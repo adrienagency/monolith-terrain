@@ -834,8 +834,22 @@ void main() {
     qCrop = q;
     // la superellipse du socle, transcrite de terrain.js : les côtés droits
     // restent exacts (une composante est nulle), seuls les coins sont formés.
-    vec2 cq = max(abs(q) - (1.0 - uCropCoin), 0.0);
+    vec2 eq = abs(q) - (1.0 - uCropCoin);
+    vec2 cq = max(eq, 0.0);
     float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
+    // ⛔ ET LE TERME INTERIEUR, SANS LEQUEL LE BLOC EST DU VERRE — Tache K ter.
+    // pn est ECRETE A ZERO dans tout le rectangle interieur, donc d y valait la
+    // CONSTANTE -uCropCoin, donc fwidth(d) y valait ZERO ; et uCropCoin vaut 0
+    // en production (poserCrop a corner = 0 pour defaut, et le branchement ne
+    // lui en passe pas). Le smoothstep etait alors evalue AU MILIEU EXACT de son
+    // intervalle et rendait 0,5 : TOUTE LA SURFACE DU CROP etait dessinee a
+    // couverture 0,5. Releve le 2026-08-22 dans l application vivante.
+    // min(max(eq.x, eq.y), 0.0) vaut ZERO des qu une composante est positive,
+    // c est-a-dire sur toute la frontiere, dans les coins et dans tout le
+    // dehors : la loi y est celle d avant AU BIT PRES. La demonstration et le
+    // pourquoi-pas-transparent sont en tete de src/monde/crop-sphere.js
+    // (distanceCrop), qui est la SEULE ecriture de cette loi.
+    float dInterieur = min(max(eq.x, eq.y), 0.0);
 
     // ══════ LA COUVERTURE DOUCE — Tâche B, Étape 5 ════════════════════════
     //
@@ -866,7 +880,7 @@ void main() {
     // ⚠️ ET LE discard RESTE AU-DELÀ D UN PIXEL. Sans lui, chaque fragment de la
     // tuile paierait le mélange : on veut le fondu SUR LE BORD, pas sur tout le
     // reste de la tuile.
-    float d = pn - uCropCoin; // > 0 = dehors
+    float d = pn + dInterieur - uCropCoin; // > 0 = dehors, < 0 DEDANS
     float w = max(fwidth(d), 1e-12); // un pixel, en unites de crop
     float dedans = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
 

@@ -180,6 +180,94 @@ export function dansCrop(lat, lon, repere, { coin = 0, expo = 2 } = {}) {
   return dansDalle(u, v, 1, coin, expo, null)
 }
 
+// ══════════ LA COUVERTURE DU BORD — Tâche K ter, défaut n° 1 ════════════════
+//
+// ⛔ **LE CROP ÉTAIT DESSINÉ À MOITIÉ TRANSPARENT SUR TOUTE SA SURFACE, ET LE
+// COUPABLE EST UNE DISTANCE QUI NE MESURE RIEN À L'INTÉRIEUR.**
+//
+// La Tâche B a remplacé le verdict binaire du `discard` par une COUVERTURE
+// fondue sur un pixel d'écran :
+//
+//     d = pn - coin        w = max(fwidth(d), 1e-12)
+//     dedans = 1 - smoothstep(-0,5 w, +0,5 w, d)
+//
+// `pn` est la superellipse de `dansDalle`, et **`dansDalle` ÉCRÊTE À ZÉRO
+// PARTOUT DANS LE RECTANGLE INTÉRIEUR** (`max(|u| - (1 - coin), 0)`). Au dedans,
+// `pn` vaut donc **exactement 0** — quel que soit le point — et `fwidth(pn)`
+// vaut **exactement 0** avec lui.
+//
+// ⚠️ **TANT QUE `coin > 0`, PERSONNE NE LE VOIT** : `d = -coin` est franchement
+// négatif, le `smoothstep` sature à 0 et la couverture vaut 1.
+// ⛔ **MAIS `poserCrop` A `corner = 0` POUR DÉFAUT, ET LE BRANCHEMENT NE LUI
+// PASSE JAMAIS DE `corner`.** Relevé dans l'application vivante le 2026-08-22,
+// La Réunion z12 : `uCropCoin = 0`. Alors `d = 0`, `w = 1e-12`, et le
+// `smoothstep` est évalué **au milieu exact de son intervalle** : il rend
+// **0,5**. **Toute la surface du crop est dessinée à une couverture de 0,5** —
+// parois, mer et fond se mélangent, on traverse le bloc du regard. C'est le mot
+// d'Adrien, et il est arithmétique.
+//
+// ⚠️ **ET LA RÉPARATION NE PASSE PAS PAR `transparent`.** L'estompage (Tâche G)
+// a BESOIN du mélange pour les ALENTOURS : `couvertureTuile = mix(1, dedans,
+// estompage)` vaut `1 - estompage` hors du crop, c'est-à-dire le fondu de la
+// planète, mesuré et validé. Couper `transparent` casserait cette tâche-là sans
+// réparer celle-ci. **Ce qui manquait est la distinction entre le DEDANS et les
+// ALENTOURS, et elle se joue dans la distance, pas dans le matériau.**
+//
+// ⚠️ **LE TERME AJOUTÉ EST NUL PARTOUT OÙ LA LOI ÉTAIT DÉJÀ JUSTE.**
+// `min(max(ex, ey), 0)` vaut 0 dès qu'une des deux composantes est positive,
+// c'est-à-dire **hors du rectangle intérieur** — donc sur toute la frontière,
+// dans tous les coins et dans tout le dehors, `distanceCrop` rend **au bit
+// près** ce que `pn - coin` rendait. Il n'est non nul que STRICTEMENT dedans, là
+// où l'ancienne écriture rendait une constante qui ne mesurait rien. C'est le
+// patron « on élargit, on ne change pas le défaut » que ce dépôt applique déjà
+// cinq fois (`distanceRivage`, `aussi: null`, le `fond`, `uMppFacteur = 0`,
+// `uMerZeroSousEau = 0`).
+
+/**
+ * La distance SIGNÉE à la frontière du crop, en coordonnées locales (±1).
+ *
+ * `< 0` dedans · `0` sur la frontière · `> 0` dehors. C'est la grandeur que le
+ * nuanceur fond sur un pixel d'écran, et **c'est la seule écriture de la loi** :
+ * `globe.js` la transcrit ligne pour ligne, `test/crop-sphere.test.js` confronte
+ * les deux textes.
+ *
+ * @param {number} u - abscisse locale du crop, ±1 sur la frontière
+ * @param {number} v - ordonnée locale
+ * @param {{coin?:number, expo?:number}} [forme] - rayon NORMALISÉ, exposant
+ */
+export function distanceCrop(u, v, { coin = 0, expo = 2 } = {}) {
+  const ex = Math.abs(u) - (1 - coin)
+  const ey = Math.abs(v) - (1 - coin)
+  const cx = Math.max(ex, 0)
+  const cy = Math.max(ey, 0)
+  const pn = Math.pow(Math.pow(cx, expo) + Math.pow(cy, expo), 1 / expo)
+  // ⚠️ **NUL HORS DU RECTANGLE INTÉRIEUR** — voir le pavé ci-dessus.
+  return pn + Math.min(Math.max(ex, ey), 0) - coin
+}
+
+/**
+ * La couverture du fragment : 1 dedans, 0 dehors, un fondu de `largeurPixel`
+ * sur la frontière.
+ *
+ * ⚠️ **LA LARGEUR SE MESURE, ELLE NE SE POSE PAS** — c'est `fwidth(d)` dans le
+ * nuanceur, un pixel d'écran exprimé en unités de crop (Tâche B). Ici elle est
+ * une entrée, pour que la loi reste vérifiable sous node.
+ *
+ * ⚠️ **ET UNE LARGEUR NULLE DOIT RENDRE UN CRÉNEAU, PAS UN DEMI.** C'est
+ * exactement le cas qui a créé cette tâche : une distance constante rend
+ * `fwidth = 0`, et un `smoothstep` dégénéré évalué en son milieu rend `0,5`. Avec
+ * une distance qui MESURE, ce cas ne se présente plus au-dedans ; le plancher
+ * reste pour que la loi soit totale.
+ *
+ * @param {number} distance - ce que rend `distanceCrop`
+ * @param {number} largeurPixel - `fwidth(d)`, en unités de crop
+ */
+export function couvertureCrop(distance, largeurPixel) {
+  const w = Math.max(largeurPixel, 1e-12)
+  const t = Math.max(0, Math.min(1, (distance + 0.5 * w) / w))
+  return 1 - t * t * (3 - 2 * t)
+}
+
 /**
  * La tuile (z, x, y) recouvre-t-elle l'emprise du crop ?
  *

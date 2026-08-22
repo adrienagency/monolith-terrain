@@ -36,7 +36,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { creerVeilleCrop, poserChaineCrop, MAILLONS } from '../src/monde/branchement-crop.js'
+import {
+  creerVeilleCrop,
+  poserChaineCrop,
+  MAILLONS,
+  CHAMPS_HABILLAGE,
+  habillageDifferent,
+} from '../src/monde/branchement-crop.js'
 import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -737,4 +743,269 @@ test('⑧ septies le drapeau est lu UNE fois, et la production ne change pas', (
   assert.equal(lectures.length, 2, 'l’import et la seule lecture — un drapeau relu ailleurs divergerait')
   // `?terre=unique` doit rester joignable par l'adresse
   assert.match(SRC_FLAGS, /paramAdresse\('terre'\)/)
+})
+
+// ══════════ ⑨ LE RAFRAÎCHISSEMENT DE L'HABILLAGE — Tâche K ter ═════════════
+//
+// ⛔ **CE QUI A ÉTÉ RELEVÉ, ET QUI A CRÉÉ CES TESTS.** Application vivante,
+// 2026-08-22, La Réunion z12, `?terre=unique&globe=continu&socle=quadtree` :
+// `contexteCrop().habillage.coastMask` **non nul** pendant que le globe portait
+// `uCoastMaskOn = 0` ; `amplitudeM = 4 737,2 m` pendant que `uContourInterval`
+// valait **500** (le défaut mondial) ; et couche « Occupation du sol » allumée à
+// la main, `terrain.mapUniforms.uSolOn = 1`, `ctx.habillage.sol` et `solLut`
+// posés — **`globe.uniforms.uSolOn` resté à 0**.
+//
+// La cause est UNE : l'habillage ne refuse jamais, donc `reprendre` ne le rejoue
+// jamais, et la chaîne ne se repose que si le LIEU change. Ce qui arrive après
+// la première pose n'atteint donc jamais le nuanceur.
+
+// Un contexte dont l'habillage ÉVOLUE — c'est le cas réel : le masque de côte,
+// la mosaïque d'occupation du sol et l'amplitude arrivent après la pose.
+function contexteEvolutif(etat) {
+  return () => ({
+    centre: { lat: 45.9, lon: 6.87 },
+    zoom: 12,
+    tuilesParBloc: 3,
+    habillage: { ...etat.habillage },
+    fond: { portee: 3, couvertureMin: 0.99 },
+    mer: { altitudeM: 12_000, fovDeg: 33, hauteurPx: 900 },
+  })
+}
+
+const habillages = (g) => g.journal.filter((e) => e.quoi === 'habillage')
+
+test('⑨a le masque de côte qui arrive APRÈS la pose atteint le globe — ROUGE avant', () => {
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: null, amplitudeM: null } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat), periodeReprise: 30 })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(habillages(g).length, 1, 'la pose doit poser l’habillage une fois')
+  assert.equal(habillages(g)[0].arg.coastMask, null)
+  // le masque est cuit par le bloc plat, DEUX images plus tard
+  etat.habillage = { coastMask: 'masque', amplitudeM: 4737.2 }
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(habillages(g).length, 2, 'l’habillage doit être REPOSÉ quand son contenu change')
+  assert.equal(habillages(g)[1].arg.coastMask, 'masque')
+  assert.equal(habillages(g)[1].arg.amplitudeM, 4737.2)
+  assert.equal(v.rafraichissements, 1)
+})
+
+test('⑨b la mosaïque d’occupation du sol allumée EN COURS DE ROUTE atteint le globe', () => {
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: 'masque', sol: null, solLut: null, solOpacite: 2 } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(v.rafraichissements, 0, 'rien n’a changé : rien ne doit être reposé')
+  // l'utilisateur allume la couche : DEUX textures apparaissent
+  etat.habillage = { coastMask: 'masque', sol: 'mosaique', solLut: 'table', solOpacite: 2 }
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  const dernier = habillages(g).at(-1)
+  assert.equal(dernier.arg.sol, 'mosaique')
+  assert.equal(dernier.arg.solLut, 'table', 'la TABLE est le champ qu’on oublie — sans elle la couche ne peint rien')
+  assert.equal(v.rafraichissements, 1)
+})
+
+test('⑨b bis la TABLE seule qui change suffit — et c’est le champ qu’on oublie', () => {
+  // ⚠️ **UNE MUTATION A SURVÉCU FAUTE DE CE TEST** : retirer `solLut` de la liste
+  // surveillée ne faisait rougir personne, parce que ⑨b faisait changer `sol` ET
+  // `solLut` ensemble. Or `terrain.js` l'écrit noir sur blanc : « poser la
+  // première sans la seconde ne casse rien de VISIBLE — la table de remplacement
+  // est noire et opaque à zéro, donc la couche s'allume et ne peint RIEN. On
+  // chercherait le défaut du côté des tuiles pendant longtemps. »
+  const g = globeFactice()
+  const etat = { habillage: { sol: 'mosaique', solLut: null } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  etat.habillage = { sol: 'mosaique', solLut: 'table' } // SEULE la table arrive
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(v.rafraichissements, 1, 'la table seule doit suffire à reposer')
+  assert.equal(habillages(g).at(-1).arg.solLut, 'table')
+})
+
+test('⑨c bis le rafraîchissement N’A LIEU QU’UNE FOIS par changement', () => {
+  // ⚠️ **UNE MUTATION A SURVÉCU FAUTE DE CE TEST** : ne pas mettre à jour
+  // l'instantané après avoir reposé laissait ⑨c verte (rien n'avait changé
+  // AVANT le premier rafraîchissement) et faisait reposer l'habillage **à chaque
+  // image pour toujours** après le premier. C'est la garde de
+  // `creerVeilleEstompage`, mais du côté de l'APRÈS.
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: null } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  etat.habillage = { coastMask: 'masque' }
+  for (let i = 0; i < 120; i++) v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(v.rafraichissements, 1, 'un changement, UN rafraîchissement — pas 120')
+  assert.equal(habillages(g).length, 2, 'la pose, puis le seul rafraîchissement')
+})
+
+test('⑨c RIEN ne bouge tant que rien ne change — pas un uniforme par image', () => {
+  // ⚠️ **LA GARDE DE `creerVeilleEstompage`, APPLIQUÉE ICI.** Sans elle, la
+  // chaîne repasserait l'habillage à CHAQUE image ; c'est peu cher, mais c'est
+  // exactement le genre de coût qu'on ne voit jamais venir.
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: 'masque', amplitudeM: 2400 } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  for (let i = 0; i < 200; i++) v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(habillages(g).length, 1, 'un seul appel : celui de la pose')
+  assert.equal(v.rafraichissements, 0)
+})
+
+test('⑨d un objet REFABRIQUÉ à chaque image ne déclenche rien — c’est le cas réel', () => {
+  // ⚠️ **`contexteCrop` FABRIQUE UN OBJET NEUF PAR IMAGE.** Une comparaison par
+  // identité d'OBJET aurait donc reposé l'habillage 60 fois par seconde, en
+  // restant verte sur ⑨a. On compare les CHAMPS, et le test le prouve.
+  const g = globeFactice()
+  const masque = { texture: 1 }
+  const contexte = () => ({
+    centre: { lat: 45.9, lon: 6.87 },
+    zoom: 12,
+    tuilesParBloc: 3,
+    habillage: { coastMask: masque, amplitudeM: 2400, contourOpacity: 0.5 },
+  })
+  const v = creerVeilleCrop({ globe: g, contexte })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  for (let i = 0; i < 50; i++) v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(v.rafraichissements, 0, 'un objet neuf mais des champs identiques ne change rien')
+})
+
+test('⑨e les RÉGLAGES du studio suivent aussi — D3, « aucune option ne se perd »', () => {
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: 'masque', contourOpacity: 0, contourWeight: 0.55 } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  // l'utilisateur remonte l'opacité des courbes dans le panneau
+  etat.habillage = { coastMask: 'masque', contourOpacity: 0.8, contourWeight: 0.55 }
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(habillages(g).at(-1).arg.contourOpacity, 0.8)
+  assert.equal(v.rafraichissements, 1)
+})
+
+test('⑨f `habillageDifferent` : `null`, `undefined` et `NaN` sont trois réponses', () => {
+  assert.equal(habillageDifferent(null, { coastMask: 'm' }), true, 'rien de posé : tout diffère')
+  assert.equal(habillageDifferent({ coastMask: null }, { coastMask: undefined }), true,
+    '« pas de masque » et « champ absent » ne sont pas la même chose')
+  assert.equal(habillageDifferent({ amplitudeM: NaN }, { amplitudeM: NaN }), false,
+    'Object.is doit rendre deux NaN ÉGAUX — sinon on repose à chaque image')
+  assert.equal(habillageDifferent({ amplitudeM: 0 }, { amplitudeM: -0 }), true,
+    'Object.is distingue 0 et -0 — on ne fait pas semblant du contraire')
+  // tous les champs surveillés sont réellement surveillés
+  for (const champ of CHAMPS_HABILLAGE) {
+    const pose = {}
+    for (const c of CHAMPS_HABILLAGE) pose[c] = 'a'
+    const voulu = { ...pose, [champ]: 'b' }
+    assert.equal(habillageDifferent(pose, voulu), true, `${champ} n’est pas surveillé`)
+  }
+  assert.equal(habillageDifferent({ coastMask: 'm' }, { coastMask: 'm', inconnu: 1 }), false,
+    'un champ hors liste ne doit PAS déclencher — la liste est fermée, et déclarée')
+})
+
+test('⑨g le rafraîchissement ne survit pas au retrait du crop', () => {
+  // `retirerCrop` appelle `retirerHabillage` : ce qui est posé n'est plus ce
+  // qu'on croyait, et le compteur doit dire la vérité.
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: 'masque' } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  v.poserMode(false) // orbite : le crop part
+  v.poserMode(true)
+  v.maj(SEUIL_NAISSANCE_M - 1000) // re-pose au MÊME lieu, MÊME habillage
+  assert.equal(v.rafraichissements, 0, 'la re-pose n’est pas un rafraîchissement')
+  assert.equal(habillages(g).length, 2, 'deux poses, aucun rafraîchissement')
+})
+
+test('⑨h le rafraîchissement n’a lieu QUE sous le seuil et QU’EN surface', () => {
+  const g = globeFactice()
+  const etat = { habillage: { coastMask: null } }
+  const v = creerVeilleCrop({ globe: g, contexte: contexteEvolutif(etat) })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  etat.habillage = { coastMask: 'masque' }
+  v.poserMode(false)
+  v.maj(SEUIL_NAISSANCE_M - 1000) // en orbite : la veille sort avant tout
+  assert.equal(v.rafraichissements, 0, 'pas de rafraîchissement hors surface')
+  v.poserMode(true)
+  v.maj(SEUIL_MORT_M + 1000) // au-dessus du seuil : le crop n'existe pas
+  assert.equal(v.rafraichissements, 0, 'pas de rafraîchissement sans crop')
+})
+
+// ══════════ ⑩ L'ORBITE RETIRE LE CROP — Tâche K ter, défaut n° 4 ═══════════
+//
+// ⛔ **`veilleCrop.poserMode` N'ÉTAIT APPELÉE DE NULLE PART.** Relevé le
+// 2026-08-22 à 3 000 km, mode `orbital` (`.banc/vues-Kter/AV-orbite.json`) :
+// `uCropOn = 1`, `uHabOn = 1`, `uCoastMaskOn = 1`, `uLandMax = 2 584,4 m`,
+// `uOceanDepth = 1 262,0 m`, parois et mer du bloc encore dans la scène. **La
+// planète entière portait la rampe et le masque de côte du dernier bloc visité.**
+
+test('⑩a `main.js` DIT à la veille du crop qu’on a quitté la surface — ROUGE avant', () => {
+  // ⚠️ **ASSERTION DE SOURCE, DÉCLARÉE COMME TELLE** : `main.js` n'est chargé par
+  // aucun test (§0 du plan). Ce qui est gardé, c'est l'existence du câblage.
+  const i = SRC_MAIN.indexOf('setSurfaceVisible(v) {')
+  assert.ok(i > 0, '`main.js` doit porter le crochet `setSurfaceVisible`')
+  const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n    setEffectsEnabled', i))
+  assert.match(corps, /veilleCrop\.poserMode\(v\)/,
+    'sans cet appel, le crop reste POSÉ en orbite et la planète porte sa rampe')
+  // un seul point d'alimentation dans tout le fichier
+  assert.equal((SRC_MAIN.match(/veilleCrop\.poserMode\(/g) || []).length, 1)
+})
+
+test('⑩b sous `terre unique`, le crop est le SEUL à recevoir le mode', () => {
+  // ⚠️ **UN SEUL ÉCRIVAIN, SINON DEUX LOIS** — mot pour mot l'argument de
+  // `majSeuilSocle`. `veilleCrop.poserMode` relaie déjà l'estompage lui-même ;
+  // l'appeler une seconde fois à côté ferait deux chemins pour un seul geste, et
+  // `veilleSocle` est rigoureusement hors-jeu sous ce drapeau.
+  const i = SRC_MAIN.indexOf('setSurfaceVisible(v) {')
+  const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n    setEffectsEnabled', i))
+  const code = corps.replace(/\/\/[^\n]*/g, '')
+  const iDrapeau = code.indexOf('if (terreUniqueBranchee)')
+  assert.ok(iDrapeau > 0, 'le câblage doit être derrière le drapeau — la production ne change pas')
+  const branche = code.slice(iDrapeau, code.indexOf('veilleSocle.poserMode('))
+  assert.match(branche, /veilleCrop\.poserMode\(v\)/)
+  assert.match(branche, /\breturn\b/, 'la branche doit RENDRE LA MAIN, sinon les deux chemins jouent')
+  assert.doesNotMatch(branche, /veilleEstompage\.poserMode\(/,
+    'l’estompage a UN SEUL point d’alimentation sous ce drapeau : la veille du crop')
+})
+
+test('⑩c la veille RETIRE réellement le crop en orbite, et le RÉTABLIT au retour', () => {
+  // ⚠️ **LE COMPORTEMENT, PAS LA CHAÎNE.** Le globe factice enregistre le retrait.
+  const g = globeFactice()
+  const est = estompageFactice()
+  const v = creerVeilleCrop({ globe: g, contexte: contexteFactice(), estompage: est })
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.ok(v.pose, 'le crop doit être posé en surface')
+  const lieu = v.signature
+  assert.ok(lieu, 'la signature du lieu doit exister tant que le crop est posé')
+  v.poserMode(false)
+  assert.equal(v.pose, false, 'le crop doit être RETIRÉ en orbite')
+  assert.ok(quoi(g).includes('retirer'), '`retirerCrop` doit avoir été appelé')
+  // ⚠️ **LA SIGNATURE PART AVEC LE CROP, ET C'EST UN CONTRAT PUBLIC** :
+  // `get signature()` existe « pour les sondes et les bancs » (le harnais de la
+  // Tâche K bis la lit), et une signature qui survivrait au retrait dirait qu'un
+  // crop est posé quelque part alors qu'il n'y en a plus.
+  assert.equal(v.signature, null, 'la signature doit partir avec le crop')
+  assert.equal(est.modes.at(-1), false, 'l’estompage doit apprendre le mode par la veille du crop')
+  // et une image d'orbite ne repose rien
+  const avant = g.journal.length
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.equal(g.journal.length, avant, 'aucune pose en orbite')
+  // retour en surface : la chaîne revient
+  v.poserMode(true)
+  v.maj(SEUIL_NAISSANCE_M - 1000)
+  assert.ok(v.pose)
+  assert.equal(est.modes.at(-1), true)
+})
+
+test('⑩d le retrait n’introduit AUCUN seuil d’altitude — consigne « zéro saut »', () => {
+  // La veille ne doit décider du retrait que sur le MODE, jamais sur une
+  // altitude qu'elle inventerait. On lui donne la MÊME altitude des deux côtés.
+  const g = globeFactice()
+  const v = creerVeilleCrop({ globe: g, contexte: contexteFactice() })
+  const alt = SEUIL_NAISSANCE_M - 1000
+  v.maj(alt)
+  assert.ok(v.pose)
+  v.poserMode(false)
+  assert.equal(v.pose, false, 'à altitude IDENTIQUE, c’est le mode seul qui décide')
+  v.poserMode(true)
+  v.maj(alt)
+  assert.ok(v.pose, 'et le retour rétablit, toujours à la même altitude')
 })

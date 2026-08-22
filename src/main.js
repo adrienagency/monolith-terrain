@@ -5008,6 +5008,17 @@ modes = new Modes({
         tween.active = false
         camera.up.set(0, 1, 0)
       }
+      // ══════ LE MODE ATTEINT ENFIN LA VEILLE DU CROP — Tâche K ter ═════════
+      //
+      // ⛔ **`veilleCrop.poserMode` N'ÉTAIT APPELÉE DE NULLE PART** : le crop
+      // restait posé en orbite, et la planète entière portait la rampe et le
+      // masque de côte du dernier bloc visité. Le relevé, le pourquoi ce n'est
+      // pas un seuil de plus, et pourquoi l'estompage n'a qu'UN écrivain sous ce
+      // drapeau : `src/monde/branchement-crop.js`, § « L'ORBITE RETIRE LE CROP ».
+      if (terreUniqueBranchee) {
+        veilleCrop.poserMode(v)
+        return
+      }
       // ⚠️ **LE MODE PRIME SUR LE SEUIL** : en orbite le socle n'existe pas,
       // quelle que soit l'altitude. Et c'est la veille qui applique, pour que
       // les deux chemins (le mode et le seuil) ne puissent pas se contredire.

@@ -109,6 +109,131 @@ export const MAILLONS = Object.freeze(['crop', 'fond', 'parois', 'habillage', 'r
  */
 export const LECTEURS_DU_FOND = Object.freeze(['parois', 'rampe'])
 
+// ══════════ LE RAFRAÎCHISSEMENT DE L'HABILLAGE — Tâche K ter ════════════════
+//
+// ⛔ **L'HABILLAGE ÉTAIT POSÉ UNE FOIS, ET UNE SEULE, ET IL ARRIVAIT TROP TÔT.**
+// Il « ne refuse jamais » (voir le poseur), donc `reprendre` ne le rejoue jamais ;
+// et la chaîne entière ne se repose que si la SIGNATURE DU LIEU change. Or trois
+// des choses qu'il transporte n'existent PAS encore quand le crop naît :
+//
+//   · le masque de côte — cuit par le bloc plat, il arrive après ;
+//   · la mosaïque d'occupation du sol — elle n'existe que si l'utilisateur
+//     allume la couche, ce qui peut arriver n'importe quand ;
+//   · `amplitudeM`, qui CALE l'intervalle des courbes de niveau.
+//
+// **Relevé dans l'application vivante le 2026-08-22, La Réunion z12** :
+// `contexteCrop().habillage.coastMask` **non nul** pendant que le globe portait
+// `uCoastMaskOn = 0`, et `uContourInterval = 500` (le défaut mondial) pendant
+// qu'`amplitudeM` valait **4 737,2 m**. Et couche d'occupation du sol allumée à
+// la main : `terrain.mapUniforms.uSolOn = 1`, `ctx.habillage.sol` et `solLut`
+// tous deux posés, **`globe.uniforms.uSolOn` resté à 0**.
+//
+// ⚠️ **C'EST UNE COURSE, PAS UNE PANNE FRANCHE — ET C'EST CE QUI L'A CACHÉE.**
+// Sur un chargement où le masque arrive AVANT la première pose, l'image est
+// juste. Sur un autre, elle ne l'est pas. Les deux ont été observés le même
+// jour, sur la même machine, à la même URL.
+//
+// ⚠️ **LA RÉPARATION NE PASSE PAS PAR UN REFUS.** Faire refuser l'habillage
+// tant qu'un masque manque le ferait rejouer toutes les `periodeReprise` images
+// pour toujours dans les crops CONTINENTAUX, où il n'y a légitimement ni côte ni
+// occupation du sol. On compare donc ce qu'on a POSÉ à ce que le contexte
+// PORTE, et on ne repose que sur changement — **exactement la garde de
+// `creerVeilleEstompage`** (« `appliquer` n'est appelé QUE lorsque la valeur
+// posée change »). `poserHabillage` n'écrit que des uniformes : c'est le maillon
+// le moins cher de la chaîne, et le seul qu'on puisse surveiller par image.
+
+/**
+ * Les champs de l'habillage qui décident de ce que le nuanceur allume.
+ *
+ * ⚠️ **LA LISTE EST FERMÉE, ET C'EST VOULU.** Comparer `Object.keys` du contexte
+ * ferait dépendre le rafraîchissement de ce que `main.js` ajoute un jour dans
+ * l'objet ; ici on nomme ce qu'on surveille, et un champ neuf qui devrait l'être
+ * se déclare ici. Les trois vecteurs (`solOffset`, `solScale`, `solTexel`) n'y
+ * sont pas : ce sont des objets MUTÉS EN PLACE par le socle (`setSol` fait
+ * `.set(...)`), donc leur identité ne bouge jamais — mais ils ne changent
+ * qu'avec `sol`, dont l'identité, elle, change.
+ */
+export const CHAMPS_HABILLAGE = Object.freeze([
+  'coastMask',
+  'sol',
+  'solLut',
+  'solOpacite',
+  'amplitudeM',
+  'contourIntervalM',
+  'contourOpacity',
+  'contourWeight',
+  'grainForceM',
+  'grainEchelle',
+])
+
+/**
+ * L'habillage à poser diffère-t-il de celui qui est posé ?
+ *
+ * ⚠️ **`Object.is`, PAS `==`** : `null` et `undefined` sont deux réponses
+ * différentes (« pas de masque » contre « champ absent du contexte »), et un
+ * `NaN` d'amplitude ne doit pas se comparer égal à lui-même autrement que par
+ * `Object.is` — sans quoi une amplitude devenue `NaN` gèlerait l'intervalle.
+ *
+ * `null` posé au départ signifie « rien n'a jamais été posé » : tout contexte
+ * diffère alors, y compris un contexte vide.
+ *
+ * @param {object|null} pose - ce que `poserHabillage` a reçu la dernière fois
+ * @param {object|null|undefined} voulu - ce que le contexte porte à cette image
+ */
+export function habillageDifferent(pose, voulu) {
+  if (!pose) return true
+  const v = voulu || {}
+  for (const champ of CHAMPS_HABILLAGE) {
+    if (!Object.is(pose[champ], v[champ])) return true
+  }
+  return false
+}
+
+// ══════════ L'ORBITE RETIRE LE CROP — Tâche K ter, défaut n° 4 ══════════════
+//
+// ⛔ **`poserMode` ÉTAIT ÉCRITE, TESTÉE, ET APPELÉE DE NULLE PART.** `maj` sort
+// à sa première ligne utile sur `if (!modeSurface) return pose` — mais rien dans
+// `main.js` ne disait jamais à cette veille qu'on avait quitté la surface.
+// `veilleSocle` et `veilleEstompage` recevaient le mode depuis
+// `setSurfaceVisible` ; celle-ci, non. **C'est un branchement absent, pas un
+// réglage**, et c'est exactement la classe d'erreur qui a créé ce fichier.
+//
+// **Relevé le 2026-08-22, mode `orbital`, 3 000 km d'altitude**
+// (`.banc/vues-Kter/AV-orbite.json`) : `uCropOn = 1`, `uHabOn = 1`,
+// `uCoastMaskOn = 1`, `uLandMax = 2 584,4 m`, `uOceanDepth = 1 262,0 m`, parois
+// ET mer du bloc encore dans la scène. Conséquences, toutes visibles :
+//
+//   · tout sommet au-dessus de 2 584 m saturait en blanc sur la planète entière,
+//     et tout océan plus profond que 1 262 m saturait de même ;
+//   · le masque de côte cuit pour La Réunion, lu en `ClampToEdge`, décidait de
+//     la terre et de la mer **sur toute la sphère** ;
+//   · les parois et la nappe de mer du bloc restaient en orbite.
+//
+// C'est la réserve n° 3 de la Tâche K bis, et c'est aussi pourquoi son jeu de
+// six stations « ne s'améliorait quasiment pas » : la station orbitale portait
+// la rampe du dernier crop.
+//
+// ⚠️ **CE N'EST PAS UN SEUIL DE PLUS — LA CONSIGNE « ZÉRO SAUT » TIENT.** On
+// n'introduit aucune altitude : on branche le MÊME interrupteur de mode que les
+// deux autres veilles reçoivent déjà, sur la MÊME bascule surface/orbite de
+// `modes.js`, qui existe et est franche depuis toujours. La loi continue de
+// l'estompage n'est pas touchée — elle reste `estompageTerre(altitude)`, et le
+// retrait du crop en orbite est le comportement que `retirerCrop` porte depuis
+// la Tâche A.
+//
+// ⚠️ **ET SOUS `terre unique`, L'ESTOMPAGE N'A QU'UN SEUL ÉCRIVAIN** : cette
+// veille relaie `estompage.poserMode` elle-même (voir `poserMode`, plus bas).
+// Appeler `veilleEstompage.poserMode` à côté ferait deux chemins pour un seul
+// geste — mot pour mot l'argument que `majSeuilSocle` écrit déjà pour `maj`.
+
+/** L'instantané qu'on garde pour la comparaison — les champs surveillés, seuls. */
+function instantaneHabillage(habillage) {
+  const src = habillage || {}
+  const out = {}
+  for (const champ of CHAMPS_HABILLAGE) out[champ] = src[champ]
+  return out
+}
+
 // Un maillon rend `{ refus }` — `null` s'il a pris, une chaîne sinon — et,
 // pour la mer seule, une `promesse` dont le refus n'arrive que plus tard.
 const POSEURS = {
@@ -256,6 +381,9 @@ export function creerVeilleCrop({
   let refus = []
   let bascules = 0
   let depuisPose = 0
+  // ⚠️ **CE QU'ON A POSÉ, PAS CE QU'ON A VU** — voir `habillageDifferent`.
+  let habillagePose = null
+  let rafraichissements = 0
   // ⚠️ **LES PROMESSES EN VOL SONT GARDÉES**, et pas par confort : sans elles un
   // test ne peut pas attendre le refus de la mer, et rien ne l'obligerait à
   // exister. C'est aussi ce qui permet à `retirerCrop` de ne pas se faire
@@ -288,7 +416,20 @@ export function creerVeilleCrop({
     const r = poserChaineCrop({ globe: g, ...ctx })
     refus = r.refus
     depuisPose = 0
+    habillagePose = instantaneHabillage(ctx.habillage)
     suivreMer(r.mer, jeton)
+  }
+
+  /**
+   * ⚠️ **LE SEUL MAILLON QU'ON SURVEILLE PAR IMAGE, ET IL NE COÛTE QUE DES
+   * UNIFORMES.** Voir le pavé « LE RAFRAÎCHISSEMENT DE L'HABILLAGE ».
+   */
+  function rafraichirHabillage(g, ctx) {
+    if (!habillageDifferent(habillagePose, ctx.habillage)) return false
+    POSEURS.habillage({ globe: g, ...ctx })
+    habillagePose = instantaneHabillage(ctx.habillage)
+    rafraichissements++
+    return true
   }
 
   // ⚠️ **ELLE NE REJOUE QUE CE QUI A REFUSÉ, ET JAMAIS LA DÉCOUPE.** Rejouer la
@@ -333,6 +474,18 @@ export function creerVeilleCrop({
     pose = false
     signature = null
     refus = []
+    // ⛔ **IL Y AVAIT ICI UN `habillagePose = null`, ET C'ÉTAIT DU CODE MORT —
+    // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
+    // raisonnement écrit à côté était plausible (« `retirerCrop` appelle
+    // `retirerHabillage`, donc ce qui est posé n'est plus ce qu'on croyait »), et
+    // il était sans effet : **`pose` retombe à faux et `signature` à `null`, donc
+    // la première image qui repose passe forcément par `poserTout`**, lequel
+    // écrit l'instantané avant que `rafraichirHabillage` ne puisse le lire.
+    // Aucun chemin n'atteint le rafraîchissement avec un instantané périmé. Une
+    // mutation qui retirait la ligne SURVIVAIT — c'est la définition du code
+    // mort que ce chantier a déjà trouvé quatre fois. **Retirée plutôt que
+    // testée à vide**, exactement comme la garde `if (nom === 'crop') continue`
+    // de `reprendre`, dix lignes plus bas.
     bascules++
   }
 
@@ -378,6 +531,11 @@ export function creerVeilleCrop({
       }
       depuisPose++
       if (refus.length && depuisPose >= periodeReprise) reprendre(g, ctx)
+      // ⚠️ **APRÈS LA REPRISE, ET PAS AVANT.** La reprise peut reposer
+      // l'habillage elle-même (s'il figurait dans les refus, ce qui n'arrive
+      // pas aujourd'hui mais reste ouvert) ; le rafraîchissement doit juger sur
+      // l'état FINAL de l'image, sinon il reposerait deux fois.
+      rafraichirHabillage(g, ctx)
       return true
     },
 
@@ -401,6 +559,8 @@ export function creerVeilleCrop({
     get refus() { return [...refus] },
     /** Combien de fois le crop est né ou mort depuis le chargement. */
     get bascules() { return bascules },
+    /** Combien de fois l'habillage a été RAFRAÎCHI hors pose — Tâche K ter. */
+    get rafraichissements() { return rafraichissements },
     /** Le lieu sur lequel la chaîne est posée — pour les sondes et les bancs. */
     get signature() { return signature },
     /** La dernière mer partie, pour qui doit l'attendre (les tests, les bancs). */
