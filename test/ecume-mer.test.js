@@ -1156,7 +1156,12 @@ test('⑦a `profondeurEau` est le `max(bathymétrie, distance × 1,6)` d ocean.j
   assert.equal(profondeurEau(0.3, 0.9, 0), 0.3)
   assert.equal(profondeurEau(0.3, 0.9, NaN), 0.3)
   assert.equal(profondeurEau(-2, 0.9, 0), 0)
+  // ⚠️ **UNE DISTANCE NÉGATIVE EST ÉCARTÉE PAR LE `max` EXTÉRIEUR, PAS PAR UNE
+  // GARDE** — la garde qui existait ici était du CODE MORT, et c'est une
+  // survivante de la campagne qui l'a dit. L'assertion reste : elle documente le
+  // comportement, elle ne prétend plus garder une ligne.
   assert.equal(profondeurEau(0.2, -5, unite), 0.2)
+  assert.equal(profondeurEau(0, -5, unite), 0)
   // monotone en distance, jamais sous la bathymétrie
   let prec = -1
   for (let d = 0; d <= 1.0001; d += 0.01) {
@@ -1179,7 +1184,12 @@ test('⑦b `REPLI_RIVAGE` remonte à `ocean.js`, et le test le RELIT là-bas', (
 test('⑦c le GLSL `profondeurEauMer` calcule ce que le jumeau JS calcule', () => {
   const g = sansCommentaires(GLSL_ECUME)
   assert.match(g, /float profondeurEauMer\(float profondeur, float distance, float unite\)/)
-  assert.match(g, /max\(p, max\(distance, 0\.0\) \* 1\.6 \* unite\)/)
+  assert.match(g, /max\(p, distance \* 1\.6 \* unite\)/)
+  // ⚠️ **ET LA BORNE SUR LA PROFONDEUR, ELLE, N'EST PAS MORTE** : c'est elle
+  // qui empêche une bathymétrie POSITIVE (au-dessus de l'eau) de ressortir telle
+  // quelle. La borne sur la DISTANCE, si — une campagne de mutation l'a montré,
+  // et elle a été retirée de la source plutôt que gardée pour rassurer.
+  assert.match(g, /float p = max\(profondeur, 0\.0\);/)
   // une seule écriture du corps, dans le morceau injecté
   assert.equal((g.match(/\* 1\.6 \* unite/g) || []).length, 1)
 })

@@ -140,7 +140,14 @@ export const REPLI_RIVAGE = 1.6
 export function profondeurEau(profondeur, distance, unite) {
   const p = Math.max(0, profondeur)
   if (!(unite > 0)) return p
-  return Math.max(p, Math.max(0, distance) * REPLI_RIVAGE * unite)
+  // ⛔ **PAS DE `Math.max(0, distance)` ICI, ET C'EST UNE CAMPAGNE DE MUTATION
+  // QUI L'A DIT.** La première version en portait un ; la mutation qui le retire
+  // a SURVECU, et elle avait raison : `p` est déjà borné à zéro et `unite > 0`,
+  // donc une distance négative rend un produit négatif que le `Math.max` extérieur
+  // écarte de toute façon. **La garde était du CODE MORT** — le neuvième de ce
+  // chantier trouvé par une survivante. `ocean.js` n'en a pas non plus
+  // (`f.g * 1.6`, nu). On la retire plutôt que de la laisser rassurer.
+  return Math.max(p, distance * REPLI_RIVAGE * unite)
 }
 
 /** Le repère côtier LARGE que l'écume lit. `ocean.js:270`. */
@@ -501,7 +508,7 @@ float declinRivageMer(float profondeur, float distance) {
 // Tache P8 : voir profondeurEau, le jumeau JS, pour la mesure qui l'exige.
 float profondeurEauMer(float profondeur, float distance, float unite) {
   float p = max(profondeur, 0.0);
-  return max(p, max(distance, 0.0) * ${REPLI_RIVAGE.toFixed(1)} * unite);
+  return max(p, distance * ${REPLI_RIVAGE.toFixed(1)} * unite);
 }
 float fonduRessacMer(float declin) {
   return smoothstep(0.0, ${FONDU_RESSAC_FIN.toFixed(2)}, declin);

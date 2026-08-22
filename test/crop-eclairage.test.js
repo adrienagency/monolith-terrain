@@ -528,6 +528,11 @@ test('④d poserHabillage POSE les uniformes, et retirerHabillage les REND', () 
     soleil: u.uSoleilIrr.value.toArray(),
     ciel: u.uCielIrr.value.toArray(),
     sol: u.uSolIrr.value.toArray(),
+    // ⚠️ **LES DEUX DE LA PAROI — Tâche P8.** Sans eux, la mutation qui retire
+    // leur remise à zéro de `retirerHabillage` SURVIT : elle l'a fait au premier
+    // tour de la campagne.
+    paroiCiel: u.uParoiCielIrr.value.toArray(),
+    paroiSol: u.uParoiSolIrr.value.toArray(),
     base: u.uAlbedoBase.value.toArray(),
     teinte: u.uAlbedoTeinte.value,
     paroi: u.uParoiCouleur.value.getHexString(),
@@ -580,6 +585,9 @@ test('④d poserHabillage POSE les uniformes, et retirerHabillage les REND', () 
   // ⚠️ **ET L'AMBIANTE S'AJOUTE À L'HÉMISPHÈRE, ELLE NE VIT PAS À CÔTÉ**
   assert.ok(u.uCielIrr.value.x > 1, 'le ciel porte l’ambiante mesurée')
   assert.ok(u.uSolIrr.value.x > 0.19, 'le sol porte l’ambiante mesurée')
+  // ⚠️ **ET CE N'EST PAS UN BANC VIDE** : sans donnée de paroi, ses deux
+  // uniformes portent le repli, c'est-à-dire ceux des tuiles — non nuls.
+  assert.ok(u.uParoiCielIrr.value.x > 1, 'la paroi porte le repli, pas zéro')
   // la verticale locale et le soleil sont des vecteurs UNITAIRES
   assert.ok(Math.abs(u.uHemiHaut.value.length() - 1) < 1e-9)
   assert.ok(Math.abs(u.uSoleilDir.value.length() - 1) < 1e-9)
@@ -589,6 +597,8 @@ test('④d poserHabillage POSE les uniformes, et retirerHabillage les REND', () 
   assert.deepEqual(u.uSoleilIrr.value.toArray(), depart.soleil)
   assert.deepEqual(u.uCielIrr.value.toArray(), depart.ciel)
   assert.deepEqual(u.uSolIrr.value.toArray(), depart.sol)
+  assert.deepEqual(u.uParoiCielIrr.value.toArray(), depart.paroiCiel)
+  assert.deepEqual(u.uParoiSolIrr.value.toArray(), depart.paroiSol)
   assert.deepEqual(u.uAlbedoBase.value.toArray(), depart.base)
   assert.equal(u.uAlbedoTeinte.value, depart.teinte)
   assert.equal(u.uParoiCouleur.value.getHexString(), depart.paroi)
@@ -816,6 +826,11 @@ test('⑥a `_materiauParois` PARTAGE les uniformes du bloc — pas des copies', 
   // Mesuré au même instant dans la même page : l'ambiante du relief verse
   // **1,54 fois** celle de la paroi à plat sur un mur vertical, et la paroi du
   // crop prenait la première — **26,63 contre 15,88 au socle**.
+  // ⚠️ **ILS EXISTENT, D'ABORD.** Sans cette ligne, retirer purement et
+  // simplement les deux uniformes du constructeur laisse `undefined === undefined`
+  // et la mutation survit — elle l'a fait au premier tour de la campagne.
+  assert.ok(m.uniforms.uCielIrr && m.uniforms.uCielIrr.value, 'uCielIrr doit exister')
+  assert.ok(m.uniforms.uSolIrr && m.uniforms.uSolIrr.value, 'uSolIrr doit exister')
   assert.equal(m.uniforms.uCielIrr, g.uniforms.uParoiCielIrr, 'la paroi lit SON ciel')
   assert.equal(m.uniforms.uSolIrr, g.uniforms.uParoiSolIrr, 'la paroi lit SON sol')
   assert.notEqual(m.uniforms.uCielIrr, g.uniforms.uCielIrr, 'la paroi ne lit PAS le ciel des tuiles')
