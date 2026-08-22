@@ -531,19 +531,21 @@ vec3 eclairerCrop(vec3 mapCol, vec3 base, float teinte, float hn, float ndu, flo
  * un ORACLE INDÉPENDANT — la surface déplacée y est construite point par point
  * et sa normale prise par un vrai produit vectoriel.
  *
- * ⛔ **LES DEUX TANGENTES SONT PROJETÉES SUR LE PLAN DE `n` AVANT TOUT, ET
- * L'ORACLE A EXIGÉ CETTE LIGNE.** La formule de Mikkelsen suppose que
- * `surf_norm` est la normale du plan que `surf_pos` engendre — chez `three`
- * c'est vrai par construction, le même maillage porte les deux. **Ici c'est
- * FAUX** : les tangentes viennent de la surface DÉPLACÉE (elles portent déjà la
- * pente du maillage à 24 quads par tuile) tandis que `n` est la normale de la
- * SPHÈRE NUE. Sans projection, `sx × sy` cesse d'être parallèle à `n` et la
- * formule rend une normale fausse — le balayage de ⑧a l'a mise en défaut sur un
- * repère incliné, avec **0,20 d'écart** sur la première composante.
+ * ⚡ **CE QU'ELLE DÉCRIT EXACTEMENT, ET IL FAUT LE DIRE : LE PLAN DE `n`,
+ * DÉPLACÉ DE `h`.** La formule ne rend PAS la normale de la surface engendrée
+ * par `sx` et `sy` : elle remplace `sx × sy` par `det · n`, c'est-à-dire qu'elle
+ * perturbe **la normale qu'on lui DONNE**. C'est précisément ce qu'on veut ici —
+ * `n` est la normale de la SPHÈRE NUE, et `h` porte tout le relief ; les
+ * tangentes ne servent qu'à mesurer la distance au sol par pixel. Perturber
+ * `vNormalW` à la place compterait deux fois la pente du maillage.
  *
- * ⚡ **ET LA PROJECTION EST AUSSI CE QUI REND LE DÉNOMINATEUR JUSTE** : la pente
- * cherchée est `dh / distance AU SOL`, et la distance au sol par pixel est
- * exactement la composante TANGENTIELLE du déplacement, pas sa longueur oblique.
+ * ⛔ **ET UNE PROJECTION DES TANGENTES SUR LE PLAN DE `n` NE CHANGERAIT RIEN —
+ * C'EST UNE SURVIVANTE DE MUTATION QUI L'A PROUVÉ, ET LA VERSION D'AVANT DE CE
+ * COMMENTAIRE ÉTAIT FAUSSE.** L'algèbre : `(sy − n(sy·n)) × n = sy × n` (le
+ * terme retiré est colinéaire à `n`), donc `R1` et `R2` sont inchangés ; et
+ * `det = (sx − n(sx·n)) · R1 = sx · R1` puisque `R1 ⟂ n`. **Trois lignes de code
+ * mort, retirées** — le dixième code mort de ce chantier trouvé par une
+ * survivante. L'invariance est désormais une ASSERTION (⑧a), pas une croyance.
  *
  * @param {number[]} sx la tangente d'écran en x, dans l'unité de `P`
  * @param {number[]} sy la tangente d'écran en y
@@ -559,15 +561,9 @@ export function normaleParDeplacement(sx, sy, n, dhx, dhy) {
     a[0] * b[1] - a[1] * b[0],
   ]
   const point = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-  const plan = (v) => {
-    const d = point(v, n)
-    return [v[0] - n[0] * d, v[1] - n[1] * d, v[2] - n[2] * d]
-  }
-  const tx = plan(sx)
-  const ty = plan(sy)
-  const r1 = croix(ty, n)
-  const r2 = croix(n, tx)
-  const det = point(tx, r1)
+  const r1 = croix(sy, n)
+  const r2 = croix(n, sx)
+  const det = point(sx, r1)
   const s = det < 0 ? -1 : det > 0 ? 1 : 0
   const v = [
     Math.abs(det) * n[0] - s * (dhx * r1[0] + dhy * r2[0]),
@@ -593,13 +589,12 @@ export const GLSL_NORMALE_FINE = /* glsl */ `
 // SANS la normalisation de sigma : elle rendrait la pente proportionnelle au
 // denivele par PIXEL au lieu du denivele par METRE. Voir l'en-tete du module.
 vec3 normaleFineCrop(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy) {
-  // ⛔ PROJETEES SUR LE PLAN DE n AVANT TOUT : les tangentes viennent de la
-  // surface DEPLACEE, n est la normale de la SPHERE NUE. Voir le module.
-  vec3 tx = sx - n * dot(sx, n);
-  vec3 ty = sy - n * dot(sy, n);
-  vec3 r1 = cross(ty, n);
-  vec3 r2 = cross(n, tx);
-  float det = dot(tx, r1);
+  // ⚠️ ELLE PERTURBE LA NORMALE QU'ON LUI DONNE : n est la SPHERE NUE, les
+  // tangentes ne servent qu'a mesurer la distance au sol par pixel. Projeter
+  // sx et sy sur le plan de n ne changerait RIEN (voir le module).
+  vec3 r1 = cross(sy, n);
+  vec3 r2 = cross(n, sx);
+  float det = dot(sx, r1);
   vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
   vec3 v = abs(det) * n - grad;
   float l = length(v);

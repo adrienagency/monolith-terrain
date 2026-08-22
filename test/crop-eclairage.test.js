@@ -1022,10 +1022,18 @@ const UNITE = (v) => { const l = NORME(v); return [v[0] / l, v[1] / l, v[2] / l]
 /**
  * L'ORACLE INDÉPENDANT — il ne connaît pas `normaleParDeplacement`.
  *
- * La surface déplacée est `S(x, y) = P(x, y) + N · h(x, y)`. On la CONSTRUIT en
- * trois points (l'origine et un pas dans chaque direction d'écran) et on prend
- * le produit vectoriel des deux différences finies. C'est la définition, pas la
- * formule de Mikkelsen.
+ * ⚠️ **CE QU'IL DÉCRIT, ET C'EST LE POINT DÉLICAT DE TOUT CE BLOC : LE PLAN DE
+ * `n`, DÉPLACÉ DE `h` LE LONG DE `n`.** C'est la surface que le crop peint — la
+ * sphère nue, plus le relief le long de son rayon — et c'est celle que la
+ * formule de Mikkelsen rend, puisqu'elle perturbe la normale QU'ON LUI DONNE.
+ * Les tangentes d'écran, elles, viennent de la surface DÉPLACÉE : leur
+ * composante radiale n'est pas un déplacement au sol, on la retire.
+ * ⚡ **Et c'est bien le même objet des deux côtés** : ⑧a assert plus bas que
+ * `normaleParDeplacement` est INVARIANTE par cette projection, donc que la
+ * retirer de la loi (ce qu'a fait la campagne de mutation) est un no-op.
+ *
+ * On CONSTRUIT la surface en trois points et on prend le produit vectoriel des
+ * deux différences finies. C'est la définition, pas la formule de Mikkelsen.
  */
 function normaleOracle(sx, sy, n, dhx, dhy) {
   // ⚠️ **LE DÉPLACEMENT SE FAIT DEPUIS LE PLAN DE `n`**, parce que c'est la
@@ -1075,6 +1083,23 @@ test('⑧a la normale par déplacement suit la DÉFINITION — oracle indépenda
     }
   }
   assert.ok(compares >= 48, `banc vide : ${compares} comparaisons`)
+  // ④ ⛔ **L'INVARIANCE PAR PROJECTION, ET ELLE VIENT D'UNE SURVIVANTE DE
+  // MUTATION.** La loi portait trois lignes qui projetaient `sx` et `sy` sur le
+  // plan de `n` ; retirées, AUCUN test ne rougissait. L'algèbre dit pourquoi :
+  // `(sy − n(sy·n)) × n = sy × n`, et `det` ne voit pas la part radiale parce
+  // que `R1 ⟂ n`. Les trois lignes sont parties ; l'invariance reste, ASSERTÉE.
+  for (const b of bases) {
+    const proj = (v) => { const d = v[0] * b.n[0] + v[1] * b.n[1] + v[2] * b.n[2]; return [v[0] - b.n[0] * d, v[1] - b.n[1] * d, v[2] - b.n[2] * d] }
+    const a = normaleParDeplacement(b.sx, b.sy, b.n, 0.31, -0.12)
+    const c = normaleParDeplacement(proj(b.sx), proj(b.sy), b.n, 0.31, -0.12)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - c[i]) < 1e-12, `la projection n'est plus un no-op : ${a} contre ${c}`)
+  }
+  // ⑤ ⚠️ **LE CAS DÉGÉNÉRÉ, ET IL EST ATTEIGNABLE** : au pixel où les deux
+  // tangentes d'écran sont colinéaires (une silhouette), `det` vaut zéro et le
+  // gradient aussi — la loi doit rendre la normale de BASE, pas un vecteur nul
+  // que `normalize` ferait exploser en NaN plus loin.
+  const degenere = normaleParDeplacement([1, 0, 0], [2, 0, 0], [0, 1, 0], 0, 0)
+  assert.deepEqual(degenere, [0, 1, 0])
 })
 
 test('⑧b ⚡ L’INVARIANCE D’ÉCHELLE D’ÉCRAN — la raison de s’écarter de three', () => {
@@ -1123,11 +1148,12 @@ test('⑧d le GLSL est la TRANSCRIPTION du jumeau JS — terme à terme, sans co
   // parce qu'elle lisait une formule DANS UN COMMENTAIRE.
   const nu = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ')
   assert.match(nu, /vec3 normaleFineCrop\(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy\) \{/)
-  assert.match(nu, /vec3 tx = sx - n \* dot\(sx, n\);/)
-  assert.match(nu, /vec3 ty = sy - n \* dot\(sy, n\);/)
-  assert.match(nu, /vec3 r1 = cross\(ty, n\);/)
-  assert.match(nu, /vec3 r2 = cross\(n, tx\);/)
-  assert.match(nu, /float det = dot\(tx, r1\);/)
+  assert.match(nu, /vec3 r1 = cross\(sy, n\);/)
+  assert.match(nu, /vec3 r2 = cross\(n, sx\);/)
+  assert.match(nu, /float det = dot\(sx, r1\);/)
+  // ⛔ **ET AUCUNE PROJECTION** : elle serait un no-op (⑧a l'assert), donc trois
+  // lignes de code mort dans un nuanceur exécuté par fragment.
+  assert.ok(!/dot\(sx, n\)/.test(nu), 'le GLSL projette : trois lignes mortes par fragment')
   assert.match(nu, /vec3 grad = sign\(det\) \* \(dhx \* r1 \+ dhy \* r2\);/)
   assert.match(nu, /vec3 v = abs\(det\) \* n - grad;/)
   assert.match(nu, /return l > 0\.0 \? v \/ l : n;/)
@@ -1152,6 +1178,11 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, échelle, varyin
   assert.ok(!/vNormalW/.test(bloc), 'la normale fine part de vNormalW : la pente grossiere est comptee deux fois')
   // ③ l'échelle est APPLIQUÉE aux DEUX dérivées, pas à une seule
   assert.match(bloc, /dFdx\(h\) \* uUnitesParMetre, dFdy\(h\) \* uUnitesParMetre/)
+  // ⛔ **ET LES QUATRE ARGUMENTS SONT APPARIÉS DANS LE BON ORDRE — une mutation
+  // qui échange les deux TANGENTES a survécu au premier tour.** `dFdx(vVue)`
+  // doit aller avec `dFdx(h)` : appariés à l'envers, le gradient tourne de
+  // quatre-vingt-dix degrés et la lumière éclaire les flancs perpendiculaires.
+  assert.match(bloc, /normaleFineCrop\(dFdx\(vVue\), dFdy\(vVue\), nSphere, dFdx\(h\) \* uUnitesParMetre, dFdy\(h\) \* uUnitesParMetre\)/)
   // ④ et c'est bien `h`, la hauteur du fragment APRÈS le fond marin et le grain
   assert.ok(nu.indexOf('if (uNormaleFineOn > 0.5)') > nu.indexOf('h += uGrainForceM'),
     'la normale fine est calculee AVANT le grain : elle deriverait une autre surface')
@@ -1177,6 +1208,13 @@ test('⑧f ⛔ LE BRANCHEMENT DANS LA CHAÎNE — pose, retrait, veille, context
   assert.equal(u.uNormaleFineOn.value, 1)
   g.poserHabillage({ normaleFine: false })
   assert.equal(u.uNormaleFineOn.value, 0, 'une pose a faux laisse la normale fine allumee')
+  // ⚠️ **ET L'INTERRUPTEUR EST L'ABSENCE DE DONNÉE** — le patron de `uCropOn`,
+  // `uHabOn`, `coastMask` et de l'ambiante de paroi (⑦c). Un appelant qui ne
+  // connaît pas ce champ doit rendre l'image d'AVANT la Tâche P9, pas un globe
+  // modelé au fragment sur toute la planète.
+  g.poserHabillage({ normaleFine: true })
+  g.poserHabillage({})
+  assert.equal(u.uNormaleFineOn.value, 0, 'une pose SANS le champ allume la normale fine')
   // ③ et `retirerHabillage` la rend
   g.poserHabillage({ normaleFine: true })
   g.retirerHabillage()
