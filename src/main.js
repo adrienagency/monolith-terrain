@@ -75,6 +75,11 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
+// LE REPOS DE LA VUE — Tâche N. ⚠️ **PUR, POUR LA MÊME RAISON QUE LES TROIS
+// VEILLES CI-DESSUS** : c'est un SEUIL, et le seuil du socle a produit onze
+// bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
+// par image relevées dans l'application vivante — voir le §3 du module.
+import { creerVeilleRepos } from './monde/veille-repos.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
 // risque de cycle depuis `main.js`, qui est en bout de chaîne.
@@ -4675,6 +4680,24 @@ function majSeuilSocle() {
 // précisément ce qui se casse en silence.
 const veilleEstompage = creerVeilleEstompage({ appliquer: (f) => globe?.poserEstompage(f) })
 
+// ══════════ LE REPOS DE LA VUE — Tâche N, « LE STUDIO SUR LE GLOBE » ═══════
+//
+// **Adrien, 2026-08-22** : « Tout ce qui est en dehors du crop ne doit pas
+// s'afficher. Ça ne s'affiche que si on dézoome, puis ça recrop quand la vue est
+// stabilisée. On ne calcule donc pas les éléments hors crop sauf si dézoom ou
+// zoom pour faire la transition. »
+//
+// ⚠️ **ELLE N'EST NOURRIE QUE PAR `veilleCrop`, ET C'EST LA MÊME RÈGLE QUE
+// L'ESTOMPAGE** : trois automates qui décident à la même image doivent décider
+// sur la MÊME lecture d'altitude. Un second `altitudeCadrageM()` ici serait le
+// troisième chemin d'un geste qui n'en a qu'un — l'argument est écrit trois fois
+// dans ce fichier, et il a été payé trois fois.
+//
+// ⚠️ **AUCUN RÉGLAGE PASSÉ ICI.** Les deux nombres (`SEUIL_BOUGE_LOG`,
+// `IMAGES_CALME`) sont mesurés et vivent dans le module avec leur source ; les
+// dupliquer ici en ferait deux jeux qui divergent d'une version.
+const veilleRepos = creerVeilleRepos()
+
 // ⚠️ **LES DEUX GARDES SONT CELLES DE `majSeuilSocle`, MOT POUR MOT, ET ELLES
 // VALENT ICI POUR LA MÊME RAISON MESURÉE.** Pendant un cran, `largeurBlocM()`
 // est divisée par deux UNE IMAGE avant que `_rescale` ne double
@@ -4933,6 +4956,13 @@ const veilleCrop = creerVeilleCrop({
   globe: () => globe,
   contexte: contexteCrop,
   estompage: veilleEstompage,
+  // ⚠️ **LE REPOS ENTRE PAR LA MÊME PORTE QUE L'ESTOMPAGE — Tâche N.** Il
+  // commande deux choses qui doivent être vraies ensemble : l'estompage plein
+  // (les alentours ne s'affichent plus) et `globe.poserCropSeul` (le quadtree
+  // cesse de les parcourir, donc de les demander et de les mailler). Le
+  // relais est dans `branchement-crop.js`, pas ici : c'est lui qui sait si la
+  // chaîne est posée, et forcer l'estompage sans crop viderait l'écran.
+  repos: veilleRepos,
   masquerSocle: () => poserVisibiliteSocle(false),
   // ⚠️ **SANS CETTE RÉSERVATION, LES PAROIS ET LA RAMPE REFUSENT POUR TOUJOURS,
   // ET C'EST MESURÉ À L'ÉCRAN.** La Réunion z12, drapeau levé, **600 tuiles** de
@@ -11167,6 +11197,13 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
   // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
   veilleCrop, terreUniqueBranchee, contexteCrop,
+  // LE REPOS DE LA VUE — Tâche N, exposé pour la même raison que les quatre
+  // blocs ci-dessus : `main.js` n'est chargé par aucun test, et
+  // `veilleRepos.auRepos` / `.bascules` sont **la seule façon de vérifier à
+  // l'écran qu'un dézoom rallume les alentours UNE fois et que la vue posée les
+  // éteint UNE fois** — c'est-à-dire de compter le battement au lieu de
+  // l'espérer.
+  veilleRepos,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne

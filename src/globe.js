@@ -18,7 +18,7 @@ import { GlobeClouds } from './globe-clouds.js'
 import { overzoomTile } from './bathy.js'
 // LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
 // three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
-import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './monde/crop-sphere.js'
+import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
@@ -1602,6 +1602,18 @@ export class Globe {
     // Écrit par `poserCrop`, lu par `_traverse` (le raffinement uniforme) ; la
     // découpe elle-même se fait au fragment, par les uniformes `uCrop*`.
     this._crop = null
+    // LE CROP SEUL — Tâche N, « LE STUDIO SUR LE GLOBE ». `false` = le parcours
+    // d'avant, au bit près, et c'est l'état de production. Écrit par
+    // `poserCropSeul`, lu par `_traverse` et par lui seul.
+    //
+    // ⚠️ **CE N'EST PAS UN DOUBLON DE `uEstompage = 1`, ET C'EST TOUTE LA
+    // TÂCHE.** L'estompage plein fait mourir le FRAGMENT hors crop ; la tuile,
+    // elle, est quand même chargée, maillée et soumise au GPU. Mesuré dans
+    // l'application vivante le 2026-08-22 (La Réunion, `?terre=unique`, altitude
+    // de bloc 12 686 m, `uEstompage = 1`) : **351 tuiles dessinées, dont 315
+    // entièrement hors du crop** — 89,7 % des appels de dessin ne montrent pas
+    // un pixel. Données brutes : `.banc/vues-N/AV-repos-bloc.json`.
+    this._cropSeul = false
     // LES PAROIS — Tâche B. `null` = le crop est une peau flottante, et c'est
     // l'état d'après la Tâche A. Écrit par `construireParoisCrop`.
     this._parois = null
@@ -1908,6 +1920,61 @@ export class Globe {
     // la couverture douce du bord ne veut rien dire sans mélange — Tâche B
     this._melangeCrop(true)
     return rep
+  }
+
+  // ═══════════ LE CROP SEUL — Tâche N, « ON NE CALCULE PAS LE DEHORS » ══════
+  //
+  // **Adrien, 2026-08-22** : « Tout ce qui est en dehors du crop ne doit pas
+  // s'afficher. […] On ne calcule donc pas les éléments hors crop sauf si dézoom
+  // ou zoom pour faire la transition. »
+  //
+  // ⚠️ **« NE PAS CALCULER » EST L'EXIGENCE DURE, ET LE `discard` DE LA TÂCHE A
+  // NE LA TIENT PAS.** Le nuanceur jette le fragment ; la tuile a déjà été
+  // demandée, décodée, maillée, et son appel de dessin est déjà parti. Le pixel
+  // meurt, le coût est payé. Ce drapeau-ci coupe en AMONT, dans `_traverse` :
+  // une tuile hors de la boîte du crop n'est ni parcourue, ni demandée, ni
+  // dessinée.
+  //
+  // ⚠️ **LE CRITÈRE EST LA BOÎTE, PAS LA FORME** — `tuileDansCrop`, la même que
+  // `zoomCropPrescrit` emploie déjà pour prescrire `ZOOM_SOCLE`. Une tuile qui
+  // ne touche le crop que par un coin arrondi reste donc parcourue : la forme se
+  // joue au fragment, le parcours se joue à la tuile. Un test de forme ici
+  // ouvrirait un trou d'une tuile dans chaque coin.
+  //
+  // ⚠️ **CE N'EST PAS UN ÉTAT PERMANENT — C'EST L'ÉTAT DE REPOS.** La loi de
+  // l'estompage (Tâche G) n'est pas touchée : elle reste
+  // `estompageTerre(altitude)` et c'est elle qui dessine les alentours PENDANT
+  // un zoom. Ce que la Tâche N change, c'est QUAND elle s'applique — la veille
+  // du repos (`src/monde/veille-repos.js`) décide, `branchement-crop.js`
+  // relaie.
+
+  /**
+   * Le globe ne parcourt-il QUE le crop ?
+   *
+   * ⚠️ **SANS CROP POSÉ, LE DRAPEAU NE COUPE RIEN**, et c'est délibéré : couper
+   * sur un repère absent ferait disparaître la planète entière. `_horsCropSeul`
+   * teste `this._crop` avant tout.
+   *
+   * @param {boolean} actif
+   * @returns {boolean} l'état posé
+   */
+  poserCropSeul(actif) {
+    this._cropSeul = !!actif
+    return this._cropSeul
+  }
+
+  /**
+   * Cette tuile est-elle hors du crop alors qu'on ne parcourt que le crop ?
+   *
+   * ⚠️ **LES RACINES z2 NE SONT PAS EXEMPTÉES ICI, CONTRAIREMENT AUX DEUX TRIS
+   * SPATIAUX.** Elles le sont là-bas parce qu'elles portent la couverture tant
+   * que leurs enfants ne sont pas au complet — un trou au bord de l'écran. Ici
+   * il n'y a pas de trou à ouvrir : hors du crop, il n'y a RIEN à montrer. Et
+   * elles ne se purgent jamais (`_purgerFile`, `_evict`), donc la transition les
+   * retrouve en cache sans un octet de réseau.
+   */
+  _horsCropSeul(z, x, y) {
+    return this._cropSeul && !!this._crop && !tuileDansCrop(z, x, y, this._crop)
   }
 
   /** Retire le crop — le globe redevient entier, parois comprises. */
@@ -3952,6 +4019,21 @@ export class Globe {
   }
 
   _traverse(t, camPos, camDir) {
+    // ══════ LE CROP SEUL — Tâche N ═════════════════════════════════════════
+    //
+    // ⚠️ **AVANT `_visites++`, ET CE N'EST PAS UN DÉTAIL DE COMPTAGE.**
+    // `_visites` est l'instrument par lequel ce dépôt mesure l'emprise
+    // parcourue (Tâche 4, « il ne se juge pas au zoom atteint mais au nombre de
+    // tuiles PARCOURUES »). Compter une tuile qu'on refuse de parcourir
+    // rendrait la mesure aveugle à la seule chose que cette tâche change.
+    //
+    // ⚠️ **ET C'EST UN `return` SEC, SANS `lastUsed`.** La tuile n'est donc plus
+    // porteuse : elle redevient évinçable. Ce n'est pas un oubli, mais ce n'est
+    // pas non plus une éviction — au repos le cache ne DÉBORDE pas (mesuré :
+    // 712 tuiles pour `cacheMax = 1 700`), donc `_evict` ne passe jamais et rien
+    // n'est rendu au réseau. **C'est ce qui rend la transition gratuite** :
+    // dézoomer retrouve en cache tout ce qui y était.
+    if (this._horsCropSeul(t.z, t.x, t.y)) return
     this._visites++
     // ⚠️ LES RACINES z2 SONT EXEMPTÉES DES DEUX TRIS, et ce n'est pas une
     // faveur : elles portent la couverture de toute la planète, ce sont elles
@@ -4050,6 +4132,28 @@ export class Globe {
       }
       // hole-free rule: descend only when all four children can draw —
       // any error keeps the parent covering the whole quad
+      //
+      // ⚠️ **AU REPOS, `kids` NE CONTIENT QUE LES ENFANTS DU CROP — Tâche N**,
+      // et la règle sans-trou tient toujours : ce qui manque à la couverture est
+      // ce qu'on a décidé de ne pas montrer. Sans ce filtrage, un quart de
+      // z11 chevauchant le bord du crop attendrait quatre enfants dont deux ne
+      // seront JAMAIS demandés — le crop resterait grossier pour toujours.
+      //
+      // ⛔ **IL Y AVAIT ICI UN `kids.length > 0 &&`, ET C'ÉTAIT DU CODE MORT —
+      // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
+      // raisonnement écrit à côté était plausible (« une liste vide passerait
+      // `every` et on descendrait dans le vide, donc une encoche »), et il est
+      // sans objet : **`tuileDansCrop` est un test d'INTERSECTION D'EMPRISES
+      // sur les deux axes** — en latitude par `y1 <= cy − demi || y0 >= cy +
+      // demi`, en longitude par `|dx| < demi + demiTuile` sur le CENTRE, ce qui
+      // est la même chose. Les quatre enfants PAVENT exactement leur parent :
+      // si le parent recoupe l'emprise du crop, au moins un enfant la recoupe.
+      // Un parent qui atteint cette ligne a forcément passé `_horsCropSeul`,
+      // donc `kids` n'est jamais vide. Une mutation qui retirait la garde
+      // SURVIVAIT. **Retirée plutôt que testée à vide** — sixième code mort de
+      // ce chantier. Ce qui garde réellement l'absence de trou est l'assertion
+      // d'ensemble de `test/veille-repos.test.js` ⑦ : le crop doit être dessiné
+      // par EXACTEMENT les mêmes tuiles avec et sans le drapeau.
       if (kids.every((k) => k.state === 'ready' && k.mesh)) {
         t.refined = true
         for (const k of kids) this._traverse(k, camPos, camDir)
@@ -4071,20 +4175,50 @@ export class Globe {
     const x = t.x * 2
     const y = t.y * 2
     return (
-      this.tiles.has(tileKey(z, x, y)) &&
-      this.tiles.has(tileKey(z, x + 1, y)) &&
-      this.tiles.has(tileKey(z, x, y + 1)) &&
-      this.tiles.has(tileKey(z, x + 1, y + 1))
+      this._enfantAcquis(z, x, y) &&
+      this._enfantAcquis(z, x + 1, y) &&
+      this._enfantAcquis(z, x, y + 1) &&
+      this._enfantAcquis(z, x + 1, y + 1)
     )
   }
 
+  /**
+   * Cet enfant est-il DÉJÀ dans le cache — ou hors sujet ?
+   *
+   * ⚠️ **HORS CROP AU REPOS, IL NE COÛTERA RIEN, DONC IL NE SE PAIE PAS —
+   * Tâche N.** `_children` ne le fera pas naître ; le compter dans l'admission
+   * ferait débiter quatre crédits pour deux tuiles à chaque quart qui chevauche
+   * le bord du crop, à chaque image. Le drapeau éteint, cette fonction est
+   * exactement `this.tiles.has(...)`.
+   */
+  _enfantAcquis(z, x, y) {
+    return this._horsCropSeul(z, x, y) || this.tiles.has(tileKey(z, x, y))
+  }
+
+  /**
+   * Les enfants à faire naître.
+   *
+   * ⚠️ **AU REPOS SOUS `_cropSeul`, CEUX QUI SONT HORS DU CROP NE NAISSENT
+   * MÊME PAS — Tâche N.** `_ensureTile` crée l'entrée de cache et `_request`
+   * part derrière : filtrer plus bas (dans `_traverse`) aurait laissé le
+   * réseau et le maillage se payer quand même, c'est-à-dire exactement le
+   * défaut que cette tâche répare. Le drapeau éteint, la liste est celle
+   * d'avant, dans le même ordre, au bit près.
+   */
   _children(t) {
-    return [
-      this._ensureTile(t.z + 1, t.x * 2, t.y * 2),
-      this._ensureTile(t.z + 1, t.x * 2 + 1, t.y * 2),
-      this._ensureTile(t.z + 1, t.x * 2, t.y * 2 + 1),
-      this._ensureTile(t.z + 1, t.x * 2 + 1, t.y * 2 + 1),
-    ]
+    const z = t.z + 1
+    const x = t.x * 2
+    const y = t.y * 2
+    // ⚠️ **DÉROULÉ, PAS UNE BOUCLE SUR UN TABLEAU DE PAIRES** : `_traverse`
+    // tourne des centaines de fois par image, et le fichier le dit déjà pour
+    // `_sphereDe` (« réutilise un seul objet »). Une allocation de quatre paires
+    // par appel serait un ramasse-miettes de plus par seconde.
+    const out = []
+    if (!this._horsCropSeul(z, x, y)) out.push(this._ensureTile(z, x, y))
+    if (!this._horsCropSeul(z, x + 1, y)) out.push(this._ensureTile(z, x + 1, y))
+    if (!this._horsCropSeul(z, x, y + 1)) out.push(this._ensureTile(z, x, y + 1))
+    if (!this._horsCropSeul(z, x + 1, y + 1)) out.push(this._ensureTile(z, x + 1, y + 1))
+    return out
   }
 
   _evict() {

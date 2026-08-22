@@ -353,6 +353,12 @@ export function poserChaineCrop(arg = {}) {
  *   l'Étape 6 a vu à la première image, `terrain.mesh.visible === true` avec
  *   `uCropOn === 1`. Appelé **une fois par entrée en surface**, jamais par
  *   image : la liste des calques qu'il touche en compte quatorze.
+ * @param {{maj:Function, oublier:Function}|null} [arg.repos] la veille du repos
+ *   (Tâche N, `veille-repos.js`). ⚠️ **ELLE EST NOURRIE ICI ET NULLE PART
+ *   AILLEURS, POUR LA MÊME RAISON QUE L'ESTOMPAGE** : trois automates qui
+ *   décident à la même image doivent décider sur la MÊME altitude. Absente, le
+ *   comportement est celui d'avant la Tâche N, au bit près — les alentours
+ *   restent dessinés au repos.
  * @param {number} [arg.periodeReprise] en IMAGES — voir le §3
  * @param {boolean} [arg.cropAuDepart] l'état de l'application au chargement
  * @param {boolean} [arg.modeSurfaceAuDepart]
@@ -361,6 +367,7 @@ export function creerVeilleCrop({
   globe,
   contexte,
   estompage = null,
+  repos = null,
   masquerSocle = null,
   reserverHauteurs = null,
   periodeReprise = 30,
@@ -394,6 +401,48 @@ export function creerVeilleCrop({
   // de calques que `masquerSocle` rappelle en touche quatorze : la repasser à
   // chaque image serait exactement ce que la garde de `creerVeilleSocle` évite.
   let socleMasque = false
+  // ══════════ LE REPOS RELAYÉ — Tâche N ══════════════════════════════════════
+  //
+  // ⚠️ **DEUX DESTINATAIRES, UN SEUL ÉCRIVAIN.** Le repos commande deux choses
+  // qui doivent être vraies ENSEMBLE ou fausses ensemble : l'estompage plein
+  // (`poserRepos`, qui efface les alentours à l'écran) et le parcours réduit du
+  // quadtree (`globe.poserCropSeul`, qui cesse de les calculer). Séparés, on
+  // aurait un dessin sans coût ou un coût sans dessin — les deux moitiés du
+  // défaut que cette tâche répare.
+  //
+  // ⚠️ **ET LE `ET` AVEC `pose` N'EST PAS UNE PRUDENCE, C'EST LA LOI.** Sans
+  // crop, l'estompage plein efface la planète et ne met rien à la place : un
+  // écran vide. C'est ce qui interdit à `estompage-terre.js` de porter cette
+  // règle lui-même — il ne sait pas s'il y a une découpe.
+  let auRepos = false
+  let reposApplique = false
+  let basculesRepos = 0
+
+  function appliquerRepos(g) {
+    // ⛔ **IL Y AVAIT ICI UN `modeSurface &&`, ET C'ÉTAIT DU CODE MORT —
+    // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
+    // raisonnement écrit à côté était plausible (« l'orbite prime, comme pour
+    // l'estompage »), et il était sans effet : **hors surface, `pose` est
+    // TOUJOURS faux**. `poserMode(false)` appelle `retirer`, qui le remet à
+    // faux ; et `decider` sort sur `if (!modeSurface) return pose` sans jamais
+    // le lever. Aucun chemin n'atteint donc ce relais avec `modeSurface` faux
+    // et `pose` vrai — une mutation qui retirait le terme SURVIVAIT. C'est la
+    // définition du code mort que ce chantier a déjà trouvé cinq fois.
+    // **Retiré plutôt que testé à vide**, exactement comme la garde
+    // `if (nom === 'crop') continue` de `reprendre` et le `habillagePose = null`
+    // de `retirer`. ⚠️ **L'INVARIANT QUI LE REMPLACE EST ÉCRIT ICI** : hors
+    // surface, il n'y a pas de crop, donc rien à relayer.
+    const voulu = !!(pose && auRepos)
+    if (voulu === reposApplique) return reposApplique
+    reposApplique = voulu
+    basculesRepos++
+    estompage?.poserRepos(voulu)
+    // ⚠️ **UN GLOBE SANS `poserCropSeul` N'EST PAS UNE PANNE** — même contrat
+    // que `poserFondCrop` (Tâche J bis) : ce module se vérifie sous node contre
+    // un globe de papier, qui ne porte que les méthodes qu'il exerce.
+    g?.poserCropSeul?.(voulu)
+    return reposApplique
+  }
 
   function suivreMer(promesse, monJeton) {
     enVol = promesse.then((r) => {
@@ -489,14 +538,12 @@ export function creerVeilleCrop({
     bascules++
   }
 
-  return {
-    /**
-     * Une image. `altitudeEllipsoideM` est l'altitude géométrique de la caméra
-     * au-dessus de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte
-     * SANS `meanM`. Une altitude non finie conserve l'état, même contrat que
-     * `socleVisible`.
-     */
-    maj(altitudeEllipsoideM) {
+  // ⚠️ **LE CORPS DE `maj` VIT ICI POUR QU'IL N'Y AIT QU'UN SEUL POINT DE
+  // SORTIE — Tâche N.** Il en compte six (orbite, globe absent, seuil, contexte
+  // absent, pose, régime établi), et le repos doit être relayé sur TOUS : un
+  // `appliquerRepos` recopié six fois serait six branchements à tenir d'accord,
+  // c'est-à-dire la classe d'erreur que ce fichier existe pour fermer.
+  function decider(altitudeEllipsoideM) {
       // ⚠️ **L'ESTOMPAGE EST NOURRI MÊME EN ORBITE**, et le §6 de
       // `estompage-terre.js` dit pourquoi : sa veille FORCE zéro hors surface,
       // là où celle du socle GÈLE. La priver de l'image la laisserait sur la
@@ -504,6 +551,13 @@ export function creerVeilleCrop({
       // elle redevient le sujet.
       estompage?.maj(altitudeEllipsoideM)
       if (!modeSurface) return pose
+      // ⚠️ **LA VEILLE DU REPOS N'EST NOURRIE QU'EN SURFACE, ET C'EST MESURÉ.**
+      // En orbite, `altitudeCadrageM()` divise un `camera.position.y` orbital
+      // par l'échelle du DERNIER bloc chargé : ce n'est pas une altitude, c'est
+      // un résidu (`veille-socle.js`, §2). Lui donner cette image ferait un
+      // écart énorme entre deux régimes, donc un « mouvement » à chaque
+      // aller-retour d'orbite. `poserMode` lui fait oublier sa référence.
+      auRepos = repos ? repos.maj(altitudeEllipsoideM) : false
       // ⚠️ **LE BLOC PLAT PART AVANT TOUTE DÉCISION D'ALTITUDE, ET C'EST VOULU.**
       // Sous ce drapeau il n'a plus lieu d'exister à aucune altitude : le
       // laisser vivre au-dessus du seuil remettrait un socle devant la planète
@@ -537,6 +591,22 @@ export function creerVeilleCrop({
       // l'état FINAL de l'image, sinon il reposerait deux fois.
       rafraichirHabillage(g, ctx)
       return true
+  }
+
+  return {
+    /**
+     * Une image. `altitudeEllipsoideM` est l'altitude géométrique de la caméra
+     * au-dessus de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte
+     * SANS `meanM`. Une altitude non finie conserve l'état, même contrat que
+     * `socleVisible`.
+     */
+    maj(altitudeEllipsoideM) {
+      const r = decider(altitudeEllipsoideM)
+      // ⚠️ **APRÈS LA DÉCISION, JAMAIS AVANT.** `appliquerRepos` lit `pose` :
+      // évalué en tête, il jugerait sur l'image d'avant et le crop naîtrait
+      // toujours avec une image d'alentours dessinés.
+      appliquerRepos(lireGlobe())
+      return r
     },
 
     /**
@@ -550,11 +620,25 @@ export function creerVeilleCrop({
       // revenant : le masquage se redemande donc à chaque entrée en surface.
       if (!modeSurface) socleMasque = false
       if (!modeSurface && pose) retirer(lireGlobe())
+      // ⚠️ **TOUT CHANGEMENT DE MODE FAIT OUBLIER L'ALTITUDE DE RÉFÉRENCE —
+      // Tâche N, ET DANS LES DEUX SENS.** En orbite, `altitudeCadrageM()`
+      // divise un `camera.position.y` orbital par l'échelle du DERNIER bloc
+      // chargé : ce n'est pas une altitude, c'est un résidu
+      // (`veille-socle.js`, §2). Comparer une altitude de surface à un résidu —
+      // ou l'inverse — déclarerait un mouvement là où la caméra est posée. Ne
+      // l'oublier qu'à l'aller laisserait le retour se faire sur la dernière
+      // valeur d'orbite : c'est la MÊME faute, prise par l'autre bout.
+      repos?.oublier?.()
+      appliquerRepos(lireGlobe())
       return pose
     },
 
     /** Le crop est-il posé ? */
     get pose() { return pose },
+    /** Le repos est-il RELAYÉ (donc : crop posé, en surface) — Tâche N. */
+    get repos() { return reposApplique },
+    /** Combien de fois le repos relayé a basculé : le compteur de battement. */
+    get basculesRepos() { return basculesRepos },
     /** Les maillons qui ont refusé et que la reprise redemande. */
     get refus() { return [...refus] },
     /** Combien de fois le crop est né ou mort depuis le chargement. */

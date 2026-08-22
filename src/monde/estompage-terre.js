@@ -194,12 +194,38 @@ export function creerVeilleEstompage({ appliquer } = {}) {
   // ce que l'ALTITUDE dit, indépendamment du mode
   let auSeuil = 0
   let modeSurface = true
+  // ══════════ 7. LE REPOS FORCE UN — Tâche N, « LE STUDIO SUR LE GLOBE » ═════
+  //
+  // **Adrien, 2026-08-22** : « Tout ce qui est en dehors du crop ne doit pas
+  // s'afficher. Ça ne s'affiche que si on dézoome, puis ça recrop quand la vue
+  // est stabilisée. »
+  //
+  // ⚠️ **LA LOI N'EST PAS TOUCHÉE, ET C'EST LE POINT.** `estompageTerre` est
+  // mesurée, relue et validée (Tâche G) : ses deux bornes se dérivent toujours
+  // de `seuil-socle.js`, sa rampe court toujours sur le logarithme de
+  // l'altitude, elle n'a toujours pas d'hystérésis. **Ce qui change est QUAND
+  // elle s'applique** — l'estompage devient un état de TRANSITION, plus un état
+  // de repos. Au repos la valeur posée est 1, « le crop seul » : c'est le
+  // comportement que la Tâche A porte depuis toujours, et `uEstompage = 1` le
+  // rend au bit près.
+  //
+  // ⚠️ **L'ORDRE DES TROIS PRIORITÉS N'EST PAS ARBITRAIRE** : l'orbite d'abord
+  // (là-haut la Terre est le sujet, elle est ENTIÈRE — §6), le repos ensuite, la
+  // loi en dernier. Un repos qui primerait sur l'orbite effacerait la planète au
+  // moment précis où elle redevient le sujet — le défaut que le §6 décrit déjà.
+  //
+  // ⚠️ **ET CE N'EST PAS À CETTE VEILLE DE SAVOIR S'IL Y A UN CROP.** Sans crop
+  // posé, forcer 1 laisserait un écran vide : la planète effacée, et rien à la
+  // place. C'est `branchement-crop.js` qui ne relaie le repos que lorsque la
+  // chaîne est posée — un seul point d'alimentation, comme pour `maj` et
+  // `poserMode`.
+  let auRepos = false
   // ce qui est réellement POSÉ à l'écran
   let pose = 0
   let applications = 0
 
   function poser() {
-    const voulu = modeSurface ? auSeuil : 0
+    const voulu = !modeSurface ? 0 : auRepos ? 1 : auSeuil
     if (voulu === pose) return pose
     pose = voulu
     applications++
@@ -211,6 +237,20 @@ export function creerVeilleEstompage({ appliquer } = {}) {
     /** Le mode de `modes.js`. ⚠️ Il PRIME : en orbite la Terre est entière. */
     poserMode(surface) {
       modeSurface = !!surface
+      return poser()
+    },
+
+    /**
+     * La vue est-elle au repos ? ⚠️ Au repos, le crop SEUL — voir le §7.
+     *
+     * ⚠️ **MÊME GARDE QUE LES DEUX AUTRES ENTRÉES** : `appliquer` n'est rappelé
+     * que lorsque la valeur posée change, sinon un uniforme serait réécrit à
+     * chaque image pour rien.
+     *
+     * @param {boolean} repos
+     */
+    poserRepos(repos) {
+      auRepos = !!repos
       return poser()
     },
 
@@ -228,6 +268,8 @@ export function creerVeilleEstompage({ appliquer } = {}) {
     get valeur() { return pose },
     /** Ce que l'altitude dit, mode mis à part — pour les sondes et les bancs. */
     get auSeuil() { return auSeuil },
+    /** Le repos est-il relayé ? — pour les sondes et les bancs (Tâche N). */
+    get auRepos() { return auRepos },
     /** Combien de fois l'estompage a été réellement réécrit. */
     get applications() { return applications },
   }
