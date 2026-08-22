@@ -42,6 +42,10 @@ import {
   MAILLONS,
   CHAMPS_HABILLAGE,
   habillageDifferent,
+  // ⚠️ **Tâche P6** : la FORME du bloc, surveillée à part de la signature de lieu.
+  CHAMPS_FORME,
+  formeDuCrop,
+  formeDifferente,
 } from '../src/monde/branchement-crop.js'
 import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
 
@@ -63,7 +67,10 @@ function globeFactice({ refuse = {} } = {}) {
     journal: j,
     refuse: { fond: false, parois: false, rampe: false, mer: false, ...refuse },
     poserCrop(a) {
-      j.push({ quoi: 'crop', centre: a?.centre, zoom: a?.zoom, tuilesParBloc: a?.tuilesParBloc })
+      // ⚠️ **Tâche P6 : L'ARGUMENT ENTIER EST JOURNALISÉ.** Trois champs
+      // recopiés ne diraient rien de `half`, `corner` et `expo` — ceux-là mêmes
+      // que personne n'a jamais passés pendant dix tâches.
+      j.push({ quoi: 'crop', arg: a, centre: a?.centre, zoom: a?.zoom, tuilesParBloc: a?.tuilesParBloc })
       g._crop = { cx: 0.5, cy: 0.35, demi: a.tuilesParBloc / 2 / 2 ** a.zoom, zoom: a.zoom }
       return g._crop
     },
@@ -148,9 +155,14 @@ test('① ter les bornes du crop sont CELLES DU CONTEXTE, pas des constantes loc
   // partout sauf à l'écran.
   const g = globeFactice()
   poserChaineCrop({ globe: g, centre: { lat: -21.1, lon: 55.5 }, zoom: 13.25, tuilesParBloc: 3 })
-  assert.deepEqual(g.journal[0], {
+  const { arg, ...borne } = g.journal[0]
+  assert.deepEqual(borne, {
     quoi: 'crop', centre: { lat: -21.1, lon: 55.5 }, zoom: 13.25, tuilesParBloc: 3,
   })
+  // ⚠️ **Tâche P6** : l argument entier est journalisé à côté, et sans forme au
+  // contexte il ne porte AUCUN coin — le carré vif d avant, au bit près.
+  assert.equal(arg.corner, undefined)
+  assert.equal(arg.expo, undefined)
 })
 
 test('① quater ce que chaque maillon reçoit vient du contexte, pas d’un défaut', () => {
@@ -1008,4 +1020,157 @@ test('⑩d le retrait n’introduit AUCUN seuil d’altitude — consigne « zé
   v.poserMode(true)
   v.maj(alt)
   assert.ok(v.pose, 'et le retour rétablit, toujours à la même altitude')
+})
+
+// ══════════ ⑧ LA FORME DU BLOC, SURVEILLÉE PAR IMAGE — Tâche P6 ════════════
+//
+// ⛔ **`poserCrop` PORTE `half`, `corner` ET `expo` DEPUIS LA TÂCHE A, ET
+// PERSONNE NE LES A JAMAIS PASSÉS** ; `construireParoisCrop` porte
+// `profondeur` depuis la Tâche B, même sort. Le bloc du crop était donc un
+// CARRÉ À ANGLES VIFS pendant que celui du socle est un squircle — relevé le
+// 2026-08-22 au même instant dans la même page : `uCropCoin = 0`,
+// `uCropCoinN = 2` contre `uSlabCorner = 2,24`, `uSlabCornerN = 4,4`.
+//
+// ⚠️ **ET LA SURVEILLANCE EST À PART DE LA SIGNATURE DE LIEU, PAR CALCUL DE
+// COÛT** : `signature` déclenche `poserTout`, donc un champ de mer de 385² et
+// un balayage de rampe de 128² à CHAQUE image d'un glissement de tirette.
+
+test('⑧a la forme est TRANSMISE à `poserCrop`, et le poseur ne la fabrique pas', async () => {
+  const g = globeFactice()
+  const ctx = {
+    ...contexteFactice()(),
+    forme: { half: 28, corner: 2.24, expo: 4.4 },
+    parois: { fractionProfondeur: 0.125 },
+  }
+  const r = poserChaineCrop({ globe: g, ...ctx })
+  const crop = g.journal.find((e) => e.quoi === 'crop')
+  assert.ok(crop.arg, 'le poseur doit transmettre l argument entier')
+  assert.equal(crop.arg.corner, 2.24)
+  assert.equal(crop.arg.expo, 4.4)
+  assert.equal(crop.arg.half, 28)
+  const parois = g.journal.find((e) => e.quoi === 'parois')
+  assert.equal(parois.arg.fractionProfondeur, 0.125)
+  await r.mer
+})
+
+test('⑧b sans forme au contexte, `poserCrop` reçoit ses défauts — le carré vif d avant', async () => {
+  const g = globeFactice()
+  const r = poserChaineCrop({ globe: g, ...contexteFactice()() })
+  const crop = g.journal.find((e) => e.quoi === 'crop')
+  assert.equal(crop.arg.corner, undefined, 'aucun coin inventé')
+  assert.equal(crop.arg.expo, undefined)
+  assert.equal(crop.arg.half, undefined)
+  await r.mer
+})
+
+test('⑧c `formeDuCrop` aplatit les DEUX sous-objets — une grandeur, une veille', () => {
+  assert.deepEqual(
+    formeDuCrop({ forme: { half: 28, corner: 2.24, expo: 4.4 }, parois: { fractionProfondeur: 0.125 } }),
+    { half: 28, corner: 2.24, expo: 4.4, fractionProfondeur: 0.125 })
+  // ⚠️ **UN CONTEXTE VIDE REND QUATRE `undefined`, PAS UN OBJET VIDE** : c'est
+  // ce qui rend `Object.is` capable de dire « rien n'a changé ».
+  assert.deepEqual(formeDuCrop(null), { half: undefined, corner: undefined, expo: undefined, fractionProfondeur: undefined })
+  assert.deepEqual(CHAMPS_FORME, ['half', 'corner', 'expo', 'fractionProfondeur'])
+})
+
+test('⑧d `formeDifferente` compare par `Object.is`, champ par champ', () => {
+  const a = { half: 28, corner: 2.24, expo: 4.4, fractionProfondeur: 0.125 }
+  assert.equal(formeDifferente(null, a), true, 'rien de posé : tout diffère')
+  assert.equal(formeDifferente(a, { ...a }), false)
+  for (const champ of CHAMPS_FORME) {
+    assert.equal(formeDifferente(a, { ...a, [champ]: 9 }), true, `${champ} doit être surveillé`)
+  }
+  // ⚠️ **UN `NaN` DIFFÈRE DE LUI-MÊME SOUS `==` MAIS PAS SOUS `Object.is`** —
+  // même contrat qu'`habillageDifferent`, et pour la même raison.
+  assert.equal(formeDifferente({ ...a, corner: NaN }, { ...a, corner: NaN }), false)
+  assert.equal(formeDifferente(a, { ...a, corner: NaN }), true)
+})
+
+test('⑧e un changement de forme rejoue la DÉCOUPE ET LES PAROIS, et RIEN d autre', async () => {
+  const g = globeFactice()
+  let forme = { half: 28, corner: 2.24, expo: 4.4 }
+  const ctx = () => ({ ...contexteFactice()(), forme, parois: { fractionProfondeur: 0.125 } })
+  const veille = creerVeilleCrop({ globe: g, contexte: ctx })
+  veille.maj(20_000)
+  await veille.enVol()
+  assert.equal(veille.reformages, 0)
+  const avant = g.journal.length
+  // même forme : RIEN ne se rejoue
+  veille.maj(20_000)
+  assert.equal(g.journal.length, avant, 'une forme inchangée ne doit rien rejouer')
+  assert.equal(veille.reformages, 0)
+  // la tirette bouge
+  forme = { half: 28, corner: 11.2, expo: 2 }
+  veille.maj(20_000)
+  assert.equal(veille.reformages, 1)
+  const rejoues = g.journal.slice(avant).map((e) => e.quoi)
+  // ⚠️ **DEUX MAILLONS, PAS SIX** : la mer suit par l'uniforme PARTAGÉ
+  // `uCropCoin`, et la rampe se remesure au prochain déplacement. Rejouer la
+  // chaîne entière coûterait un champ de 385² par image de glissement.
+  assert.deepEqual(rejoues, ['crop', 'parois'])
+  assert.equal(g.journal[g.journal.length - 2].arg.corner, 11.2)
+  // et la profondeur est surveillée AUSSI — elle vit dans l'autre sous-objet
+  const avant2 = g.journal.length
+  veille.maj(20_000)
+  assert.equal(g.journal.length, avant2, 'la forme est posée : plus rien à rejouer')
+})
+
+test('⑧f la PROFONDEUR entre dans la même veille que le coin', async () => {
+  const g = globeFactice()
+  let fraction = 0.125
+  const ctx = () => ({
+    ...contexteFactice()(),
+    forme: { half: 28, corner: 2.24, expo: 4.4 },
+    parois: { fractionProfondeur: fraction },
+  })
+  const veille = creerVeilleCrop({ globe: g, contexte: ctx })
+  veille.maj(20_000)
+  await veille.enVol()
+  const avant = g.journal.length
+  fraction = 0.375
+  veille.maj(20_000)
+  assert.equal(veille.reformages, 1, 'la profondeur doit déclencher un reformage')
+  assert.deepEqual(g.journal.slice(avant).map((e) => e.quoi), ['crop', 'parois'])
+  assert.equal(g.journal[g.journal.length - 1].arg.fractionProfondeur, 0.375)
+})
+
+test('⑧g un reformage qui voit les parois REFUSER les remet dans la file de reprise', async () => {
+  const g = globeFactice()
+  let forme = { half: 28, corner: 2.24, expo: 4.4 }
+  const ctx = () => ({ ...contexteFactice()(), forme, parois: { fractionProfondeur: 0.125 } })
+  const veille = creerVeilleCrop({ globe: g, contexte: ctx, periodeReprise: 2 })
+  veille.maj(20_000)
+  await veille.enVol()
+  assert.deepEqual(veille.refus, [], 'témoin : rien ne refuse au départ')
+  g.refuse.parois = true
+  forme = { half: 28, corner: 11.2, expo: 2 }
+  veille.maj(20_000)
+  // ⚠️ **UN REFUS PENDANT UN REFORMAGE N'EST PAS PERDU** : sans cette ligne, le
+  // bloc garderait une surface arrondie et un flanc carré jusqu'au prochain
+  // déplacement — deux formes pour un objet, pire que deux carrés.
+  assert.ok(veille.refus.includes('parois'), 'le refus doit rejoindre la file de reprise')
+})
+
+test('⑧h `contexteCrop` de `main.js` remplit les deux sous-objets — lecture de SOURCE', () => {
+  // ⚠️ **AUCUN TEST NE CHARGE `main.js`** (§0 du plan) : ce garde-fou est une
+  // lecture, et il est DÉCLARÉ tel.
+  const i = SRC_MAIN.indexOf('function contexteCrop()')
+  assert.ok(i > 0)
+  const bloc = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n  ctx.rampe =', i))
+  assert.match(bloc, /forme: \{/)
+  assert.match(bloc, /parois: \{/)
+  // ⚠️ **LES UNIFORMES DU SOCLE, PAS `params`** — même règle que pour les dix
+  // curseurs d'Atlas et pour les lampes : `terrain.js` porte l'écrêtage du rayon
+  // et `exposantCoin`, que `params` ne porte pas.
+  assert.match(bloc, /terrain\.mapUniforms\.uSlabCorner/)
+  assert.match(bloc, /terrain\.mapUniforms\.uSlabCornerN/)
+  assert.match(bloc, /plinth\.depth/)
+  // ⚠️ **LES COMMENTAIRES SONT RETIRÉS AVANT DE CHERCHER UNE FORMULE** — la
+  // Tâche K ter a eu une mutation survivante parce qu'une assertion lisait une
+  // formule dans un pavé de prose. Ici le pavé NOMME `params.plinthDepth` pour
+  // dire précisément qu'on ne s'en sert pas.
+  const code = bloc.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/params\.slabCorner/.test(code), 'la forme ne doit pas passer par params')
+  assert.ok(!/params\.plinthDepth/.test(code), 'la profondeur ne doit pas passer par params')
+  assert.match(code, /terrain\.mapUniforms\.uSlabCorner/, 'le témoin : le code lui-même porte bien la lecture')
 })

@@ -363,7 +363,14 @@ export function repereLocalCrop(repere, rayon) {
  * @param {number} arg.rayon - R_GLOBE, en unités de scène
  * @param {number} arg.echelle - unités de scène par mètre d'altitude
  * @param {number} [arg.pas] - espacement de l'anneau (voir `PAS_CONTOUR`)
- * @param {number} [arg.profondeur] - en unités ; défaut `FRACTION_PROFONDEUR × largeur`
+ * @param {number} [arg.profondeur] - en unités ; défaut `fractionProfondeur × largeur`
+ * @param {number} [arg.fractionProfondeur] - la profondeur EN FRACTION de la
+ *   largeur du bloc, quand `profondeur` n'est pas imposée. ⛔ **Tâche P6 : elle
+ *   n'existait pas, et `FRACTION_PROFONDEUR = 7 / 56` était donc GELÉE** —
+ *   c'est-à-dire `params.plinthDepth` à son défaut, pendant que la tirette
+ *   « profondeur du socle » vit et déplace celle du bloc plat. Même famille que
+ *   `couleursFond` (P5) et que `corner` (P6) : un défaut qui a l'air juste parce
+ *   qu'il coïncide avec le réglage d'usine.
  * @param {number|null} [arg.baseYFloor] - fond IMPOSÉ, jamais plus haut
  * @param {number} [arg.plancherMer] - le plancher du globe (§4), 0 par défaut
  * @param {number} [arg.couvertureMin] - fraction de points qui doivent avoir
@@ -380,6 +387,7 @@ export function construireSolideCrop({
   echelle,
   pas = PAS_CONTOUR,
   profondeur = null,
+  fractionProfondeur = FRACTION_PROFONDEUR,
   baseYFloor = null,
   plancherMer = 0,
   couvertureMin = 1,
@@ -488,7 +496,12 @@ export function construireSolideCrop({
   }
 
   const largeur = Math.max(x1 - x0, z1 - z0)
-  const prof = Number.isFinite(profondeur) ? Math.max(0, profondeur) : FRACTION_PROFONDEUR * largeur
+  // ⚠️ **LA FRACTION EST ÉCRÊTÉE À ZÉRO, PAS SEULEMENT LA PROFONDEUR** : une
+  // tirette négative (ou un `NaN` remonté d'un uniforme absent) ferait un bloc
+  // dont le fond passe AU-DESSUS de sa surface, et `computeSlab` du socle borne
+  // déjà de la même façon.
+  const fr = Number.isFinite(fractionProfondeur) ? Math.max(0, fractionProfondeur) : FRACTION_PROFONDEUR
+  const prof = Number.isFinite(profondeur) ? Math.max(0, profondeur) : fr * largeur
   const baseBrut = minY - prof
   const baseY = baseYFloor != null ? Math.min(baseYFloor, baseBrut) : baseBrut
   const bande = Number.isFinite(aoBande) ? Math.max(0, aoBande) : FRACTION_BANDE_AO * Math.max(0, hautMax - baseY)

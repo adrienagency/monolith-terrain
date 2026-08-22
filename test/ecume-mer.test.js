@@ -241,14 +241,19 @@ function traduire(glsl, nom, params) {
     .replace(/\bmax\(/g, 'Math.max(')
     .replace(/\bmin\(/g, 'Math.min(')
     .replace(/\bsin\(/g, 'Math.sin(')
+    // ⚠️ **Tâche P6** : `pow` et `poidsLagonEau` entrent dans le traducteur —
+    // sans eux `opaciteEau` ne se traduit pas, et un test qui ne tourne pas ne
+    // garde rien.
+    .replace(/\bpow\(/g, 'Math.pow(')
     .replace(/\blargeurRessacMer\(/g, 'largeurRessacMer(')
   const SS = (a, b, t) => { const x = Math.min(1, Math.max(0, (t - a) / (b - a))); return x * x * (3 - 2 * x) }
   const CL = (v, a, b) => Math.min(b, Math.max(a, v))
   const MIX = (a, b, t) => a + (b - a) * t
   const largeurRessacMer = (f) => (1 - SS(0.1, 0.75, f)) * SS(0.002, 0.03, f)
+  const poidsLagonEau = (t) => SS(0, LAGON_FIN, t)
   // eslint-disable-next-line no-new-func
-  const f = new Function('SS', 'CL', 'MIX', 'largeurRessacMer', ...params, js)
-  return (...args) => f(SS, CL, MIX, largeurRessacMer, ...args)
+  const f = new Function('SS', 'CL', 'MIX', 'largeurRessacMer', 'poidsLagonEau', ...params, js)
+  return (...args) => f(SS, CL, MIX, largeurRessacMer, poidsLagonEau, ...args)
 }
 
 test('②a le GLSL `declinRivageMer` calcule ce que le jumeau JS calcule', () => {
@@ -683,4 +688,210 @@ test('⑦f `majReglagesMer` est le SEUL écrivain des six uniformes d état de m
     const ecritures = (g.match(new RegExp(`u\\.${uni}\\.value = `, 'g')) || []).length
     assert.equal(ecritures, 1, `${uni} doit avoir UN seul écrivain, pas ${ecritures}`)
   }
+})
+
+// ══════════ ⑧ LA LAME D'EAU — Tâche P6, la réserve n° 2 de P5 ══════════════
+//
+// ⛔ **QUATRE RÉGLAGES QUI N'AVAIENT AUCUN PARAMÈTRE POUR ARRIVER.** P5 avait
+// mesuré le symptôme — *« la concentration de luminance vaut 80,97 % côté crop
+// contre 30,33 % au socle […] presque tout l'écart vit dans la NAPPE »* — et
+// écrit qu'elle ne l'attribuait pas. Relevé le 2026-08-22 au même instant dans
+// la même page : `uTransp = 0,57`, `uSunFx = 0,72`, `uDetail = 0,75`,
+// `uDayLight = 1`. **Le nuanceur de la calotte n'en portait pas un seul.**
+//
+// ⚠️ **ET LE NEUTRE N'EST PAS « LA CALOTTE D'AVANT », PARCE QU'IL NE PEUT PAS
+// L'ÊTRE** : le nuanceur d'avant portait `mix(0,45 ; 0,95)` SANS le facteur de
+// tirette (donc `transparence ≈ 0,1685`) ET le glacis de lagon à plein régime
+// (donc `transparence ≥ 0,35`). ⑧d le démontre au lieu de l'affirmer.
+
+test('⑧a `lameEauDuSocle` LIT les quatre uniformes vivants', () => {
+  assert.deepEqual(lameEauDuSocle({
+    uTransp: { value: 0.57 }, uSunFx: { value: 0.72 },
+    uDayLight: { value: 0.31 }, uDetail: { value: 0.75 },
+  }), { transparence: 0.57, soleilFx: 0.72, jour: 0.31, detail: 0.75 })
+})
+
+test('⑧b sans socle à lire, `lameEauDuSocle` rend le NEUTRE d ocean.js', () => {
+  for (const rien of [null, undefined, {}]) {
+    assert.deepEqual(lameEauDuSocle(rien), LAME_EAU_NEUTRE)
+  }
+  // ⚠️ **LES QUATRE NEUTRES REMONTENT À `ocean.js` RELU SUR LE DISQUE**, pas à
+  // des littéraux recopiés ici : c'est la discipline du §0 du plan.
+  const s = ocean()
+  assert.match(s, /uTransp: \{ value: params\.waterTransparency \?\? 0\.4 \}/)
+  assert.match(s, /uSunFx: \{ value: params\.waterSunFx \?\? 1 \}/)
+  assert.match(s, /uDayLight: \{ value: 1 \}/)
+  assert.equal(LAME_EAU_NEUTRE.transparence, 0.4)
+  assert.equal(LAME_EAU_NEUTRE.soleilFx, 1)
+  assert.equal(LAME_EAU_NEUTRE.jour, 1)
+  // le detail est `chopLook(seaChop ?? 0.7).detail`, re-dérivé depuis la SOURCE
+  const m = /function chopLook\(c\) \{\s*\n?\s*return \{ detail: ([\d.]+) \+ ([\d.]+) \* c,/.exec(s)
+  assert.ok(m, 'chopLook doit rester lisible dans ocean.js')
+  assert.equal(LAME_EAU_NEUTRE.detail, Number(m[1]) + Number(m[2]) * 0.7)
+  assert.equal(detailClapot(0.7), LAME_EAU_NEUTRE.detail)
+  assert.match(s, /uDetail: \{ value: look\.detail \}/)
+})
+
+test('⑧c un uniforme absent ou NaN rend SA valeur neutre, jamais celle du voisin', () => {
+  // même piège que ⑦c : une lecture qui retomberait EN BLOC sur le neutre dès
+  // qu'un seul uniforme manque jetterait trois valeurs justes.
+  const noms = { transparence: 'uTransp', soleilFx: 'uSunFx', jour: 'uDayLight', detail: 'uDetail' }
+  for (const [champ, uni] of Object.entries(noms)) {
+    const seul = lameEauDuSocle({ [uni]: { value: 0.123456 } })
+    assert.equal(seul[champ], 0.123456, `${uni} n atteint pas ${champ}`)
+    for (const [autre, v] of Object.entries(LAME_EAU_NEUTRE)) {
+      if (autre === champ) continue
+      assert.equal(seul[autre], v, `${uni} a débordé sur ${autre}`)
+    }
+    assert.equal(lameEauDuSocle({ [uni]: { value: NaN } })[champ], LAME_EAU_NEUTRE[champ])
+    assert.equal(lameEauDuSocle({ [uni]: {} })[champ], LAME_EAU_NEUTRE[champ])
+  }
+})
+
+test('⑧d AUCUNE transparence ne reproduit le nuanceur d avant — la loi était TRONQUÉE', () => {
+  // ⛔ **CE TEST EST LA JUSTIFICATION DU NEUTRE, ET IL EST EXÉCUTÉ.** Le
+  // nuanceur d'avant P6 portait DEUX choses incompatibles :
+  //   · une opacité `mix(0.45, 0.95, pow(d, 0.55))` SANS facteur de tirette,
+  //     ce qui exige `mix(1.15, 0.26, t) = 1`, donc `t = 0,15 / 0,89` ;
+  //   · un corps `mix(peu, fond, pow(d, 0.7))` SANS glacis, c'est-à-dire
+  //     `poidsLagon(t) = 1`, donc `t >= 0,35`.
+  const tOpacite = (TIRETTE_EAU.opaque - 1) / (TIRETTE_EAU.opaque - TIRETTE_EAU.clair)
+  assert.ok(tOpacite < LAGON_FIN, `${tOpacite} devrait etre sous le seuil de lagon ${LAGON_FIN}`)
+  assert.ok(poidsLagon(tOpacite) < 1, 'les deux exigences se contredisent')
+  // et à la transparence vivante du socle, la lame est bien MOINS opaque
+  const brute = OPACITE_EAU.bas + (OPACITE_EAU.haut - OPACITE_EAU.bas) * Math.pow(0.5, OPACITE_EAU.expo)
+  const vivante = opaciteEau(0.5, 0.57, 0)
+  assert.ok(vivante < brute, `${vivante} devrait etre sous ${brute}`)
+  // le rapport mesuré : mix(1.15, 0.26, 0.57) = 0,6427
+  const facteur = TIRETTE_EAU.opaque + (TIRETTE_EAU.clair - TIRETTE_EAU.opaque) * 0.57
+  assert.ok(Math.abs(facteur - 0.6427) < 1e-4, `${facteur}`)
+  assert.ok(Math.abs(vivante / brute - facteur) < 1e-12, 'a lagon plein le rapport EST le facteur de tirette')
+})
+
+test('⑧e `opaciteEau` est bornée, monotone en profondeur, et le lagon ferme la marche', () => {
+  let n = 0
+  for (let t = 0; t <= 1.0001; t += 0.01) {
+    let precedent = -1
+    for (let d = 0; d <= 1.0001; d += 0.01) {
+      const w = opaciteEau(d, t, 0)
+      assert.ok(w >= 0 && w <= 1, `w=${w} hors [0,1] a t=${t} d=${d}`)
+      assert.ok(w >= precedent - 1e-12, `non monotone a t=${t} d=${d}`)
+      precedent = w
+      n++
+    }
+  }
+  assert.ok(n > 10000, `${n} points seulement`)
+  // transparence NULLE : peinture pleine, l'eau est opaque partout
+  for (const d of [0, 0.3, 0.7, 1]) assert.equal(opaciteEau(d, 0, 0), 1)
+  // le plancher de Fresnel remonte l'opacité, et il tombe APRÈS l'écrêtage
+  assert.ok(opaciteEau(0, 1, 1) > opaciteEau(0, 1, 0))
+})
+
+test('⑧f le GLSL de la lame d eau suit ses jumeaux JS, point par point', () => {
+  const gl = traduire(GLSL_LAME_EAU, 'poidsLagonEau', ['transparence'])
+  const go = traduire(GLSL_LAME_EAU, 'opaciteEau', ['dLagon', 'transparence', 'fresnel'])
+  let n = 0
+  for (let t = 0; t <= 1.0001; t += 0.02) {
+    assert.ok(Math.abs(gl(t) - poidsLagon(t)) < 1e-12, `lagon ${t}`)
+    for (let d = 0; d <= 1.0001; d += 0.05) {
+      for (const f of [0, 0.25, 0.5]) {
+        assert.ok(Math.abs(go(d, t, f) - opaciteEau(d, t, f)) < 1e-12, `opacite ${d} ${t} ${f}`)
+        n++
+      }
+    }
+  }
+  assert.ok(n > 3000, `${n} points seulement`)
+})
+
+test('⑧g les lois de `GLSL_LAME_EAU` sont INTERPOLÉES, jamais réécrites', () => {
+  // ⚠️ **LES MOTIFS VISENT LES NOMS, PAS LES CHIFFRES** — la leçon d'une
+  // mutation survivante de P2 : ses motifs cherchaient `0.35` dans un texte qui
+  // portait `${PART_OMBRAGE.toFixed(2)}`.
+  const src = readFileSync(new URL('../src/monde/ecume-mer.js', import.meta.url), 'utf8')
+  for (const nom of ['LAGON_FIN', 'LAGON_EXPO', 'OPACITE_EAU', 'TIRETTE_EAU', 'OPACITE_ECRETAGE', 'NUIT_EAU', 'NUIT_ECUME', 'CLAPOT_NORMALE', 'GLINT_TAVELURE', 'BLANC_ECUME']) {
+    assert.ok(new RegExp(`\\$\\{${nom}`).test(src), `${nom} doit être interpolé dans le GLSL`)
+  }
+  // et les valeurs elles-mêmes sont celles d'ocean.js
+  assert.equal(LAGON_FIN, 0.35)
+  assert.equal(LAGON_EXPO, 0.7)
+  assert.deepEqual(NUIT_EAU, [0.1, 0.16, 0.3])
+  assert.equal(NUIT_ECUME, 0.14)
+  assert.equal(CLAPOT_NORMALE.gain, 0.6)
+  assert.equal(CLAPOT_NORMALE.haut, 0.9)
+  assert.equal(CLAPOT_NORMALE.freq, 6)
+  assert.equal(GLINT_TAVELURE.base, 0.35)
+  assert.equal(GLINT_TAVELURE.gain, 0.85)
+  assert.equal(OPACITE_ECRETAGE.bas, 0.05)
+  assert.equal(OPACITE_ECRETAGE.haut, 0.97)
+  // ⚠️ **ET `ocean.js` NE PORTE PLUS AUCUNE DES CINQ FORMULES.** Une seconde
+  // écriture, même identique aujourd'hui, diverge demain — c'est le motif que ce
+  // fichier existe pour fermer.
+  const o = sansCommentaires(ocean())
+  assert.ok(!/mix\(0\.45, 0\.95, pow\(dRt, 0\.55\)\)/.test(o), 'wOp est encore ecrit dans ocean.js')
+  assert.ok(!/mix\(1\.15, 0\.26, uTransp\)/.test(o), 'le facteur de tirette est encore dans ocean.js')
+  assert.ok(!/smoothstep\(0\.0, 0\.35, uTransp\)/.test(o), 'le poids de lagon est encore dans ocean.js')
+  assert.ok(!/uDetail \* 0\.6 \* uViewCalm/.test(o), 'le clapot de normale est encore dans ocean.js')
+  assert.ok(!/0\.35 \+ 0\.85 \* patchy/.test(o), 'le glint de tavelure est encore dans ocean.js')
+  // …et `ocean.js` les APPELLE toutes
+  const brut = ocean()
+  for (const appel of [
+    /float lagoonW = poidsLagonEau\(uTransp\);/,
+    /vec3 body = corpsEau\(uShallowT, uDeep, dRt, lagoonW, uDayLight\);/,
+    /float wOp = opaciteEau\(dRt, uTransp, fres\);/,
+    /vec3 N = clapotNormale\(vNorm, uDetail, uViewCalm, n1, n2\);/,
+    /col \+= uSunColor \* spec \* uSunFx \* glintTavelureMer\(patchy\);/,
+    /col = blanchirEcume\(col, foam, uDayLight\);/,
+  ]) assert.match(brut, appel)
+})
+
+test('⑧h la calotte du globe APPELLE les mêmes lois, avec les uniformes branchés', () => {
+  const g = sansCommentaires(globe())
+  // ⛔ **LES DEUX FORMULES TRONQUÉES ONT DISPARU DU NUANCEUR DE LA CALOTTE.**
+  assert.ok(!/mix\(uMerPeu, uMerFond, pow\(dLagon, 0\.7\)\)/.test(g), 'le corps tronque est encore la')
+  assert.ok(!/mix\(0\.45, 0\.95, pow\(dLagon, 0\.55\)\)/.test(g), 'l opacite tronquee est encore la')
+  for (const appel of [
+    /vec3 col = corpsEau\(uMerPeu, uMerFond, dLagon, poidsLagonEau\(uMerTransp\), uMerJour\);/,
+    /float opac = opaciteEau\(dLagon, uMerTransp, fres\);/,
+    /vec3 N = clapotNormale\(normalize\(vNormMer\), uMerDetail, uMerCalmeVue, r1, r2\);/,
+    /col = blanchirEcume\(col, ecume, uMerJour\);/,
+    /\* uMerSoleilFx \* vRichesse;/,
+  ]) assert.match(g, appel)
+  // ⚠️ **LE CLAPOT EST INDEXÉ EN UNITÉS DE SOCLE**, converti par `uMerUnite` —
+  // la MÊME monnaie que la tavelure depuis P4, pas une seconde.
+  // ⚠️ **ET LE MOTIF VISE LE NOM, PAS LE CHIFFRE** : la source porte le gabarit
+  // `${CLAPOT_NORMALE.freq…}`, pas `6.0`. Une assertion sur le chiffre ne
+  // rougirait pas si quelqu'un remplaçait l'interpolation par un littéral,
+  // c'est-à-dire par la seconde écriture qu'on interdit.
+  assert.match(g, /vec2 rp = vLocal \/ max\(uMerUnite, 1e-9\) \* \$\{CLAPOT_NORMALE\.freq\.toFixed\(1\)\};/)
+  // ⛔ **ET LE SOLEIL DE LA MER N EST PLUS CELUI DE LA PLANÈTE.** Relevé le
+  // 2026-08-22 : `uSunDir` valait (0,2305 -0,3687 0,9005), SOUS l'horizon,
+  // parce que `main.js` le repose par image sur la CAMÉRA.
+  assert.match(g, /vec3 L = normalize\(uEclairageOn > 0\.5 \? uSoleilDir : uSunDir\);/)
+})
+
+test('⑧i les quatre uniformes de lame ont UN SEUL écrivain — `majReglagesMer`', () => {
+  const g = sansCommentaires(globe())
+  for (const uni of ['uMerTransp', 'uMerSoleilFx', 'uMerJour', 'uMerDetail']) {
+    const n = (g.match(new RegExp(`u\\.${uni}\\.value = `, 'g')) || []).length
+    assert.equal(n, 1, `${uni} doit avoir UN seul écrivain, pas ${n}`)
+  }
+  // …et les deux couleurs de la lame aussi
+  for (const uni of ['uMerPeu', 'uMerFond']) {
+    const n = (g.match(new RegExp(`u\\.${uni}\\.value\\.(copy|set)\\(`, 'g')) || []).length
+    assert.equal(n, 1, `${uni} doit avoir UN seul écrivain, pas ${n}`)
+  }
+})
+
+test('⑧j `ocean.js` REMONTE la lame, les couleurs, le soleil et le spectre', () => {
+  const src = ocean()
+  assert.match(src, /eau: lameEauDuSocle\(u\),/)
+  assert.match(src, /couleurs: couleursEauDuSocle\(u\?\.uShallowT\?\.value \?\? null, u\?\.uDeep\?\.value \?\? null\),/)
+  assert.match(src, /soleilCouleur: u\?\.uSunColor\?\.value \?\? null,/)
+  // ⚠️ **LE SPECTRE PAR RÉFÉRENCE** — c'est ce que `_applySea` fait déjà pour
+  // les matériaux du socle ; la calotte entre dans la même liste de lecteurs.
+  assert.match(src, /spectre: u \? \{ a: u\.uWaveA\?\.value \?\? null, b: u\.uWaveB\?\.value \?\? null \} : null,/)
+  assert.match(src, /mat\.uniforms\.uWaveA\.value = u\.a/)
+  // ⛔ **ET LA COULEUR DU SOLEIL EST BIEN CELLE QU `update` RECOPIE PAR IMAGE**,
+  // pas la lampe lue une seconde fois : une grandeur, un écrivain.
+  assert.match(src, /if \(sun && mat\.uniforms\.uSunColor\) mat\.uniforms\.uSunColor\.value\.copy\(sun\.color\)/)
 })

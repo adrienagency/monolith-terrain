@@ -331,11 +331,68 @@ function instantaneHabillage(habillage) {
   return out
 }
 
+/**
+ * Les champs de la FORME du bloc — Tâche P6.
+ *
+ * ⚠️ **`half` EN EST, ET CE N'EST PAS DÉCORATIF** : c'est lui qui normalise
+ * `corner`, donc deux valeurs de `half` pour un même `corner` sont deux
+ * silhouettes. La fenêtre continue le déplace (`uSlabHalf` vaut 28 hors damier,
+ * autre chose dedans) — c'est déjà la raison pour laquelle `fxDemiBloc` figure
+ * dans `CHAMPS_HABILLAGE`.
+ */
+export const CHAMPS_FORME = Object.freeze(['half', 'corner', 'expo', 'fractionProfondeur'])
+
+/**
+ * La forme du bloc, aplatie depuis le contexte — Tâche P6.
+ *
+ * ⚠️ **ELLE VIT DANS DEUX SOUS-OBJETS ET C'EST UNE SEULE GRANDEUR** : `half`,
+ * `corner` et `expo` vont à `poserCrop` (la silhouette vue de dessus),
+ * `fractionProfondeur` va à `construireParoisCrop` (l'épaisseur). Les surveiller
+ * séparément ferait deux veilles pour un seul geste — et un bloc dont le contour
+ * s'arrondit sans que son flanc suive.
+ */
+export function formeDuCrop(ctx) {
+  const f = ctx?.forme || {}
+  const p = ctx?.parois || {}
+  return { half: f.half, corner: f.corner, expo: f.expo, fractionProfondeur: p.fractionProfondeur }
+}
+
+/**
+ * La forme à poser diffère-t-elle de celle qui est posée ?
+ *
+ * ⚠️ **MÊME CONTRAT QU'`habillageDifferent`, `Object.is` COMPRIS**, et pour la
+ * même raison : un `NaN` d'arrondi ne doit pas se comparer égal à lui-même.
+ */
+export function formeDifferente(pose, voulu) {
+  if (!pose) return true
+  const v = voulu || {}
+  for (const champ of CHAMPS_FORME) {
+    if (!Object.is(pose[champ], v[champ])) return true
+  }
+  return false
+}
+
 // Un maillon rend `{ refus }` — `null` s'il a pris, une chaîne sinon — et,
 // pour la mer seule, une `promesse` dont le refus n'arrive que plus tard.
 const POSEURS = {
-  crop({ globe, centre, zoom, tuilesParBloc }) {
-    const rep = globe.poserCrop({ centre, zoom, tuilesParBloc })
+  // ══════════ LA FORME DU BLOC — Tâche P6 ═══════════════════════════════════
+  //
+  // ⛔ **`poserCrop` PORTE `corner`, `expo` ET `half` DEPUIS LA TÂCHE A, ET
+  // AUCUN APPELANT NE LES A JAMAIS PASSÉS.** Le crop tournait donc sur
+  // `corner = 0`, `expo = 2` — un carré à angles VIFS — pendant que le socle vit
+  // sur `params.slabCorner = 0,04` et `params.slabCornerSmoothing = 0,6`,
+  // c'est-à-dire un rayon d'arrondi de **8 % du demi-côté** et un exposant de
+  // squircle de **4,4**. Relevé le 2026-08-22 au même instant dans la même page :
+  // `uCropCoin = 0` et `uCropCoinN = 2` contre `uSlabCorner = 2,24`,
+  // `uSlabCornerN = 4,4`, `uSlabHalf = 28`. **C'est la SILHOUETTE du bloc**, et
+  // `parois-crop.js` §4 le dit déjà : `cornerR` s'y traduit par `forme.coin`,
+  // « le rayon NORMALISÉ que `poserCrop` pose déjà ».
+  //
+  // ⚠️ **LE COIN ARRIVE EN UNITÉS DU SOCLE ET SE NORMALISE DANS `poserCrop`** —
+  // par `coinNormalise(corner, half)`, la SEULE conversion, celle qui existait
+  // déjà. Une normalisation faite ici en serait une seconde.
+  crop({ globe, centre, zoom, tuilesParBloc, forme }) {
+    const rep = globe.poserCrop({ centre, zoom, tuilesParBloc, ...(forme || {}) })
     return { refus: rep ? null : 'crop' }
   },
   fond({ globe, fond }) {
@@ -488,6 +545,13 @@ export function creerVeilleCrop({
   // ⚠️ **CE QU'ON A POSÉ, PAS CE QU'ON A VU** — voir `habillageDifferent`.
   let habillagePose = null
   let rafraichissements = 0
+  // ⚠️ **LA FORME, SURVEILLÉE À PART — Tâche P6.** Elle n'est PAS dans la
+  // signature de lieu, et c'est une décision de coût : `signature` déclenche
+  // `poserTout`, donc un champ de mer de 385² et un balayage de rampe de 128², à
+  // CHAQUE image d'un glissement de la tirette d'arrondi. Ici on ne rejoue que
+  // les DEUX maillons qui lisent la forme.
+  let formePosee = null
+  let reformages = 0
   // ⚠️ **LES PROMESSES EN VOL SONT GARDÉES**, et pas par confort : sans elles un
   // test ne peut pas attendre le refus de la mer, et rien ne l'obligerait à
   // exister. C'est aussi ce qui permet à `retirerCrop` de ne pas se faire
@@ -563,6 +627,7 @@ export function creerVeilleCrop({
     refus = r.refus
     depuisPose = 0
     habillagePose = instantaneHabillage(ctx.habillage)
+    formePosee = formeDuCrop(ctx)
     suivreMer(r.mer, jeton)
   }
 
@@ -576,6 +641,37 @@ export function creerVeilleCrop({
     habillagePose = instantaneHabillage(ctx.habillage)
     rafraichissements++
     return true
+  }
+
+  /**
+   * LA FORME DU BLOC, SURVEILLÉE PAR IMAGE — Tâche P6.
+   *
+   * ⚠️ **DEUX MAILLONS, PAS SIX, ET LE CHOIX EST CHIFFRÉ.** Les tirettes
+   * « arrondi » et « douceur des coins » du socle rebâtissent SES parois à
+   * chaque image de glissement ; ici, rejouer la chaîne entière coûterait EN
+   * PLUS un champ de mer de 385² et un balayage de rampe de 128² par image.
+   *
+   * ⚠️ **ET LA MER SUIT SANS ÊTRE REJOUÉE** : son matériau partage `uCropCoin`
+   * et `uCropCoinN` avec les tuiles (`poserMer` les prend sur `this.uniforms`),
+   * donc `poserCrop` seul déplace aussi le bord de la nappe. C'est la mécanique
+   * d'uniformes partagés que la Tâche A a posée, pas un heureux hasard.
+   *
+   * ⚠️ **LA RAMPE, ELLE, N'EST PAS REJOUÉE, ET JE LE DIS** : `mesurerRelief`
+   * échantillonne la superellipse, donc son amplitude bouge d'un cheveu quand
+   * l'arrondi change. Elle se remesure au prochain déplacement. Un balayage de
+   * `pas²` points par image de glissement n'en vaut pas le prix.
+   */
+  function rafraichirForme(g, ctx) {
+    if (!formeDifferente(formePosee, formeDuCrop(ctx))) return false
+    const r = POSEURS.crop({ globe: g, ...ctx })
+    // ⚠️ **ET LES PAROIS AVEC, SINON LE BLOC EST À DEUX FORMES** : la surface
+    // serait arrondie et son flanc resterait carré — pire que les deux carrés.
+    const p = POSEURS.parois({ globe: g, ...ctx })
+    formePosee = formeDuCrop(ctx)
+    reformages++
+    // un refus des parois retourne dans la file de reprise, comme partout
+    if (p.refus && !refus.includes('parois')) refus.push('parois')
+    return !r.refus
   }
 
   // ⚠️ **ELLE NE REJOUE QUE CE QUI A REFUSÉ, ET JAMAIS LA DÉCOUPE.** Rejouer la
@@ -686,6 +782,10 @@ export function creerVeilleCrop({
       // l'habillage elle-même (s'il figurait dans les refus, ce qui n'arrive
       // pas aujourd'hui mais reste ouvert) ; le rafraîchissement doit juger sur
       // l'état FINAL de l'image, sinon il reposerait deux fois.
+      // ⚠️ **LA FORME AVANT L'HABILLAGE, ET L'ORDRE COMPTE** : `poserHabillage`
+      // dérive sa marge de côte du crop POSÉ (`margeCoteDuCrop(this._crop)`).
+      // L'inverse la calculerait sur le repère d'avant le reformage.
+      rafraichirForme(g, ctx)
       rafraichirHabillage(g, ctx)
       return true
   }
@@ -742,6 +842,8 @@ export function creerVeilleCrop({
     get bascules() { return bascules },
     /** Combien de fois l'habillage a été RAFRAÎCHI hors pose — Tâche K ter. */
     get rafraichissements() { return rafraichissements },
+    /** Combien de fois la FORME a été rejouée hors pose — Tâche P6. */
+    get reformages() { return reformages },
     /** Le lieu sur lequel la chaîne est posée — pour les sondes et les bancs. */
     get signature() { return signature },
     /** La dernière mer partie, pour qui doit l'attendre (les tests, les bancs). */

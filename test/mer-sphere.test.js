@@ -91,7 +91,10 @@ import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
 // LA LOI DE SURFACE — Tache J bis : l'epsilon de coplanarite depend de son DEFAUT.
 import { altitudeMaillage } from '../src/monde/fond-crop.js'
-import { repereLocalCrop, construireSolideCrop } from '../src/monde/parois-crop.js'
+// ⚠️ **Tâche P6** : `FRACTION_PROFONDEUR` entre ici parce que ⑭h l'exerce — la
+// fraction etait GELEE, et un test qui recopierait `7 / 56` ne rougirait pas si
+// le module changeait sous lui.
+import { repereLocalCrop, construireSolideCrop, FRACTION_PROFONDEUR } from '../src/monde/parois-crop.js'
 import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
 import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES, CIRCONFERENCE_M } from '../src/monde/habillage-crop.js'
 
@@ -1032,13 +1035,24 @@ function globeAvecCrop(overrides = {}) {
       // pour que `poserEstompage` et `_majBordMer` s'exercent l'un sur l'autre.
       uEstompageOn: val(0),
       uEstompage: val(1),
+      // ⚠️ **Tâche P6, ET C'EST LA MÊME DISCIPLINE** : ce que la méthode
+      // exerce, ce bâtisseur le porte pour de vrai. `poserMer` PARTAGE
+      // désormais le soleil du bloc et son interrupteur avec les tuiles ; et
+      // `poserCrop` écrit les trois uniformes de la découpe.
+      uSoleilDir: val({ x: 0, y: 1, z: 0 }),
+      uEclairageOn: val(0),
+      uCropCentre: val({ x: 0, y: 0, set(a, b) { this.x = a; this.y = b } }),
+      uCropDemi: val(1),
+      uCropOn: val(0),
     },
     _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
     retirerMer: Globe.prototype.retirerMer,
     _cuireChampMer: Globe.prototype._cuireChampMer,
     _majBordMer: Globe.prototype._majBordMer,
     _melangeCalottes() {},
+    _melangeCrop() {},
     _calottes: [],
+    tiles: new Map(),
     ...overrides,
   }
 }
@@ -1783,4 +1797,229 @@ test('⑬l `retirerMer` rend les trois couleurs au défaut du module', () => {
     assert.equal('#' + g.uniforms.uOceanDeep.value.getHexString(), RAMPE_NAUTIQUE.fond)
     assert.equal(g.uniforms.uMerRampeOn.value, 0)
   })
+})
+
+// ══════════ ⑭ LA LAME D'EAU ET LA FORME DU BLOC — Tâche P6 ═════════════════
+//
+// ⛔ **LE MOTIF DE DIX TÂCHES, CHERCHÉ EN BLOC AU LIEU D'ÊTRE ATTENDU** : un
+// paramètre existe, il a un défaut, personne ne l'a branché. Six trouvés d'un
+// coup — `couleurs` et `graine` de `poserMer`, `half` / `corner` / `expo` de
+// `poserCrop`, `profondeur` de `construireParoisCrop` —, plus quatre réglages
+// de la lame d'eau qui n'avaient **aucun paramètre** pour arriver.
+//
+// ⚠️ **ON EXÉCUTE.** C'est la leçon de la campagne de P4 : « une assertion qui
+// lit un fichier prouve qu'un texte est là ; elle ne prouve pas qu'il pose la
+// bonne valeur ».
+
+test('⑭a `majReglagesMer` pose les QUATRE réglages de lame, un par un', () => {
+  return merPosee().then(({ g, u }) => {
+    // le témoin : à la naissance, la calotte porte le NEUTRE d'`ocean.js`
+    assert.equal(u.uMerTransp.value, LAME_EAU_NEUTRE.transparence)
+    assert.equal(u.uMerDetail.value, LAME_EAU_NEUTRE.detail)
+    const eau = { transparence: 0.57, soleilFx: 0.72, jour: 0.31, detail: 0.75 }
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, eau })
+    assert.deepEqual(pose.eau, eau)
+    assert.equal(u.uMerTransp.value, 0.57)
+    assert.equal(u.uMerSoleilFx.value, 0.72)
+    assert.equal(u.uMerJour.value, 0.31)
+    assert.equal(u.uMerDetail.value, 0.75)
+    // ⚠️ **UN PAR UN, ET LES TROIS AUTRES NE BOUGENT PAS** — c'est ce qui tue
+    // une mutation qui échangerait deux affectations.
+    const noms = { transparence: 'uMerTransp', soleilFx: 'uMerSoleilFx', jour: 'uMerJour', detail: 'uMerDetail' }
+    for (const champ of Object.keys(noms)) {
+      const un = { ...LAME_EAU_NEUTRE, [champ]: 0.246813 }
+      Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, eau: un })
+      for (const [autre, uni] of Object.entries(noms)) {
+        const attendu = autre === champ ? 0.246813 : LAME_EAU_NEUTRE[autre]
+        assert.equal(u[uni].value, attendu, `${champ} a débordé sur ${autre}`)
+      }
+    }
+  })
+})
+
+test('⑭b une lame INCOMPLÈTE retombe sur le neutre entier, pas sur une eau hybride', () => {
+  return merPosee().then(({ g, u }) => {
+    Globe.prototype.majReglagesMer.call(g,
+      { vue: 1, surface: 1, eau: { transparence: 0.57, soleilFx: 0.72, jour: 1, detail: 0.75 } })
+    assert.equal(u.uMerTransp.value, 0.57)
+    // ⛔ un champ manquant, ou un NaN : TOUT retombe au neutre — le raisonnement
+    // du demi-couple d'accalmies de P4, appliqué à quatre.
+    for (const cassee of [
+      { transparence: 0.57, soleilFx: 0.72, jour: 1 },
+      { transparence: NaN, soleilFx: 0.72, jour: 1, detail: 0.75 },
+      { transparence: 0.57, soleilFx: 0.72, jour: 1, detail: null },
+    ]) {
+      const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, eau: cassee })
+      assert.deepEqual(pose.eau, LAME_EAU_NEUTRE)
+      assert.equal(u.uMerTransp.value, LAME_EAU_NEUTRE.transparence)
+      assert.equal(u.uMerDetail.value, LAME_EAU_NEUTRE.detail)
+    }
+  })
+})
+
+test('⑭c `majReglagesMer` COPIE les deux couleurs de la lame — jamais un demi-couple', () => {
+  return merPosee().then(({ g, u }) => {
+    const peu = { isColor: true, r: 0.53, g: 0.82, b: 0.88, copyDepuis: null }
+    const fond = { isColor: true, r: 0.09, g: 0.27, b: 0.4 }
+    const avant = { r: u.uMerPeu.value.r, g: u.uMerPeu.value.g, b: u.uMerPeu.value.b }
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, couleurs: { peu, fond } })
+    assert.equal(pose.couleurs, true)
+    for (const [uni, src] of [[u.uMerPeu, peu], [u.uMerFond, fond]]) {
+      assert.ok(Math.abs(uni.value.r - src.r) < 1e-6, 'canal R')
+      assert.ok(Math.abs(uni.value.g - src.g) < 1e-6, 'canal V')
+      assert.ok(Math.abs(uni.value.b - src.b) < 1e-6, 'canal B')
+      // ⚠️ **COPIÉ, PAS PARTAGÉ** : `_applySea` du socle repose ces objets, et
+      // deux matériaux qui partagent une couleur finissent par se la disputer.
+      assert.notEqual(uni.value, src)
+    }
+    // ⛔ un demi-couple ne pose RIEN
+    const pose2 = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, couleurs: { peu } })
+    assert.equal(pose2.couleurs, false)
+    assert.ok(Math.abs(u.uMerPeu.value.r - peu.r) < 1e-6, 'un demi-couple ne doit rien écrire')
+    // …et sans couleurs du tout, la calotte garde ce qu'elle a
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1 })
+    assert.ok(Math.abs(u.uMerPeu.value.r - peu.r) < 1e-6)
+    assert.ok(avant.r !== peu.r, 'le témoin doit distinguer le défaut de la valeur posée')
+  })
+})
+
+test('⑭d la couleur du soleil et le SPECTRE traversent — le spectre par RÉFÉRENCE', () => {
+  return merPosee().then(({ g, u }) => {
+    const soleilCouleur = { isColor: true, r: 1, g: 0.97, b: 0.9 }
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, soleilCouleur })
+    assert.ok(Math.abs(u.uSunColor.value.g - 0.97) < 1e-6, 'la couleur du soleil doit être copiée')
+    assert.notEqual(u.uSunColor.value, soleilCouleur, 'copiée, pas partagée')
+    // ⚠️ **LE SPECTRE, LUI, EST PARTAGÉ, ET C'EST DÉLIBÉRÉ** : `_applySea`
+    // assigne déjà `u.a` / `u.b` à TOUS les matériaux du socle sans les cloner.
+    // Un clone par image serait 32 `Vector4` recopiés pour rien, et surtout un
+    // `reseed` ne traverserait plus.
+    const a = [{ x: 1 }, { x: 2 }]
+    const b = [{ y: 1 }, { y: 2 }]
+    const avantA = u.uWaveA.value
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: { a, b } })
+    assert.equal(pose.spectre, true)
+    assert.equal(u.uWaveA.value, a, 'le spectre doit être partagé, pas copié')
+    assert.equal(u.uWaveB.value, b)
+    assert.notEqual(avantA, a, 'le témoin : la calotte naît avec SON tirage')
+    // ⛔ un spectre vide ou incomplet ne remplace RIEN — sinon la mer devient un
+    // miroir plat (le zéro trop propre de l'Étape 4 de la Tâche F).
+    for (const cassee of [{ a: [], b }, { a, b: null }, { a: null, b: null }, {}]) {
+      const p2 = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: cassee })
+      assert.equal(p2.spectre, false)
+      assert.equal(u.uWaveA.value, a, 'un spectre cassé ne doit rien écraser')
+    }
+  })
+})
+
+test('⑭e `poserMer` n accepte PLUS `couleurs` ni `graine`', () => {
+  // ⛔ **DEUX PARAMÈTRES QUE PERSONNE N'A JAMAIS PASSÉS**, exactement comme les
+  // quatre que P5 a retirés. D13 §① : « plus de paramètre de compatibilité à
+  // traîner ».
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const i = src.indexOf('async poserMer({')
+  assert.ok(i > 0)
+  const sig = src.slice(i, src.indexOf('} = {}) {', i))
+  for (const mort of ['couleurs =', 'graine =']) {
+    assert.ok(!sig.includes(mort), `poserMer ne doit plus porter ${mort}`)
+  }
+  // et la mer se construit sur le NEUTRE du module, jamais sur un argument
+  assert.match(src, /const cols = mod\.couleursEau\(\{\}\)/)
+  assert.match(src, /mod\.seaStateToUniforms\(mod\.makeSeaState\(\)\)/)
+  // …et `contexteCrop().mer` ne les porte pas non plus
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+  const j = main.indexOf('    mer: {')
+  assert.ok(j > 0, 'le bloc mer du contexte doit rester lisible')
+  const bloc = main.slice(j, main.indexOf('\n  }\n', j))
+  for (const mort of ['couleurs:', 'graine:']) {
+    assert.ok(!bloc.includes(mort), `contexteCrop().mer ne doit pas porter ${mort}`)
+  }
+})
+
+// ── LA FORME DU BLOC ───────────────────────────────────────────────────────
+
+test('⑭f `poserCrop` prend le coin et l exposant du socle, et les NORMALISE une fois', () => {
+  const g = globeAvecCrop()
+  // le témoin : sans argument, le carré à angles vifs d'avant P6, au bit près
+  assert.equal(g.uniforms.uCropCoin.value, 0)
+  assert.equal(g.uniforms.uCropCoinN.value, 2)
+  // les valeurs RELEVÉES le 2026-08-22 sur le socle vivant
+  Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 28, corner: 2.24, expo: 4.4 })
+  assert.ok(Math.abs(g.uniforms.uCropCoin.value - 0.08) < 1e-12, 'coin = 2,24 / 28')
+  assert.equal(g.uniforms.uCropCoinN.value, 4.4)
+  // ⚠️ **LA NORMALISATION EST CELLE DE `coinNormalise`, ET ELLE EST BORNÉE** :
+  // un rayon plus grand que le demi-côté est écrêté à 1, un négatif à 0.
+  Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 28, corner: 999, expo: 4.4 })
+  assert.equal(g.uniforms.uCropCoin.value, 1)
+  Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 28, corner: -5, expo: 4.4 })
+  assert.equal(g.uniforms.uCropCoin.value, 0)
+  // ⚠️ **`half` COMPTE** : le même rayon sur un demi-côté deux fois plus grand
+  // est un arrondi deux fois plus petit. Une mutation qui figerait 28 tombe ici.
+  Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 56, corner: 2.24, expo: 4.4 })
+  assert.ok(Math.abs(g.uniforms.uCropCoin.value - 0.04) < 1e-12)
+  // ⚠️ **ET L EXPOSANT NE DESCEND JAMAIS SOUS 2** : sous 2 la « superellipse »
+  // devient concave, et le bloc rentrerait dans ses propres coins.
+  Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 28, corner: 2.24, expo: 0.5 })
+  assert.equal(g.uniforms.uCropCoinN.value, 2)
+})
+
+test('⑭g la MER lit le même coin que les tuiles — un uniforme, pas deux', () => {
+  return merPosee().then(({ g, u }) => {
+    // ⚠️ **C'EST CE PARTAGE QUI FAIT QUE LA NAPPE SUIT SANS ÊTRE REBÂTIE**, et
+    // c'est pourquoi `rafraichirForme` ne rejoue que `crop` et `parois`.
+    assert.equal(u.uCropCoin, g.uniforms.uCropCoin)
+    assert.equal(u.uCropCoinN, g.uniforms.uCropCoinN)
+    Globe.prototype.poserCrop.call(g, { centre: CENTRE, zoom: 12, tuilesParBloc: 3, half: 28, corner: 2.24, expo: 4.4 })
+    assert.ok(Math.abs(u.uCropCoin.value - 0.08) < 1e-12, 'la mer doit voir le coin sans rebâtir')
+  })
+})
+
+test('⑭h la PROFONDEUR du bloc suit la tirette du socle, en FRACTION de la largeur', () => {
+  // ⛔ **`FRACTION_PROFONDEUR = 7 / 56` ÉTAIT GELÉE** : sept et cinquante-six
+  // sont `params.plinthDepth` et `TERRAIN_SIZE` À LEUR VALEUR D'USINE. Le
+  // défaut avait donc l'air juste — c'est la même coïncidence que les deux
+  // couleurs de la lame d'eau, et c'est pourquoi personne ne l'a vue.
+  const base = { repere: REPERE, forme: { coin: 0, expo: 2 }, rayon: 1, echelle: 1e-6, hauteur: () => 0 }
+  const defaut = construireSolideCrop(base)
+  const triple = construireSolideCrop({ ...base, fractionProfondeur: FRACTION_PROFONDEUR * 3 })
+  assert.ok(!defaut.refus && !triple.refus, 'les deux solides doivent se bâtir')
+  // ⚠️ **LE ZÉRO N'EST PAS ZÉRO, ET C'EST LA SPHÈRE.** `hauteur()` rend 0
+  // partout, mais l'anneau court sur une CALOTTE : son point le plus bas est à
+  // −1,15 × 10⁻⁶ unité, pas à 0. Mesurer le rapport sur `baseY` brut rendait
+  // 2,9915 au lieu de 3 — un chiffre presque juste, donc le pire genre. On
+  // mesure donc l'ÉPAISSEUR, `baseY − minY`, et `minY` se lit à fraction nulle.
+  const minY = construireSolideCrop({ ...base, fractionProfondeur: 0 }).baseY
+  assert.ok(minY < 0 && minY > -1e-5, `minY = ${minY} : la calotte doit être presque plate`)
+  const epaisseur = (s) => minY - s.baseY
+  // ⚠️ **LE TÉMOIN D'ABORD** : sans épaisseur, le rapport de deux zéros ne
+  // distinguerait rien — la classe d'erreur que P5 nomme (« une assertion qui
+  // prouve qu'un texte est là »).
+  assert.ok(epaisseur(defaut) > 0, 'le bloc doit avoir une épaisseur')
+  assert.ok(Math.abs(epaisseur(triple) / epaisseur(defaut) - 3) < 1e-9,
+    `${epaisseur(triple)} / ${epaisseur(defaut)}`)
+  // ⚠️ **UNE FRACTION NÉGATIVE OU NON FINIE NE RETOURNE PAS LE BLOC** — un fond
+  // au-dessus de sa propre surface, c'est le défaut que `plancherMer` a déjà
+  // coûté une fois.
+  assert.equal(construireSolideCrop({ ...base, fractionProfondeur: -1 }).baseY, minY)
+  assert.equal(construireSolideCrop({ ...base, fractionProfondeur: NaN }).baseY, defaut.baseY)
+  // …et `profondeur` (absolue) garde la priorité, pour les bancs et les tests
+  assert.ok(Math.abs(epaisseur(construireSolideCrop({ ...base, profondeur: 0.5, fractionProfondeur: 9 })) - 0.5) < 1e-12)
+})
+
+test('⑭i `construireParoisCrop` TRANSMET la fraction, et `contexteCrop` la calcule', () => {
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  assert.match(src, /construireParoisCrop\(\{ profondeur = null, fractionProfondeur = undefined,/)
+  // ⚠️ **`undefined` LAISSE LE DÉFAUT DU MODULE** : une valeur réécrite ici en
+  // serait une seconde, et deux défauts jumeaux divergent (`uContourInterval`,
+  // Tâche C, tour 1).
+  assert.match(src, /\n      fractionProfondeur,\n/)
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+  // ⚠️ **`plinth.depth`, PAS `params.plinthDepth`** : c'est `rebuild` qui écrit
+  // `this.depth`, donc le matériel qui dit la vérité — la règle de
+  // `plinth.wallMat.color` (manque n° 2 du noteur), appliquée à la géométrie.
+  assert.match(main, /fractionProfondeur: plinth\.depth \/ \(2 \* \(terrain\.mapUniforms\.uSlabHalf\?\.value \|\| 28\)\)/)
+  // et la forme vient des UNIFORMES du socle, jamais de `params`
+  assert.match(main, /half: terrain\.mapUniforms\.uSlabHalf\?\.value \?\? 28/)
+  assert.match(main, /corner: terrain\.mapUniforms\.uSlabCorner\?\.value \?\? 0/)
+  assert.match(main, /expo: terrain\.mapUniforms\.uSlabCornerN\?\.value \?\? 2/)
+  assert.ok(!/corner: params\.slabCorner/.test(main), 'la forme ne doit pas passer par params')
 })

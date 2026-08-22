@@ -2514,6 +2514,20 @@ export class Globe {
    * ne calcule pas l'emprise : il l'applique. Deux producteurs d'emprise, c'est
    * un socle et une découpe qui divergent d'un pixel puis d'un mètre.
    *
+   * ⛔ **`half`, `corner` ET `expo` N'ONT ÉTÉ PASSÉS PAR PERSONNE DE LA TÂCHE A
+   * À LA TÂCHE P6.** Le crop a donc vécu dix tâches sur `corner = 0`, `expo = 2`
+   * — **un carré à angles vifs** — pendant que le socle vivait sur
+   * `params.slabCorner = 0,04` (un rayon de 8 % du demi-côté) et
+   * `params.slabCornerSmoothing = 0,6` (un squircle d'exposant 4,4). Relevé le
+   * 2026-08-22 au même instant dans la même page : `uCropCoin = 0`,
+   * `uCropCoinN = 2` contre `uSlabCorner = 2,24`, `uSlabCornerN = 4,4`,
+   * `uSlabHalf = 28`. La Tâche P4 l'avait même ÉCRIT en passant — « relevé sur
+   * la page vivante : `uCropCoin` vaut ZERO » — sans y voir un branchement
+   * absent.
+   *
+   * ⚠️ **LES DÉFAUTS RESTENT CEUX D'AVANT** : un appelant muet (test, banc,
+   * globe de papier) obtient le carré vif, au bit près.
+   *
    * @param {{centre:{lat:number,lon:number}, zoom?:number, tuilesParBloc?:number,
    *          half?:number, corner?:number, expo?:number}} arg
    */
@@ -4276,12 +4290,19 @@ export class Globe {
    * qu'à l'arrêt ». L'appelant décide quand.
    *
    * @param {object} [arg]
-   * @param {number} [arg.profondeur] en unités de scène ; défaut : la proportion
-   *   du socle (7 sur 56), voir `FRACTION_PROFONDEUR`
+   * @param {number} [arg.profondeur] en unités de scène ; défaut :
+   *   `fractionProfondeur × largeur`
+   * @param {number} [arg.fractionProfondeur] la profondeur EN FRACTION de la
+   *   largeur. ⛔ **Tâche P6 : `FRACTION_PROFONDEUR = 7 / 56` était GELÉE.** Sept
+   *   et cinquante-six sont `params.plinthDepth` et `TERRAIN_SIZE` **à leur
+   *   valeur d'usine** ; la tirette « profondeur du socle » creuse le bloc plat
+   *   et ne touchait pas le bloc du crop. Relevé le 2026-08-22 :
+   *   `plinth.depth = 7` — donc **concordant par coïncidence**, exactement comme
+   *   les deux couleurs de la lame d'eau.
    * @param {number} [arg.baseYFloor] fond imposé, jamais plus haut
    * @returns {{mesh: object, couverture: number, solide: object}|null}
    */
-  construireParoisCrop({ profondeur = null, baseYFloor = null, couvertureMin = 1 } = {}) {
+  construireParoisCrop({ profondeur = null, fractionProfondeur = undefined, baseYFloor = null, couvertureMin = 1 } = {}) {
     if (!this._crop) return null
     // ⚠️ LA LISTE EST PRÉ-FILTRÉE UNE FOIS : l'anneau fait plus de mille points,
     // et reparcourir `this.tiles` (jusqu'à 1 700 entrées) à chacun ferait deux
@@ -4297,6 +4318,10 @@ export class Globe {
         coin: this.uniforms.uCropCoin.value,
         expo: this.uniforms.uCropCoinN.value,
       },
+      // ⚠️ **`undefined` LAISSE LE DÉFAUT DU MODULE, ET C'EST VOULU** : une
+      // valeur écrite ici en serait une seconde, et deux défauts jumeaux
+      // divergent (le `uContourInterval` de la Tâche C, réparé au tour 1).
+      fractionProfondeur,
       hauteur: (lat, lon) => this.hauteurSurface(lat, lon, liste),
       rayon: R_GLOBE,
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,

@@ -4928,6 +4928,55 @@ function contexteCrop() {
     centre,
     zoom,
     tuilesParBloc: BLOCK_TILES,
+    // ══════════ LA FORME DU BLOC — Tâche P6 ═══════════════════════════════════
+    //
+    // ⛔ **`poserCrop` PORTE `half`, `corner` ET `expo` DEPUIS LA TÂCHE A ET
+    // PERSONNE NE LES A JAMAIS PASSÉS.** Le bloc du crop était donc un CARRÉ À
+    // ANGLES VIFS pendant que celui du socle est un squircle : relevé le
+    // 2026-08-22 au même instant dans la même page, `uCropCoin = 0` et
+    // `uCropCoinN = 2` contre `uSlabCorner = 2,24`, `uSlabCornerN = 4,4`,
+    // `uSlabHalf = 28`. **C'est la silhouette du bloc, et elle se voit sur les
+    // quatre coins.** La Tâche P4 avait même relevé le zéro en passant, sans y
+    // voir un branchement absent.
+    //
+    // ⚠️ **ON LIT LES UNIFORMES DU SOCLE, PAS `params` — MÊME RÈGLE QUE POUR
+    // LES DIX CURSEURS D'ATLAS ET POUR LES LAMPES.** `terrain.js` porte deux
+    // règles que `params` ne porte pas : l'écrêtage du rayon
+    // (`min(TERRAIN_SIZE/2 − 0,05, max(0,05, slabCorner × TERRAIN_SIZE))`, donc
+    // un plancher NON NUL même à tirette zéro) et `exposantCoin`, qui traduit la
+    // douceur en exposant de superellipse. Passer par `params` aurait redérivé
+    // les deux.
+    //
+    // ⚠️ **ET `uSlabHalf` VIVANT, PAS 28 EN DUR** : c'est lui qui NORMALISE le
+    // rayon, et la fenêtre continue le déplace. C'est déjà l'argument que
+    // `fxDemiBloc` porte quelques lignes plus bas.
+    forme: {
+      half: terrain.mapUniforms.uSlabHalf?.value ?? 28,
+      corner: terrain.mapUniforms.uSlabCorner?.value ?? 0,
+      expo: terrain.mapUniforms.uSlabCornerN?.value ?? 2,
+    },
+    // ══════════ LA PROFONDEUR DU BLOC — Tâche P6 ══════════════════════════════
+    //
+    // ⛔ **`construireParoisCrop` PORTE `profondeur` DEPUIS LA TÂCHE B, ET
+    // PERSONNE NE L'A JAMAIS PASSÉE.** Le crop vivait donc sur
+    // `FRACTION_PROFONDEUR = 7 / 56`, c'est-à-dire `params.plinthDepth` et
+    // `TERRAIN_SIZE` **à leur valeur d'usine**. Relevé le 2026-08-22 :
+    // `plinth.depth = 7` — donc **concordant par coïncidence**, exactement comme
+    // les deux couleurs de la lame d'eau. La tirette « profondeur » creusait le
+    // bloc plat et laissait celui du crop où il était.
+    //
+    // ⚠️ **`plinth.depth`, PAS `params.plinthDepth`** : c'est `rebuild` qui
+    // écrit `this.depth = params.plinthDepth ?? this.depth`, donc le MATÉRIEL
+    // qui dit la vérité — la règle de `plinth.wallMat.color` (manque n° 2 du
+    // noteur), appliquée à la géométrie.
+    //
+    // ⚠️ **EN FRACTION DE LA LARGEUR, PAS EN UNITÉS** : le §4 de
+    // `parois-crop.js` l'écrit — « recopier 7 dans un crop qui fait 0,163 unité
+    // de large aurait donné un puits de quarante fois sa largeur ». Le
+    // dénominateur est la LARGEUR du socle, donc `2 × uSlabHalf`.
+    parois: {
+      fractionProfondeur: plinth.depth / (2 * (terrain.mapUniforms.uSlabHalf?.value || 28)),
+    },
     habillage: {
       coastMask: cote,
       sol,
