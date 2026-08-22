@@ -377,24 +377,56 @@ export function zoomCran ({ demZoom, zoomNiveau = 0, pasNiveau = PAS_NIVEAU } = 
  *
  * @param {{surcharges?:object, lat?:number, fovDeg?:number, fraction?:number}} [arg]
  */
-export function creerExagerationPartagee ({ surcharges = null, ancres = EXAG_ANCRES, base = EXAG_BASE, lat = 45, fovDeg = FOV_DEG, fraction = FRACTION_REFERENCE } = {}) {
+export function creerExagerationPartagee ({ surcharges = null, ancres = EXAG_ANCRES, base = EXAG_BASE, lat = 45, fovDeg = FOV_DEG, fraction = FRACTION_REFERENCE, constante = null } = {}) {
   const courbe = surcharges ? courbeExageration({ surcharges, ancres, base }) : COURBE_DEFAUT
   return {
     courbe,
     lat,
     fovDeg,
     fraction,
+    // ══════════ D10 — L'EXAGÉRATION UNIQUE, ET CE QU'ELLE SUPPRIME ══════════
+    //
+    // **Adrien, 2026-08-22 :** *« On va faire une exagération d'altitude unique
+    // à ×2 sur toute la map, ça évitera les sauts et les rechargements. »*
+    //
+    // ⚠️ **CE CHAMP N'EST PAS UN RÉGLAGE DE PLUS, C'EST UN INTERRUPTEUR
+    // D'ÉCRITURE.** Posé, les trois écrivains (`majExageration` et ses deux
+    // dérivés) rendent la main sans rien changer : la valeur ne bouge JAMAIS.
+    // Or `globe.majExageration` n'appelle `setExaggeration` — donc
+    // `_rechargeTuiles`, donc **la planète entière rendue au réseau** — que si
+    // la valeur a bougé. **Une constante ne bouge pas : le rechargement
+    // disparaît sans qu'on ait à porter le relief dans le nuanceur de sommets**
+    // (12 s et 21 s mesurées, aller et retour, La Réunion z12).
+    //
+    // ⚠️ **LE MODULE N'EST PAS SUPPRIMÉ, ET IL NE DOIT PAS L'ÊTRE** : la courbe,
+    // ses ancres et ses quatorze lecteurs servent encore au chemin plat, et des
+    // tests les gardent. Ici, **il rend la constante sur ce chemin-là, et rien
+    // d'autre.**
+    constante: constante > 0 ? Number(constante) : null,
     // ⚠️ La valeur de DÉPART est celle du zoom du socle, pas `base` : une
     // fenêtre construite avant la première image ne doit pas naître à la
     // mauvaise échelle puis sauter.
-    valeur: courbe(zoomDepuisAltitude(altitudeDepuisZoom(13, { lat, fovDeg, fraction }), { lat, fovDeg, fraction })),
+    // ⚠️ **ET SOUS D10 C'EST LA CONSTANTE, DÈS LA CONSTRUCTION.** Naître à 2,8
+    // pour être posé à 2 à la première image coûterait UN rechargement complet
+    // de la planète — le seul qu'on ne verrait pas passer, et le plus cher.
+    valeur: constante > 0
+      ? Number(constante)
+      : courbe(zoomDepuisAltitude(altitudeDepuisZoom(13, { lat, fovDeg, fraction }), { lat, fovDeg, fraction })),
     zoom: 13,
     altitudeM: null,
   }
 }
 
-/** L'unique écrivain « continu ». Appelé au rééchantillonnage, depuis l'altitude. */
+/**
+ * L'unique écrivain « continu ». Appelé au rééchantillonnage, depuis l'altitude.
+ *
+ * ⚠️ **SOUS D10 IL REND LA MAIN SANS ÉCRIRE.** Les deux autres écrivains
+ * (`majExagerationCadrage`, `majExagerationCran`) passent par ici — c'est la
+ * règle « un seul chemin d'écriture » du module —, donc **cette seule ligne
+ * gèle les trois.**
+ */
 export function majExageration (partage, altitudeM) {
+  if (partage?.constante > 0) return partage.valeur
   const z = zoomDepuisAltitude(altitudeM, partage)
   partage.zoom = z
   partage.altitudeM = Number(altitudeM)
@@ -436,6 +468,11 @@ export function majExagerationCran (partage, { demZoom, zoomNiveau = 0, pasNivea
  * la seule différence est qu'ils la lisent **au même endroit**.
  */
 export function poserExageration (partage, valeur) {
+  // ⚠️ **LUI AUSSI — ET C'EST L'ÉCRIVAIN DU CHEMIN PLAT.** `syncExagToZoom` le
+  // rappelle à chaque chargement de bloc ; sans cette ligne, le palier
+  // `exagForZoom(demZoom)` reviendrait écraser la constante à chaque cran, et le
+  // rechargement de la planète avec lui.
+  if (partage?.constante > 0) return partage.valeur
   const v = Number(valeur)
   if (!Number.isFinite(v)) return partage.valeur
   partage.valeur = v

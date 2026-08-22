@@ -33,6 +33,21 @@ import {
   planProche,
   poseCranContinu,
 } from './loi-altitude.js'
+// LE ZOOM CONTINU — Tâche M, « la mort des paliers ». Module PUR lui aussi ; il
+// porte la loi mesurée par Adrien (un cran = ×√2), le franchissement de niveau
+// sans table, et le changement d'unités qui rend ce franchissement invisible.
+// ⚠️ **`modes.js` N'IMPORTE PAS `flags.js`** : il ne connaît le régime que par le
+// crochet `hooks.zoomContinu()`, comme `globe.js` ne connaît `globeContinu` que
+// par son constructeur.
+import {
+  PAS_CRAN,
+  PAS_NIVEAU,
+  facteurCran,
+  franchissement,
+  poseApresNiveau,
+  distancePourAltitudeFond,
+  niveauDArrivee,
+} from './monde/zoom-continu.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
 // preventDefault() sur plusieurs branches ; côté tactile, le vrai événement a
@@ -168,16 +183,43 @@ const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRES
 // même aller-retour rend 26 876 m (×0,970, le résidu venant du `y = −0,3` de la
 // cible). L'ancien escalier ne cliquettait pas parce que la téléportation
 // remettait les deux directions au même point de présentation.
-export const STEP_IN = Math.LN2 // max zoom-IN per level (= UN cran, ×2) before the in-limit
-export const STEP_OUT = Math.LN2 // idem en dézoom — l'aller-retour doit revenir au point de départ
+// ⛔ **ET CES DEUX-LÀ CONFONDAIENT DEUX GRANDEURS — Tâche M, D9.** Le paragraphe
+// ci-dessus est juste sur UN point (le budget d'un NIVEAU DE MNT vaut `ln 2`,
+// parce qu'un cran de zoom slippy divise l'emprise de la tuile par deux) et faux
+// sur l'autre : il en concluait que le CRAN valait `ln 2` aussi.
+//
+// **Dix-neuf altitudes relevées par Adrien dans Google Earth**, 63 170 km →
+// 126 km, 18 intervalles : **moyenne géométrique ×1,41256**, soit **√2 à 0,12 %
+// près**. ➡️ **Un cran vaut ×√2, pas ×2.** La justification complète, l'écart-type
+// et le piège de la « loi de moins en moins forte » vivent dans
+// `monde/zoom-continu.js`.
+//
+// ⚠️ **LES DEUX NOMBRES RESTENT, MAIS SÉPARÉS** : `STEP_IN`/`STEP_OUT` sont LE
+// CRAN (le geste de l'utilisateur, libre, mesuré) ; `BUDGET_NIVEAU` est le
+// NIVEAU DE MNT (la grille de tuiles, pas un réglage). C'est leur confusion qui
+// valait « deux fois trop ».
+export const STEP_IN = PAS_CRAN // UN CRAN, ×√2 — la loi mesurée (D9)
+export const STEP_OUT = PAS_CRAN // idem en dézoom — l'aller-retour doit revenir au point de départ
+
+// LE BUDGET D'UN NIVEAU DE MNT. ⚠️ **Il n'est pas libre** : un niveau divise
+// l'emprise du bloc par deux, donc `ln 2` de distance et rien d'autre. C'est lui
+// que le glissé de l'ESCALIER borne (chemin plat) et lui que le franchissement
+// automatique compte (chemin continu).
+export const BUDGET_NIVEAU = PAS_NIVEAU
 
 // ⚠️ « AU MOINS 20 CRANS » EST UNE CONTRAINTE D'ADRIEN, PAS UN EFFET DE BORD.
 // Un défilement continu délivre `N × ZOOM_IMPULSE × ZOOM_TAU` de distance
 // logarithmique : le niveau valait 1,2 / (0,05 × 1,2) = 20 crans de molette.
 // Le budget ayant changé, l'impulsion est désormais DÉRIVÉE de lui pour que ce
 // 20 ne bouge pas — la valeur littérale (0,05) l'aurait fait tomber à 11,5.
+// ⚠️ **ET C'EST LE NIVEAU QUI LE DÉRIVE, PAS LE CRAN — Tâche M.** Le cahier des
+// charges le dit : *« Le réglage porte sur le CRAN, pas sur le tour de molette :
+// le nombre de crans par tour dépend de la souris. »* Dériver l'impulsion du
+// cran aurait divisé la molette par deux au passage, ce que personne n'a
+// demandé ; la dériver du niveau laisse la molette **au bit près** ce qu'elle
+// était.
 const CRANS_PAR_NIVEAU = 20
-const ZOOM_IMPULSE = STEP_IN / (CRANS_PAR_NIVEAU * ZOOM_TAU) // ≈ 0,0289 log-dist/s par cran
+const ZOOM_IMPULSE = BUDGET_NIVEAU / (CRANS_PAR_NIVEAU * ZOOM_TAU) // ≈ 0,0289 log-dist/s par cran
 
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
@@ -219,7 +261,8 @@ export class Modes {
     this._zoomNdc = new THREE.Vector2() // cursor NDC of the last wheel notch
     this._zoomPivot = null // world point the coast zooms toward (last valid)
     this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
-    this._levelZoom = 0 // log-distance zoomed within the level; clamped to [-STEP_IN, STEP_OUT]
+    this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
+    this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
 
     this._buildDom()
 
@@ -254,6 +297,168 @@ export class Modes {
     domElement.addEventListener('touchcancel', finDuGeste, { passive: true })
   }
 
+  // ══════════ LE RÉGIME CONTINU — Tâche M ═══════════════════════════════════
+  //
+  // ⚠️ **UN CROCHET, RAPPELÉ À CHAQUE LECTURE — PAS UN BOOLÉEN FIGÉ À LA
+  // CONSTRUCTION.** Une tâche de ce chantier a trouvé un test faible qui passait
+  // le globe PAR SA VALEUR alors que la production le passe PAR UNE FONCTION :
+  // la faute était invisible sous la seule forme que la production n'emploie
+  // pas. Ici la production passe une fonction, et les bancs aussi.
+  _continu() {
+    return this.hooks.zoomContinu?.() === true
+  }
+
+  // L'ALTITUDE QUE LA CAMÉRA DE FOND OCCUPE, EN MÈTRES — `camY × emprise / span`.
+  //
+  // ⚠️ **C'EST LA SEULE GRANDEUR DONT UN SAUT SE VOIT À L'ÉCRAN** sous
+  // `?terre=unique` : la caméra visible est celle que la similitude de
+  // `monde/frontiere-rendu.js` produit, et son facteur est HORIZONTAL. Les deux
+  // autres altitudes de ce fichier (`this.altM`, `_altitudeCadrageM()`) portent
+  // l'exagération verticale, donc elles ne la voient pas.
+  _altitudeFondM() {
+    const emprise = this.hooks.empriseBlocM?.()
+    const span = this.hooks.coteBloc?.()
+    if (!(emprise > 0) || !(span > 0)) return null
+    return (this.camera.position.y * emprise) / span
+  }
+
+  // ══════════ LA CAMÉRA SUIT L'UNITÉ DU BLOC, IMAGE PAR IMAGE ══════════════
+  //
+  // ⚠️ **C'EST ICI ET PAS DANS `_rescale`, ET LA RAISON EST MESURÉE.** Le dépôt
+  // reposait la caméra APRÈS le chargement ; or `main.js` documente, journal par
+  // image à l'appui, que **`largeurBlocM()` est divisée par deux UNE IMAGE AVANT
+  // que `_rescale` ne double `camera.position.y`**. Entre les deux, l'altitude
+  // lue vaut exactement LA MOITIÉ de la vraie — c'est ce qui a produit **onze
+  // bascules du seuil du socle au lieu d'une**, et sous `?terre=unique` cela
+  // ferait clignoter la planète entière à chaque cran.
+  //
+  // En suivant l'emprise image par image, la conversion tombe sur la MÊME image
+  // que le changement, **quel qu'en soit l'auteur** : cran, plongée, vol,
+  // template, ou l'arrivée du MNT derrière la fenêtre (écart mesuré 6,9·10⁻⁵ à
+  // z12, 3,5 % à z5 — un vrai changement d'unité, pas du bruit).
+  //
+  // ⚠️ **ET C'EST UNE CONVERSION D'UNITÉS, PAS UNE REPOSITION.** L'invariant est
+  // `camY × emprise`, c'est-à-dire l'altitude que la caméra de FOND occupe. La
+  // pente traverse inchangée : l'angle de vue de l'utilisateur est gardé.
+  _suivreEmprise() {
+    const emprise = this.hooks.empriseBlocM?.()
+    const avant = this._empriseVue
+    if (!(emprise > 0)) { this._empriseVue = null; return }
+    this._empriseVue = emprise
+    if (!this._continu() || this.mode !== 'surface' || !(avant > 0) || avant === emprise) return
+    const c = this.controls
+    const cible = c.target
+    _zoomDir.copy(this.camera.position).sub(cible)
+    const norme = _zoomDir.length()
+    if (!(norme > 1e-6)) return
+    _zoomDir.multiplyScalar(1 / norme)
+    if (Math.abs(_zoomDir.y) < 1e-3) return // vue rasante : la pente ne porte plus rien
+    const pose = poseApresNiveau({
+      camY: this.camera.position.y,
+      pente: _zoomDir.y,
+      empriseAvant: avant,
+      empriseApres: emprise,
+      yCible: cible.y,
+    })
+    const borne = THREE.MathUtils.clamp(pose.distanceCible, c.minDistance, c.maxDistance)
+    this.camera.position.copy(cible).addScaledVector(_zoomDir, borne)
+    c.update()
+  }
+
+  // Le niveau d'arrivée, DÉDUIT de l'altitude de fond — sans table de paliers.
+  _niveauDArrivee(altM) {
+    const empriseAuZoom = this.hooks.empriseBlocMAuZoom
+    const span = this.hooks.coteBloc?.()
+    if (typeof empriseAuZoom !== 'function' || !(span > 0)) return null
+    return niveauDArrivee({
+      altM,
+      empriseAuZoom,
+      span,
+      zoomMax: this.hooks.getFineZoom(),
+      pente: _ARRIVAL_DIR.y,
+      yCible: Y_CIBLE,
+      distanceMin: DISTANCE_MIN_SURFACE,
+      // ⚠️ **LA MOITIÉ DU PLAFOND, ET CE N'EST PAS UNE MARGE DE CONFORT.**
+      // Un niveau s'explore de `d₀/2` (on affine) à `2 d₀` (on élargit) : sans
+      // ce demi, `2 d₀` dépasserait `maxDistance` et le glissé se ferait CLIPPER
+      // avant d'avoir dépensé son niveau — la butée reviendrait par la fenêtre,
+      // en haut cette fois. Le 0,94 est celui de `distanceArrivee` et pour la
+      // même raison écrite là-bas : rester sous la butée dure pour que
+      // `controls.update()` ne re-clampe pas immédiatement.
+      distanceMax: distanceArrivee(this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE) / 2,
+    })
+  }
+
+  // ══════════ LE FRANCHISSEMENT AUTOMATIQUE — CE QUI TUE LE CRAN ════════════
+  //
+  // ⛔ **C'EST LE GESTE QUE LE DÉPÔT DEMANDAIT À L'UTILISATEUR DE FAIRE.** Le
+  // glissé butait sur le budget du niveau, rendait la main, et il fallait
+  // **re-défiler** pour franchir (`atInLimit` → `_refine`). Adrien : *« vire
+  // absolument ton système de saut de niveau !!! »*
+  //
+  // Ici le budget n'est plus une butée mais un COMPTEUR : dès qu'il vaut un
+  // niveau plein, on franchit, et le compteur repart de son reste. L'hystérésis
+  // est celle de la troncature (`franchissement`), donc symétrique et sans
+  // seuil à régler.
+  _franchirSiBesoin() {
+    if (!this._continu() || this.busy || this.travel || this._diveTween) return
+    const { niveaux, reste } = franchissement(this._levelZoom, BUDGET_NIVEAU)
+    if (niveaux === 0) return
+    if (niveaux > 0) {
+      // ⚠️ **ON NE DÉPENSE LE BUDGET QUE SI LE NIVEAU EXISTE.** Au zoom fin il
+      // n'y a plus rien à affiner : laisser le compteur courir est CORRECT — il
+      // faudra le remonter d'autant pour élargir, et l'aller-retour reste
+      // symétrique. Le retrancher rendrait le retour asymétrique.
+      if (!this.hooks.getRefineTarget()) return
+      this._levelZoom = reste
+      this._refine()
+      return
+    }
+    if (this.hooks.getCoarsenTarget()) {
+      this._levelZoom = reste
+      this._coarsen()
+      return
+    }
+    // plus de niveau plus large : la porte orbitale, et elle est SANS RIDEAU
+    this._levelZoom = reste
+    this.enterOrbit()
+  }
+
+  // ══════════ UN CRAN, ET UN SEUL GESTE POUR LES DEUX MONDES ════════════════
+  //
+  // ⛔ **`_orbitNotch` EST MORT AVEC SON 1,7.** Ce facteur n'avait aucune source :
+  // il était choisi. Le cran vaut ×√2 — mesuré par Adrien sur Google Earth — et
+  // c'est la MÊME loi en orbite et en surface, ce qui est la moitié de « une
+  // seule caméra, de l'orbite au sol ».
+  cranZoom(dir) {
+    if (this.busy || this.travel || this._diveTween) return
+    const f = facteurCran(dir)
+    if (this.mode === 'orbital') {
+      if (dir > 0) this._diveArmed = true // inward intent arms the dive, like the wheel
+      this.orbAltTarget = THREE.MathUtils.clamp(
+        this.orbAltTarget * f,
+        ORB_ALT_MIN, // le plancher orbital est parti — voir ORB_ALT_MIN
+        MAX_ALT_M / ORBITAL_M_PER_UNIT
+      )
+      return
+    }
+    if (!this._continu()) {
+      // chemin plat (sauvegarde gelée) : le bouton garde l'escalier de paliers
+      if (dir > 0) this._refine()
+      else if (this.hooks.getCoarsenTarget()) this._coarsen()
+      else this.enterOrbit()
+      return
+    }
+    const c = this.controls
+    const dist = c.getDistance()
+    const nouvelle = THREE.MathUtils.clamp(dist * f, c.minDistance, c.maxDistance)
+    this._levelZoom += Math.log(Math.max(nouvelle, 1e-6) / Math.max(dist, 1e-6))
+    _zoomDir.copy(this.camera.position).sub(c.target).normalize()
+    this.camera.position.copy(c.target).addScaledVector(_zoomDir, nouvelle)
+    c.update()
+    this._franchirSiBesoin()
+  }
+
   // UN cran de zoom, d'où qu'il vienne — molette ou pincement. `e` doit porter
   // deltaY, clientX, clientY et preventDefault().
   _zoomGesture(e) {
@@ -285,8 +490,14 @@ export class Modes {
       const inward = e.deltaY < 0
       // "at the zone limit" = the level's zoom budget is spent (or the
       // physical near stop / far stop is reached anyway)
-      const atInLimit = this._levelZoom <= -STEP_IN + 0.03 || dist <= this.controls.minDistance * 1.02 || this.hooks.nearGround?.()
-      const atOutLimit = this._levelZoom >= STEP_OUT - 0.03 || dist >= this.controls.maxDistance * 0.98
+      // ⛔ **SOUS LE DRAPEAU, LES DEUX BUTÉES N'EXISTENT PLUS — Tâche M.** Elles
+      // SONT le cran qu'Adrien décrit : le glissé s'arrêtait au bout du niveau
+      // et il fallait re-défiler pour franchir. Le franchissement est désormais
+      // automatique (`_franchirSiBesoin`, appelé par `_applyZoom`), donc ces deux
+      // branches n'ont plus rien à déclencher.
+      const continu = this._continu()
+      const atInLimit = !continu && (this._levelZoom <= -BUDGET_NIVEAU + 0.03 || dist <= this.controls.minDistance * 1.02 || this.hooks.nearGround?.())
+      const atOutLimit = !continu && (this._levelZoom >= BUDGET_NIVEAU - 0.03 || dist >= this.controls.maxDistance * 0.98)
       // GUARD-RAIL (Adrien): the glide stops at the zone limit; a FRESH
       // re-scroll while already pinned there is what steps to the next level.
       if (fresh && inward && atInLimit) {
@@ -355,7 +566,13 @@ export class Modes {
     this._msgTimer = setTimeout(() => this.msgEl.classList.add('hidden'), MSG_MS)
   }
 
+  // ⛔ **LE RIDEAU EST LE SAUT LE PLUS VISIBLE DE TOUS — 480 ms d'aller, 480 ms
+  // de retour, à chaque traversée.** Il n'était pas l'ornement du saut, il était
+  // là parce que le saut était invisible autrement (`_rescale` le dit déjà de son
+  // côté). Sous `?terre=unique` il n'y a plus qu'une Terre des deux côtés de la
+  // traversée : il n'a plus rien à masquer, et Adrien : « je ne veux aucun saut ».
   _whiteout(swap) {
+    if (this._continu()) return Promise.resolve().then(swap)
     return new Promise((resolve) => {
       this.whiteEl.classList.add('on')
       setTimeout(async () => {
@@ -373,6 +590,12 @@ export class Modes {
     this._resetZoom()
     // continuity: pop out at the altitude the surface view actually had, so a
     // z8 patch hands over at ~500 km and a z12 patch at ~30 km
+    // ⚠️ **SOUS LE DRAPEAU, ON SORT À L'ALTITUDE EXACTE — pas 15 % au-dessus.**
+    // Le `× 1,15` d'`altitudeSortieOrbiteM` existait pour repasser la porte de
+    // plongée sans y retomber ; la porte est maintenant géométrique et
+    // `_diveArmed` suffit à ne pas replonger. Un 15 % de recul serait un saut,
+    // et c'est exactement ce qu'Adrien refuse.
+    if (entryAltM == null && this._continu()) entryAltM = this._altitudeFondM()
     if (entryAltM == null) {
       // pop out just above the block's own altitude; a coarse z4 continental
       // block (~7 500 km up) hands over above the 8 000 km globe gate
@@ -410,6 +633,7 @@ export class Modes {
       this.camera.up.set(0, 1, 0)
       this.camera.lookAt(0, 0, 0)
       this.controls.update()
+      this._empriseVue = null // on quitte l'espace du bloc : plus d'unité à suivre
       this.mode = 'orbital'
     })
     this.busy = false
@@ -489,12 +713,27 @@ export class Modes {
   _niveauDePlongee(altM, zoomImpose = null) {
     const echelleAuZoom = this.hooks.echelleVerticaleAuZoom
     const zoomFin = this.hooks.getFineZoom()
+    // Le geste qui DÉSIGNE garde son niveau — clic sur le globe, cadrage GPX.
+    if (zoomImpose != null) return { zoom: zoomImpose, distanceCible: null }
+    // ⛔ **PLUS DE TABLE SOUS LE DRAPEAU.** `DIVE_TIERS` posait NEUF paliers
+    // d'altitude à la main ; ici le niveau se déduit de l'emprise, et la porte
+    // orbitale devient géométrique.
+    //
+    // ⚠️ **ET IL PASSE AVANT LA GARDE D'`echelleVerticaleAuZoom` — TROUVÉ PAR LE
+    // BANC, PAS PAR LA RELECTURE.** Cette branche-ci ne lit PAS l'échelle
+    // verticale (c'est tout son objet : l'exagération n'entre plus dans la
+    // traversée). La laisser sous une garde qui exige un crochet qu'elle
+    // n'emploie pas la rendait muette dès qu'il manquait — et le repli était le
+    // ZOOM FIN, c'est-à-dire une plongée à z15 depuis 1 600 km.
+    if (this._continu()) {
+      const n = this._niveauDArrivee(altM)
+      if (n) return { zoom: n.zoom, distanceCible: n.distanceCible }
+    }
     if (typeof echelleAuZoom !== 'function' || !(altM > 0)) {
       // pas d'échelle à lire : on retombe sur la pose d'arrivée d'avant, jamais
       // sur une distance inventée (même garde que `_rescale`).
-      return { zoom: zoomImpose ?? zoomFin, distanceCible: null }
+      return { zoom: zoomFin, distanceCible: null }
     }
-    if (zoomImpose != null) return { zoom: zoomImpose, distanceCible: null }
     return niveauDePlongee({
       altM,
       echelleAuZoom,
@@ -526,6 +765,33 @@ export class Modes {
   // Sans le hook (banc de test, source procédurale) : la pose fixe d'avant,
   // jamais une distance inventée.
   _posePlongee(arrival, altDepartM) {
+    // ⛔ **LE DÉPÔT CONSERVAIT L'AUTRE ALTITUDE, ET `loi-altitude.js` LE SAVAIT** :
+    // *« le CHAMP VISUEL, lui, saute encore d'un facteur exagération(z) […] C'est
+    // une question, pas un oubli. »* Sous `?terre=unique` la question a une
+    // réponse, parce qu'il n'y a plus deux mondes à raccorder mais un seul : de
+    // l'autre côté de la traversée c'est la MÊME planète, donc c'est l'altitude
+    // de FOND qui doit être continue. **Le saut valait ×2,5 à ×5 selon le palier
+    // d'exagération, et il vaudrait encore ×2 sous D10.**
+    if (this._continu()) {
+      const d = distancePourAltitudeFond({
+        altM: altDepartM,
+        extentMeters: this.hooks.empriseBlocM?.(),
+        span: this.hooks.coteBloc?.(),
+        pente: _ARRIVAL_DIR.y,
+        yCible: arrival.target.y,
+      })
+      if (d != null) {
+        const dist = THREE.MathUtils.clamp(
+          d,
+          this.controls.minDistance,
+          this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE
+        )
+        const p = arrival.target.clone().addScaledVector(_ARRIVAL_DIR, dist)
+        const seuil = this._solSous(arrival.target) + 3 // même garde de dégagement
+        if (p.y < seuil) p.y = seuil
+        return p
+      }
+    }
     const echelleV = this.hooks.echelleVerticaleBloc?.() ?? null
     if (!(echelleV > 0) || !(altDepartM > 0)) return arrival.pos
     const brute = distancePourAltitude({ altM: altDepartM, echelleV, yCible: arrival.target.y })
@@ -605,6 +871,11 @@ export class Modes {
       this.controls.target.copy(arrival.target)
       this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
       this.camera.position.copy(this._posePlongee(arrival, altDepartM))
+      // ⚠️ **L'EMPRISE D'ARRIVÉE EST MÉMORISÉE ICI, ET SANS ÇA LA PLONGÉE SE
+      // FERAIT CONVERTIR DEUX FOIS** : `_suivreEmprise` verrait passer l'emprise
+      // du bloc quitté à celle du bloc d'arrivée et rejouerait un changement
+      // d'unités que `_posePlongee` vient déjà d'appliquer.
+      this._empriseVue = this.hooks.empriseBlocM?.() ?? null
       // `near` DÉRIVÉ, plus restauré : c'est la même loi qu'en orbite
       // (`planProche`), appliquée à la hauteur au-dessus du sol du bloc. Elle
       // sature à NEAR_MAX = 0,5 dès 2,5 unités de dégagement — c'est-à-dire
@@ -666,8 +937,14 @@ export class Modes {
   // ⚠️ ET IL N'Y A PLUS DE FONDU AU BLANC. Le rideau n'était pas l'ornement du
   // saut, il était là parce que le saut était invisible autrement.
   async _rescale(next, verb) {
+    const continu = this._continu()
     this.busy = true
-    this._resetZoom() // the new level starts its own scroll budget
+    // ⛔ **`_resetZoom()` TUAIT L'ÉLAN À CHAQUE CRAN, ET C'EST LA MOITIÉ DE LA
+    // SENSATION D'ACCROCHAGE.** Le glissé repartait de zéro de l'autre côté :
+    // l'utilisateur relançait la molette à chaque niveau. Sous le drapeau,
+    // l'élan et le compteur de budget TRAVERSENT — c'est `_franchirSiBesoin` qui
+    // a déjà retranché le niveau franchi du compteur.
+    if (!continu) this._resetZoom() // the new level starts its own scroll budget
     const prevDir = this.camera.position.clone().sub(this.controls.target)
     const camYAvant = this.camera.position.y
     const echelleAvant = this.hooks.echelleVerticaleBloc?.() ?? null
@@ -682,6 +959,13 @@ export class Modes {
     const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
     const arrival = this._arrivalPose(next)
     this.controls.target.copy(arrival.target)
+    // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
+    // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
+    // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport
+    // des EMPRISES, alors que `poseCranContinu` prend le rapport des échelles
+    // VERTICALES — lequel porte l'exagération, et c'est LUI l'accrochage (jusqu'à
+    // ×2 au cran z4 → z5 avec la table de paliers du dépôt).
+    if (continu) { this._suivreEmprise(); this.busy = false; return }
     const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
     // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
     // comparer : on retombe sur la pose d'arrivée, qui est le comportement
@@ -761,29 +1045,13 @@ export class Modes {
   // Orbital: nudge the altitude target inward and arm the dive (the settle→dive
   // logic then lands at the matching scale — same path as a wheel-in notch).
   stepFiner() {
-    if (this.busy || this.travel || this._diveTween) return
-    if (this.mode === 'surface') this._refine()
-    else this._orbitNotch(1)
+    this.cranZoom(1)
   }
 
   // one level WIDER. Surface: coarsen, or open the orbit gate once past z4.
   // Orbital: nudge the altitude target outward (toward the planet).
   stepWider() {
-    if (this.busy || this.travel || this._diveTween) return
-    if (this.mode === 'surface') {
-      if (this.hooks.getCoarsenTarget()) this._coarsen()
-      else this.enterOrbit()
-    } else this._orbitNotch(-1)
-  }
-
-  _orbitNotch(dir) {
-    if (dir > 0) this._diveArmed = true // inward intent arms the dive, like the wheel
-    const f = dir > 0 ? 1 / 1.7 : 1.7
-    this.orbAltTarget = THREE.MathUtils.clamp(
-      this.orbAltTarget * f,
-      ORB_ALT_MIN, // le plancher orbital est parti — voir ORB_ALT_MIN
-      MAX_ALT_M / ORBITAL_M_PER_UNIT
-    )
+    this.cranZoom(-1)
   }
 
   // ══════════ CLIQUER SUR LE GLOBE ══════════════════════════════════════════
@@ -896,8 +1164,14 @@ export class Modes {
     // clamp to the level's own zoom budget: the glide stops at the zone limit
     // (Adrien) instead of running to the physical near/far stop
     let dLog = Math.log(Math.max(newDist, 1e-6) / Math.max(dist, 1e-6))
-    if (this._levelZoom + dLog < -STEP_IN) { dLog = -STEP_IN - this._levelZoom; this._zoomVel = 0 }
-    else if (this._levelZoom + dLog > STEP_OUT) { dLog = STEP_OUT - this._levelZoom; this._zoomVel = 0 }
+    // ⚠️ **SOUS LE DRAPEAU LE BUDGET EST UN COMPTEUR, PAS UNE BUTÉE — Tâche M.**
+    // Le glissé n'est plus borné : il court, et c'est `_franchirSiBesoin` (au bas
+    // de cette fonction) qui change de niveau quand le compteur vaut un niveau
+    // plein. Sans le drapeau, les deux lignes d'avant, au bit près.
+    if (!this._continu()) {
+      if (this._levelZoom + dLog < -BUDGET_NIVEAU) { dLog = -BUDGET_NIVEAU - this._levelZoom; this._zoomVel = 0 }
+      else if (this._levelZoom + dLog > BUDGET_NIVEAU) { dLog = BUDGET_NIVEAU - this._levelZoom; this._zoomVel = 0 }
+    }
     this._levelZoom += dLog
     newDist = dist * Math.exp(dLog)
     factor = newDist / dist
@@ -916,11 +1190,21 @@ export class Modes {
     // crosses a level; a fresh re-scroll at the limit does (see the wheel handler)
     if (newDist <= min + 1e-3 || newDist >= max - 1e-3) this._zoomVel = 0
     if (Math.abs(this._zoomVel) < ZOOM_STOP) this._zoomVel = 0 // coast spent
+    // ⚠️ **APRÈS LE DÉPLACEMENT, PAS AVANT.** Le franchissement lit le compteur
+    // que cette image vient d'incrémenter ; le placer plus haut le ferait décider
+    // sur l'image précédente — c'est la « sonde lue APRÈS la fonction » du §0,
+    // dans l'autre sens.
+    this._franchirSiBesoin()
   }
 
   // ---------------------------------------------------------------- per-frame
 
   update(dt) {
+    // ⚠️ **EN TÊTE, ET `main.js` LE JUSTIFIE** : `modes.update(dt)` court AVANT
+    // `majSeuilSocle()` et `majCameraFond()`. Convertir ici, c'est convertir
+    // avant que quiconque ne lise l'altitude de cette image — donc jamais l'image
+    // à moitié d'altitude qui a produit onze bascules du seuil.
+    this._suivreEmprise()
     if (this.mode === 'orbital') {
       if (this.travel) {
         this._updateTravel(dt)
@@ -944,7 +1228,19 @@ export class Modes {
       }
 
       this.altM = altitudeOrbitaleM(this.orbAlt, ORBITAL_M_PER_UNIT)
-      if (!this.busy && !this.travel && this._diveArmed) {
+      if (!this.busy && !this.travel && this._diveArmed && this._continu()) {
+        // ⛔ **PLUS DE TABLE, PLUS D'ATTENTE DE STABILISATION.** Le dépôt
+        // attendait que le zoom se POSE (`settled`, à 6 % près) puis lisait le
+        // palier dans `DIVE_TIERS` : deux paliers pour un seul geste. Ici la
+        // porte est GÉOMÉTRIQUE — on traverse dès qu'un niveau de bloc peut
+        // accueillir l'altitude sous le plafond de la caméra — et la traversée
+        // conserve l'altitude de fond, donc elle ne se voit pas.
+        const n = this._niveauDArrivee(this.altM)
+        if (n && n.borne !== 'haut') {
+          this._diveArmed = false
+          this._dive({ altM: DIVE_ALT_M, zoom: n.zoom })
+        }
+      } else if (!this.busy && !this.travel && this._diveArmed) {
         // dive when an inward zoom SETTLES under a tier — never intercept a
         // fast zoom mid-flight; the landing scale matches where you stopped
         const settled = Math.abs(this.orbAlt - this.orbAltTarget) < this.orbAltTarget * 0.06
@@ -962,7 +1258,12 @@ export class Modes {
       }
     } else {
       // surface inertial dolly — the long élan (see the wheel handler)
-      if (!this._diveTween && !this.busy && Math.abs(this._zoomVel) > ZOOM_STOP) this._applyZoom(dt)
+      // ⚠️ **SOUS LE DRAPEAU, LE GLISSÉ SURVIT AU CHARGEMENT — ET C'EST LA
+      // TROISIÈME MOITIÉ DU CRAN.** `busy` gèle le zoom pendant tout le
+      // `loadSurface` du franchissement : la molette ne répond plus, puis la vue
+      // repart. C'est une PAUSE, et Adrien n'en veut pas. `_franchirSiBesoin` se
+      // garde lui-même contre un second franchissement pendant celui-ci.
+      if (!this._diveTween && (!this.busy || this._continu()) && Math.abs(this._zoomVel) > ZOOM_STOP) this._applyZoom(dt)
       // click-to-dive lean-in tween (first beat): ease 30% toward the point,
       // then load the finer level (see diveTo). ease-in-out quad.
       if (this._diveTween && !this.busy) {

@@ -1974,7 +1974,43 @@ export class Globe {
    * retrouve en cache sans un octet de réseau.
    */
   _horsCropSeul(z, x, y) {
-    return this._cropSeul && !!this._crop && !tuileDansCrop(z, x, y, this._crop)
+    if (!this._crop) return false
+    if (!this._cropSeul && !this.estompePlein()) return false
+    return !tuileDansCrop(z, x, y, this._crop)
+  }
+
+  /**
+   * L'ESTOMPAGE EST-IL PLEIN ? — Tâche M, volet ④ (« n'améliorer que la zone
+   * visée »).
+   *
+   * ⚠️ **CE N'EST PAS UN SECOND DRAPEAU, C'EST UNE LECTURE.** À `uEstompage = 1`
+   * le nuanceur de fragment rend `couvertureTuile = mix(1.0, dedans, 1.0)`,
+   * c'est-à-dire `dedans` — lequel vaut **exactement 0** hors du crop, donc
+   * `discard`. **Tout ce qui est dehors est déjà invisible** ; le parcourir,
+   * le demander au réseau, le décoder et le mailler est du travail dont pas un
+   * pixel ne sort.
+   *
+   * ⚠️ **CE QUE ÇA AJOUTE À LA TÂCHE N, ET POURQUOI CE N'EST PAS UN DOUBLON.**
+   * `poserCropSeul` coupe **au REPOS** — c'est la consigne d'Adrien du même jour
+   * (« ça ne s'affiche que si on dézoome, puis ça recrop quand la vue est
+   * stabilisée »). Mais **pendant** un zoom la vue n'est pas au repos, et
+   * l'estompage, lui, peut être plein depuis longtemps : c'est exactement le cas
+   * d'une DESCENTE. Mesuré dans l'application vivante, descente 1 600 km → 3 km :
+   * **9 456 tuiles demandées, dont 5 081 hors crop — 53,7 %**, presque toutes
+   * sous estompage plein.
+   *
+   * ⚠️ **ET LA GARDE EST L'INVERSE DE CELLE DE LA TÂCHE N** : elle coupe MOINS
+   * souvent qu'elle en altitude (l'estompage n'est plein que sous la bande) et
+   * PLUS souvent en régime (elle ne demande pas le repos). Les deux se cumulent
+   * par un OU, aucune ne remplace l'autre.
+   *
+   * ⚠️ **`uEstompageOn` D'ABORD.** Sans lui, `uEstompage` vaut **1 par défaut**
+   * (voir sa déclaration) : lire la valeur seule couperait le dehors sur une
+   * planète où l'estompage n'a jamais été posé — c'est-à-dire en production.
+   */
+  estompePlein() {
+    const u = this.uniforms
+    return u.uEstompageOn.value > 0.5 && u.uEstompage.value >= 1
   }
 
   /** Retire le crop — le globe redevient entier, parois comprises. */

@@ -88,6 +88,7 @@ import { BLOCK_TILES } from './landmarks.js'
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
 import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCran, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
+import { EXAGERATION_UNIQUE } from './monde/zoom-continu.js'
 // LA FENÊTRE BORNÉE — Tâche 6 ter. ⚠️ Importée ICI et pas dans `terrain.js` :
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
@@ -776,7 +777,40 @@ const params = {
 // ⚠️ `exagPartage` est ÉNUMÉRABLE, et c'est voulu : `block-grid.js:1133`
 // fabrique ses voisins par `{ ...params }`, et un damier qui perdrait le
 // partage lirait une valeur figée à l'instant de la copie.
-const exagPartage = creerExagerationPartagee({ surcharges: surchargesStockees() })
+// ══════════ UNE SEULE TERRE — Tâche I, LE BRANCHEMENT ══════════════════════
+//
+// ⚠️ **LU ICI ET NULLE PART AILLEURS.** Le drapeau décide de cinq choses qui
+// doivent s'accorder au caractère près, et un second appel à `terreUniqueActive()`
+// ailleurs dans ce fichier pourrait diverger (l'adresse ne change pas, mais le
+// patron, lui, se recopie) :
+//   1. le bloc plat ne se rallume plus (`poserVisibiliteSocle`, `socleAffiche`) ;
+//   2. l'état de départ de `veilleSocle` dit « pas de bloc », pour que la
+//      première image sous le seuil APPLIQUE l'extinction ;
+//   3. `majSeuilSocle` nourrit `veilleCrop` au lieu de `veilleSocle`, sur la
+//      MÊME altitude et à la MÊME image ;
+//   4. **le globe devient le quatorzième lecteur de l'exagération** ;
+//   5. ⚡ **et cette exagération est une CONSTANTE — D10, Tâche M.** C'est elle,
+//      et rien d'autre, qui supprime le rechargement de la planète entière.
+//
+// ⚠️ **IL EXIGE `?frontiere=1`, et `flags.js` le garde** : sans la passe de fond
+// le globe n'est pas dessiné en mode surface, et creuser un crop dans une
+// planète qu'on ne dessine pas ne montrerait rien.
+//
+// ⚠️ **IL EST DÉCLARÉ ICI, AVANT LE PARTAGE D'EXAGÉRATION ET AVANT LE GLOBE,
+// PARCE QUE LES DEUX LE LISENT.**
+const terreUniqueBranchee = terreUniqueActive()
+
+// ⚠️ **`constante` EST TOUT LE GESTE DE D10, ET IL TIENT EN UN ARGUMENT.**
+// `setExaggeration` (`globe.js`) rend au réseau TOUTES les tuiles prêtes ;
+// `majExageration` ne l'appelle que si la valeur a BOUGÉ. Figer la valeur, c'est
+// donc supprimer le rechargement — **12 s et 21 s mesurées, aller et retour, La
+// Réunion z12** — sans porter le relief dans le nuanceur de sommets. Le portage
+// reste utile un jour (l'exagération redeviendrait un réglage vivant) : il est
+// **DIFFÉRÉ, pas abandonné.**
+const exagPartage = creerExagerationPartagee({
+  surcharges: surchargesStockees(),
+  constante: terreUniqueBranchee ? EXAGERATION_UNIQUE : null,
+})
 params.exagPartage = exagPartage
 // ⚠️ `EXAG_BASE` ET NON `params.demExaggeration` : ce serait un TREIZIÈME
 // lecteur direct, et le test ①a le compterait comme tel — à juste titre, parce
@@ -4029,26 +4063,15 @@ function altitudeCadrageM() {
 // Tâche B a relevé à l'écran.
 // ══════════ UNE SEULE TERRE — Tâche I, LE BRANCHEMENT ══════════════════════
 //
-// ⚠️ **LU ICI ET NULLE PART AILLEURS.** Le drapeau décide de quatre choses qui
-// doivent s'accorder au caractère près, et un second appel à `terreUniqueActive()`
-// ailleurs dans ce fichier pourrait diverger (l'adresse ne change pas, mais le
-// patron, lui, se recopie) :
-//   1. le bloc plat ne se rallume plus (`poserVisibiliteSocle`, `socleAffiche`) ;
-//   2. l'état de départ de `veilleSocle` dit « pas de bloc », pour que la
-//      première image sous le seuil APPLIQUE l'extinction ;
-//   3. `majSeuilSocle` nourrit `veilleCrop` au lieu de `veilleSocle`, sur la
-//      MÊME altitude et à la MÊME image ;
-//   4. **le globe devient le quatorzième lecteur de l'exagération** — la ligne
-//      juste dessous, et le §ci-après dit pourquoi ce n'est pas un raccourci.
+// ⚠️ **`terreUniqueBranchee` EST DÉCLARÉ PLUS HAUT, AU PARTAGE D'EXAGÉRATION**
+// (Tâche M, D10 : la constante ×2 se pose à la CONSTRUCTION du partage, sinon le
+// démarrage coûte un rechargement complet de la planète). Le drapeau reste **lu
+// une seule fois dans ce fichier** ; la liste de ce qu'il décide, et pourquoi une
+// seconde lecture divergerait, est écrite à sa déclaration.
 //
-// ⚠️ **IL EXIGE `?frontiere=1`, et `flags.js` le garde** : sans la passe de fond
-// le globe n'est pas dessiné en mode surface, et creuser un crop dans une
-// planète qu'on ne dessine pas ne montrerait rien.
-//
-// ⚠️ **IL EST DÉCLARÉ ICI, AVANT LE GLOBE, PARCE QUE LE GLOBE LE LIT.** Un `const`
-// déclaré plus bas serait dans sa zone morte au moment de cette ligne : une
-// `ReferenceError` au démarrage, que ni un test ni `node --check` ne voient.
-const terreUniqueBranchee = terreUniqueActive()
+// ⚠️ **UN `const` DÉCLARÉ ICI SERAIT DANS LA ZONE MORTE** au moment de
+// `creerExagerationPartagee` : une `ReferenceError` au démarrage, que ni un test
+// ni `node --check` ne voient.
 
 // ⚠️ **`terre unique` ENTRAÎNE `exagSuivie`, ET C'EST UNE MESURE À L'ÉCRAN QUI
 // L'A EXIGÉ, PAS UN GOÛT DE SYMÉTRIE.** La Tâche E fait du globe « le
@@ -5154,6 +5177,29 @@ modes = new Modes({
         exageration: exagForZoom(zoom),
       })
     },
+    // ══════════ LES TROIS CROCHETS DU ZOOM CONTINU — Tâche M ════════════════
+    //
+    // ⚠️ **`modes.js` NE PEUT PAS LES CALCULER.** L'emprise du bloc vit dans la
+    // fenêtre bornée (`largeurBlocM`), pas dans la machine à modes, et le côté du
+    // bloc est une constante de `terrain.js`. Ce sont les MÊMES grandeurs que
+    // `majCameraFond()` passe à la similitude vingt lignes plus haut : la caméra
+    // de fond et la caméra du bloc décident donc sur le même couple, sans quoi la
+    // conversion d'unités et la pose du fond diraient deux choses différentes.
+    empriseBlocM: () => (params.source === 'real' ? largeurBlocM() : 0),
+    // L'emprise d'un niveau **qu'on n'a pas encore chargé** — même rôle
+    // qu'`echelleVerticaleAuZoom` pour la plongée, mais SANS l'exagération :
+    // c'est l'emprise horizontale, celle que la similitude emploie.
+    empriseBlocMAuZoom: (zoom, lat = params.demLat) => empriseBlocM({ zoom, lat }),
+    // ⚠️ **`TERRAIN_SIZE` ET PAS `terrain._span()`** : c'est le couple qu'emploient
+    // déjà `altitudeCadrageM()` et `majCameraFond()`. Deux conventions d'échelle
+    // dans le même fichier divergeraient en silence.
+    coteBloc: () => TERRAIN_SIZE,
+    // ⚡ **LE RÉGIME CONTINU — LU UNE FOIS, PASSÉ PAR UNE FONCTION.** `modes.js`
+    // n'importe pas `flags.js` ; sans cette ligne, tout le travail de la Tâche M
+    // serait du code qui ne s'exécute jamais, et c'est **la faiblesse récurrente
+    // de ce chantier** (quatre tâches d'affilée ont vu leurs mutations de
+    // branchement survivre).
+    zoomContinu: () => terreUniqueBranchee,
     // ══════════ ELLE REND LA MAIN DÈS QUE LA FENÊTRE EST POSÉE ══════════════
     //
     // ⚠️ **C'EST LA DERNIÈRE MARCHE DU PIVOT, ET ELLE ARRIVE EN DERNIER POUR UNE
@@ -5333,7 +5379,18 @@ const gotoCtl = createGoto({
 
 // vertical zoom stepper (left edge) — discrete alternative to the wheel; reads
 // live staircase/orbit state each frame, only triggers modes.stepFiner/Wider
-const zoomStepper = buildZoomStepper({
+// ⛔ **ET SOUS `?terre=unique` IL N'EXISTE PAS — Tâche M.** Adrien : *« on
+// supprime toutes les zones »*, *« vire absolument ton système de saut de
+// niveau »*. `ORB` et `Z{n}` sont les DEUX étiquettes de l'escalier de paliers ;
+// les garder au-dessus d'un zoom devenu continu afficherait un niveau qui ne
+// décrit plus rien — la caméra passe désormais entre les niveaux sans s'y poser.
+//
+// ⚠️ **CE QUI EST PERDU EST NOMMÉ ICI, ET C'EST LE PRIX** : les deux boutons
+// `+` / `−` partent avec l'étiquette, donc il n'y a plus de zoom discret au
+// doigt sous ce drapeau. `modes.cranZoom(±1)` existe et applique la loi mesurée
+// (×√2) — **il n'a plus d'appelant d'IHM sur ce chemin, et c'est une réserve du
+// rapport, pas un oubli.**
+const zoomStepper = terreUniqueBranchee ? null : buildZoomStepper({
   modes,
   getState: () => modes.mode === 'orbital'
     ? { label: 'ORB', canFiner: true, canWider: true, busy: modes.busy || !!modes.travel }
@@ -11515,7 +11572,7 @@ function tick() {
   // décroche totalement" field bug, and it clobbered EVERY camera rig alike,
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
-  zoomStepper.update()
+  zoomStepper?.update()
   // ══════ LE SEUIL DU SOCLE — Tâche 3, branchée ══════════════════════
   //
   // ⚠️ **APRÈS `modes.update(dt)`, ET AVANT `majCameraFond()`.** Après, parce

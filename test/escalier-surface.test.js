@@ -45,7 +45,13 @@ import {
   profilDescente,
   sautsDuProfil,
 } from '../src/loi-altitude.js'
-import { pickDiveTier, STEP_IN, STEP_OUT } from '../src/modes.js'
+// ⚠️ **`BUDGET_NIVEAU` ET NON `STEP_IN` — Tâche M.** Les deux étaient LE MÊME
+// NOMBRE et le même nom jusqu'à la loi de zoom mesurée (D9) : `STEP_IN` est
+// désormais **le CRAN** (×√2, la mesure d'Adrien sur Google Earth) et
+// `BUDGET_NIVEAU` **le niveau de MNT** (×2, la grille de tuiles). Ce banc rejoue
+// l'ESCALIER, donc c'est le niveau qui le pilote — la valeur qu'il lit n'a pas
+// bougé d'un bit, seul son nom l'a fait.
+import { pickDiveTier, BUDGET_NIVEAU, STEP_IN, STEP_OUT } from '../src/modes.js'
 import { ORBITAL_M_PER_UNIT } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
@@ -64,7 +70,7 @@ const VOL = {
   choisirPalier: pickDiveTier,
   metresParUnite: ORBITAL_M_PER_UNIT,
   span: TERRAIN_SIZE,
-  budgetNiveau: STEP_IN,
+  budgetNiveau: BUDGET_NIVEAU,
   lat: LAT_REF,
 }
 
@@ -206,14 +212,20 @@ test('MUTATION — remettre la téléportation v48 ramène les sauts', () => {
 // coller au plancher `minDistance`.
 
 test('le budget du niveau vaut exactement un cran, dans les deux sens', () => {
-  assert.equal(STEP_IN, Math.LN2)
-  assert.equal(STEP_OUT, Math.LN2, "sinon l'aller-retour cliquette — voir le test ⑥")
-  assert.match(SRC_MODES, /export const STEP_IN = Math\.LN2/)
-  assert.match(SRC_MODES, /export const STEP_OUT = Math\.LN2/)
-  // « au moins 20 crans » (Adrien) est désormais DÉRIVÉ du budget, pas posé à
-  // côté de lui : un défilement continu délivre N × IMPULSE × TAU.
+  // ⚠️ **LE NOMBRE N'A PAS BOUGÉ, LE NOM SI — Tâche M.** Le budget du niveau
+  // vaut toujours `ln 2`, parce qu'un niveau divise l'emprise du bloc par deux.
+  // Ce qui a changé est qu'il ne s'appelle plus `STEP_IN` : `STEP_IN` est
+  // maintenant LE CRAN (×√2, D9), et confondre les deux valait « deux fois
+  // trop ».
+  assert.equal(BUDGET_NIVEAU, Math.LN2)
+  assert.match(SRC_MODES, /export const BUDGET_NIVEAU = PAS_NIVEAU/)
+  assert.equal(STEP_IN, Math.LN2 / 2)
+  assert.equal(STEP_OUT, STEP_IN, "sinon l'aller-retour cliquette — voir le test ⑥")
+  // « au moins 20 crans » (Adrien) est DÉRIVÉ du budget du NIVEAU, pas du cran :
+  // le cahier des charges de la Tâche M le dit — « le réglage porte sur le CRAN,
+  // pas sur le tour de molette ». La molette est donc inchangée au bit près.
   assert.match(SRC_MODES, /const CRANS_PAR_NIVEAU = 20/)
-  assert.match(SRC_MODES, /const ZOOM_IMPULSE = STEP_IN \/ \(CRANS_PAR_NIVEAU \* ZOOM_TAU\)/)
+  assert.match(SRC_MODES, /const ZOOM_IMPULSE = BUDGET_NIVEAU \/ \(CRANS_PAR_NIVEAU \* ZOOM_TAU\)/)
 })
 
 test('la caméra ne vient JAMAIS se coller au plancher de distance', () => {
@@ -295,7 +307,7 @@ function allerRetour(z, d0, budgetIn, budgetOut) {
 }
 
 test('un cran de zoom puis un cran de dézoom ramènent où on était', () => {
-  const r = allerRetour(10, 77.5, STEP_IN, STEP_OUT)
+  const r = allerRetour(10, 77.5, BUDGET_NIVEAU, BUDGET_NIVEAU)
   assert.ok(Math.abs(r - 1) < 0.05, `l'aller-retour rend ×${r.toFixed(3)}`)
   assert.ok(Math.abs(r - 0.97) < 0.005, `mesuré ×0,970 — le résidu vient du y = ${Y_CIBLE} de la cible`)
 })

@@ -64,7 +64,13 @@ import {
   profilDescente,
   sautsDuProfil,
 } from '../src/loi-altitude.js'
-import { DIVE_TIERS, pickDiveTier, STEP_IN } from '../src/modes.js'
+// ⚠️ **`BUDGET_NIVEAU` ET NON `STEP_IN` — Tâche M.** Les deux étaient LE MÊME
+// NOMBRE et le même nom jusqu'à la loi de zoom mesurée (D9) : `STEP_IN` est
+// désormais **le CRAN** (×√2, la mesure d'Adrien sur Google Earth) et
+// `BUDGET_NIVEAU` **le niveau de MNT** (×2, la grille de tuiles). Ce banc rejoue
+// l'ESCALIER, donc c'est le niveau qui le pilote — la valeur qu'il lit n'a pas
+// bougé d'un bit, seul son nom l'a fait.
+import { DIVE_TIERS, pickDiveTier, BUDGET_NIVEAU } from '../src/modes.js'
 import { ORBITAL_M_PER_UNIT, R_GLOBE } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
@@ -83,7 +89,7 @@ const VOL = {
   choisirPalier: pickDiveTier,
   metresParUnite: ORBITAL_M_PER_UNIT,
   span: TERRAIN_SIZE,
-  budgetNiveau: STEP_IN,
+  budgetNiveau: BUDGET_NIVEAU,
   lat: LAT_REF,
 }
 

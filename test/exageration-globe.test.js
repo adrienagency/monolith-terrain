@@ -101,7 +101,7 @@ test('①b SUR LA VOIE DU BUDGET, et sur elle seule, la butée rend le cran vois
     assert.equal(zoomCran({ demZoom: z, zoomNiveau: -PAS_NIVEAU }), z + 1, `butée IN z=${z}`)
     assert.equal(zoomCran({ demZoom: z, zoomNiveau: +PAS_NIVEAU }), z - 1, `butée OUT z=${z}`)
   }
-  assert.equal(PAS_NIVEAU, Math.LN2, '`STEP_IN` de `modes.js` vaut `Math.LN2`')
+  assert.equal(PAS_NIVEAU, Math.LN2, '`BUDGET_NIVEAU` de `modes.js` vaut `Math.LN2`')
 })
 
 test('①c BORNÉ PAR CONSTRUCTION — même nourri d\'absurdités', () => {
@@ -138,8 +138,11 @@ test('①d `_levelZoom` est bien remis à zéro à CHAQUE cran — sinon la born
   assert.ok(/this\._levelZoom\s*=\s*0/.test(corpsRz),
     '`_resetZoom` n\'écrase plus `_levelZoom` — la borne du pilote tombe en silence')
   // …et la butée du niveau est bien celle qu'on recopie.
-  assert.ok(/export const STEP_IN = Math\.LN2/.test(src), '`STEP_IN` a changé de valeur')
-  assert.ok(/export const STEP_OUT = Math\.LN2/.test(src), '`STEP_OUT` a changé de valeur')
+  // ⚠️ **C'EST `BUDGET_NIVEAU` QU'ON RECOPIE, PAS `STEP_IN` — Tâche M.** Les
+  // deux ne font plus qu'un nombre chacun : `STEP_IN` est le CRAN (×√2),
+  // `BUDGET_NIVEAU` le niveau de MNT (×2). Le pilote d'exagération borne son
+  // `_levelZoom` sur le NIVEAU.
+  assert.ok(/export const BUDGET_NIVEAU = PAS_NIVEAU/.test(src), '`BUDGET_NIVEAU` a changé de valeur')
 })
 
 test('①e LÀ OÙ L\'INVARIANT NE TIENT PAS — le saut est MESURÉ, pas nié', () => {
@@ -176,7 +179,7 @@ test('①e LÀ OÙ L\'INVARIANT NE TIENT PAS — le saut est MESURÉ, pas nié',
     `\`atInLimit\` n'a plus trois voies : ${ligne[1]}`)
   assert.ok(/minDistance/.test(ligne[1]), '`atInLimit` ne lit plus `minDistance`')
   assert.ok(/nearGround/.test(ligne[1]), '`atInLimit` ne lit plus `nearGround`')
-  assert.ok(/STEP_IN\s*\+\s*0\.03/.test(ligne[1]), 'la tolérance de 0,03 a changé — (b) est à refaire')
+  assert.ok(/BUDGET_NIVEAU\s*\+\s*0\.03/.test(ligne[1]), 'la tolérance de 0,03 a changé — (b) est à refaire')
 })
 
 // ══════════ ② IL NE REFERME AUCUNE BOUCLE — ET C'EST MESURÉ ═════════════════
