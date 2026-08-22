@@ -62,7 +62,7 @@ import {
 } from '../src/monde/mer-sphere.js'
 // ⚠️ **Tâche P4** : le fondu de rivage n'est plus écrit dans `globe.js`, il est
 // INJECTÉ depuis le module partagé — le test suit donc la valeur à sa source.
-import { FONDU_HOULE_FIN, GLSL_ECUME } from '../src/monde/ecume-mer.js'
+import { FONDU_HOULE_FIN, GLSL_ECUME, accalmieDuSocle } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
@@ -87,7 +87,7 @@ import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
 import { altitudeMaillage } from '../src/monde/fond-crop.js'
 import { repereLocalCrop, construireSolideCrop } from '../src/monde/parois-crop.js'
 import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
-import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
+import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES, CIRCONFERENCE_M } from '../src/monde/habillage-crop.js'
 
 const SRC_OCEAN = new URL('../src/ocean.js', import.meta.url)
 const SRC_GLOBE = new URL('../src/globe.js', import.meta.url)
@@ -1253,4 +1253,157 @@ test('⑪j `exigerBathy` attend la nappe, et un `remplir` MUET garde le défaut 
     assert.equal(r.refus, undefined, 'un remplir muet ne doit pas se mettre à refuser')
     assert.equal(r.bathy, true)
   })
+})
+
+// ══════════ ⑫ CE QUE `poserMer` ET `majReglagesMer` POSENT VRAIMENT ════════
+//
+// ⛔ **CES NEUF TESTS SONT NÉS D'UNE CAMPAGNE DE MUTATION, PAS D'UNE INTUITION.**
+// Premier tour de la Tâche P4 : **28 / 37**, et les NEUF survivantes visaient
+// toutes le même trou — le corps de `majReglagesMer` et les uniformes que
+// `poserMer` écrit n'étaient gardés que par des assertions de SOURCE. Une
+// assertion qui lit un fichier prouve qu'un texte est là ; elle ne prouve pas
+// qu'il pose la bonne valeur. **On EXÉCUTE.**
+//
+// ⚠️ Et aucune des neuf n'était du code mort : elles sont toutes sur le chemin
+// vivant de l'image (`main.js` appelle `majReglagesMer` à chaque image).
+
+function merPosee(arg = {}) {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer
+    .call(g, { remplir: remplirBouchon, portee: PORTEE_CROP, ...arg })
+    .then((r) => ({ g, r, u: g._mer.material.uniforms }))
+}
+
+test('⑫a `majReglagesMer` pose les DEUX accalmies, le givre et le ciel', () => {
+  return merPosee().then(({ g, u }) => {
+    const ciel = { isColor: true }
+    const cible = { isColor: true, copy(c) { this.recu = c } }
+    u.uSky.value = cible
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 0.4039, surface: 0.08, givre: 0.56, ciel })
+    assert.equal(u.uMerCalmeVue.value, 0.4039)
+    assert.equal(u.uMerCalmeSurf.value, 0.08, 'la seconde accalmie doit être posée AUSSI')
+    assert.equal(u.uMerGivre.value, 0.56, 'le givre du socle de verre doit être posé')
+    assert.equal(cible.recu, ciel, 'le ciel doit être COPIÉ, pas remplacé')
+    assert.deepEqual(pose, { vue: 0.4039, surface: 0.08, givre: 0.56 })
+  })
+})
+
+test('⑫b un demi-couple retombe sur le NEUTRE — pas sur une moitié d accalmie', () => {
+  return merPosee().then(({ g, u }) => {
+    // ⚠️ **UN DEMI-COUPLE EST PIRE QUE PAS D ACCALMIE DU TOUT** : le ressac
+    // serait multiplié par 0,08 pendant que les moutons resteraient à 1.
+    for (const mauvais of [{ vue: 0.4, surface: NaN }, { vue: NaN, surface: 0.08 }, {}, null, undefined]) {
+      Globe.prototype.majReglagesMer.call(g, mauvais)
+      assert.equal(u.uMerCalmeVue.value, 1, `${JSON.stringify(mauvais)}`)
+      assert.equal(u.uMerCalmeSurf.value, 1, `${JSON.stringify(mauvais)}`)
+    }
+    // et un givre non fini ne passe pas dans l'uniforme
+    Globe.prototype.majReglagesMer.call(g, { vue: 0.4, surface: 0.08, givre: NaN })
+    assert.equal(u.uMerGivre.value, 0)
+  })
+})
+
+test('⑫c un NaN d accalmie ne peut pas atteindre l uniforme', () => {
+  // ⚠️ Même contrat que `poserEstompage` : un NaN dans un uniforme éteint la
+  // moitié d'un GPU sans un mot. `accalmieDuSocle` le filtre à la source.
+  return merPosee().then(({ g, u }) => {
+    const socle = { uViewCalm: { value: NaN }, uSurfCalm: { value: NaN } }
+    Globe.prototype.majReglagesMer.call(g, accalmieDuSocle(socle))
+    assert.ok(Number.isFinite(u.uMerCalmeVue.value) && Number.isFinite(u.uMerCalmeSurf.value))
+    assert.equal(u.uMerCalmeVue.value, 1)
+  })
+})
+
+test('⑫d sans mer posée, `majReglagesMer` rend `null` et n écrit nulle part', () => {
+  const g = globeAvecCrop()
+  assert.equal(Globe.prototype.majReglagesMer.call(g), null)
+})
+
+test('⑫e `uMerUnite` EST le facteur qui a normalisé le canal G', () => {
+  return merPosee().then(({ u }) => {
+    // recalculé ICI depuis les grandeurs du repère, pas repris de la méthode
+    const largeur = 2 * PORTEE_CROP * REPERE.demi * CIRCONFERENCE_M * (R_GLOBE / R_TERRE_M)
+    const attendu = largeur / (COTE_CROP_UNITES * PORTEE_CROP)
+    assert.ok(Math.abs(u.uMerUnite.value - attendu) < 1e-15, `${u.uMerUnite.value} contre ${attendu}`)
+    // ⚠️ **ET IL EST EN MÈTRES MERCATOR, PAS EN MÈTRES VRAIS** : `largeurCropM`
+    // porte un `cos φ` que `largeurUnites` n'a pas. À La Réunion l'écart vaut
+    // 6,8 %, et c'est exactement la sorte de conversion à moitié faite que ce
+    // chantier a payée quatre fois.
+    const vrai = (largeurCropM(REPERE) * (R_GLOBE / R_TERRE_M)) / COTE_CROP_UNITES
+    assert.ok(Math.abs(u.uMerUnite.value / vrai - 1) > 0.05,
+      'les deux conventions doivent différer, sinon le test ne distingue rien')
+  })
+})
+
+test('⑫f le rideau d eau descend au fond DES PAROIS, et le dit', () => {
+  const g = globeAvecCrop()
+  g._baseYCrop = -0.1337
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then((r) => {
+    const u = g._mer.material.uniforms
+    assert.equal(u.uMerBasY.value, -0.1337, 'l uniforme doit porter le fond des parois')
+    assert.ok(r.jupe, 'l état doit DIRE que le rideau est là')
+    assert.equal(r.jupe.basY, -0.1337)
+    assert.ok(r.jupe.anneau > 100 && r.jupe.sommets === 2 * r.jupe.anneau)
+    // le maillage porte vraiment l'attribut, et il vaut 1 sur la moitié basse
+    const aJupe = g._mer.geometry.getAttribute('aJupe')
+    assert.ok(aJupe, 'l attribut aJupe doit être posé sur la géométrie')
+    let uns = 0
+    for (let i = 0; i < aJupe.array.length; i++) if (aJupe.array[i] === 1) uns++
+    assert.equal(uns, r.jupe.anneau, 'exactement l anneau BAS doit valoir 1')
+    // ⚠️ **ET LES INDEX DU RIDEAU SONT DÉCALÉS** : sans le décalage ils
+    // pointeraient sur la calotte et replieraient la nappe sur elle-même.
+    const idx = g._mer.geometry.getIndex().array
+    let maxi = 0
+    for (let i = 0; i < idx.length; i++) if (idx[i] > maxi) maxi = idx[i]
+    assert.equal(maxi, g._mer.geometry.getAttribute('position').count - 1)
+    assert.ok(maxi >= r.compte.sommets, 'le rideau doit vivre APRÈS la calotte dans l index')
+  })
+})
+
+test('⑫g sans parois, PAS de rideau — et l état le dit plutôt que de le taire', () => {
+  const g = globeAvecCrop() // `_baseYCrop` absent : les parois ont refusé
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then((r) => {
+    assert.equal(r.jupe, null, 'l état doit DIRE qu il n y a pas de rideau')
+    assert.equal(g._mer.material.uniforms.uMerBasY.value, 0)
+    const aJupe = g._mer.geometry.getAttribute('aJupe')
+    assert.ok(aJupe, 'l attribut reste déclaré — le nuanceur le lit toujours')
+    for (let i = 0; i < aJupe.array.length; i++) assert.equal(aJupe.array[i], 0)
+    assert.equal(aJupe.count, r.compte.sommets, 'aucun sommet de rideau ne doit être bâti')
+  })
+})
+
+test('⑫h `construireParoisCrop` RETIENT le fond du bloc pour la mer', () => {
+  // ⚠️ `MAILLONS` met `parois` AVANT `mer` : c'est ce qui rend la valeur
+  // disponible. Un refus de couverture ne doit RIEN retenir.
+  const solide = construireSolideCrop({
+    repere: REPERE,
+    forme: { coin: 0, expo: 2 },
+    hauteur: () => 100,
+    rayon: R_GLOBE,
+    echelle: (R_GLOBE / R_TERRE_M) * EXAG_SOCLE_NOMINALE,
+  })
+  assert.ok(Number.isFinite(solide.baseY) && solide.baseY < 0, `baseY ${solide.baseY}`)
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  assert.match(src, /this\._baseYCrop = solide\.baseY/)
+  // et il n'est posé qu'APRÈS le refus : une paroi refusée n'écrit rien
+  const iRefus = src.indexOf('if (solide.refus) return { mesh: null, solide')
+  const iPose = src.indexOf('this._baseYCrop = solide.baseY')
+  assert.ok(iRefus > 0 && iPose > iRefus)
+})
+
+test('⑫i le champ de la mer REND son unité — un seul calcul, deux lecteurs', () => {
+  // ⚠️ La mutation « le champ ne rend plus son unité » survivait : rien
+  // n'exigeait que `_cuireChampMer` la publie, alors que c'est le seul moyen
+  // que l'uniforme et le canal G partagent le MÊME nombre.
+  const g = globeAvecCrop()
+  const champ = Globe.prototype._cuireChampMer.call(g, {
+    repere: REPERE,
+    portee: PORTEE_CROP,
+    remplir: remplirBouchon,
+    echelle: (R_GLOBE / R_TERRE_M) * EXAG_SOCLE_NOMINALE,
+  })
+  assert.ok(Number.isFinite(champ.unite) && champ.unite > 0, `unite ${champ.unite}`)
+  const largeur = 2 * PORTEE_CROP * REPERE.demi * CIRCONFERENCE_M * (R_GLOBE / R_TERRE_M)
+  assert.ok(Math.abs(champ.unite - largeur / (COTE_CROP_UNITES * PORTEE_CROP)) < 1e-15)
+  champ.texture.dispose?.()
 })
