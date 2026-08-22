@@ -71,6 +71,8 @@ import {
   PORTEE_CROP,
 } from '../src/monde/mer-sphere.js'
 import { COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
+import { construireSolideCrop } from '../src/monde/parois-crop.js'
+import { auditerSolide } from '../src/monde/audit-solide.js'
 
 const SRC_OCEAN = new URL('../src/ocean.js', import.meta.url)
 const SRC_GLOBE = new URL('../src/globe.js', import.meta.url)
@@ -522,6 +524,150 @@ test('⑤b le RETRAIT est celui de `plinth.js`, et il rentre DANS le crop', () =
   assert.ok(Math.abs(maxRentre - (1 - RETRAIT_EAU_CROP)) < 1e-6, `avec retrait : ${maxRentre}`)
   // 0,22 unité de socle, exactement le chanfrein + la marge d'eau du mode plat
   assert.ok(Math.abs((1 - maxRentre) * (COTE_CROP_UNITES / 2) - 0.22) < 1e-4)
+})
+
+// ══════════ ⑤bis LE SENS DE PARCOURS DU RIDEAU — Tâche P7 ══════════════════
+//
+// ⛔ **LE DÉFAUT QUE CES QUATRE TESTS FERMENT.** La Tâche P4 a bâti le rideau
+// avec `(i, n+i, j)` / `(j, n+i, n+j)` en écrivant à côté « le sens de parcours
+// suit celui des parois » — c'était **l'exact inverse** du sens des parois, donc
+// des faces avant tournées vers l'INTÉRIEUR. Le matériau de la calotte étant en
+// `FrontSide` (relevé sur la page vivante : `side = 0`, quand la jupe du socle
+// est en `DoubleSide`), le rideau était **éliminé au culling sur chaque flanc
+// tourné vers la caméra**, et le fond marin nu passait par-dessus l'arête haute
+// de la paroi — le « tablier » du noteur.
+//
+// ⚠️ **AUCUN TEST NE REGARDAIT LE SENS**, et c'est pour ça que ça a tenu deux
+// tâches : ⑤a compte les triangles, ⑤b mesure le retrait, ⑤c les erreurs. Un
+// ruban retourné a exactement le même compte, le même retrait et les mêmes
+// erreurs.
+
+/** Le solide des parois sur le MÊME anneau — c'est lui, l'étalon de sens. */
+function solideCrop(basY = -0.12) {
+  return construireSolideCrop({
+    repere: REPERE,
+    rayon: 100,
+    forme: { coin: 0.08, expo: 4.4 },
+    echelle: 1,
+    hauteur: () => 0,
+    profondeur: Math.abs(basY),
+  })
+}
+
+test('⑤bis-a le rideau pose EXACTEMENT le même tableau d indices que les PAROIS', () => {
+  // ⚠️ **L ÉTALON N EST PAS UNE CONVENTION RECOPIÉE, C EST L AUTRE PIÈCE.**
+  // `construireSolideCrop` (`parois-crop.js` §④) DÉMONTRE son orientation ligne
+  // à ligne, et `test/crop-parois.test.js` l exige par volume signé. Les deux
+  // pièces tracent le même anneau (`contourCrop`, même pas, même forme) et
+  // rangent leurs sommets pareil (0…n−1 en haut, n…2n−1 en bas) : leurs
+  // triangles de mur DOIVENT donc être les mêmes entiers, dans le même ordre.
+  const j = construireJupeMer({ repere: REPERE, rayon: 100, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } })
+  const s = solideCrop()
+  const n = j.compte.anneau
+  assert.equal(s.compte.anneau, n, 'les deux anneaux doivent avoir la même longueur, sinon on ne compare rien')
+  const mur = Array.from(s.indices.subarray(0, n * 6))
+  const rideau = Array.from(j.indices)
+  assert.deepEqual(rideau, mur, 'le rideau et les parois ne tournent plus dans le même sens')
+})
+
+test('⑤bis-b chaque triangle du rideau regarde DEHORS — la normale, calculée', () => {
+  const j = construireJupeMer({ repere: REPERE, rayon: 100, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } })
+  const p = j.positions
+  const som = (k) => [p[k * 3], p[k * 3 + 1], p[k * 3 + 2]]
+  let dedans = 0
+  let horizontales = 0
+  let minDot = Infinity
+  for (let t = 0; t < j.indices.length; t += 3) {
+    const A = som(j.indices[t]), B = som(j.indices[t + 1]), C = som(j.indices[t + 2])
+    const e1 = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
+    const e2 = [C[0] - A[0], C[1] - A[1], C[2] - A[2]]
+    // three.js : face AVANT = parcours anti-horaire vu de la face, donc
+    // e1 × e2 pointe vers l observateur de la face avant.
+    const N = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0],
+    ]
+    const L = Math.hypot(N[0], N[1], N[2])
+    assert.ok(L > 0, 'triangle dégénéré dans le rideau')
+    // la direction du DEHORS au barycentre : le rayon horizontal depuis l axe
+    // du crop (le contour est convexe et contient l origine, donc le radial
+    // suffit à trancher le signe).
+    const cx = (A[0] + B[0] + C[0]) / 3
+    const cz = (A[2] + B[2] + C[2]) / 3
+    const r = Math.hypot(cx, cz)
+    const dot = (N[0] * cx + N[2] * cz) / (L * r)
+    if (dot <= 0) dedans++
+    if (Math.abs(N[1] / L) < 1e-6) horizontales++
+    if (dot < minDot) minDot = dot
+  }
+  assert.equal(dedans, 0, `${dedans} triangles du rideau sur ${j.compte.triangles} regardent DEDANS`)
+  // ⚠️ **ET LE RUBAN EST VERTICAL** : sa normale n a pas de composante `y`. Sans
+  // cette seconde assertion, un ruban couché à plat passerait le signe.
+  assert.equal(horizontales, j.compte.triangles, 'la normale du rideau doit être horizontale')
+  // ⚠️ **0,7 ET PAS 0,9, ET LA RAISON EST GÉOMÉTRIQUE** : sur les quatre coins
+  // de la superellipse, le rayon depuis l axe et la normale sortante divergent —
+  // mesuré ici, le pire vaut **0,7321**, c est-à-dire 42,9°, un peu moins que les
+  // 45° du coin d un carré. Exiger 0,9 refuserait les coins ; le signe, lui, est
+  // exact partout (`dedans === 0`).
+  assert.ok(minDot > 0.7, `la normale la plus obliquement sortante fait ${minDot} avec le radial`)
+})
+
+test('⑤bis-c MUTATION — le ruban RETOURNÉ tombe sur le volume signé, pas sur la fermeture', () => {
+  // ⚠️ **LA DÉMONSTRATION DU §1 D `audit-solide.js`, REJOUÉE SUR LE RIDEAU** :
+  // on lui pose ses deux couvercles pour en faire une coque close, et on audite.
+  // Ā ne voit PAS un solide retourné ; seul le volume signé l attrape. C est
+  // exactement l instrument que `test/crop-parois.test.js` emploie sur les
+  // parois — on ne s en écrit pas un second.
+  const j = construireJupeMer({ repere: REPERE, rayon: 100, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } })
+  const n = j.compte.anneau
+  // sommets : le ruban, puis le centre BAS (2n) et le centre HAUT (2n+1)
+  const pos = new Float64Array((2 * n + 2) * 3)
+  pos.set(j.positions)
+  let hautMoyen = 0
+  for (let i = 0; i < n; i++) hautMoyen += j.positions[i * 3 + 1]
+  hautMoyen /= n
+  pos[2 * n * 3 + 1] = j.positions[n * 3 + 1] // le fond, plat
+  pos[(2 * n + 1) * 3 + 1] = hautMoyen
+  const capot = (indices) => {
+    const idx = new Uint32Array(indices.length + n * 6)
+    idx.set(indices)
+    let w = indices.length
+    for (let k = 0; k < n; k++) {
+      const q = (k + 1) % n
+      idx[w++] = 2 * n; idx[w++] = n + k; idx[w++] = n + q          // le fond
+      idx[w++] = 2 * n + 1; idx[w++] = q; idx[w++] = k              // le couvercle
+    }
+    return idx
+  }
+  const sain = auditerSolide({ geometrie: pos, indices: capot(j.indices), axeHauteur: 'y' })
+  assert.equal(sain.ferme, true, `non fermé : ‖Ā‖/aire = ${sain.fermetureRelative}`)
+  assert.equal(sain.oriente, true, `volume signé ${sain.volume} : le rideau est retourné`)
+  assert.equal(sain.sain, true, sain.raison)
+
+  // ⚠️ **ON RETOURNE LA COQUE ENTIÈRE, COUVERCLES COMPRIS.** Ne retourner que le
+  // ruban ouvrirait la fermeture, et le test tomberait alors sur ‖Ā‖ — c est-à-
+  // dire sur autre chose que ce qu il prétend prouver. (Essayé : `ferme` passe à
+  // `false`, et la démonstration s effondre.)
+  const envers = new Uint32Array(capot(j.indices))
+  for (let t = 0; t < envers.length; t += 3) { const x = envers[t + 1]; envers[t + 1] = envers[t + 2]; envers[t + 2] = x }
+  const retourne = auditerSolide({ geometrie: pos, indices: envers, axeHauteur: 'y' })
+  assert.equal(retourne.ferme, true, 'un ruban retourné reste FERMÉ — c est tout le piège')
+  assert.equal(retourne.oriente, false, 'le volume signé ne voit pas le ruban retourné : il ne mesure rien')
+})
+
+test('⑤bis-d la SOURCE ne porte plus le sens fautif, et la calotte garde le sien', () => {
+  // ⚠️ Garde-fou de SOURCE, DÉCLARÉ COMME TEL : les trois tests ci-dessus
+  // prouvent le comportement ; celui-ci empêche seulement le sens fautif de
+  // revenir par un copier-coller, et vérifie qu on n a pas retourné LA CALOTTE
+  // au passage — elle, elle regarde vers le HAUT, et son sens est justifié dans
+  // `construireCalotte`.
+  const s = readFileSync(new URL('../src/monde/mer-sphere.js', import.meta.url), 'utf8')
+  const corps = s.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/indices\[m\+\+\] = i; indices\[m\+\+\] = n \+ i; indices\[m\+\+\] = j/.test(corps),
+    'le sens fautif du rideau est revenu')
+  assert.match(corps, /indices\[m\+\+\] = i; indices\[m\+\+\] = j; indices\[m\+\+\] = n \+ i/)
+  assert.match(corps, /indices\[m\+\+\] = a; indices\[m\+\+\] = c; indices\[m\+\+\] = b/)
 })
 
 test('⑤c un `basY` absent est une ERREUR, pas un zéro silencieux', () => {

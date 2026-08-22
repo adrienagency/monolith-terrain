@@ -642,16 +642,43 @@ export function construireJupeMer({
     jupe[n + i] = 1
   }
 
-  // ⚠️ **`DoubleSide` N'EST PAS UNE OPTION ICI** : le rideau se regarde de
-  // l'extérieur, mais un crop vu de l'autre bord montre sa face interne. Le sens
-  // de parcours suit celui des parois (l'anneau est horaire vu du dessus, donc
-  // haut → bas → suivant sort vers le DEHORS).
+  // ⛔ **LE SENS DE PARCOURS ÉTAIT RETOURNÉ, ET C'EST LE TABLIER DE MER —
+  // Tâche P7, VU À L'ÉCRAN PUIS PROUVÉ EN LE BOUGEANT.** La Tâche P4 avait bâti
+  // ce ruban et écrit ici « le sens de parcours suit celui des parois » ; il ne
+  // le suivait pas. `construireSolideCrop` (`parois-crop.js` §④), sur le MÊME
+  // anneau, avec le MÊME agencement (0…n−1 en haut, n…2n−1 en bas), pose
+  // `(k, j, n+k)` puis `(j, n+j, n+k)` — et il le DÉMONTRE ligne à ligne, puis
+  // `auditerSolide` exige un volume signé POSITIF. Ces deux lignes-ci posaient
+  // `(i, n+i, j)` et `(j, n+i, n+j)`, c'est-à-dire **l'exact inverse** : les
+  // faces avant du rideau pointaient vers l'INTÉRIEUR du bloc.
+  //
+  // ⚠️ **ET LE MATÉRIAU DE LA CALOTTE EST EN `FrontSide`** (relevé sur la page
+  // vivante : `side = 0`, quand la jupe du socle est en `DoubleSide`). Sur
+  // chaque flanc TOURNÉ VERS LA CAMÉRA le rideau était donc **éliminé au
+  // culling**, et par le trou on voyait la lèvre nue du fond marin passer
+  // par-dessus l'arête haute de la paroi : le « tablier pâle à bord festonné »
+  // du noteur.
+  //
+  // ⚡ **A/B à témoin nul dans la même page, boucle gelée, La Réunion z12,
+  // cadrage côte de la notation-01 :** en retournant le ruban DANS LE TAMPON
+  // D'INDEX, le liséré de fond marin nu entre la nappe et l'arête haute tombe
+  // de **5 314 px à 186 px** sur les 210 colonnes où le socle, lui, amène son
+  // eau jusqu'à son mur (le socle en rend **441**) ; le rideau visible passe de
+  // **1 519 px à 6 642 px**. Retour au sens d'origine : **les trois chiffres
+  // reviennent au pixel.** (`.banc/P7/S5-ab-rideau-P7.json`.)
+  //
+  // ⚠️ **`DoubleSide` RENDRAIT LA MÊME IMAGE, ET N'EST PAS LA RÉPARATION.**
+  // Mesuré aussi : `side = DoubleSide` sur le sens fautif rend **exactement le
+  // même liséré (186 px)** — il ne fait que rattraper le culling. Le ruban est
+  // un anneau FERMÉ autour d'un bloc opaque : d'un point de vue extérieur, la
+  // moitié lointaine est de toute façon cachée par le bloc. On répare le sens,
+  // on ne paie pas la seconde face.
   const indices = new Uint32Array(n * 6)
   let m = 0
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
-    indices[m++] = i; indices[m++] = n + i; indices[m++] = j
-    indices[m++] = j; indices[m++] = n + i; indices[m++] = n + j
+    indices[m++] = i; indices[m++] = j; indices[m++] = n + i
+    indices[m++] = j; indices[m++] = n + j; indices[m++] = n + i
   }
   return { positions, uv, jupe, indices, compte: { anneau: n, sommets: n * 2, triangles: n * 2 } }
 }
