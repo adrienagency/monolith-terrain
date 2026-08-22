@@ -4679,6 +4679,37 @@ function majEstompage() {
   veilleEstompage.maj(altitudeCadrageM())
 }
 
+// ══════════ LA LOI DE TEXTURE ANCRÉE AU MONDE — Tâche K ════════════════════
+//
+// ⚠️ **LUE ICI ET NULLE PART AILLEURS, ET LE `fov` EST LU EN DIRECT.** Le §0 du
+// plan a payé deux fautes critiques là-dessus : le code dit `FOV_DEG = 30`
+// (`main.js:289`) mais l'application vivante tourne à **33** parce qu'un
+// template repose `params.fov`. Un seuil dérivé d'un fov écrit en dur serait
+// faux de 10 % sur toute la session, en silence.
+//
+// ⚠️ **ET LA HAUTEUR EST CELLE DU TAMPON DE DESSIN, PAS CELLE DU CSS.** Sur un
+// écran Retina le tampon fait deux fois la hauteur en points ; prendre
+// `clientHeight` doublerait les mètres par pixel et ferait disparaître les
+// courbes de niveau sur les seules machines à forte densité — un défaut que
+// personne ne reproduirait sur son poste.
+//
+// ⚠️ **SOUS DRAPEAU, ET LE DÉFAUT EST L'ANCIEN.** Hors `?terre=unique`, la loi
+// est RETIRÉE : `uMppFacteur` retombe à 0 et le nuanceur reprend `fwidth(vUv) ×
+// uTilePx`, au bit près. La vue orbitale en production ne bouge pas.
+const _tailleDessin = new THREE.Vector2()
+function majLoiTextureMonde() {
+  if (!globe) return
+  if (!terreUniqueBranchee) { globe.retirerLoiMonde(); return }
+  renderer.getDrawingBufferSize(_tailleDessin)
+  const cam = frontiereActive ? camGlobe : camera
+  const ancre = latLonOrigineBloc()
+  globe.poserLoiMonde({
+    fovDeg: cam?.fov ?? camera.fov,
+    hauteurPx: _tailleDessin.y,
+    lat: Number.isFinite(ancre?.lat) ? ancre.lat : 0,
+  })
+}
+
 // ══════════ UNE SEULE TERRE — Tâche I, LE CONTEXTE ET LA VEILLE ════════════
 //
 // ⚠️ **LE CROP DOIT TOMBER EXACTEMENT SUR LE BLOC, ET LA SIMILITUDE NE PARDONNE
@@ -11432,6 +11463,7 @@ function tick() {
   // en mode surface c'est elle, et pas la caméra principale, qui dit au quadtree
   // où il est regardé. Sans drapeau, `majCameraFond` rend la main tout de suite.
   majCameraFond()
+  majLoiTextureMonde()
   if (frontiereActive && modes.mode === 'surface') {
     // ⚠️ **LE GLOBE STREAME MAINTENANT EN MODE SURFACE, ET C'EST UN COÛT
     // RÉEL, PAS UN EFFET DE BORD GRATUIT.** Il est le fond : sans cet appel il

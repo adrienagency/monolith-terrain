@@ -72,6 +72,7 @@ import { FOV_DEG } from './monde/seuil-socle.js'
 // `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
 // gardée par un test —, donc aucun cycle n'est ouvert ici.
 import { lireExageration } from './monde/exageration-continue.js'
+import { loiTextureMonde, GRAIN_PAR_PIXEL, METRES_PAR_DEGRE } from './monde/loi-texture-monde.js'
 // LE FOND DU CROP — Tâche J bis. Pur lui aussi (il n'importe que
 // `crop-sphere.js`, pur) : il ne rend que des nombres, et c'est ce fichier-ci
 // qui décide QUAND les lire. Son en-tête porte les mesures qui le fondent.
@@ -486,12 +487,37 @@ const VERT = /* glsl */ `
 varying vec2 vUv;
 varying vec3 vNormalW;
 varying vec2 vLatLon;
+// LA DISTANCE CAMERA DU FRAGMENT — Tache K, la loi de texture ancree au monde.
+//
+// (Pas d'accent grave dans ce bloc : il vit dans un template literal JS et le
+// terminerait — le piege que terrain.js, ocean.js et le bloc du crop
+// documentent tous les trois, et qui a coute une passe de syntaxe ici meme.)
+//
+// ⚠️ PRISE EN ESPACE DE VUE, PAS EN ESPACE MONDE, ET C'EST LA PRECISION QUI LE
+// DICTE : les sommets sont en RTC (relatifs au centre de LEUR tuile) expres pour
+// ne pas payer l'ulp float32 a magnitude 100 (0,486 m, recalcule par l'etude du
+// fondu de niveaux). modelViewMatrix * position rend la position dans le repere
+// de la CAMERA, dont la longueur EST la distance cherchee — sans jamais
+// reconstruire une coordonnee monde de grande magnitude.
+//
+// ⚠️ ET C'EST LA PROFONDEUR (-z de vue), PAS LA LONGUEUR DU VECTEUR. Pour une
+// camera en perspective, un pixel couvre 2 z tan(fov/2) / hauteurPx d'un plan
+// perpendiculaire a l'axe de vue : la grandeur exacte est la PROFONDEUR. Prendre
+// length(mv.xyz) surestimerait de 1/cos(theta) sur les bords — jusqu'a +8 % au
+// coin a fov 33 — et ferait varier la loi avec la position a l'ecran, ce que la
+// tache existe justement pour supprimer.
+//
+// ⚠️ ET C'EST UN varying, PAS UN ATTRIBUT : aucun octet de geometrie en plus,
+// contrairement a la cible de morphing chiffree a +23 % par l'etude.
+varying float vProfCam;
 attribute vec2 latlon;
 void main() {
   vUv = uv;
   vLatLon = latlon;
   vNormalW = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vProfCam = -mv.z;
+  gl_Position = projectionMatrix * mv;
 }
 `
 
@@ -561,6 +587,22 @@ uniform vec3 uOceanDeep;
 uniform float uPlancherRampeM; // garde de division, en metres — voir le module
 // côté de la tuile en texels — 256 (AWS) ou 512 (Mapterhorn), voir planTuile
 uniform float uTilePx;
+
+// ══════════ LA LOI DE TEXTURE ANCREE AU MONDE — Tache K ═══════════════════
+//
+// ⚠️ uMppFacteur A 0 : RIEN NE CHANGE. Meme garde et meme raison que uCropOn,
+// uHabOn et uMerRampeOn — la production (la vue orbitale du globe, en ligne sur
+// shibumap.com) rend exactement ce qu'elle rendait, au bit pres, tant que
+// poserLoiMonde n'a pas ete appele. C'est le patron « on elargit sans changer le
+// defaut » (distanceRivage de F, aussi: null de J, le fond de J bis).
+//
+// La loi vit dans src/monde/loi-texture-monde.js et se verifie sous node
+// (test/loi-texture-monde.test.js) ; ce bloc-ci en est la TRANSCRIPTION.
+uniform float uMppFacteur;    // metres de sol par pixel d'ecran, PAR unite de distance
+uniform float uResRefM;       // metres de sol par texel de la donnee de reference
+uniform float uGrainParPixel; // cellules de grain par pixel d'ecran
+uniform float uMetresParDegre;
+varying float vProfCam;
 
 // ══════════ LE CROP DÉCOUPÉ DANS LA SPHÈRE — Tâche A, « UNE SEULE TERRE » ═══
 //
@@ -1006,7 +1048,30 @@ void main() {
   // tile shrinks in the orbital/travel view the sampled height aliases and the
   // contour lines CRAWL. Fade them out as the tile minifies (texels per screen
   // pixel > ~1) so the far globe reads clean; they return in full up close.
-  float texel = max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx;
+  //
+  // ══════ ET C'EST ICI QUE LA LOI QUITTE L'ESPACE-TUILE — Tache K ══════════
+  //
+  // ⛔ fwidth(vUv) EST LA DERIVEE D'UN UV LOCAL A LA TUILE, ET uTilePx VAUT 256
+  // OU 512 SELON LA TUILE. Une tuile grossiere couvre plus de terrain pour
+  // autant de texels, donc fwidth(vUv) est mecaniquement plus petit : minFade
+  // peut valoir 1 d'un cote d'une frontiere de niveaux et 0 de l'autre — UNE
+  // TUILE ENTIERE S'AFFICHE COMME UN CHAMP PLAT pendant que sa voisine garde ses
+  // courbes. C'est l'arete droite qu'Adrien voit, et l'Etape 1 de la Tache K l'a
+  // MESUREE : geler minFade change 23,5 % de l'image au nadir et 41,0 % en
+  // isometrique, contre 0,05 % et 0,21 % pour crowd. C'est lui qui domine.
+  //
+  // ⚠️ ET DES SEPT fwidth DU NUANCEUR, C'EST LE SEUL QUI SOIT EN ESPACE-TUILE
+  // DE BOUT EN BOUT : les six autres mesurent des metres, des degres ou une
+  // couverture de cote, c'est-a-dire des grandeurs de MONDE par pixel d'ecran.
+  // Le detail de l'audit est en tete de src/monde/loi-texture-monde.js.
+  //
+  // La grandeur de remplacement ne depend QUE de la distance camera : ni du
+  // niveau de la tuile (donc plus d'arete), ni de l'inclinaison de la camera
+  // (donc la meme loi en nadir et en isometrique — le critere de sortie).
+  float mppEcran = vProfCam * uMppFacteur; // metres de sol par pixel d'ecran
+  float texelTuile = max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx; // la loi du depot
+  float texelMonde = mppEcran / max(uResRefM, 1e-6);
+  float texel = uMppFacteur > 0.0 ? texelMonde : texelTuile;
   float minFade = clamp(1.6 - texel * 0.55, 0.0, 1.0);
   float contour = max(minor * minorK, major) * uContourOpacity * crowd * minFade;
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
@@ -1035,7 +1100,28 @@ void main() {
   col = mix(uShadowColor, col, 0.10 + 0.90 * day);
 
   // faint paper grain
-  col += (hash12(vUv * 941.7 + vLatLon) - 0.5) * 0.02 * (0.2 + 0.8 * day);
+  // ⛔ LE GRAIN ETAIT INDEXE SUR vUv, DONC SUR LA TUILE. vUv va de 0 a 1 quelle
+  // que soit l'etendue au sol : 941,7 cellules par tuile, donc une frequence
+  // inversement proportionnelle a la taille de la tuile, donc un grain qui
+  // DOUBLE de taille a chaque frontiere de niveaux. vLatLon ne compensait pas —
+  // le terme 941,7 x vUv domine de plusieurs ordres de grandeur.
+  //
+  // ⚠️ C'EST LA MEME DISCIPLINE QUE L'HABILLAGE, QUI INDEXE DEJA SON GRAIN SUR
+  // qCrop « sinon le grain se repeterait a chaque tuile ». Ici la coordonnee
+  // continue est le METRE DE SOL absolu, tire de vLatLon (absolu, il etait deja
+  // la pour le graticule et pour la decoupe), ramene en PIXELS D'ECRAN par
+  // mppEcran. Le grain garde donc sa finesse — 941,7/256 = 3,678 cellules par
+  // pixel, derive et non pose — mais son ancrage est le SOL, pas la tuile.
+  //
+  // ⚠️ ET IL NE RESTE PAS COLLE A L'ECRAN : tourner ou deplacer la camera ne
+  // change pas la coordonnee (le sol ne bouge pas), seule la distance la remet a
+  // l'echelle — exactement comme le niveau de tuile le faisait, mais sans marche.
+  // Le moirage que terrain.js documente (etude 5.4) demanderait une coordonnee
+  // d'ecran ; ce n'en est pas une.
+  float grainX = vLatLon.y * cos(radians(vLatLon.x)) * uMetresParDegre / max(mppEcran, 1e-3) * uGrainParPixel;
+  float grainY = vLatLon.x * uMetresParDegre / max(mppEcran, 1e-3) * uGrainParPixel;
+  vec2 grainP = uMppFacteur > 0.0 ? vec2(grainX, grainY) : vUv * 941.7 + vLatLon;
+  col += (hash12(grainP) - 0.5) * 0.02 * (0.2 + 0.8 * day);
 
   gl_FragColor = vec4(col, couvertureCrop);
 }
@@ -1556,6 +1642,16 @@ export class Globe {
       // `this.uniforms`, que `_materialFor` étale dans chaque matériau) : le
       // crop est une propriété du monde, pas de la tuile — contrairement à
       // `uTex` et `uTilePx`, qui sont propres à chacune.
+      // LA LOI DE TEXTURE ANCRÉE AU MONDE — Tâche K. ⚠️ **`uMppFacteur: 0` :
+      // sans `poserLoiMonde`, RIEN NE CHANGE** — même garde et même raison que
+      // `uCropOn`, `uHabOn` et `uMerRampeOn`. Ces quatre-là sont PARTAGÉS (ils
+      // vivent dans `this.uniforms`, que `_materialFor` étale dans chaque
+      // matériau) : la loi est une propriété du MONDE, pas de la tuile — c'est
+      // le sujet même de la tâche, et la mettre par tuile la referait mentir.
+      uMppFacteur: { value: 0 },
+      uResRefM: { value: 1 },
+      uGrainParPixel: { value: GRAIN_PAR_PIXEL },
+      uMetresParDegre: { value: METRES_PAR_DEGRE },
       uCropOn: { value: 0 },
       uCropCentre: { value: new THREE.Vector2(0, 0) },
       uCropDemi: { value: 1 },
@@ -1793,6 +1889,41 @@ export class Globe {
     // `creerVeilleEstompage` ne le déclenche que sur changement de valeur.
     this._majBordMer()
     return v
+  }
+
+  /**
+   * LA LOI DE TEXTURE ANCRÉE AU MONDE — Tâche K.
+   *
+   * Pose les quatre uniformes qui font quitter l'espace-tuile à `minFade` et au
+   * grain de papier. ⚠️ **APPELÉE PAR IMAGE**, parce que le `fov` et la hauteur
+   * du cadre changent en cours de session : le §0 du plan est formel, « tout ce
+   * qui dérive un seuil du fov lit `camera.fov` EN DIRECT » — le code dit 30,
+   * l'application vivante tourne à 33.
+   *
+   * ⚠️ **REND `false` ET NE TOUCHE À RIEN SI LA LOI N'EST PAS CALCULABLE.** Un
+   * `NaN` posé dans `uMppFacteur` ferait basculer chaque fragment sur la branche
+   * monde avec une échelle absurde — un écran noir sans un mot d'erreur.
+   *
+   * @param {{fovDeg:number, hauteurPx:number, lat:number}} o
+   */
+  poserLoiMonde({ fovDeg, hauteurPx, lat = 0 } = {}) {
+    const loi = loiTextureMonde({ fovDeg, hauteurPx, lat })
+    if (!loi) return false
+    const u = this.uniforms
+    u.uMppFacteur.value = loi.mppFacteur
+    u.uResRefM.value = loi.resRefM
+    u.uGrainParPixel.value = loi.grainParPixel
+    u.uMetresParDegre.value = loi.metresParDegre
+    return true
+  }
+
+  /**
+   * Retire la loi de monde — le nuanceur reprend celle du dépôt, AU BIT PRÈS.
+   * C'est ce qui garantit que la production (la vue orbitale de shibumap.com)
+   * n'est pas concernée tant que `?terre=unique` n'est pas levé.
+   */
+  retirerLoiMonde() {
+    this.uniforms.uMppFacteur.value = 0
   }
 
   /** Retire l'estompage — on revient au crop SEUL, le comportement de la Tâche A. */
