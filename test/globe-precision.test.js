@@ -372,6 +372,30 @@ test('P7 · sans bloc, la jupe garde sa longueur AU BIT PRÈS — le défaut est
   const r = rayonsJupe(t1.mesh)
   const chute = r.bord - r.jupe
   assert.ok(chute > 0.09 && chute < 0.91, `chute de jupe hors bornes : ${chute.toFixed(4)}`)
+
+  // ⚠️ **CHAQUE SOMMET DE JUPE EST SOUS LE SIEN, PAS SOUS UN AUTRE.** Sans cette
+  // assertion, une PERMUTATION des sommets de jupe (`dst = nV + bi + 1`) survit :
+  // elle est appliquée partout, donc tous les comptes, toutes les distances et
+  // même la comparaison « avant / après » restent d accord avec eux-mêmes.
+  // Trouvée par la campagne de mutation de P7 (survivante 4c).
+  const mesh = t1.mesh
+  mesh.updateMatrixWorld(true)
+  const G = grilleDe(mesh)
+  const nV = (G + 1) ** 2
+  const bord = mesh.geometry.userData.jupe.bord
+  const attr = mesh.geometry.attributes.position
+  const A = new THREE.Vector3()
+  const Bv = new THREE.Vector3()
+  let pireEcart = 0
+  for (let bi = 0; bi < bord.length; bi++) {
+    A.fromBufferAttribute(attr, bord[bi]).applyMatrix4(mesh.matrixWorld)
+    Bv.fromBufferAttribute(attr, nV + bi).applyMatrix4(mesh.matrixWorld)
+    // colinéaires depuis le CENTRE de la planète : le sinus de l angle entre les
+    // deux rayons doit être nul.
+    const sin = A.clone().cross(Bv).length() / (A.length() * Bv.length())
+    if (sin > pireEcart) pireEcart = sin
+  }
+  assert.ok(pireEcart < 1e-6, `un sommet de jupe n est pas sous SON sommet de bord : sinus ${pireEcart}`)
 })
 
 test('P7 · avec un bloc, la jupe s ARRÊTE au plancher, et pas un pouce plus bas', () => {
@@ -440,7 +464,14 @@ test('P7 · `_retaillerJupe` est IDEMPOTENTE, et elle rend la jupe pleine quand 
   g._baseYCrop = rBord - R_GLOBE - 0.06 // la borne mord — voir le test précédent
   g._parois = { faux: true }
   g.tiles.set(t.key, t)
+  // ⚠️ **LE TAMPON DOIT ÊTRE DÉCLARÉ SALE, SINON LE GPU GARDE L ANCIEN.** Une
+  // retaille qui écrit dans le tableau sans lever `needsUpdate` ne change RIEN à
+  // l écran, et aucune comparaison de tampon ne peut le voir : `version` est le
+  // seul témoin. Trouvée par la campagne de mutation de P7 (survivante 4d).
+  const versionAvant = t.mesh.geometry.attributes.position.version
   assert.equal(g._retaillerJupes(), 1)
+  assert.ok(t.mesh.geometry.attributes.position.version > versionAvant,
+    'la retaille n a pas levé `needsUpdate` : le GPU garde la jupe d avant')
   const borne = Float32Array.from(t.mesh.geometry.attributes.position.array)
   let bouges = 0
   for (let i = 0; i < pleine.length; i++) if (pleine[i] !== borne[i]) bouges++
@@ -459,6 +490,16 @@ test('P7 · `_retaillerJupe` est IDEMPOTENTE, et elle rend la jupe pleine quand 
   g._retaillerJupes()
   const rendue = t.mesh.geometry.attributes.position.array
   for (let i = 0; i < pleine.length; i++) assert.equal(rendue[i], pleine[i], `sommet ${i} n est pas revenu`)
+
+  // ⚠️ **UNE TUILE SANS JUPE N EST PAS UNE TUILE RETAILLÉE.** Le compte que rend
+  // `_retaillerJupes` est ce qui dit combien de jupes ont bougé ; le rendre vrai
+  // pour un maillage sans `userData.jupe` en ferait un compte de TUILES.
+  // Trouvée par la campagne de mutation de P7 (survivante 4e).
+  assert.equal(g._retaillerJupe({ mesh: null }), false)
+  assert.equal(g._retaillerJupe({ mesh: { geometry: { userData: {} } } }), false)
+  assert.equal(g._retaillerJupe(undefined), false)
+  g.tiles.set('sans-jupe', { mesh: { geometry: { userData: {} } } })
+  assert.equal(g._retaillerJupes(), 1, 'une tuile sans jupe ne doit pas être comptée')
 })
 
 test('P7 · `poserParoisCrop` retaille, `retirerParoisCrop` rend — lecture de SOURCE', () => {
