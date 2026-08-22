@@ -43,6 +43,9 @@ import {
   ecumeLisere,
   ecumeMer,
   GLSL_ECUME,
+  // ⚠️ **Tâche P5** : l'état de mer, LU sur le socle et jamais recalculé.
+  ETAT_MER_NEUTRE,
+  etatMerDuSocle,
 } from '../src/monde/ecume-mer.js'
 import {
   construireJupeMer,
@@ -408,9 +411,10 @@ test('④c `main.js` pose les réglages à CHAQUE image, juste après `setView`'
   // ⚠️ **ET IL PORTE LES RÉGLAGES VIVANTS DES DEUX SOURCES — Tâche P5** : la mer
   // du socle (`reglagesMer`, qui contient l'état de mer) ET les trois couleurs
   // de fond, qui vivent sur `terrain.mapUniforms` et non sur `realWater`.
-  const appel = s.slice(j, j + 200)
+  const appel = s.slice(j, j + 400)
   assert.match(appel, /\.\.\.realWater\?\.reglagesMer/)
-  assert.match(appel, /fond: couleursFondDuSocle\(terrain\.mapUniforms\)/)
+  // ⚠️ **UN PAR UN, JAMAIS LA POIGNÉE** — `test/damier-uniformes.test.js` ③.
+  assert.match(appel, /fond: couleursFondDuSocle\(\s+terrain\.mapUniforms\.uOceanShallow\.value,/)
   // ⚠️ **ET IL N'Y EN A QU'UN** : deux sites poseraient deux valeurs d'une même
   // image, et c'est le genre d'écart qu'on met des soirées à lire.
   assert.equal((s.match(/majReglagesMer\(/g) || []).length, 1)
@@ -560,4 +564,92 @@ test('⑥b `dBord` est SIGNÉ — sans quoi le retrait ne peut pas exister', () 
   assert.equal(ancien(0.5, 0, 0, 2), 0)
   assert.equal(ancien(0, 0, 0, 2), 0)
   assert.ok(bordDeMer(1).fin < ancien(0.5, 0, 0, 2), 'le fondu tomberait entièrement sous la mesure')
+})
+
+// ══════════ ⑦ L'ÉTAT DE MER — Tâche P5, la réserve n° 1 de P4 ══════════════
+//
+// ⛔ **P4 L'AVAIT MESURÉ ET NE L'AVAIT PAS FERMÉ** : *« le socle vit à
+// `uChop = 1`, `uWaveH = 2`, `uFoam = 1,9`, `uFoamScale = 1` ; la calotte prend
+// les défauts de `poserMer` […] Ce sont deux MERS différentes. »*
+// ⚡ Et il y en avait un **sixième**, non nommé : la VITESSE (`uSpeedMul = 0,4`
+// contre `uMerVitesse: { value: 1 }` codé en dur — la houle du crop défilait
+// **2,5 fois trop vite**).
+
+test('⑦a `etatMerDuSocle` LIT les six uniformes vivants', () => {
+  const socle = {
+    uWaveH: { value: 2 }, uChop: { value: 1 }, uFoam: { value: 1.9 },
+    uFoamScale: { value: 1 }, uGloss: { value: 110 }, uSpeedMul: { value: 0.4 },
+  }
+  assert.deepEqual(etatMerDuSocle(socle),
+    { houle: 2, chop: 1, ecume: 1.9, ecumeEchelle: 1, brillance: 110, vitesse: 0.4 })
+})
+
+test('⑦b sans socle à lire, `etatMerDuSocle` rend le NEUTRE — la mer d avant P5', () => {
+  assert.deepEqual(etatMerDuSocle(null), ETAT_MER_NEUTRE)
+  assert.deepEqual(etatMerDuSocle(undefined), ETAT_MER_NEUTRE)
+  assert.deepEqual(etatMerDuSocle({}), ETAT_MER_NEUTRE)
+})
+
+test('⑦c un uniforme absent ou NaN rend SA valeur neutre, jamais celle du voisin', () => {
+  // ⚠️ **CHAMP PAR CHAMP** : une lecture qui retomberait en bloc sur le neutre
+  // dès qu'un seul uniforme manque jetterait cinq valeurs justes ; une qui
+  // prendrait le voisin fabriquerait une mer que personne n'a réglée. Les deux
+  // fautes passent un `deepEqual` global si on ne teste pas séparément.
+  const noms = {
+    houle: 'uWaveH', chop: 'uChop', ecume: 'uFoam',
+    ecumeEchelle: 'uFoamScale', brillance: 'uGloss', vitesse: 'uSpeedMul',
+  }
+  for (const [champ, uni] of Object.entries(noms)) {
+    const seul = etatMerDuSocle({ [uni]: { value: 0.987654 } })
+    assert.equal(seul[champ], 0.987654, `${uni} n atteint pas ${champ}`)
+    for (const [autre, v] of Object.entries(ETAT_MER_NEUTRE)) {
+      if (autre === champ) continue
+      assert.equal(seul[autre], v, `${uni} a débordé sur ${autre}`)
+    }
+    // ⚠️ **UN NaN NE PASSE PAS** : il éteint la moitié d'un GPU sans un mot.
+    assert.equal(etatMerDuSocle({ [uni]: { value: NaN } })[champ], ETAT_MER_NEUTRE[champ])
+    assert.equal(etatMerDuSocle({ [uni]: {} })[champ], ETAT_MER_NEUTRE[champ])
+  }
+})
+
+test('⑦d les deux valeurs dérivées du NEUTRE remontent à `chopLook` d `ocean.js`', () => {
+  // ⚠️ **LU SUR LE DISQUE, PAS RECOPIÉ ICI.** `poserMer` transcrivait
+  // `chopLook` (`1,9 × c²` et `240 − 130 × c`) ; `ETAT_MER_NEUTRE` en porte
+  // l'image à `c = 0,7`, et ce test la re-dérive depuis la SOURCE d'`ocean.js`.
+  const src = ocean()
+  const m = src.match(/function chopLook\(c\) \{\s*\n?\s*return \{ detail: [^,]+, foam: ([\d.]+) \* c \* c, gloss: ([\d.]+) - ([\d.]+) \* c \}/)
+  assert.ok(m, 'chopLook doit rester lisible dans ocean.js')
+  const [, foamK, glossA, glossB] = m.map(Number)
+  assert.equal(ETAT_MER_NEUTRE.ecume, foamK * ETAT_MER_NEUTRE.chop * ETAT_MER_NEUTRE.chop)
+  assert.equal(ETAT_MER_NEUTRE.brillance, glossA - glossB * ETAT_MER_NEUTRE.chop)
+  // et le neutre reste bien celui du dépôt d'avant P5 : chop 0,7, écume 0,35
+  assert.equal(ETAT_MER_NEUTRE.chop, 0.7)
+  assert.equal(ETAT_MER_NEUTRE.houle, 0.5)
+  assert.equal(ETAT_MER_NEUTRE.ecumeEchelle, 0.35)
+  assert.equal(ETAT_MER_NEUTRE.vitesse, 1)
+})
+
+test('⑦e `ocean.js` REMONTE son état de mer par `reglagesMer`, et par lui seul', () => {
+  const src = ocean()
+  // un seul accesseur, et il appelle la lecture partagée
+  assert.match(src, /get reglagesMer\(\)/)
+  assert.equal((src.match(/get reglagesMer\(\)/g) || []).length, 1)
+  assert.match(src, /etat: etatMerDuSocle\(u\),/)
+  // ⚠️ **ET `globe.js` NE REDÉRIVE RIEN** : plus une seule transcription de
+  // `chopLook` dans le nuanceur ni dans `poserMer`. C'était deux écritures
+  // d'une loi qui vit dans `ocean.js`.
+  const g = sansCommentaires(globe())
+  assert.ok(!/1\.9 \* chop \* chop/.test(g), 'globe.js ne doit plus transcrire foam')
+  assert.ok(!/240 - 130 \* chop/.test(g), 'globe.js ne doit plus transcrire gloss')
+})
+
+test('⑦f `majReglagesMer` est le SEUL écrivain des six uniformes d état de mer', () => {
+  // ⚠️ **DEUX ÉCRIVAINS POUR UNE GRANDEUR, C EST LA FAUTE QUE D13 §③ NOMME**, et
+  // ce chantier l'a payée sur `hNorm`, sur `uMerUnite` et sur le déclin côtier.
+  // Chaque uniforme n'est ASSIGNÉ qu'une fois hors de sa déclaration.
+  const g = sansCommentaires(globe())
+  for (const uni of ['uMerHoule', 'uMerChop', 'uMerEcume', 'uMerEcumeEchelle', 'uMerBrillance', 'uMerVitesse']) {
+    const ecritures = (g.match(new RegExp(`u\\.${uni}\\.value = `, 'g')) || []).length
+    assert.equal(ecritures, 1, `${uni} doit avoir UN seul écrivain, pas ${ecritures}`)
+  }
 })

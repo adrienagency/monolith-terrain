@@ -963,6 +963,33 @@ test('⑩d le nuanceur du globe garde la rampe nautique DERRIÈRE son interrupte
 // (`BufferGeometry`, `DataTexture`, `ShaderMaterial`), et aucune de ces
 // classes n'a besoin d'un contexte WebGL pour être CONSTRUITE.
 
+// ⚠️ **Tâche P5 — UNE COULEUR BOUCHON QUI COPIE VRAIMENT.** L'ancien bouchon ne
+// portait qu'un `set()` VIDE : une `majReglagesMer` qui n'aurait rien copié
+// serait passée sans un mot. Celui-ci porte les trois canaux, `set`, `copy` et
+// `getHexString`, donc le test peut LIRE ce qui a été posé.
+function couleurBouchon(hex = '#000000') {
+  const c = {
+    isColor: true,
+    r: parseInt(hex.slice(1, 3), 16) / 255,
+    g: parseInt(hex.slice(3, 5), 16) / 255,
+    b: parseInt(hex.slice(5, 7), 16) / 255,
+    set(v) {
+      if (typeof v === 'string') {
+        c.r = parseInt(v.slice(1, 3), 16) / 255
+        c.g = parseInt(v.slice(3, 5), 16) / 255
+        c.b = parseInt(v.slice(5, 7), 16) / 255
+      }
+      return c
+    },
+    copy(o) { c.r = o.r; c.g = o.g; c.b = o.b; return c },
+    getHexString() {
+      const h = (v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')
+      return h(c.r) + h(c.g) + h(c.b)
+    },
+  }
+  return c
+}
+
 function globeAvecCrop(overrides = {}) {
   // Un `Globe` minimal qui porte exactement ce que `poserMer` lit et écrit —
   // même discipline que `globeMinimal()` ci-dessus, élargie au corps de la
@@ -991,9 +1018,9 @@ function globeAvecCrop(overrides = {}) {
       // discipline que le reste de ce bâtisseur : ce que la méthode exerce, il
       // le porte pour de vrai.
       uPlancherRampeM: val(0),
-      uOceanShallow: val({ set() {} }),
-      uOceanMid: val({ set() {} }),
-      uOceanDeep: val({ set() {} }),
+      uOceanShallow: val(couleurBouchon(RAMPE_NAUTIQUE.peu)),
+      uOceanMid: val(couleurBouchon(RAMPE_NAUTIQUE.moyen)),
+      uOceanDeep: val(couleurBouchon(RAMPE_NAUTIQUE.fond)),
       // Tâche J : le bord de la mer les lit — VRAIS uniformes, pas des bouchons,
       // pour que `poserEstompage` et `_majBordMer` s'exercent l'un sur l'autre.
       uEstompageOn: val(0),
@@ -1474,4 +1501,265 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
     const un = { materials: [{ uniforms: { [nom]: { value: valeur } } }] }
     assert.equal(d.get.call(un).etat[champ], valeur, `${nom} n atteint pas ${champ}`)
   }
+})
+
+// ══════════ ⑬ LE FOND MARIN DU CROP — Tâche P5 ═════════════════════════════
+//
+// ⛔ **LE DÉFAUT NOMMÉ PAR LA TÂCHE P4** : *« le fond marin du crop est EN
+// TERRASSES […] gradins pâles à bords droits »*. Mesuré dans la page vivante
+// (La Réunion z12, `.banc/vues-P5/bilan-P5.json`), il n'y avait **ni terrasse ni
+// quantification de la donnée** : le champ rend **5 303 valeurs distinctes sur
+// 5 449 nœuds d'eau**, et sa PENTE moyenne est celle du MNT du socle à 1-3 %
+// près. Ce qui était faux, ce sont **deux entrées de la loi de couleur** — et
+// aucune des deux n'était calculée : elles étaient POSÉES, à des défauts.
+
+test('⑬a `profondeurMaxDuCrop` mesure le CROP, pas la calotte', () => {
+  // un champ de portée 3 : le crop occupe le tiers central. On creuse le
+  // DEHORS beaucoup plus profond que le dedans — c'est exactement la situation
+  // de La Réunion (calotte à −3 510,49 m, crop à −2 116,27 m).
+  const cote = 13
+  const portee = 3
+  const v = new Float32Array(cote * cote)
+  const n = cote - 1
+  for (let j = 0; j < cote; j++) {
+    for (let i = 0; i < cote; i++) {
+      const qu = ((2 * i) / n - 1) * portee
+      const qv = ((2 * j) / n - 1) * portee
+      v[j * cote + i] = Math.abs(qu) <= 1 && Math.abs(qv) <= 1 ? -2116.27 : -3510.49
+    }
+  }
+  assert.ok(Math.abs(profondeurMaxDuCrop(v, cote, portee) - 2116.27) < 1e-2)
+  // ⚠️ **ET LE TÉMOIN QUI DIT QUE LE TEST DISTINGUE QUELQUE CHOSE** : le maximum
+  // du champ ENTIER, lui, vaut 3 510,49. Sans lui, un `profondeurMaxDuCrop` qui
+  // rendrait bêtement le maximum global passerait la ligne du dessus le jour où
+  // les deux valeurs coïncideraient.
+  let global = 0
+  for (const h of v) if (-h > global) global = -h
+  assert.ok(Math.abs(global - 3510.49) < 1e-2)
+  assert.ok(global / profondeurMaxDuCrop(v, cote, portee) > 1.65,
+    'le dehors doit être NETTEMENT plus profond, sinon le test ne prouve rien')
+})
+
+test('⑬b la borne du crop est la MÊME que celle du nuanceur et d `uvFond`', () => {
+  // ⚠️ Le nœud `i` porte `q = (2 i / (cote − 1) − 1) × portee` — la convention de
+  // `uvFond` (`fond-crop.js`) et de `MER_VERT`. Une seconde convention ici et le
+  // budget serait mesuré ailleurs que là où il sert.
+  const cote = 7
+  const portee = 3
+  const v = new Float32Array(cote * cote).fill(0)
+  // le nœud du CENTRE seul, à −100 m : dedans, donc compté
+  v[3 * cote + 3] = -100
+  assert.equal(profondeurMaxDuCrop(v, cote, portee), 100)
+  // le nœud voisin (q = ±1 exactement) est encore DEDANS (borne inclusive)
+  const w = new Float32Array(cote * cote).fill(0)
+  w[3 * cote + 2] = -50 // q.u = (4/6 − 1) × 3 = −1
+  assert.equal(profondeurMaxDuCrop(w, cote, portee), 50)
+  // celui d'après (q = −2) est DEHORS
+  const y = new Float32Array(cote * cote).fill(0)
+  y[3 * cote + 1] = -50
+  assert.equal(profondeurMaxDuCrop(y, cote, portee), 0)
+})
+
+test('⑬c un champ sans eau, un champ vide ou une portée nulle rendent 0', () => {
+  assert.equal(profondeurMaxDuCrop(new Float32Array(9).fill(120), 3, 1), 0, 'la terre ne compte pas')
+  assert.equal(profondeurMaxDuCrop(null, 3, 1), 0)
+  assert.equal(profondeurMaxDuCrop(new Float32Array(9), 1, 1), 0)
+  assert.equal(profondeurMaxDuCrop(new Float32Array(9), 3, 0), 0)
+})
+
+// le champ qui SÉPARE les deux mesures : creusé au dehors, moins au dedans
+const creuseDehors = (emprise, n, sortie) => {
+  const cote = n + 1
+  for (let j = 0; j < cote; j++) {
+    for (let i = 0; i < cote; i++) {
+      const qu = ((2 * i) / n - 1) * PORTEE_CROP
+      const qv = ((2 * j) / n - 1) * PORTEE_CROP
+      sortie[j * cote + i] = Math.abs(qu) <= 1 && Math.abs(qv) <= 1 ? -2116.27 : -3510.49
+    }
+  }
+  return { remplis: sortie.length }
+}
+
+test('⑬d `poserMer` pose le budget du CROP, jamais celui de la calotte', async () => {
+  // le bouchon des autres tests remplit à −500 m PARTOUT : les deux mesures y
+  // coïncident, et c'est le cas dégénéré. Celui-ci les sépare.
+  const g = globeAvecCrop()
+  const r = await Globe.prototype.poserMer.call(g, { remplir: creuseDehors, portee: PORTEE_CROP })
+  assert.ok(r && !r.refus, `poserMer a refusé : ${r && r.refus}`)
+  // ⛔ **2 116,27 ET NON 3 510,49** : le socle normalise sur SON bloc
+  // (`uSeaRange = −dem.minM`), et l'écart mesuré à La Réunion vaut ×1,658.
+  assert.ok(Math.abs(g.uniforms.uMerFondBudgetM.value - 2116.27) < 1,
+    `budget ${g.uniforms.uMerFondBudgetM.value} : il doit être celui du CROP`)
+  assert.ok(g.uniforms.uMerFondBudgetM.value < 3510,
+    'le budget de la CALOTTE ne doit pas atteindre l uniforme')
+})
+
+test('⑬e un crop SANS eau à l intérieur retombe sur le champ, pas sur zéro', async () => {
+  // ⚠️ **UN BUDGET NUL PEINDRAIT TOUTE LA MER D UN SEUL BLEU** : `d01` saturerait
+  // à 1 partout. Le repli n'est donc pas décoratif.
+  const g = globeAvecCrop()
+  const terreDedans = (emprise, n, sortie) => {
+    const cote = n + 1
+    for (let j = 0; j < cote; j++) {
+      for (let i = 0; i < cote; i++) {
+        const qu = ((2 * i) / n - 1) * PORTEE_CROP
+        const qv = ((2 * j) / n - 1) * PORTEE_CROP
+        sortie[j * cote + i] = Math.abs(qu) <= 1 && Math.abs(qv) <= 1 ? 300 : -3510.49
+      }
+    }
+    return { remplis: sortie.length }
+  }
+  await Globe.prototype.poserMer.call(g, { remplir: terreDedans, portee: PORTEE_CROP })
+  assert.ok(Math.abs(g.uniforms.uMerFondBudgetM.value - 3510.49) < 1,
+    `le repli doit être la profondeur du champ : ${g.uniforms.uMerFondBudgetM.value}`)
+})
+
+test('⑬f `couleursFondDuSocle` LIT les trois couleurs vivantes — jamais un demi-triplet', () => {
+  const peu = { isColor: true, n: 'peu' }
+  const moyen = { isColor: true, n: 'moyen' }
+  const fond = { isColor: true, n: 'fond' }
+  assert.deepEqual(couleursFondDuSocle(peu, moyen, fond), { peu, moyen, fond })
+  // ⚠️ **DEUX SUR TROIS = RIEN.** Deux couleurs du socle et une du défaut
+  // seraient pires que les trois du défaut — le raisonnement du demi-couple
+  // d'accalmies de P4, appliqué à trois.
+  assert.equal(couleursFondDuSocle(peu, moyen, null), null)
+  assert.equal(couleursFondDuSocle(peu, null, fond), null)
+  assert.equal(couleursFondDuSocle(null, moyen, fond), null)
+  assert.equal(couleursFondDuSocle(peu, moyen, {}), null)
+  assert.equal(couleursFondDuSocle(), null)
+  // ⚠️ **ET ELLE NE PREND PAS LA POIGNÉE DES UNIFORMES DU SOCLE** :
+  // `test/damier-uniformes.test.js` ③ l'interdit, et il a attrapé la première
+  // écriture de cette tâche.
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+  assert.ok(!/couleursFondDuSocle\(terrain\.mapUniforms\)/.test(main),
+    'la poignée entière ne doit jamais être cédée')
+  assert.match(main, /couleursFondDuSocle\(\s+terrain\.mapUniforms\.uOceanShallow\.value,\s+terrain\.mapUniforms\.uOceanMid\.value,\s+terrain\.mapUniforms\.uOceanDeep\.value,/)
+})
+
+test('⑬g `majReglagesMer` COPIE les trois couleurs du socle dans les uniformes des TUILES', () => {
+  return merPosee().then(({ g }) => {
+    const u = g.uniforms
+    // le témoin : à la naissance, la calotte porte le DÉFAUT du module
+    assert.equal('#' + u.uOceanShallow.value.getHexString(), RAMPE_NAUTIQUE.peu)
+    const peu = { isColor: true, r: 0.78, g: 0.95, b: 0.89 }
+    const moyen = { isColor: true, r: 0.38, g: 0.81, b: 0.76 }
+    const fond = { isColor: true, r: 0.07, g: 0.43, b: 0.49 }
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, fond: { peu, moyen, fond } })
+    assert.equal(pose.fond, true)
+    for (const [uni, src] of [[u.uOceanShallow, peu], [u.uOceanMid, moyen], [u.uOceanDeep, fond]]) {
+      assert.ok(Math.abs(uni.value.r - src.r) < 1e-6, 'canal R')
+      assert.ok(Math.abs(uni.value.g - src.g) < 1e-6, 'canal V')
+      assert.ok(Math.abs(uni.value.b - src.b) < 1e-6, 'canal B')
+      // ⚠️ **COPIÉ, PAS PARTAGÉ** : partager l'objet ferait qu'un `retirerMer`
+      // remettant `RAMPE_NAUTIQUE` REPEINDRAIT la mer du socle.
+      assert.notEqual(uni.value, src)
+    }
+    // ⛔ et un triplet incomplet ne pose RIEN — pas deux couleurs sur trois
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1 })
+    assert.ok(Math.abs(u.uOceanShallow.value.r - peu.r) < 1e-6, 'sans fond, on ne touche à rien')
+    const pose2 = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, fond: { peu, moyen } })
+    assert.equal(pose2.fond, false)
+    assert.ok(Math.abs(u.uOceanShallow.value.r - peu.r) < 1e-6, 'un demi-triplet ne pose rien')
+  })
+})
+
+const SIX = [
+  ['houle', 'uMerHoule'], ['chop', 'uMerChop'], ['ecume', 'uMerEcume'],
+  ['ecumeEchelle', 'uMerEcumeEchelle'], ['brillance', 'uMerBrillance'], ['vitesse', 'uMerVitesse'],
+]
+
+test('⑬h `majReglagesMer` pose les SIX réglages d état de mer, un par un', () => {
+  return merPosee().then(({ g, u }) => {
+    // le témoin : à la naissance, la mer porte le NEUTRE, c'est-à-dire la mer
+    // d'avant la Tâche P5, au bit près.
+    for (const [champ, uni] of SIX) assert.equal(u[uni].value, ETAT_MER_NEUTRE[champ], uni)
+    // les valeurs RELEVÉES sur le socle vivant le 2026-08-22
+    const etat = { houle: 2, chop: 1, ecume: 1.9, ecumeEchelle: 1, brillance: 110, vitesse: 0.4 }
+    Globe.prototype.majReglagesMer.call(g, { vue: 0.4039, surface: 0.08, etat })
+    for (const [champ, uni] of SIX) assert.equal(u[uni].value, etat[champ], uni)
+    // ⚠️ **ET CHACUN SÉPARÉMENT, PARCE QU UNE ASSERTION GROUPÉE NE DIT PAS
+    // LEQUEL** : on ne change qu'un champ à la fois, et on vérifie que les cinq
+    // autres n'ont pas bougé. C'est ce qui tue une mutation qui échangerait deux
+    // affectations.
+    for (const [champ, uni] of SIX) {
+      const seul = { ...ETAT_MER_NEUTRE, [champ]: 0.123456 }
+      Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, etat: seul })
+      assert.equal(u[uni].value, 0.123456, `${champ} n atteint pas ${uni}`)
+      for (const [autre, autreUni] of SIX) {
+        if (autre === champ) continue
+        assert.equal(u[autreUni].value, ETAT_MER_NEUTRE[autre], `${champ} a débordé sur ${autreUni}`)
+      }
+    }
+  })
+})
+
+test('⑬i un état de mer INCOMPLET retombe sur le neutre entier, pas sur une mer hybride', () => {
+  return merPosee().then(({ g, u }) => {
+    const bon = { houle: 2, chop: 1, ecume: 1.9, ecumeEchelle: 1, brillance: 110, vitesse: 0.4 }
+    for (const champ of Object.keys(bon)) {
+      const casse = { ...bon, [champ]: NaN }
+      Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, etat: casse })
+      for (const [c, uni] of SIX) {
+        assert.equal(u[uni].value, ETAT_MER_NEUTRE[c], `${champ} NaN doit rendre TOUT le neutre`)
+        // ⚠️ **AUCUN NaN NE PEUT ATTEINDRE UN UNIFORME** : il éteint la moitié
+        // d'un GPU sans un mot (même contrat que `poserEstompage`).
+        assert.ok(Number.isFinite(u[uni].value), `${uni} porte un NaN`)
+      }
+    }
+    for (const mauvais of [null, undefined, {}, 'oui']) {
+      Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, etat: mauvais })
+      assert.equal(u.uMerEcumeEchelle.value, ETAT_MER_NEUTRE.ecumeEchelle)
+    }
+  })
+})
+
+test('⑬j la HOULE porte l accalmie de vue — l expression d `ocean.js`, pas une seconde loi', () => {
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const ocean = readFileSync(SRC_OCEAN, 'utf8')
+  // `ocean.js` : oceanGerstner(xz, uTime, uWaveH * uViewCalm, …) au vertex …
+  assert.match(ocean, /oceanGerstner\(xz, uTime, uWaveH \* uViewCalm, uChop, uSpeedMul, uLenScale/)
+  // … et uWaveH BRUT dans shoreSurf.
+  assert.match(ocean, /shoreSurf\(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm/)
+  // la calotte fait le MÊME partage, avec ses propres noms
+  assert.match(src, /oceanGerstner\(vec2\(p\.x, p\.z\), uMerTemps, uMerHoule \* uMerCalmeVue, uMerChop, uMerVitesse, uMerLambda/)
+  assert.match(src, /shoreSurf\(uvF, uMerChamp, uMerTemps, uMerHoule, uMerChop, uMerVitesse, uMerLambda, richesseMer/)
+  // ⚠️ **ET L UNIFORME EST DÉCLARÉ DANS LE VERTEX**, sinon la compilation tombe.
+  const vert = src.slice(src.indexOf('const MER_VERT'), src.indexOf('const MER_FRAG'))
+  assert.match(vert, /uniform float uMerCalmeVue;/)
+  // ⚠️ **UNE SEULE DÉCLARATION** : deux `uniform float uMerCalmeVue` dans le
+  // même nuanceur ne compilent pas, et le banc ne le dirait qu'à l'écran.
+  assert.equal((vert.match(/uniform float uMerCalmeVue;/g) || []).length, 1)
+})
+
+test('⑬k `poserMer` n accepte PLUS les quatre paramètres que personne ne passait', () => {
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const i = src.indexOf('async poserMer({')
+  const signature = src.slice(i, src.indexOf('} = {}) {', i))
+  for (const mort of ['couleursFond', 'houle =', 'chop =', 'ecumeEchelle =']) {
+    assert.ok(!signature.includes(mort), `${mort} doit avoir quitté la signature de poserMer`)
+  }
+  // ⚠️ **ET AUCUN APPELANT NE LES PASSAIT — C EST CE QUI RENDAIT LE TROU MUET.**
+  // Le garde reste : si quelqu'un les remettait dans le contexte, il faudrait
+  // décider QUI écrit, et ce test est l'endroit où la question se pose.
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+  const j = main.indexOf('    mer: {')
+  const bloc = main.slice(j, main.indexOf('\n  }\n', j))
+  for (const mort of ['couleursFond', 'houle:', 'chop:', 'ecumeEchelle:']) {
+    assert.ok(!bloc.includes(mort), `contexteCrop().mer ne doit pas porter ${mort}`)
+  }
+})
+
+test('⑬l `retirerMer` rend les trois couleurs au défaut du module', () => {
+  return merPosee().then(({ g }) => {
+    const peu = { isColor: true, r: 0.1, g: 0.2, b: 0.3 }
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, fond: { peu, moyen: peu, fond: peu } })
+    assert.ok(Math.abs(g.uniforms.uOceanShallow.value.r - 0.1) < 1e-6)
+    Globe.prototype.retirerMer.call(g)
+    // ⚠️ L'UNIFORME EST PARTAGÉ PAR TOUTES LES TUILES : le laisser sur la
+    // palette du crop repeindrait tous les océans du monde en vue orbitale.
+    assert.equal('#' + g.uniforms.uOceanShallow.value.getHexString(), RAMPE_NAUTIQUE.peu)
+    assert.equal('#' + g.uniforms.uOceanMid.value.getHexString(), RAMPE_NAUTIQUE.moyen)
+    assert.equal('#' + g.uniforms.uOceanDeep.value.getHexString(), RAMPE_NAUTIQUE.fond)
+    assert.equal(g.uniforms.uMerRampeOn.value, 0)
+  })
 })

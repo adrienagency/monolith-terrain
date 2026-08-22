@@ -3568,16 +3568,21 @@ export class Globe {
         uMerSeuilEau: { value: seuilTraitEauM(rep, exag) * echelle },
         uMerPeu: { value: cols.shallowT },
         uMerFond: { value: cols.deep },
-        // ⚠️ `chopLook` d'`ocean.js`, transcrit : écume quadratique, brillance
-        // décroissante. Mer d'huile à 0, mer agitée généreuse.
-        uMerEcume: { value: 1.9 * chop * chop },
-        // ⚠️ LE FACTEUR D'ÉCHELLE D'ÉCUME D'`ocean.js`, QUI MANQUAIT. Là-bas il
-        // vaut `smooth01((waveScale − 0,12)/0,2)` et il éteint l'écume des vues
-        // continentales ; ici la calotte couvre déjà 164 km, donc il est posé à
-        // sa valeur de vue LARGE. Sans lui, la côte vue de 7,6 km était une masse
-        // blanche trouée de bleu — relevé à l'écran, `.banc/vues/M-mer-seule-cote.jpg`.
+        // ⛔ **PLUS DE TRANSCRIPTION DE `chopLook` ICI — Tâche P5.** Ces deux
+        // lignes portaient `1.9 * chop * chop` et `240 - 130 * chop`, c'est-à-dire
+        // une SECONDE écriture d'une loi qui vit dans `ocean.js` — et le panneau
+        // « Effets » peut y écrire autre chose. Les deux valeurs arrivent
+        // désormais par `majReglagesMer`, LUES sur `uFoam` et `uGloss` ; ce qui
+        // est posé ici n'est plus que le NEUTRE, c'est-à-dire `chopLook(0,7)`,
+        // la mer d'avant cette tâche au bit près.
+        uMerEcume: { value: etat.ecume },
+        // ⚠️ LE FACTEUR D'ÉCHELLE D'ÉCUME D'`ocean.js`. Là-bas il vaut
+        // `smooth01((waveScale − 0,12)/0,2)` — relevé à **1** sur la page vivante
+        // — et il éteint l'écume des vues continentales. Il arrive maintenant par
+        // `majReglagesMer` ; le `0,35` du neutre était la valeur posée à la main
+        // par la Tâche M, et c'est un des six écarts que P4 avait relevés.
         uMerEcumeEchelle: { value: ecumeEchelle },
-        uMerBrillance: { value: 240 - 130 * chop },
+        uMerBrillance: { value: etat.brillance },
         uCropCoin: u.uCropCoin,
         uCropCoinN: u.uCropCoinN,
         // ⚠️ **PROPRE À LA MER, PAS PARTAGÉ** : les deux bornes sont exprimées

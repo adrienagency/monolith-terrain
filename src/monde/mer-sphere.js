@@ -301,17 +301,23 @@ export const RAMPE_NAUTIQUE = Object.freeze({
  * ferait deux palettes à garder d'accord — la faute que D13 §③ nomme, et celle
  * que P2 a évitée en prenant `terrain.mapUniforms.uRampTex` tel quel.
  *
- * @param {{uOceanShallow?:{value:object}, uOceanMid?:{value:object}, uOceanDeep?:{value:object}}|null} uniformes
- *   `terrain.mapUniforms`
- * @returns {{peu:object, moyen:object, fond:object}|null} les objets `Color`
- *   VIVANTS du socle, ou `null` si l'un des trois manque — **on ne pose jamais
+ * ⚠️ **ELLE PREND TROIS COULEURS, PAS LA POIGNÉE DES UNIFORMES DU SOCLE**, et
+ * ce n'est pas un goût : `test/damier-uniformes.test.js` ③ INTERDIT de céder
+ * `terrain.mapUniforms` en bloc — « un module qui la reçoit écrit dedans quand
+ * il veut, et aucune des deux autres propriétés de ce fichier ne le voit
+ * passer ». C'est la même règle que `contexteCrop` suit déjà (« les uniformes se
+ * lisent un par un, jamais en bloc »). Le test l'a attrapé à la première
+ * écriture de cette tâche.
+ *
+ * @param {object|null} peu la couleur du haut-fond (`uOceanShallow`)
+ * @param {object|null} moyen la couleur intermédiaire (`uOceanMid`)
+ * @param {object|null} fond la couleur d'abysse (`uOceanDeep`)
+ * @returns {{peu:object, moyen:object, fond:object}|null} les trois `Color`
+ *   VIVANTES du socle, ou `null` si l'une des trois manque — **on ne pose jamais
  *   un demi-triplet** : deux couleurs du socle et une du défaut seraient pires
  *   que les trois du défaut, exactement comme le demi-couple d'accalmies de P4.
  */
-export function couleursFondDuSocle(uniformes) {
-  const peu = uniformes?.uOceanShallow?.value
-  const moyen = uniformes?.uOceanMid?.value
-  const fond = uniformes?.uOceanDeep?.value
+export function couleursFondDuSocle(peu, moyen, fond) {
   if (!peu?.isColor || !moyen?.isColor || !fond?.isColor) return null
   return { peu, moyen, fond }
 }

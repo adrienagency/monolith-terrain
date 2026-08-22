@@ -11941,12 +11941,18 @@ function tick() {
   // l'ancienne palette jusqu'au prochain déplacement — c'est exactement ce que
   // `rampe2D` a coûté à la Tâche P2. Par image, c'est trois `Color.copy`.
   //
-  // ⚠️ **`terrain.mapUniforms` SE LIT SANS EN PRENDRE LA POIGNÉE** (même règle
-  // que `contexteCrop` : `test/damier-uniformes.test.js` ③ l'exige).
+  // ⚠️ **LES TROIS UNIFORMES SE LISENT UN PAR UN, JAMAIS EN BLOC**, et ce n'est
+  // pas un goût : `test/damier-uniformes.test.js` ③ interdit de céder
+  // `terrain.mapUniforms` à qui que ce soit. Il a attrapé la première écriture
+  // de cette tâche, qui passait la poignée entière.
   if (terreUniqueBranchee) {
     globe?.majReglagesMer({
       ...realWater?.reglagesMer,
-      fond: couleursFondDuSocle(terrain.mapUniforms),
+      fond: couleursFondDuSocle(
+        terrain.mapUniforms.uOceanShallow.value,
+        terrain.mapUniforms.uOceanMid.value,
+        terrain.mapUniforms.uOceanDeep.value,
+      ),
     })
   }
   // PRÉCHAUFFAGE DES SHADERS — voir warmup.js et le rendez-vous en bas de tick.
