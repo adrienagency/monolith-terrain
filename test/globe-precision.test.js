@@ -55,6 +55,8 @@ import {
   tileToLatLon,
   latLonToSphere,
 } from '../src/geo.js'
+import fs from 'node:fs'
+import { repereCrop } from '../src/monde/crop-sphere.js'
 
 // ---------------------------------------------------------------- outillage
 
@@ -116,6 +118,16 @@ function construis(t) {
     exaggeration: EXAGERATION,
     group: new THREE.Group(),
     _materialFor: () => new THREE.MeshBasicMaterial(),
+    // ⚠️ **LES VRAIES MÉTHODES DE JUPE — Tâche P7.** `_buildMesh` retaille sa
+    // jupe sur le fond du bloc en sortant ; sans parois ni crop, le plancher
+    // vaut 0 et la jupe garde sa pleine longueur. Poser ici les vraies méthodes
+    // plutôt que des bouchons, c'est EXERCER ce chemin neutre au lieu de le
+    // contourner — et c'est lui que ce fichier prouve « au bit près ».
+    _parois: null,
+    _crop: null,
+    _baseYCrop: null,
+    _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
+    _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
   }
   Globe.prototype._buildMesh.call(faux, t)
   return t.mesh
@@ -294,4 +306,170 @@ test('la jupe descend toujours vers le centre de la planète', () => {
   assert.ok(rJupe < rBord, `la jupe (${rJupe.toFixed(4)}) ne descend pas sous le bord (${rBord.toFixed(4)})`)
   const chute = rBord - rJupe
   assert.ok(chute > 0.09 && chute < 0.91, `chute de jupe hors bornes : ${chute.toFixed(4)}`)
+})
+
+// ══════════ LA JUPE ET LE PLANCHER DU BLOC — Tâche P7 ═══════════════════════
+//
+// ⛔ **LE DÉFAUT.** Le rabattement de jupe (`skirtDrop`) vit dans la monnaie du
+// GLOBE — entre 0,1 et 0,9 unité de scène sur une planète de rayon 100. Le bloc
+// du crop, lui, fait **0,0507 à 0,0955 unité d'épaisseur** au relevé de La
+// Réunion : la jupe traversait son fond et pendait dessous. Mesuré dans la page
+// vivante, cadrage intérieur de la notation-01 : **2 186 px de tuile en
+// 12 langues** sous l'arête basse de la paroi, contre **0** au socle — et c'est
+// au pixel et à la colonne près le relevé du noteur (`F-jupes-N02.json`).
+//
+// ⚠️ **L'ORDRE EST LE PIÈGE, ET C'EST LUI QUE CES TESTS GARDENT.** Les parois
+// exigent des tuiles bâties, donc le fond du bloc naît APRÈS les tuiles :
+// borner dans `_buildMesh` seulement n'aurait rien changé au bloc d'ouverture.
+
+/** Un globe factice qui porte les VRAIES méthodes de jupe. */
+function globeFactice(crop = null, baseY = null, parois = null) {
+  return {
+    exaggeration: EXAGERATION,
+    group: new THREE.Group(),
+    tiles: new Map(),
+    _materialFor: () => new THREE.MeshBasicMaterial(),
+    _crop: crop,
+    _baseYCrop: baseY,
+    _parois: parois,
+    _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
+    _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
+    _retaillerJupes() { return Globe.prototype._retaillerJupes.call(this) },
+    _buildMesh(t) { return Globe.prototype._buildMesh.call(this, t) },
+  }
+}
+
+/** Le rayon mondial du sommet de jupe `bi`, et celui de son sommet de bord. */
+function rayonsJupe(mesh, bi = 0) {
+  mesh.updateMatrixWorld(true)
+  const G = grilleDe(mesh)
+  const nV = (G + 1) ** 2
+  const attr = mesh.geometry.attributes.position
+  const p = new THREE.Vector3()
+  p.fromBufferAttribute(attr, nV + bi).applyMatrix4(mesh.matrixWorld)
+  const jupe = p.length()
+  p.fromBufferAttribute(attr, mesh.geometry.userData.jupe.bord[bi]).applyMatrix4(mesh.matrixWorld)
+  return { jupe, bord: p.length() }
+}
+
+const CENTRE_P7 = { lat: 45.8326, lon: 6.8652 }
+const REPERE_P7 = repereCrop({ centre: CENTRE_P7, zoom: 11 })
+
+test('P7 · sans bloc, la jupe garde sa longueur AU BIT PRÈS — le défaut est neutre', () => {
+  const t1 = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const t2 = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const nu = globeFactice()
+  nu._buildMesh(t1)
+  // le même maillage, bâti par le chemin d'avant : rabattement plein, sans garde
+  const avecCrop = globeFactice(REPERE_P7, null, null) // un crop, mais AUCUNE paroi
+  avecCrop._buildMesh(t2)
+  const a = t1.mesh.geometry.attributes.position.array
+  const b = t2.mesh.geometry.attributes.position.array
+  assert.equal(a.length, b.length)
+  let differents = 0
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) differents++
+  assert.equal(differents, 0, 'un crop SANS parois ne doit pas toucher un seul bit de jupe')
+  const r = rayonsJupe(t1.mesh)
+  const chute = r.bord - r.jupe
+  assert.ok(chute > 0.09 && chute < 0.91, `chute de jupe hors bornes : ${chute.toFixed(4)}`)
+})
+
+test('P7 · avec un bloc, la jupe s ARRÊTE au plancher, et pas un pouce plus bas', () => {
+  const t = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  // ⚠️ **LE PLANCHER EST DÉRIVÉ DU BORD MESURÉ, PAS POSÉ AU HASARD — ET C EST
+  // UNE LEÇON PAYÉE ICI MÊME.** Premier jet : `baseY = −0,05`. Le bord de cette
+  // tuile vit à **100,2825** (1 000 m d altitude × exagération 18), le
+  // rabattement plein vaut **0,1**, la marge valait donc **0,3325** : la borne
+  // ne mordait PAS et le test passait au vert sans rien garder. On pose donc le
+  // fond à **0,06 sous le bord**, c est-à-dire dans la plage où la loi agit.
+  const nu = globeFactice()
+  nu._buildMesh(t)
+  const rBord = rayonsJupe(t.mesh).bord
+  const MARGE = 0.06 // < le rabattement plein (0,1) : la borne doit mordre
+  const baseY = rBord - R_GLOBE - MARGE
+  const plancher = R_GLOBE + baseY
+
+  const t2 = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const g = globeFactice(REPERE_P7, baseY, { faux: true })
+  g._buildMesh(t2)
+  const mesh = t2.mesh
+  const G = grilleDe(mesh)
+  const nV = (G + 1) ** 2
+  const bord = mesh.geometry.userData.jupe.bord
+  mesh.updateMatrixWorld(true)
+  const attr = mesh.geometry.attributes.position
+  const pt = new THREE.Vector3()
+  let sousLePlancher = 0
+  let touchent = 0
+  for (let bi = 0; bi < bord.length; bi++) {
+    pt.fromBufferAttribute(attr, nV + bi).applyMatrix4(mesh.matrixWorld)
+    const r = pt.length()
+    if (r < plancher - 1e-4) sousLePlancher++
+    if (Math.abs(r - plancher) < 1e-4) touchent++
+  }
+  assert.equal(sousLePlancher, 0, `${sousLePlancher} sommets de jupe passent SOUS le fond du bloc`)
+  assert.equal(touchent, bord.length, 'la jupe ne s arrête pas AU plancher : elle a été supprimée, ou pas bornée')
+})
+
+test('P7 · `_rayonPlancherCrop` a DEUX gardes, et chacune empêche une faute', () => {
+  const t = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const baseY = -0.05
+  const attendu = R_GLOBE + baseY
+  assert.equal(globeFactice(REPERE_P7, baseY, { faux: true })._rayonPlancherCrop(t), attendu)
+  // ① sans parois posées, PAS de plancher — sinon un `_baseYCrop` périmé
+  //    raccourcirait la jupe de tout le globe
+  assert.equal(globeFactice(REPERE_P7, baseY, null)._rayonPlancherCrop(t), 0)
+  // ② une tuile HORS de l emprise du crop garde sa jupe : son rayon vaut lui
+  //    aussi ~100, elle passerait sans ce tri
+  const loin = tuileDeTest(11, -33.86, 151.21) // Sydney
+  assert.equal(globeFactice(REPERE_P7, baseY, { faux: true })._rayonPlancherCrop(loin), 0)
+  // ③ un `baseY` non fini n est pas un zéro silencieux
+  assert.equal(globeFactice(REPERE_P7, NaN, { faux: true })._rayonPlancherCrop(t), 0)
+  assert.equal(globeFactice(REPERE_P7, null, { faux: true })._rayonPlancherCrop(t), 0)
+})
+
+test('P7 · `_retaillerJupe` est IDEMPOTENTE, et elle rend la jupe pleine quand le bloc part', () => {
+  const t = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const g = globeFactice()
+  g._buildMesh(t)
+  const pleine = Float32Array.from(t.mesh.geometry.attributes.position.array)
+  const rBord = rayonsJupe(t.mesh).bord
+
+  // le bloc arrive APRÈS la tuile — l ordre réel, et c est TOUT le sujet
+  g._crop = REPERE_P7
+  g._baseYCrop = rBord - R_GLOBE - 0.06 // la borne mord — voir le test précédent
+  g._parois = { faux: true }
+  g.tiles.set(t.key, t)
+  assert.equal(g._retaillerJupes(), 1)
+  const borne = Float32Array.from(t.mesh.geometry.attributes.position.array)
+  let bouges = 0
+  for (let i = 0; i < pleine.length; i++) if (pleine[i] !== borne[i]) bouges++
+  assert.ok(bouges > 0, 'la retaille n a bougé AUCUN sommet : elle ne fait rien')
+
+  // ⚠️ IDEMPOTENTE : rappelée, elle rend le MÊME tampon. Une version qui
+  // rabattrait depuis la position COURANTE creuserait à chaque appel.
+  g._retaillerJupes()
+  g._retaillerJupes()
+  const encore = t.mesh.geometry.attributes.position.array
+  for (let i = 0; i < borne.length; i++) assert.equal(encore[i], borne[i], `sommet ${i} a bougé au second appel`)
+
+  // le bloc part : la jupe reprend sa pleine longueur, AU BIT PRÈS
+  g._parois = null
+  g._baseYCrop = null
+  g._retaillerJupes()
+  const rendue = t.mesh.geometry.attributes.position.array
+  for (let i = 0; i < pleine.length; i++) assert.equal(rendue[i], pleine[i], `sommet ${i} n est pas revenu`)
+})
+
+test('P7 · `poserParoisCrop` retaille, `retirerParoisCrop` rend — lecture de SOURCE', () => {
+  // ⚠️ Garde-fou de SOURCE, DÉCLARÉ : les quatre tests ci-dessus prouvent le
+  // comportement des méthodes ; celui-ci garde les DEUX appels qui les mettent
+  // sur le chemin vivant, et la remise à nul du fond du bloc — le trou par
+  // lequel un `_baseYCrop` périmé revenait.
+  const s = fs.readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
+  const corps = s.replace(/\/\/[^\n]*/g, '')
+  assert.match(corps, /this\._baseYCrop = solide\.baseY\s*\n\s*this\._retaillerJupes\(\)/)
+  assert.match(corps, /this\._parois = null\s*\n\s*this\._baseYCrop = null\s*\n\s*this\._retaillerJupes\(\)/)
+  assert.match(corps, /geo\.userData\.jupe = \{ nV, bord: border, rabattement: skirtDrop \}/)
+  assert.match(corps, /this\._retaillerJupe\(t\)/)
 })

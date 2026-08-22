@@ -254,6 +254,55 @@ export function occlusionContact(y, baseY, bande, force = FORCE_AO) {
 }
 
 /**
+ * Le rabattement d'une jupe de tuile, BORNÉ PAR LE PLANCHER DU BLOC — Tâche P7.
+ *
+ * ⛔ **LE DÉFAUT, MESURÉ AVANT D'ÊTRE RÉPARÉ.** `globe.js` rabat le contour de
+ * chaque tuile vers le centre de la planète pour cacher les fentes entre niveaux
+ * de détail (`skirtDrop`, borné entre **0,1 et 0,9 unité de scène**). Ce
+ * rabattement est dans la monnaie du GLOBE ; le bloc du crop, lui, ne fait que
+ * **0,0507 à 0,0955 unité d'épaisseur** au relevé de La Réunion. **La jupe
+ * traverse donc le fond du bloc et pend dessous** — c'est le manque n° 5 du
+ * noteur, et c'est la même faute que la tavelure de P4, que le budget de fond de
+ * P5 et que la houle de P6 : *une valeur juste dans la mauvaise monnaie.*
+ *
+ * ⚡ **A/B à témoin nul dans la page vivante** (La Réunion z12, cadrage intérieur
+ * de la notation-01, boucle gelée) : en remontant les sommets de jupe au
+ * plancher DANS LE TAMPON DE POSITIONS, les pixels de tuile qui pendent sous
+ * l'arête basse de la paroi tombent de **2 186 px en 12 langues à 1 px en
+ * 1 langue** — le socle en rend **0**. Retour : **2 186 px et 12 langues,
+ * colonne pour colonne.** (`.banc/P7/S7-ab-jupes--21.115-P7.json`.)
+ * ⚠️ **Et les 2 186 px / 12 langues sont EXACTEMENT le relevé du noteur**
+ * (`F-jupes-N02.json`), aux douze colonnes près : la convention de mesure de ce
+ * banc et la sienne sont donc la même.
+ *
+ * ⚠️ **ON BORNE, ON NE SUPPRIME PAS.** Les deux sorties que le noteur nommait
+ * étaient « couper la jupe par sa hauteur » et « ne pas bâtir de jupe sur une
+ * tuile de frontière ». La seconde ne peut pas marcher : **les douze langues ne
+ * viennent PAS des tuiles de frontière** — mesuré, **168 tuiles sur 168** ont
+ * des sommets de jupe sous le plancher, y compris en plein milieu du bloc ; ce
+ * qu'on voit est ce qui dépasse de la SILHOUETTE. La première est celle-ci, et
+ * elle garde à la jupe toute la longueur que le bloc lui laisse — donc son
+ * service anti-fente à l'intérieur.
+ *
+ * ⚠️ **LE PLANCHER EST UN PLAN, ON LE BORNE PAR UNE SPHÈRE, ET L'ÉCART EST
+ * CHIFFRÉ.** Le fond du bloc est le plan `y = baseY` du repère local ; ce qu'on
+ * compare ici est un RAYON. Les deux se touchent au centre du crop et divergent
+ * de la flèche du crop — **3,68 m à La Réunion, soit 5,8·10⁻⁵ unité de scène,
+ * 0,06 % de l'épaisseur du bloc**, c'est-à-dire **six centièmes de pixel** au
+ * cadrage de ce banc. Dit plutôt que caché.
+ *
+ * @param {number} rabattement le `skirtDrop` du globe, en unités de scène
+ * @param {number} rayonSommet le rayon du sommet de BORD, depuis le centre
+ * @param {number} rayonPlancher le rayon du fond du bloc — `0` (ou non fini)
+ *   quand aucun bloc n'est posé : le rabattement est alors rendu TEL QUEL
+ * @returns {number} le rabattement à appliquer
+ */
+export function rabattementBorne(rabattement, rayonSommet, rayonPlancher) {
+  if (!(rayonPlancher > 0) || !(rayonSommet > 0)) return rabattement
+  return Math.min(rabattement, Math.max(0, rayonSommet - rayonPlancher))
+}
+
+/**
  * L'anneau du crop, en coordonnées LOCALES (±1), sens horaire vu du dessus.
  *
  * ⚠️ **LE TRACÉ EST CELUI DE `computeSlab`, RAMENÉ AU DEMI-CÔTÉ 1** — mêmes

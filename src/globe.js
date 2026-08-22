@@ -21,7 +21,7 @@ import { overzoomTile } from './bathy.js'
 import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
-import { construireSolideCrop } from './monde/parois-crop.js'
+import { construireSolideCrop, rabattementBorne } from './monde/parois-crop.js'
 import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
@@ -2162,6 +2162,11 @@ export class Globe {
     // Écrit par `poserCrop`, lu par `_traverse` (le raffinement uniforme) ; la
     // découpe elle-même se fait au fragment, par les uniformes `uCrop*`.
     this._crop = null
+    // LE FOND DU BLOC — Tâche P4 pour le rideau d'eau, Tâche P7 pour la jupe des
+    // tuiles. Déclaré ici pour la raison écrite trois lignes plus haut : qu'il ne
+    // naisse pas `undefined` au détour d'une lecture. Écrit par `poserParoisCrop`,
+    // REMIS À NUL par `retirerParoisCrop`.
+    this._baseYCrop = null
     // LE CROP SEUL — Tâche N, « LE STUDIO SUR LE GLOBE ». `false` = le parcours
     // d'avant, au bit près, et c'est l'état de production. Écrit par
     // `poserCropSeul`, lu par `_traverse` et par lui seul.
@@ -4419,6 +4424,12 @@ export class Globe {
     // la lit ; si les parois ont refusé, elle est nulle et le rideau n'est pas
     // bâti (dit dans `_merEtat.jupe`) plutôt que posé sur un fond deviné.
     this._baseYCrop = solide.baseY
+    // ⚠️ **ET LES JUPES DES TUILES SE RETAILLENT DESSUS — Tâche P7.** C'est ici
+    // et pas dans `_buildMesh` parce que l'ordre l'impose : les parois exigent
+    // des tuiles bâties (`couverture`), donc les tuiles du premier bloc sont
+    // toujours plus vieilles que son fond. `_retaillerJupe` est idempotente et
+    // recalcule depuis l'anneau de bord — la rappeler ne creuse rien.
+    this._retaillerJupes()
     return { mesh, solide, couverture: solide.couverture, refus: null }
   }
 
@@ -4429,6 +4440,91 @@ export class Globe {
     this._parois.geometry.dispose()
     this._parois.material.dispose()
     this._parois = null
+    // ⚠️ **ET LE FOND DU BLOC PART AVEC LUI — Tâche P7.** Il ne l'était pas :
+    // `_baseYCrop` survivait au retrait des parois, et deux lecteurs le
+    // consultent maintenant (`poserMer` pour le rideau, `_rayonPlancherCrop`
+    // pour la jupe des tuiles). Sans cette ligne, une tuile bâtie APRÈS le
+    // retrait du crop se serait fait tailler sa jupe sur un bloc qui n'existe
+    // plus. La garde de `poserMer` (`Number.isFinite(basY)`) devient donc vraie
+    // pour la même raison qu'elle a été écrite.
+    this._baseYCrop = null
+    // et les jupes reprennent leur pleine longueur : sans bloc, plus de plancher
+    this._retaillerJupes()
+  }
+
+  /**
+   * Le rayon du fond du bloc pour la jupe d'une tuile — `0` s'il n'y a pas de
+   * bloc, ou si la tuile ne le touche pas. Tâche P7.
+   *
+   * ⚠️ **DEUX GARDES, ET CHACUNE EMPÊCHE UNE FAUTE DIFFÉRENTE.**
+   *   ① `this._parois` : sans parois posées il n'y a **pas de plancher**, et
+   *      borner sur une valeur périmée raccourcirait la jupe de tout le globe.
+   *   ② `tuileDansCrop` : c'est un test d'INTERSECTION D'EMPRISES, le même que
+   *      celui du raffinement (`zoomCropPrescrit`). Sans lui, une tuile à
+   *      l'autre bout de la planète — dont le rayon vaut lui aussi ~100 — verrait
+   *      sa jupe bornée par un plancher qui n'a rien à voir avec elle.
+   *
+   * ⚠️ **`R_GLOBE + baseY`, ET C'EST LE RAYON DE L'ORIGINE LOCALE DU CROP** :
+   * `repereLocalCrop` place cette origine à `surSphere(centre, R_GLOBE)` et
+   * mesure `baseY` le long de la verticale de ce centre. L'écart entre ce rayon
+   * et le PLAN du fond est la flèche du crop — chiffrée dans `rabattementBorne`.
+   */
+  _rayonPlancherCrop(t) {
+    if (!this._parois || !this._crop || !Number.isFinite(this._baseYCrop)) return 0
+    if (!tuileDansCrop(t.z, t.x, t.y, this._crop)) return 0
+    return R_GLOBE + this._baseYCrop
+  }
+
+  /**
+   * Retaille la jupe d'UNE tuile sur le plancher du bloc courant — Tâche P7.
+   *
+   * ⚠️ **IDEMPOTENTE, ET C'EST LA PROPRIÉTÉ QUI LA REND SÛRE.** Elle recalcule
+   * chaque sommet de jupe **depuis son sommet de BORD**, jamais depuis sa
+   * position courante : l'appeler deux fois, ou l'appeler après un déplacement
+   * de bloc, ou l'appeler quand le bloc a disparu (le plancher rend alors `0`,
+   * donc la jupe pleine) rend exactement le même tampon. Une version qui
+   * rabattrait « encore un peu » à chaque passage creuserait à chaque image.
+   *
+   * @returns {boolean} vrai si une jupe a été retaillée
+   */
+  _retaillerJupe(t) {
+    const mesh = t?.mesh
+    const d = mesh?.geometry?.userData?.jupe
+    if (!d) return false
+    const rPlancher = this._rayonPlancherCrop(t)
+    const attr = mesh.geometry.attributes.position
+    const a = attr.array
+    const o = mesh.position
+    for (let bi = 0; bi < d.bord.length; bi++) {
+      const src = d.bord[bi]
+      const X = a[src * 3] + o.x
+      const Y = a[src * 3 + 1] + o.y
+      const Z = a[src * 3 + 2] + o.z
+      const rayon = Math.hypot(X, Y, Z)
+      const inv = 1 - rabattementBorne(d.rabattement, rayon, rPlancher) / rayon
+      const dst = d.nV + bi
+      a[dst * 3] = X * inv - o.x
+      a[dst * 3 + 1] = Y * inv - o.y
+      a[dst * 3 + 2] = Z * inv - o.z
+    }
+    attr.needsUpdate = true
+    mesh.geometry.computeBoundingSphere()
+    return true
+  }
+
+  /**
+   * Retaille les jupes de TOUTES les tuiles — appelée quand le fond du bloc
+   * change (parois posées) ou disparaît (parois retirées).
+   *
+   * ⚠️ **TOUTES, PAS SEULEMENT CELLES DU CROP.** Le tri est dans
+   * `_rayonPlancherCrop` (`tuileDansCrop`), et il doit l'être : une tuile qui
+   * SORT de l'emprise quand le bloc se déplace doit retrouver sa jupe pleine, et
+   * seule une passe qui la visite peut la lui rendre.
+   */
+  _retaillerJupes() {
+    let n = 0
+    for (const t of this.tiles.values()) if (this._retaillerJupe(t)) n++
+    return n
   }
 
   // La matière du bloc : la recette d'éclairage des calottes polaires, mot pour
@@ -5182,6 +5278,14 @@ export class Globe {
     geo.setAttribute('latlon', new THREE.BufferAttribute(ll2, 2))
     geo.setIndex(indices)
     geo.computeBoundingSphere()
+    // ⚠️ **DE QUOI RETAILLER LA JUPE PLUS TARD — Tâche P7, ET L'ORDRE L'EXIGE.**
+    // Le fond du bloc n'existe qu'une fois les parois posées, et les parois
+    // exigent des tuiles bâties : quand `_buildMesh` tourne pour le premier
+    // bloc, `_baseYCrop` est encore nul. Borner ICI ne toucherait donc que les
+    // tuiles arrivées APRÈS, et le bloc d'ouverture garderait ses langues. On
+    // garde de quoi RECALCULER la jupe depuis son anneau de bord — jamais depuis
+    // sa position courante, pour que `_retaillerJupe` soit idempotente.
+    geo.userData.jupe = { nV, bord: border, rabattement: skirtDrop }
 
     const mesh = new THREE.Mesh(geo, this._materialFor(t.texture, t.size))
     mesh.position.copy(origine) // la position mondiale vit ICI, plus dans les sommets
@@ -5189,6 +5293,8 @@ export class Globe {
     mesh.name = t.key
     t.mesh = mesh
     this.group.add(mesh)
+    // le bloc est peut-être DÉJÀ là (déplacement de fenêtre, tuile de remplacement)
+    this._retaillerJupe(t)
 
     // ⚠️ LES HAUTEURS SONT RELÂCHÉES ICI, ET C'EST LEUR DERNIER LECTEUR (plan
     // « globe continu », Tâche 4 sexies, Étape 1). `t.heights` est un

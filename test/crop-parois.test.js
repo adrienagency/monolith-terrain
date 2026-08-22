@@ -59,6 +59,7 @@ import {
   occlusionContact,
   FRACTION_PROFONDEUR,
   PAS_CONTOUR,
+  rabattementBorne,
 } from '../src/monde/parois-crop.js'
 import { repereCrop, coinNormalise, latLonDeLocal, localCrop } from '../src/monde/crop-sphere.js'
 // ⚠️ ON APPELLE LES MÉTHODES DU GLOBE PAR `.call` SUR UN OBJET MINIMAL, patron
@@ -802,3 +803,64 @@ function margeOctogone(p) {
   }
   return (lo + hi) / 2 - r0
 }
+
+
+// ══════════ LE RABATTEMENT DES JUPES DE TUILE — Tâche P7 ════════════════════
+//
+// ⛔ **`skirtDrop` (`globe.js`) EST DANS LA MONNAIE DU GLOBE.** Entre 0,1 et
+// 0,9 unité de scène sur une planète de rayon 100 ; le bloc du crop, lui, fait
+// **0,0507 à 0,0955 unité d'épaisseur** au relevé de La Réunion. La jupe
+// traversait donc le fond du bloc et pendait dessous : **2 186 px en 12 langues**
+// contre **0** au socle, mesuré dans la page vivante (`.banc/P7/`).
+
+test('P7 · le rabattement est BORNÉ par le plancher, et par lui seul', () => {
+  // au-dessus du plancher, le rabattement passe entier
+  assert.equal(rabattementBorne(0.1, 100.5, 100.0), 0.1)
+  // sous le plancher, il s arrête dessus — au bit près
+  assert.equal(rabattementBorne(0.1, 100.05, 100.0), 100.05 - 100.0)
+  // pile au plancher : plus rien à rabattre, et surtout PAS un nombre négatif
+  assert.equal(rabattementBorne(0.1, 100.0, 100.0), 0)
+  assert.equal(rabattementBorne(0.1, 99.9, 100.0), 0)
+  // et jamais plus que ce que l appelant demande
+  assert.equal(rabattementBorne(0.02, 100.5, 100.0), 0.02)
+})
+
+test('P7 · SANS plancher, le rabattement est rendu TEL QUEL — le neutre est exact', () => {
+  // ⚠️ **C EST LE DÉFAUT DE TOUT LE GLOBE**, et il doit être exact au bit près :
+  // hors crop, `_rayonPlancherCrop` rend `0`, et rien ne doit bouger.
+  for (const rien of [0, -1, NaN, null, undefined]) {
+    assert.equal(rabattementBorne(0.37, 100.5, rien), 0.37, `plancher ${rien}`)
+  }
+  // un rayon de sommet absurde ne fabrique pas non plus une borne silencieuse
+  for (const rien of [0, -1, NaN]) {
+    assert.equal(rabattementBorne(0.37, rien, 100), 0.37, `rayon ${rien}`)
+  }
+})
+
+test('P7 · la borne est MONOTONE, et un plancher plus profond rend plus de jupe', () => {
+  // ⚠️ Une inversion `Math.min`/`Math.max` — la mutation la plus banale de ce
+  // dépôt — rendrait cette suite décroissante ou constante.
+  let precedent = -1
+  for (let d = 0; d <= 0.2; d += 0.01) {
+    const r = rabattementBorne(0.5, 100, 100 - d)
+    assert.ok(r >= precedent, `rabattement non croissant à ${d} : ${r} < ${precedent}`)
+    assert.ok(r <= 0.5, 'la borne ne doit jamais AJOUTER du rabattement')
+    precedent = r
+  }
+  assert.equal(rabattementBorne(0.5, 100, 100 - 0.2).toFixed(6), '0.200000')
+})
+
+test('P7 · `globe.js` APPELLE la borne, et il ne la réécrit pas', () => {
+  const g = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
+  // ⚠️ **LES COMMENTAIRES SONT RETIRÉS AVANT DE COMPTER** — ceux de ligne ET
+  // ceux de bloc. La Tâche K ter a eu une mutation survivante parce qu une
+  // assertion lisait une formule dans un pavé de prose ; ici c est l inverse,
+  // un pavé de prose faisait compter une occurrence de trop.
+  const corps = g.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
+  assert.match(corps, /rabattementBorne\(d\.rabattement, rayon, rPlancher\)/)
+  assert.match(corps, /import \{ construireSolideCrop, rabattementBorne \}/)
+  // une seconde écriture de la loi — un `Math.min` sur le rabattement ailleurs —
+  // est exactement ce que ce chantier a payé quatre fois sur la mer.
+  const occurrences = (corps.match(/rabattementBorne/g) || []).length
+  assert.equal(occurrences, 2, 'la borne doit être IMPORTÉE une fois et APPELÉE une fois')
+})

@@ -207,6 +207,12 @@ function construis(t, fond) {
     group: new THREE.Group(),
     _materialFor: () => new THREE.MeshBasicMaterial(),
     _fondCrop: fond ?? null,
+    // les vraies méthodes de jupe (Tâche P7) : sans parois, plancher nul
+    _parois: null,
+    _crop: null,
+    _baseYCrop: null,
+    _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
+    _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
   }
   Globe.prototype._buildMesh.call(faux, t)
   return t.mesh
@@ -428,6 +434,10 @@ function globeNu({ crop = null, fond = null, exageration = EXAGERATION } = {}) {
     group: new THREE.Group(),
     gardeHauteurs: new Set(),
     _materialFor: () => new THREE.MeshBasicMaterial(),
+    _parois: null,
+    _baseYCrop: null,
+    _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
+    _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
     _buildMesh(t) { return Globe.prototype._buildMesh.call(this, t) },
     _refaireMaillagesDuFond() { return Globe.prototype._refaireMaillagesDuFond.call(this) },
     _poserTextureFond(f) { return Globe.prototype._poserTextureFond.call(this, f) },
