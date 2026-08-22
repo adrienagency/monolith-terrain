@@ -1407,3 +1407,32 @@ test('⑫i le champ de la mer REND son unité — un seul calcul, deux lecteurs'
   assert.ok(Math.abs(champ.unite - largeur / (COTE_CROP_UNITES * PORTEE_CROP)) < 1e-15)
   champ.texture.dispose?.()
 })
+
+test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exécuté', async () => {
+  // ⚠️ **IMPORTATION DYNAMIQUE, ET C'EST OBLIGATOIRE** : une `import` statique
+  // est hissée AU-DESSUS de `registerHooks`, et `ocean-waves` n'est alors plus
+  // résolu. Le fichier tombe entier avec un `ERR_MODULE_NOT_FOUND` — vu.
+  const { RealWater } = await import('../src/ocean.js')
+  // ⛔ **DIXIÈME SURVIVANTE DE LA CAMPAGNE, ET ELLE A TROUVÉ UN VRAI TROU.**
+  // « le givre du socle ne traverse pas » restait verte : l'accesseur n'était
+  // gardé que par un `grep` de sa ligne de recherche du matériau, pas par un
+  // appel. On l'EXÉCUTE, sur un objet minimal qui porte exactement ce qu'il lit.
+  //
+  // ⚠️ **LE GIVRE VIT SUR LE SECOND MATÉRIAU** — celui de la jupe — et c'est
+  // tout le piège : `materials[0]` n'a pas d'`uFrost`, donc une recherche naïve
+  // rendrait 0 sans un mot. Le faux socle le reproduit exprès.
+  const d = Object.getOwnPropertyDescriptor(RealWater.prototype, 'reglagesMer')
+  assert.equal(typeof d?.get, 'function', 'reglagesMer doit être un accesseur')
+  const ciel = { isColor: true }
+  const socle = {
+    materials: [
+      { uniforms: { uViewCalm: { value: 0.4039 }, uSurfCalm: { value: 0.08 }, uSky: { value: ciel } } },
+      { uniforms: { uFrost: { value: 0.56 } } },
+    ],
+  }
+  assert.deepEqual(d.get.call(socle), { vue: 0.4039, surface: 0.08, givre: 0.56, ciel })
+  // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
+  assert.deepEqual(d.get.call({ materials: [] }), { vue: 1, surface: 1, givre: 0, ciel: null })
+  // un givre non fini ne remonte pas
+  assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
+})
