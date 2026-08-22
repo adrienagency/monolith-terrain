@@ -635,7 +635,7 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
 // --- le stub, en fin de fichier : il n'est utile qu'aux tests ④
 
 const val = (v) => ({ value: v })
-const vecStub = () => ({ x: 0, y: 0, z: 0, set() { return this }, fromArray() { return this }, normalize() { return this } })
+const vecStub = () => ({ x: 0, y: 0, z: 0, set() { return this }, fromArray() { return this }, normalize() { return this }, copy() { return this } })
 const couleurStub = () => ({ set() {}, setStyle() {} })
 function globeStub() {
   return {
@@ -662,6 +662,7 @@ function globeStub() {
       uEclairageOn: val(0),
       uSoleilDir: val(vecStub()), uSoleilIrr: val(vecStub()),
       uHemiHaut: val(vecStub()), uCielIrr: val(vecStub()), uSolIrr: val(vecStub()),
+      uParoiCielIrr: val(vecStub()), uParoiSolIrr: val(vecStub()),
       uAlbedoBase: val(vecStub()), uAlbedoTeinte: val(1),
       uParoiCouleur: val(couleurStub()),
       uSurfaceFx: val(0), uFxBlend: val(0), uFxOpacite: val(0), uFxScale: val(1), uFxTime: val(0),

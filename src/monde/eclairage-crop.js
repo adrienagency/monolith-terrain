@@ -330,6 +330,63 @@ export function irradianceAmbiante(coef, envIntensite) {
   }
 }
 
+/**
+ * L'ENVIRONNEMENT QU'UN MATÉRIAU VOIT VRAIMENT — Tâche P8.
+ *
+ * ⛔ **CE N'EST PAS UNE COMMODITÉ, C'EST LA RÈGLE DE `three`, ET LE CROP EN
+ * MANQUAIT LA MOITIÉ SUR SES PAROIS.** `WebGLRenderer.js` (r172) :
+ *
+ *     if ( material.isMeshStandardMaterial && material.envMap === null
+ *          && scene.environment !== null )
+ *         m_uniforms.envMapIntensity.value = scene.environmentIntensity;
+ *
+ * Autrement dit : **un matériau qui porte SON PROPRE `envMap` ne voit ni
+ * `scene.environment` ni `scene.environmentIntensity`** — il voit SA texture, à
+ * SON intensité. `irradianceAmbiante` (juste au-dessus) cite déjà cette ligne
+ * pour conclure qu'`envMapIntensity` est du code MORT sur le relief
+ * (`terrain.material.envMap === null`, relevé). ⚡ **L'AUTRE MOITIÉ DE LA MÊME
+ * LIGNE N'AVAIT JAMAIS ÉTÉ TIRÉE : LA PAROI DU SOCLE, ELLE, A SON PROPRE
+ * `envMap`.** `plinth.js` l'écrit en toutes lettres à `setEnvMap` — *« give the
+ * socle walls their own studio env map (overrides scene.environment for this
+ * material only… while the terrain keeps the neutral room env) »* — et
+ * `main.js` lui pose `makeSocleEnvMap(renderer)`, une pièce SOMBRE (fond
+ * `0x15171d`, sol noir) à `envMapIntensity = 1`.
+ *
+ * ⚡ **LES DEUX AMBIANTES, MESURÉES AU MÊME INSTANT DANS LA PAGE VIVANTE**
+ * (2026-08-22, La Réunion z12, `.banc/P8/S3-ambiante-P8.json`), irradiance
+ * versée à plat sur une paroi VERTICALE (`ndu = 0`) :
+ *
+ *   · relief (`scene.environment` × `scene.environmentIntensity = 0,395`)
+ *     → **(1,526 · 1,526 · 1,526)**, rigoureusement neutre ;
+ *   · paroi (`wallMat.envMap` × `envMapIntensity = 1`)
+ *     → **(0,989 · 0,947 · 0,931)**.
+ *
+ * **La paroi du crop prenait la PREMIÈRE**, celle du relief. Elle en sortait
+ * **1,68 fois trop claire** (face sombre 26,63 contre 15,88 au socle) pour un
+ * contraste inter-faces **1,52 fois trop faible** — les deux constantes que la
+ * notation-02 §5 nomme.
+ *
+ * ⚠️ **ET LA CAUSE EST PROUVÉE EN LA BOUGEANT DES DEUX CÔTÉS** (leçon de P6 :
+ * une concordance au défaut n'est pas un branchement) :
+ *   · retirer son studio à la paroi DU SOCLE — elle retombe alors sur
+ *     `scene.environment`, c'est-à-dire sur la source du crop — la fait sauter
+ *     de **15,88 à 38,11** et effondre son contraste de **3,045 à 1,405** ;
+ *   · donner l'ambiante DE LA PAROI au crop le fait tomber de **26,63 à 17,87**
+ *     et monte son contraste de **2,008 à 2,490**.
+ *   **Les deux aller-retours rendent le chiffre de départ.**
+ *
+ * @param {object|null} envMap la texture propre au matériau
+ * @param {number} envMapIntensite son intensité à lui
+ * @param {object|null} sceneEnv `scene.environment`
+ * @param {number} sceneIntensite `scene.environmentIntensity`
+ * @returns {{texture: object|null, intensite: number}} ce que `three` fait lire
+ */
+export function environnementEffectif(envMap, envMapIntensite, sceneEnv, sceneIntensite) {
+  if (envMap) return { texture: envMap, intensite: Number.isFinite(envMapIntensite) ? Math.max(0, envMapIntensite) : 1 }
+  if (sceneEnv) return { texture: sceneEnv, intensite: Number.isFinite(sceneIntensite) ? Math.max(0, sceneIntensite) : 1 }
+  return { texture: null, intensite: 0 }
+}
+
 export const GLSL_OMBRE_PEINTURE = /* glsl */ `
 float natOmbrePeinture(float lum) {
   return clamp(lum * ${OMBRE_GAIN}, ${OMBRE_MIN}, ${OMBRE_MAX});

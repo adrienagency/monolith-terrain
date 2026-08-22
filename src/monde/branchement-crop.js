@@ -223,6 +223,17 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   // absente d'ici, le bloc s'éclairerait à l'ambiante de son premier instant.
   'ambianteCoef',
   'ambianteIntensite',
+  // ⛔ **ET LA PAROI A LA SIENNE, QUI N'EST PAS CELLE-LÀ — Tâche P8.** Le relief
+  // voit `scene.environment` (« the neutral room env ») ; la paroi voit son
+  // propre `wallMat.envMap` (« their own studio env map »), et `three`
+  // n'applique `scene.environmentIntensity` qu'aux matériaux SANS `envMap` à
+  // eux. La paroi du crop empruntait l'ambiante du RELIEF — **1,54 fois plus
+  // forte à plat sur un mur vertical**, les deux mesurées au même instant dans
+  // la même page — et en sortait **1,68 fois trop claire**. Les deux champs
+  // suivent la palette (un préréglage PBR repose `envMap` et `envMapIntensity`)
+  // et le cycle horaire, donc leur place est ICI et pas à la construction.
+  'paroiAmbianteCoef',
+  'paroiAmbianteIntensite',
   'albedoBase',
   'albedoTeinte',
   // ⚠️ **`paroiCouleur` N'EST PAS `params.plinthColor`, ET C'EST TOUT LE

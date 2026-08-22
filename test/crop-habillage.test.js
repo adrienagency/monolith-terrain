@@ -584,6 +584,8 @@ const vec3 = (x, y, z) => ({
   set(a, b, c) { this.x = a; this.y = b; this.z = c; return this },
   fromArray(t) { this.x = t[0]; this.y = t[1]; this.z = t[2]; return this },
   normalize() { const n = Math.hypot(this.x, this.y, this.z) || 1; this.x /= n; this.y /= n; this.z /= n; return this },
+  // `copy` : le repli de l'ambiante de paroi sur celle des tuiles (Tâche P8)
+  copy(v) { this.x = v.x; this.y = v.y; this.z = v.z; return this },
 })
 
 /** Un globe minimal : rien que les uniformes et le repère du crop. */
@@ -639,6 +641,11 @@ function globeStub(crop = REPERE) {
       uHemiHaut: val(vec3(0, 1, 0)),
       uCielIrr: val(vec3(...ECLAIRAGE_MONDE.cielIrr)),
       uSolIrr: val(vec3(...ECLAIRAGE_MONDE.solIrr)),
+      // ⚠️ **LES DEUX DE LA PAROI — Tâche P8.** Elles partent des MÊMES défauts
+      // que celles des tuiles (le constructeur du globe fait pareil) : c'est ce
+      // qui permet à ⑨h de voir un `retirerHabillage` qui les oublierait.
+      uParoiCielIrr: val(vec3(...ECLAIRAGE_MONDE.cielIrr)),
+      uParoiSolIrr: val(vec3(...ECLAIRAGE_MONDE.solIrr)),
       uAlbedoBase: val(vec3(...ECLAIRAGE_MONDE.albedoBase)),
       uAlbedoTeinte: val(ECLAIRAGE_MONDE.albedoTeinte),
       uParoiCouleur: val(couleurStub('#d8d4cc')),

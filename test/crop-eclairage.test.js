@@ -47,6 +47,7 @@ import {
   hautLocal,
   directionSoleilLocale,
   irradianceAmbiante,
+  environnementEffectif,
   GLSL_ECLAIRAGE,
   GLSL_OMBRE_PEINTURE,
 } from '../src/monde/eclairage-crop.js'
@@ -396,6 +397,11 @@ const CHAMPS_P3 = [
   'hemiIntensite',
   'ambianteCoef',
   'ambianteIntensite',
+  // ⚠️ **LES DEUX DE LA PAROI — Tâche P8.** Elles sont dans cette liste-ci et
+  // pas seulement dans `CHAMPS_HABILLAGE` pour que ④j leur impose la même
+  // exigence qu'aux vingt-sept autres : lire une SOURCE VIVANTE.
+  'paroiAmbianteCoef',
+  'paroiAmbianteIntensite',
   'albedoBase',
   'albedoTeinte',
   'paroiCouleur',
@@ -455,7 +461,21 @@ test('④c contexteCrop lit les LAMPES et le MATÉRIAU, jamais params', () => {
   // l'ambiante est MESURÉE, et sur la seule intensité que three applique
   assert.match(ctx, /ambianteCoef: coefAmbiante\(renderer, scene\.environment\)/)
   assert.match(ctx, /ambianteIntensite: scene\.environmentIntensity/)
-  assert.equal(/envMapIntensity/.test(ctx), false)
+  // ⛔ **ET LA PAROI A LA SIENNE — Tâche P8.** `envMapIntensity` est du code
+  // MORT sur le RELIEF (`terrain.material.envMap === null`, et `three` écrase
+  // alors l'uniforme par `scene.environmentIntensity`) — la ligne ci-dessus le
+  // garde. Mais la PAROI porte son propre `envMap` (`plinth.setEnvMap` ←
+  // `makeSocleEnvMap`), donc pour elle c'est l'inverse : `envMapIntensity`
+  // compte et `scene.environmentIntensity` est morte. Le crop prenait
+  // l'ambiante du relief sur ses parois — **1,68 fois trop claires**.
+  assert.equal(/ambianteIntensite:.*envMapIntensity/.test(ctx), false)
+  assert.match(ctx, /paroiAmbianteCoef: coefAmbiante\(renderer, envParoi\.texture\)/)
+  assert.match(ctx, /paroiAmbianteIntensite: envParoi\.intensite/)
+  // ⚠️ **LA RÈGLE VIENT DU MODULE PUR, ET LE MATÉRIAU DIT LA VÉRITÉ** — même
+  // règle que `paroiCouleur` : `params.envMapIntensity` vaut 0,15 pendant que
+  // le matériau vivant porte 1 (un préréglage PBR le repose).
+  assert.match(ctx, /environnementEffectif\(\s*plinth\?\.wallMat\?\.envMap \?\? null,\s*plinth\?\.wallMat\?\.envMapIntensity,/)
+  assert.equal(/params\.envMapIntensity/.test(ctx), false)
   // la couche Apparence vient des uniformes du socle
   for (const u of ['uSurfaceFx', 'uFxBlend', 'uFxOpacity', 'uFxScale', 'uFxP1', 'uFxP2', 'uFxP3']) {
     assert.match(ctx, new RegExp(`terrain\\.mapUniforms\\.${u}\\.value`))
@@ -486,7 +506,9 @@ test('④j ⛔ CHAQUE champ surveillé lit une SOURCE VIVANTE — aucun ne peut 
   ).replace(/\/\/[^\n]*/g, '')
   // une source vivante : un uniforme du socle, une lampe, la scène, le
   // matériau, le socle-plinthe, le centre du crop, ou la sonde d'ambiante.
-  const VIVANT = /^\s*(terrain\.|sun\.|hemi\.|scene\.|plinth\.|centre\.|coefAmbiante\(|params\.sun|`#\$\{)/
+  // ⚠️ `envParoi.` est vivant parce qu'il est BÂTI juste au-dessus depuis
+  // `plinth?.wallMat` — c'est ④c qui garde CETTE ligne-là.
+  const VIVANT = /^\s*(terrain\.|sun\.|hemi\.|scene\.|plinth\.|centre\.|coefAmbiante\(|envParoi\.|params\.sun|`#\$\{)/
   let n = 0
   for (const champ of CHAMPS_P3) {
     const m = ctx.match(new RegExp(`\\n\\s*${champ}:([^\\n]*)`))
@@ -495,7 +517,7 @@ test('④j ⛔ CHAQUE champ surveillé lit une SOURCE VIVANTE — aucun ne peut 
     n++
   }
   assert.equal(n, CHAMPS_P3.length)
-  assert.equal(n, 27) // le dénominateur est COMPTÉ, pas annoncé par le titre
+  assert.equal(n, 29) // le dénominateur est COMPTÉ, pas annoncé par le titre
 })
 
 test('④d poserHabillage POSE les uniformes, et retirerHabillage les REND', () => {
@@ -784,9 +806,20 @@ test('⑥a `_materiauParois` PARTAGE les uniformes du bloc — pas des copies', 
   // ⚠️ **PARTAGÉS, ET C'EST CE QUI FAIT QUE LA TIRETTE D'HEURE LES DÉPLACE.**
   // `poserHabillage` écrit dans `this.uniforms` ; les parois ne sont rebâties
   // qu'à l'arrêt. Des copies figeraient leur soleil à la naissance du bloc.
-  for (const nom of ['uSoleilDir', 'uHemiHaut', 'uSoleilIrr', 'uCielIrr', 'uSolIrr', 'uEclairageOn']) {
+  for (const nom of ['uSoleilDir', 'uHemiHaut', 'uSoleilIrr', 'uEclairageOn']) {
     assert.equal(m.uniforms[nom], g.uniforms[nom], `${nom} doit être PARTAGÉ avec les tuiles`)
   }
+  // ⛔ **MAIS PAS L'AMBIANTE, ET C'EST LE MANQUE N° 3 DU NOTEUR — Tâche P8.**
+  // Le relief du socle voit `scene.environment` à `scene.environmentIntensity` ;
+  // sa PAROI voit son propre `wallMat.envMap` à `envMapIntensity`, parce que
+  // `three` n'écrase l'intensité que sur les matériaux SANS `envMap` à eux.
+  // Mesuré au même instant dans la même page : l'ambiante du relief verse
+  // **1,54 fois** celle de la paroi à plat sur un mur vertical, et la paroi du
+  // crop prenait la première — **26,63 contre 15,88 au socle**.
+  assert.equal(m.uniforms.uCielIrr, g.uniforms.uParoiCielIrr, 'la paroi lit SON ciel')
+  assert.equal(m.uniforms.uSolIrr, g.uniforms.uParoiSolIrr, 'la paroi lit SON sol')
+  assert.notEqual(m.uniforms.uCielIrr, g.uniforms.uCielIrr, 'la paroi ne lit PAS le ciel des tuiles')
+  assert.notEqual(m.uniforms.uSolIrr, g.uniforms.uSolIrr, 'la paroi ne lit PAS le sol des tuiles')
   // les trois d'avant P6 le restent — le repli de planète existe encore
   for (const nom of ['uSunDir', 'uShadowColor']) {
     assert.equal(m.uniforms[nom], g.uniforms[nom], `${nom} doit rester partagé`)
@@ -833,4 +866,113 @@ test('⑥c `GLSL_IRRADIANCE` est INJECTÉ dans `GLSL_ECLAIRAGE`, jamais réécri
   // ⚠️ **ET LE GLOBE INJECTE LE MORCEAU DÉTACHÉ DANS LES PAROIS**, une fois.
   assert.equal((GLOBE_NU.match(/\$\{GLSL_IRRADIANCE\}/g) || []).length, 1)
   assert.match(GLOBE_NU, /GLSL_IRRADIANCE,/)
+})
+
+// ══════════ ⑦ L'AMBIANTE DE LA PAROI N'EST PAS CELLE DU RELIEF — Tâche P8 ═══
+//
+// ⛔ **LE MANQUE N° 3 DU NOTEUR TENAIT DANS UNE MOITIÉ DE LIGNE DE `three`.**
+// `sonde-ambiante.js` la cite depuis P3 :
+//
+//     if ( material.isMeshStandardMaterial && material.envMap === null
+//          && scene.environment !== null )
+//         m_uniforms.envMapIntensity.value = scene.environmentIntensity;
+//
+// et en tire, à raison, qu'`envMapIntensity` est du code MORT sur le relief.
+// **L'autre moitié n'avait jamais été tirée** : la PAROI du socle porte son
+// propre `envMap` (`plinth.setEnvMap(makeSocleEnvMap(renderer))`, une pièce
+// SOMBRE à fond `0x15171d` et sol noir), donc pour elle la règle s'inverse.
+//
+// ⚡ **LES DEUX AMBIANTES, MESURÉES AU MÊME INSTANT DANS LA PAGE VIVANTE**
+// (`.banc/P8/S3-ambiante-P8.json`), à plat sur un mur vertical :
+// relief **(1,526 · 1,526 · 1,526)** contre paroi **(0,989 · 0,947 · 0,931)**.
+// La paroi du crop prenait la première : **26,63 contre 15,88 au socle**.
+
+test('⑦a `environnementEffectif` applique la règle de three, pas une commodité', () => {
+  const propre = { nom: 'studio' }
+  const scene = { nom: 'salle' }
+  // ⛔ un matériau qui a SON `envMap` ne voit NI la texture de scène NI son
+  // intensité — c'est le cas de la paroi du socle
+  assert.deepEqual(environnementEffectif(propre, 1, scene, 0.395), { texture: propre, intensite: 1 })
+  assert.deepEqual(environnementEffectif(propre, 1.4, scene, 0.395), { texture: propre, intensite: 1.4 })
+  // … et un matériau SANS `envMap` voit celle de la scène, à l'intensité de la
+  // scène : c'est le cas du relief, et c'est ce que P3 avait déjà mesuré
+  assert.deepEqual(environnementEffectif(null, 0.15, scene, 0.395), { texture: scene, intensite: 0.395 })
+  // ⚠️ **LE TÉMOIN QUI TUE LA MUTATION « on prend toujours la scène »** : les
+  // deux appels ci-dessous rendent des textures DIFFÉRENTES pour la même scène.
+  assert.notEqual(
+    environnementEffectif(propre, 1, scene, 0.395).texture,
+    environnementEffectif(null, 1, scene, 0.395).texture
+  )
+  // rien du tout : pas de lumière, et surtout pas une intensité qui traîne
+  assert.deepEqual(environnementEffectif(null, 1, null, 0.395), { texture: null, intensite: 0 })
+  // une intensité absente ou aberrante ne fabrique pas un `NaN` d'irradiance
+  assert.deepEqual(environnementEffectif(propre, undefined, scene, 0.4), { texture: propre, intensite: 1 })
+  assert.deepEqual(environnementEffectif(propre, NaN, scene, 0.4), { texture: propre, intensite: 1 })
+  assert.deepEqual(environnementEffectif(propre, -3, scene, 0.4), { texture: propre, intensite: 0 })
+  assert.deepEqual(environnementEffectif(null, 1, scene, undefined), { texture: scene, intensite: 1 })
+})
+
+test('⑦b la paroi prend SON ambiante, les tuiles gardent la LEUR', () => {
+  const g = new Globe({ radius: 100 })
+  const u = g.uniforms
+  const commun = {
+    centreLat: -21.115, centreLon: 55.536, soleilAzimut: 302.02, soleilElevation: 34.33,
+    soleilCouleur: '#fff7e6', soleilIntensite: 3.743,
+    hemiCiel: '#85c2eb', hemiSol: '#4a3a2a', hemiIntensite: 0.8105,
+  }
+  // les DEUX coefficients RÉELS, relevés par la sonde du dépôt le 2026-08-22
+  const RELIEF = { ciel: [6.6827, 6.6827, 6.6827], sol: [1.0452, 1.0452, 1.0452] }
+  const PAROI = { ciel: [1.8348, 1.7796, 1.7636], sol: [0.1436, 0.1137, 0.0987] }
+  g.poserHabillage({
+    ...commun,
+    ambianteCoef: RELIEF, ambianteIntensite: 0.3951,
+    paroiAmbianteCoef: PAROI, paroiAmbianteIntensite: 1,
+  })
+  // ⚠️ **LA LAMPE HÉMISPHÉRIQUE EST LA MÊME DES DEUX CÔTÉS** — elle éclaire
+  // toute la scène ; seul l'environnement diffère. On vérifie donc l'ÉCART, qui
+  // doit valoir exactement la différence des deux ambiantes.
+  const ecartCiel = u.uCielIrr.value.x - u.uParoiCielIrr.value.x
+  assert.ok(Math.abs(ecartCiel - (6.6827 * 0.3951 - 1.8348)) < 1e-6, 'ecart ciel ' + ecartCiel)
+  const ecartSol = u.uSolIrr.value.x - u.uParoiSolIrr.value.x
+  assert.ok(Math.abs(ecartSol - (1.0452 * 0.3951 - 0.1436)) < 1e-6, 'ecart sol ' + ecartSol)
+  // ⛔ **ET LE SENS COMPTE** : c'est le relief qui est le PLUS clair à plat sur
+  // un mur vertical (1,526 contre 0,989 mesuré), donc la paroi doit être PLUS
+  // SOMBRE. Une mutation qui échangerait les deux passerait l'égalité ci-dessus
+  // au signe près ; elle ne passe pas celle-ci.
+  const platTuiles = (u.uCielIrr.value.x + u.uSolIrr.value.x) / 2
+  const platParoi = (u.uParoiCielIrr.value.x + u.uParoiSolIrr.value.x) / 2
+  assert.ok(platParoi < platTuiles, 'la paroi doit etre plus sombre que les tuiles')
+  assert.ok(platTuiles / platParoi > 1.3, 'rapport mesure 1,54 ; ici ' + platTuiles / platParoi)
+  // ⚡ **ET LE MATÉRIAU DE PAROI LIT BIEN CES DEUX-LÀ** (⑥a garde l'identité ;
+  // ici on garde la VALEUR, donc le chemin entier de `poserHabillage` au GPU)
+  const m = g._materiauParois()
+  assert.equal(m.uniforms.uCielIrr.value.x, u.uParoiCielIrr.value.x)
+  assert.notEqual(m.uniforms.uCielIrr.value.x, u.uCielIrr.value.x)
+})
+
+test('⑦c SANS donnée de paroi, la paroi retombe sur les tuiles — AU BIT PRÈS', () => {
+  // ⚠️ **L'INTERRUPTEUR EST L'ABSENCE DE DONNÉE**, le patron de `uCropOn`,
+  // `uHabOn`, `coastMask` et `sol`. Un appelant qui ne connaît pas encore ces
+  // deux champs doit rendre l'image d'AVANT la Tâche P8, pas une paroi noire.
+  const g = new Globe({ radius: 100 })
+  const u = g.uniforms
+  const base = {
+    centreLat: -21.115, centreLon: 55.536, soleilAzimut: 302.02, soleilElevation: 34.33,
+    soleilCouleur: '#fff7e6', soleilIntensite: 3.743,
+    hemiCiel: '#85c2eb', hemiSol: '#4a3a2a', hemiIntensite: 0.8105,
+    ambianteCoef: { ciel: [6.6827, 6.6827, 6.6827], sol: [1.0452, 1.0452, 1.0452] },
+    ambianteIntensite: 0.3951,
+  }
+  g.poserHabillage({ ...base })
+  assert.deepEqual(u.uParoiCielIrr.value.toArray(), u.uCielIrr.value.toArray())
+  assert.deepEqual(u.uParoiSolIrr.value.toArray(), u.uSolIrr.value.toArray())
+  // ⚠️ **ET CE N'EST PAS UN BANC VIDE** : les valeurs ne sont ni nulles ni le
+  // défaut MONDE — sans ça, l'égalité ci-dessus serait « zéro égale zéro ».
+  assert.ok(u.uParoiCielIrr.value.x > 2, 'le repli porte une vraie irradiance')
+  assert.notDeepEqual(u.uParoiCielIrr.value.toArray(), [...ECLAIRAGE_MONDE.cielIrr])
+  // … et une ambiante de paroi NULLE n'est PAS le repli : un matériau dont
+  // l'environnement a été retiré doit garder sa seule lampe hémisphérique.
+  g.poserHabillage({ ...base, paroiAmbianteCoef: null, paroiAmbianteIntensite: 0 })
+  assert.ok(u.uParoiCielIrr.value.x < u.uCielIrr.value.x, 'ambiante nulle, pas repli')
+  assert.ok(u.uParoiCielIrr.value.x > 0.18, 'la lampe hemispherique reste')
 })

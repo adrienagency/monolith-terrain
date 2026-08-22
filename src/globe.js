@@ -2390,6 +2390,21 @@ export class Globe {
       uHemiHaut: { value: new THREE.Vector3(0, 1, 0) },
       uCielIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.cielIrr) },
       uSolIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.solIrr) },
+      // ══════ L'AMBIANTE PROPRE À LA PAROI — Tâche P8 ═══════════════════════
+      //
+      // ⛔ **DEUX AMBIANTES ET NON UNE, PARCE QUE LE SOCLE EN A DEUX.** Le
+      // relief voit `scene.environment` (« the neutral room env ») ; la paroi
+      // voit `wallMat.envMap` (« their own studio env map »), et `three`
+      // n'applique `scene.environmentIntensity` qu'aux matériaux SANS `envMap` à
+      // eux. La démonstration, les deux relevés et les deux témoins sont à
+      // `environnementEffectif` (`monde/eclairage-crop.js`).
+      //
+      // ⚠️ **LE DÉFAUT EST CELUI DES TUILES, PAS ZÉRO.** Sans donnée de paroi,
+      // `poserHabillage` y recopie `uCielIrr`/`uSolIrr` : l'image d'avant cette
+      // tâche est alors rendue AU BIT PRÈS. Un zéro aurait fait une paroi noire
+      // chez tout appelant qui ne connaît pas encore ces deux champs.
+      uParoiCielIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.cielIrr) },
+      uParoiSolIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.solIrr) },
       uAlbedoBase: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.albedoBase) },
       uAlbedoTeinte: { value: ECLAIRAGE_MONDE.albedoTeinte },
       // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════
@@ -2971,6 +2986,15 @@ export class Globe {
     hemiIntensite = null,
     ambianteCoef = null,
     ambianteIntensite = null,
+    // ══════ L'AMBIANTE DE LA PAROI — Tâche P8 ════════════════════════════════
+    //
+    // ⚠️ **MÊME PATRON QUE PARTOUT ICI : L'INTERRUPTEUR EST L'ABSENCE DE
+    // DONNÉE.** Un appelant qui ne les passe pas fait retomber la paroi sur
+    // l'ambiante des tuiles, c'est-à-dire sur l'image d'avant cette tâche AU BIT
+    // PRÈS. C'est ce que `test/crop-eclairage.test.js` verrouille, et c'est ce
+    // qui rend la mutation « on oublie de les poser » visible en test.
+    paroiAmbianteCoef = null,
+    paroiAmbianteIntensite = null,
     albedoBase = null,
     albedoTeinte = null,
     // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
@@ -3092,6 +3116,35 @@ export class Globe {
         u.uSolIrr.value.y + amb.sol[1],
         u.uSolIrr.value.z + amb.sol[2]
       )
+      // ══════ ET LA PAROI PREND SON PROPRE ENVIRONNEMENT — Tâche P8 ══════════
+      //
+      // ⚠️ **LA LAMPE HÉMISPHÉRIQUE EST LA MÊME, L'ENVIRONNEMENT NON.** Une
+      // `HemisphereLight` éclaire toute la scène ; un `envMap` posé sur un
+      // matériau n'éclaire que lui. On repart donc du même hémisphère et on lui
+      // ajoute l'ambiante DE LA PAROI au lieu de celle du relief.
+      //
+      // ⚠️ **SANS DONNÉE DE PAROI, ON RECOPIE CELLE DES TUILES** — pas zéro : le
+      // défaut doit être l'image d'avant cette tâche, au bit près.
+      const ambParoi = paroiAmbianteCoef != null || Number.isFinite(paroiAmbianteIntensite)
+        ? irradianceAmbiante(paroiAmbianteCoef, paroiAmbianteIntensite)
+        : null
+      if (ambParoi) {
+        poserIrradiance(u.uParoiCielIrr.value, hemiCiel, hemiIntensite)
+        poserIrradiance(u.uParoiSolIrr.value, hemiSol, hemiIntensite)
+        u.uParoiCielIrr.value.set(
+          u.uParoiCielIrr.value.x + ambParoi.ciel[0],
+          u.uParoiCielIrr.value.y + ambParoi.ciel[1],
+          u.uParoiCielIrr.value.z + ambParoi.ciel[2]
+        )
+        u.uParoiSolIrr.value.set(
+          u.uParoiSolIrr.value.x + ambParoi.sol[0],
+          u.uParoiSolIrr.value.y + ambParoi.sol[1],
+          u.uParoiSolIrr.value.z + ambParoi.sol[2]
+        )
+      } else {
+        u.uParoiCielIrr.value.copy(u.uCielIrr.value)
+        u.uParoiSolIrr.value.copy(u.uSolIrr.value)
+      }
       if (albedoBase != null) {
         // ⚠️ **`setStyle`, PAS `set`** : `set` accepte aussi un nombre, et une
         // chaîne '#rrggbb' est ce que le contexte transporte (une chaîne se
@@ -3206,6 +3259,11 @@ export class Globe {
     u.uSoleilIrr.value.fromArray(ECLAIRAGE_MONDE.soleilIrr)
     u.uCielIrr.value.fromArray(ECLAIRAGE_MONDE.cielIrr)
     u.uSolIrr.value.fromArray(ECLAIRAGE_MONDE.solIrr)
+    // ⚠️ **LES DEUX DE LA PAROI AUSSI — Tâche P8**, et pour la raison que ce
+    // bloc porte déjà : l'aller-retour bit-à-bit porte sur les VALEURS. Une
+    // paroi restée sur le studio d'un crop mort est un état qui traîne.
+    u.uParoiCielIrr.value.fromArray(ECLAIRAGE_MONDE.cielIrr)
+    u.uParoiSolIrr.value.fromArray(ECLAIRAGE_MONDE.solIrr)
     u.uAlbedoBase.value.fromArray(ECLAIRAGE_MONDE.albedoBase)
     u.uAlbedoTeinte.value = ECLAIRAGE_MONDE.albedoTeinte
     u.uParoiCouleur.value.set('#d8d4cc')
@@ -4591,12 +4649,24 @@ export class Globe {
         // studio, éclairé par trois sources. »* La paroi du socle est un
         // `MeshPhysicalMaterial` rugosité 0,95, métal 0, occlusion par sommet :
         // un diffus pur. `irradianceCrop` est cette loi-là, et c'est la MÊME
-        // fonction, les MÊMES uniformes que les tuiles — pas une seconde.
+        // fonction que les tuiles — pas une seconde.
+        //
+        // ⛔ **MAIS PAS LES MÊMES UNIFORMES D'AMBIANTE, ET P6 SE TROMPAIT SUR CE
+        // POINT — Tâche P8.** La ligne au-dessus disait « les MÊMES uniformes
+        // que les tuiles ». Elle a coûté la moitié du manque n° 3 du noteur :
+        // **le relief et la paroi du socle ne voient PAS le même
+        // environnement.** Le relief voit `scene.environment` à
+        // `scene.environmentIntensity` ; la paroi voit son propre studio à
+        // `envMapIntensity`, parce que `three` n'écrase l'intensité que sur les
+        // matériaux SANS `envMap` à eux. La paroi du crop empruntait donc
+        // l'ambiante du RELIEF, **1,54 fois plus forte à plat sur un mur
+        // vertical** — d'où ses 26,63 contre 15,88. Mesures, témoins et
+        // aller-retours : `environnementEffectif` (`monde/eclairage-crop.js`).
         uSoleilDir: this.uniforms.uSoleilDir,
         uHemiHaut: this.uniforms.uHemiHaut,
         uSoleilIrr: this.uniforms.uSoleilIrr,
-        uCielIrr: this.uniforms.uCielIrr,
-        uSolIrr: this.uniforms.uSolIrr,
+        uCielIrr: this.uniforms.uParoiCielIrr,
+        uSolIrr: this.uniforms.uParoiSolIrr,
         uEclairageOn: this.uniforms.uEclairageOn,
       },
       vertexShader: /* glsl */ `

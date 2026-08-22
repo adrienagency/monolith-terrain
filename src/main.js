@@ -87,6 +87,12 @@ import { creerVeilleCrop } from './monde/branchement-crop.js'
 // `scene.environment` par un ciel HDRI — un nombre en dur serait devenu faux
 // sans que rien ne le dise.
 import { coefAmbiante } from './sonde-ambiante.js'
+// ⛔ **ET LA PAROI N'EST PAS ÉCLAIRÉE PAR LE MÊME ENVIRONNEMENT QUE LE RELIEF —
+// Tâche P8.** `environnementEffectif` est la règle de `three` (« un matériau qui
+// porte son propre `envMap` ne voit ni `scene.environment` ni
+// `scene.environmentIntensity` »), écrite une fois, vérifiable sous node. C'est
+// elle qui dit LAQUELLE des deux textures sonder pour la paroi du crop.
+import { environnementEffectif } from './monde/eclairage-crop.js'
 // LE REPOS DE LA VUE — Tâche N. ⚠️ **PUR, POUR LA MÊME RAISON QUE LES TROIS
 // VEILLES CI-DESSUS** : c'est un SEUIL, et le seuil du socle a produit onze
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
@@ -4924,6 +4930,17 @@ function contexteCrop() {
     ? f.maxM - f.minM
     : (Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null)
 
+  // ⛔ **L'ENVIRONNEMENT DE LA PAROI N'EST PAS CELUI DU RELIEF — Tâche P8.** La
+  // règle est celle de `three` et elle est écrite dans `environnementEffectif` ;
+  // ici on ne fait que l'appliquer au matériau de paroi VIVANT. `?.` parce que
+  // `contexteCrop` tourne aussi avant que la plinthe existe.
+  const envParoi = environnementEffectif(
+    plinth?.wallMat?.envMap ?? null,
+    plinth?.wallMat?.envMapIntensity,
+    scene.environment,
+    scene.environmentIntensity
+  )
+
   const ctx = {
     centre,
     zoom,
@@ -5069,6 +5086,30 @@ function contexteCrop() {
       // `CHAMPS_HABILLAGE` impose à tout ce qui n'est ni scalaire ni chaîne.
       ambianteCoef: coefAmbiante(renderer, scene.environment),
       ambianteIntensite: scene.environmentIntensity,
+      // ══════ ET L'AMBIANTE DE LA PAROI, QUI N'EST PAS CELLE-LÀ — Tâche P8 ═══
+      //
+      // ⛔ **LE COMMENTAIRE JUSTE AU-DESSUS NE TIRE QUE LA MOITIÉ DE SA PROPRE
+      // LIGNE DE `three`.** Il conclut, à raison, qu'`envMapIntensity` est du
+      // code MORT sur le relief parce que `terrain.material.envMap === null`.
+      // **La paroi du socle, elle, a son propre `envMap`** — `plinth.setEnvMap`
+      // lui pose `makeSocleEnvMap(renderer)`, et son commentaire l'annonce :
+      // *« give the socle walls their own studio env map (overrides
+      // scene.environment for this material only… while the terrain keeps the
+      // neutral room env) »*. La règle de `three` s'inverse alors : c'est
+      // `wallMat.envMapIntensity` qui compte, et `scene.environmentIntensity`
+      // qui est morte.
+      //
+      // ⚡ **MESURÉ AU MÊME INSTANT DANS LA MÊME PAGE** (La Réunion z12,
+      // `.banc/P8/S3-ambiante-P8.json`), irradiance à plat sur un mur vertical :
+      // relief **(1,526 · 1,526 · 1,526)** contre paroi **(0,989 · 0,947 ·
+      // 0,931)**. La paroi du crop prenait la première : **1,68 fois trop
+      // claire** (26,63 contre 15,88), contraste **1,52 fois trop faible**.
+      //
+      // ⚠️ **ON LIT LE MATÉRIAU, PAS `params` — la même règle que `paroiCouleur`
+      // vingt lignes plus bas** : un préréglage PBR repose `envMapIntensity`
+      // (`plinth.setMaterial`), et `params.envMapIntensity` ne le sait pas.
+      paroiAmbianteCoef: coefAmbiante(renderer, envParoi.texture),
+      paroiAmbianteIntensite: envParoi.intensite,
       // le fond contre lequel `mapTint` dose la peinture — `terrain.js:1137`
       albedoBase: `#${terrain.material.color.getHexString()}`,
       albedoTeinte: terrain.mapUniforms.uTint.value,
