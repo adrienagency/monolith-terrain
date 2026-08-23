@@ -30,6 +30,9 @@ import {
   poseApresNiveau,
   poseFranchissement,
   poseFonduArrivee,
+  avancerFonduPose,
+  adoucir,
+  adoucirInverse,
   camYPourAltitudeFond,
   distancePourAltitudeFond,
   niveauDArrivee,
@@ -38,7 +41,7 @@ import {
 import { sautsDuProfil, empriseBlocM, distanceArrivee, PENTE_ARRIVEE_Y, Y_CIBLE } from '../src/loi-altitude.js'
 import { altitudeFondM } from '../src/monde/frontiere-rendu.js'
 import { ORBITAL_M_PER_UNIT } from '../src/geo.js'
-import { STEP_IN, STEP_OUT } from '../src/modes.js'
+import { STEP_IN, STEP_OUT, DUREE_FONDU_POSE_S, PAS_POSE_MAX_DEG } from '../src/modes.js'
 
 // ⚠️ **UN CANEVAS DE PACOTILLE, ET RIEN DE PLUS.** Le constructeur de `Globe`
 // appelle `rebuildRamp`, qui demande un canevas 512×1 pour cuire la rampe
@@ -374,14 +377,17 @@ test('⑥ la conversion d’unités tombe sur la MÊME image que le changement',
   // UNE IMAGE avant que la caméra ne suive — onze bascules du seuil du socle au
   // lieu d'une. Le suiveur est donc appelé EN TÊTE d'`update`, avant que
   // `majSeuilSocle()` et `majCameraFond()` ne lisent quoi que ce soit.
-  // ⚠️ **LA SIGNATURE PORTE MAINTENANT `cibleAvant` — Tâche R4.** Voir la
-  // section ⑪ : sans l'ancienne cible, la direction se relisait sur le couple
-  // dépareillé `caméra(repère d'avant) − cible(repère d'après)`, et le
-  // franchissement tournait la caméra de 10,4°, mesurés au navigateur.
-  assert.match(SRC_MODES, /_suivreEmprise\(cibleAvant = null\) \{/)
+  // ⛔ **TROIS ASSERTIONS DE TEXTE SOURCE ONT ÉTÉ RETIRÉES ICI — Tâche R4, tour
+  // de correction.** Elles lisaient la SIGNATURE de `_suivreEmprise` et la
+  // MENTION de `poseFranchissement` dans son corps. Elles ne prouvaient rien du
+  // comportement — une mutation a survécu à 4 082 tests exactement pour cette
+  // raison — et cassaient à la première renommée. Ce qu'elles prétendaient
+  // couvrir est désormais couvert par le COMPORTEMENT, en section ⑪ :
+  // « ⑪ GARDE — le suiveur repose MÊME à emprise égale… » et « ⑪ GARDE — sans
+  // emprise mémorisée… » appellent `_suivreEmprise` et regardent où la caméra
+  // atterrit. Ce qui reste ci-dessous est un ORDRE d'appel entre trois lecteurs
+  // de `main.js` — une contrainte de séquence qu'aucune valeur ne porte.
   assert.match(SRC_MODES, /update\(dt\) \{[\s\S]{0,700}?this\._suivreEmprise\(\)/)
-  const suiv = SRC_MODES.slice(SRC_MODES.indexOf('  _suivreEmprise(cibleAvant = null) {'))
-  assert.match(suiv.slice(0, suiv.indexOf('\n  }\n')), /poseFranchissement/)
   // et `main.js` appelle bien `modes.update` avant les deux lecteurs d'altitude
   const iUpdate = SRC_MAIN.indexOf('modes.update(dt)')
   assert.ok(iUpdate > 0 && iUpdate < SRC_MAIN.indexOf('  majSeuilSocle()'))
@@ -396,9 +402,13 @@ test('⑥ le franchissement ne remet PAS l’élan à zéro sous le drapeau', ()
   assert.match(corps, /if \(!continu\) this\._resetZoom\(\)/)
   // ⚠️ et le cran ne repose PAS la caméra lui-même : il rend la main au suiveur
   // d'unités, seul écrivain de la conversion.
-  // ⚠️ **ET IL LUI PASSE L'ANCIENNE CIBLE — Tâche R4** : c'est la seule chose
-  // que le suiveur ne peut pas retrouver seul une fois la cible réécrite.
-  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(cibleAvant\); this\.busy = false; return \}/)
+  // ⛔ **LE `cibleAvant` DE CETTE LIGNE N'EST PLUS LU DANS LE TEXTE** — Tâche R4,
+  // tour de correction. Que `_rescale` passe bien l'ANCIENNE cible est prouvé
+  // par le comportement en ⑪ (« BRANCHEMENT — un franchissement ne tourne PAS la
+  // caméra, visée mobile comprise ») : ce test-là échoue à −8,329° dès qu'on
+  // remet le geste d'avant. Ce qui reste ici est la FORME de l'appel — que le
+  // chemin continu sort avant `poseCranContinu`.
+  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(.*\); this\.busy = false; return \}/)
   // ⚠️ **LA FORME D'APPEL, PAS LA MENTION** : le commentaire au-dessus nomme
   // `poseCranContinu` pour dire pourquoi on ne l'emploie plus. L'APPEL, lui, est
   // après le retour anticipé — donc hors du chemin continu.
@@ -907,10 +917,15 @@ test('⑪ BRANCHEMENT — la plongée arrive AU NADIR puis balaie jusqu’à la 
     assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'le fondu a fait bouger l’altitude de fond')
   }
   assert.equal(m._fonduPose, null, 'le fondu ne s’est jamais terminé')
-  assert.ok(Math.abs(incl() - 46.551) < 0.05, `la pose finale vaut ${incl().toFixed(3)}° au lieu de 46,551°`)
+  assert.ok(Math.abs(incl() - 46.54816) < 0.01, `la pose finale vaut ${incl().toFixed(5)}° au lieu de 46,54816°`)
   // ⚠️ **LE CRITÈRE D'ADRIEN, CHIFFRÉ** : plus aucun pas d'image à image ne
   // ressemble au saut de 46,55° relevé au navigateur.
-  assert.ok(plusGrandPas < 3, `le plus grand pas vaut encore ${plusGrandPas.toFixed(2)}° par image`)
+  // ⛔ **ET LE SEUIL DESCEND DE 3° À 1,5° — Tâche R4, tour de correction.** À
+  // `dt = 1/60` la courbe donne 1,41° : un seuil à 3° **ne pouvait pas échouer
+  // ici**, quelle que soit la bêtise commise. C'est le défaut que la relecture a
+  // relevé, et il n'est pas réparé par un seuil plus serré sur un `dt` parfait —
+  // il l'est par le test ⑫, qui rejoue le `dt` RELEVÉ AU NAVIGATEUR.
+  assert.ok(plusGrandPas < 1.5, `le plus grand pas vaut encore ${plusGrandPas.toFixed(3)}° par image`)
 })
 
 test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, comme avant', async () => {
@@ -927,4 +942,301 @@ test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, com
   // drapeau n'a pas bougé d'un centième.
   assert.ok(Math.abs(incl - 46.46) < 0.02, `hors drapeau, la plongée arrive à ${incl.toFixed(3)}°`)
   assert.equal(m._fonduPose ?? null, null, 'un fondu de pose s’est armé hors du régime continu')
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⑫ LES GARDES, PAR LE COMPORTEMENT — Tâche R4, TOUR DE CORRECTION
+//
+// ⛔ **NEUF MUTATIONS SUR VINGT-SIX SURVIVAIENT AUX 4 202 TESTS, ET QUATRE
+// D'ENTRE ELLES ÉTAIENT EXACTEMENT LES GARDES QUE LE RAPPORT DÉFENDAIT LE PLUS
+// LONGUEMENT.** Un successeur qui les jugeait inutiles pouvait les retirer et
+// laisser la suite verte. Cette section les couvre — **par le comportement, pas
+// par le texte source** : ici, une assertion qui lirait `assert.match(SRC_MODES,
+// …)` ne prouverait rien, et une mutation a déjà survécu à 4 082 tests pour
+// cette raison exacte.
+//
+// ⚠️ **DEUX DES NEUF SONT DES MUTANTS ÉQUIVALENTS, ET C'EST DÉMONTRÉ, PAS
+// SUPPOSÉ** — voir `rapport-R4.md` §9. Les tests ci-dessous épinglent quand même
+// le CONTRAT, parce que l'équivalence tient à la garde jumelle d'une AUTRE
+// fonction : elle se perdrait au premier remaniement de celle-là.
+// ══════════════════════════════════════════════════════════════════════════
+
+test('⑫ GARDE Z5 — la distance de franchissement est ÉCRÊTÉE aux bornes des contrôles', () => {
+  // la caméra est très haut : la distance brute dépasse `maxDistance`
+  const cibleAvant = { x: 0, y: 0, z: 0 }
+  const cibleApres = { x: 3, y: 0, z: -4 }
+  const camera = { x: 0, y: 900, z: 900 }
+  const p = poseFranchissement({
+    camera, cibleAvant, cibleApres, empriseAvant: 1e6, empriseApres: 1e6,
+    distanceMin: 6, distanceMax: 150,
+  })
+  const d = Math.hypot(p.x - cibleApres.x, p.y - cibleApres.y, p.z - cibleApres.z)
+  assert.ok(Math.abs(d - 150) < 1e-9, `distance ${d.toFixed(3)} au lieu de la butée 150`)
+  assert.ok(Math.abs(p.distanceCible - 150) < 1e-9)
+  // et la butée BASSE mord aussi, sur une caméra presque posée sur sa cible
+  const bas = poseFranchissement({
+    camera: { x: 0, y: 1, z: 1 }, cibleAvant, cibleApres, empriseAvant: 1e6, empriseApres: 1e6,
+    distanceMin: 6, distanceMax: 150,
+  })
+  const db = Math.hypot(bas.x - cibleApres.x, bas.y - cibleApres.y, bas.z - cibleApres.z)
+  assert.ok(Math.abs(db - 6) < 1e-9, `distance ${db.toFixed(3)} au lieu de la butée 6`)
+})
+
+test('⑫ GARDE Z6 — une visée PRESQUE rasante ne repose RIEN, au lieu d’un ré-ancrage sur la butée', () => {
+  // ⚠️ **« PRESQUE » EST TOUT LE TEST.** À pente EXACTEMENT nulle, la garde ne
+  // sert à rien : `(camY − yCible) / 0` n'est pas fini et le test de finitude
+  // suffit. C'est à pente TRÈS PETITE que la garde travaille : la distance reste
+  // FINIE — 80 000 unités ici —, donc la loi rendrait une pose, et l'écrêtage la
+  // ramènerait sur `maxDistance`. Sans la garde, une visée rasante ferait donc
+  // SAUTER la caméra sur la butée au lieu de la laisser où elle est.
+  const cible = { x: 0, y: 0, z: 0 }
+  const rasant = { x: 0, y: 40, z: 80000 } // pente = 5 × 10⁻⁴, sous le seuil de 10⁻³
+  assert.equal(
+    poseFranchissement({ camera: rasant, cibleAvant: cible, cibleApres: cible, empriseAvant: 1, empriseApres: 1, distanceMax: 150 }),
+    null
+  )
+  // le témoin : au-DESSUS du seuil, la même géométrie rend bien une pose — et
+  // elle atterrit sur la butée, ce qui montre exactement ce que la garde évite
+  const ok = poseFranchissement({
+    camera: { x: 0, y: 40, z: 8000 }, cibleAvant: cible, cibleApres: cible,
+    empriseAvant: 1, empriseApres: 1, distanceMax: 150,
+  })
+  assert.ok(ok && Math.abs(ok.distanceCible - 150) < 1e-9, 'le témoin ne prouve rien')
+})
+
+test('⑫ GARDE Z13 — l’avancement du fondu est BORNÉ à [0, 1]', () => {
+  const cible = { x: 3, y: Y_CIBLE, z: -7 }
+  const n = Math.hypot(18, 19)
+  const direction = { x: 0, y: 18 / n, z: 19 / n }
+  const camY = 44
+  const p = (a) => poseFonduArrivee({ cible, camY, direction, avancement: a })
+  for (const [hors, dedans] of [[1.4, 1], [12, 1], [-0.3, 0], [-9, 0]]) {
+    const a = p(hors)
+    const b = p(dedans)
+    assert.ok(Math.abs(a.x - b.x) < 1e-12 && Math.abs(a.z - b.z) < 1e-12,
+      `avancement ${hors} ne retombe pas sur ${dedans}`)
+  }
+  // et sans la borne, 1,4 sortirait VRAIMENT de la course : le témoin le dit
+  const elevFin = Math.asin(direction.y)
+  const horsCourse = Math.PI / 2 + (elevFin - Math.PI / 2) * 1.4
+  assert.ok(horsCourse < elevFin - 0.1, 'le témoin ne prouve rien : 1,4 ne sort pas de la course')
+})
+
+test('⑫ GARDE M4 — un franchissement ne se lance PAS pendant le balayage, et il n’est pas PERDU', async () => {
+  // ⚠️ **LA GARDE QUE LE RAPPORT DÉFEND SUR DIX LIGNES, ET QUE RIEN NE
+  // PROTÉGEAIT.** Un franchissement lancé au milieu du balayage écrirait une
+  // nouvelle cible et se battrait avec lui pour la même caméra.
+  const { m, etat } = await machine({ emprise: 1e6 })
+  m._levelZoom = PAS_NIVEAU * 1.2 // de quoi franchir un niveau
+  const budget = m._levelZoom
+  m._fonduPose = { t: 0.3, e: 0.3, angleTotalDeg: 46.5, cible: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } }
+  m._franchirSiBesoin()
+  assert.equal(etat.loadSurface, 0, 'un niveau a été franchi PENDANT le balayage')
+  assert.equal(m._levelZoom, budget, 'le budget a été dépensé pendant le balayage')
+  // ⚠️ **ET LE COMPTEUR TRAVERSE** : le niveau se franchit dès que le balayage
+  // est fini. Sans cette moitié-là, la garde serait une perte, pas un report.
+  m._fonduPose = null
+  m._franchirSiBesoin()
+  assert.ok(m._levelZoom < budget, 'le budget n’a pas été dépensé une fois le balayage fini')
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.loadSurface, 1, 'le niveau reporté n’a jamais été franchi')
+})
+
+test('⑫ GARDE M5 — le suiveur repose MÊME à emprise égale, dès qu’on lui donne l’ancienne cible', async () => {
+  // ⚠️ **LE CAS MESURÉ** : pendant l'`await` du chargement, le suiveur PAR IMAGE
+  // a déjà vu passer la nouvelle emprise et l'a convertie. Sortir sur
+  // `avant === emprise` laisserait la caméra ancrée sur une cible qui n'existe
+  // plus — c'est-à-dire exactement le défaut, une image plus tard.
+  const { m, camera, controls } = await machine({ emprise: 1e6 })
+  camera.position.set(-2.229, 23.821, 25.157)
+  controls.target.set(-2.229, -0.156, -0.153)
+  m._suivreEmprise() // première lecture : elle mémorise l'emprise, et rien d'autre
+  const cibleAvant = controls.target.clone()
+  const attendu = inclinaisonDeg(camera.position, cibleAvant)
+  // la cible saute dans le repère du nouveau bloc — SANS que l'emprise change
+  controls.target.set(4.814, -0.297, 8.949)
+  const posAvant = camera.position.clone()
+  m._suivreEmprise(cibleAvant)
+  assert.ok(camera.position.distanceTo(posAvant) > 1, 'la caméra n’a pas été reposée du tout')
+  const obtenu = inclinaisonDeg(camera.position, controls.target)
+  assert.ok(Math.abs(obtenu - attendu) < 1e-9, `la caméra a tourné de ${(obtenu - attendu).toFixed(4)}°`)
+})
+
+test('⑫ GARDE M7 — sans emprise mémorisée, on RÉ-ANCRE quand même, et sans convertir', async () => {
+  const { m, camera, controls } = await machine({ emprise: 1e6 })
+  camera.position.set(-2.229, 23.821, 25.157)
+  controls.target.set(-2.229, -0.156, -0.153)
+  const cibleAvant = controls.target.clone()
+  const attendu = inclinaisonDeg(camera.position, cibleAvant)
+  const camY = camera.position.y
+  assert.equal(m._empriseVue, null, 'l’état de départ du test n’est pas « sans emprise mémorisée »')
+  controls.target.set(4.814, -0.297, 8.949)
+  m._suivreEmprise(cibleAvant)
+  // ré-ancré…
+  assert.ok(Math.abs(inclinaisonDeg(camera.position, controls.target) - attendu) < 1e-9)
+  // … et SANS conversion d'altitude : `camY` traverse à l'identique
+  assert.ok(Math.abs(camera.position.y - camY) < 1e-9, `camY est passée de ${camY} à ${camera.position.y}`)
+})
+
+test('⑫ GARDE M9 — la courbe du balayage est ADOUCIE, pas linéaire', () => {
+  // ⚠️ **C'EST DE CETTE COURBE QUE `DUREE_FONDU_POSE_S` EST DÉRIVÉE** : « la
+  // vitesse de pointe vaut DEUX fois la moyenne ». Une courbe linéaire donne un
+  // pas constant, passe tous les seuils, et rend la dérivation fausse en silence.
+  const n = 66
+  const pas = []
+  let e = 0
+  for (let i = 1; i <= n; i++) {
+    const suite = adoucir(i / n)
+    pas.push(suite - e)
+    e = suite
+  }
+  const moyen = 1 / n
+  const pointe = Math.max(...pas)
+  assert.ok(pointe / moyen > 1.9 && pointe / moyen < 2.1, `pointe/moyenne = ${(pointe / moyen).toFixed(3)} au lieu de ≈ 2`)
+  // les deux bouts sont adoucis : le premier pas est une fraction du plus grand
+  assert.ok(pas[0] < pointe / 10, 'le départ n’est pas adouci')
+  assert.ok(pas[n - 1] < pointe / 10, 'l’arrivée n’est pas adoucie')
+  // et la réciproque est bien la réciproque — c'est elle qui remonte `t` quand
+  // le plafond par image mord
+  for (const t of [0, 0.13, 0.4999, 0.5, 0.5001, 0.87, 1]) {
+    assert.ok(Math.abs(adoucirInverse(adoucir(t)) - t) < 1e-12, `réciproque fausse en t = ${t}`)
+  }
+})
+
+test('⑫ GARDE M11 — une arrivée sous `minDistance` n’arme AUCUN balayage, et ne bouge pas la caméra', async () => {
+  // ⚠️ **C'EST LA RÉSERVE 2 DU RAPPORT**, et rien ne la protégeait. À l'aplomb,
+  // la distance à la cible vaut `camY − yCible` ; sous `minDistance`,
+  // `controls.update()` la repousserait à chaque image et le balayage se
+  // battrait contre la butée.
+  const { m, camera } = await machine({ emprise: 1e6 })
+  const cible = new (camera.position.constructor)(0, 0, 0)
+  // minDistance vaut 6 dans le banc : 4 est dessous, 12 est au-dessus
+  camera.position.set(0, 4, 4)
+  const posAvant = camera.position.clone()
+  m._armerFonduPose(cible)
+  assert.equal(m._fonduPose, null, 'un balayage s’est armé sous la butée de distance')
+  assert.equal(camera.position.distanceTo(posAvant), 0, 'la caméra a bougé alors que rien ne devait s’armer')
+  // le témoin : au-dessus de la butée, le même geste arme bien un balayage
+  camera.position.set(0, 12, 12)
+  m._armerFonduPose(cible)
+  assert.ok(m._fonduPose, 'le témoin ne prouve rien : rien ne s’arme même au-dessus de la butée')
+  assert.ok(m._fonduPose.angleTotalDeg > 40 && m._fonduPose.angleTotalDeg < 50)
+})
+
+test('⑫ GARDE M10 — une arrivée rasante n’arme aucun balayage', async () => {
+  // ⚠️ **MUTANT ÉQUIVALENT, ET LE TEST EST QUAND MÊME UTILE.** La garde
+  // `direction.y > 1e-3` de `_armerFonduPose` lit la MÊME grandeur normalisée
+  // que la garde `sinFin > penteMin` de `poseFonduArrivee`, au même seuil : la
+  // retirer ne change rien d'observable — le balayage s'arme puis se désarme
+  // dans le même appel. Ce test épingle le CONTRAT — « rasant ⇒ rien » — qui,
+  // lui, cesserait d'être tenu si l'autre garde bougeait.
+  const { m, camera } = await machine({ emprise: 1e6 })
+  const cible = new (camera.position.constructor)(0, 0, 0)
+  camera.position.set(0, 7, 7000) // 7 unités de haut pour 7 000 de côté
+  m._armerFonduPose(cible)
+  assert.equal(m._fonduPose, null, 'un balayage s’est armé sur une arrivée rasante')
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⑫ bis LE PLAFOND PAR IMAGE — LE GARDE-FOU QUI NE POUVAIT PAS ÉCHOUER
+//
+// ⛔ **`assert.ok(plusGrandPas < 3)` NE POUVAIT PAS ÉCHOUER**, parce que
+// `machine()` alimente un `dt` PARFAIT de 1/60, où la courbe donne 1,41°. Dans
+// l'application, la plongée est le moment où la surface se charge : les images
+// durent 90, 160, 195, 225 ms, et l'écrêtage `Math.min(dtBrut, 0,05)` de
+// `main.js` les convertissait en pas de 4°.
+//
+// **Mesuré par moi, en Chrome VISIBLE, sur la RTX 3080 d'Adrien**
+// (`node scripts/sonde-descente.mjs --visible 1`, trace
+// `.banc/R4/r4c-gpu-avant.json`) : pas de pointe **4,135°** sur une image de
+// 95 ms, **six** pas au-dessus de 3°, balayage de 34 images en 1 974 ms.
+//
+// `INTERVALLES_GPU` est la suite RELEVÉE des durées d'image de ce balayage, en
+// millisecondes. C'est elle qui rend le test capable d'échouer.
+// ══════════════════════════════════════════════════════════════════════════
+
+const INTERVALLES_GPU = [
+  9, 225, 19, 12, 83, 93, 71, 3, 68, 81, 84, 8, 90, 95, 162, 8, 194, 106, 122, 9,
+  139, 104, 14, 14, 6, 26, 8, 19, 19, 16, 16, 17, 28, 6, 20, 17, 17, 18, 17, 19,
+]
+// `main.js` écrête le pas de temps de simulation ; le banc doit l'écrêter pareil,
+// sans quoi il mesurerait un autre logiciel que celui qui tourne.
+const DT_GPU = INTERVALLES_GPU.map((ms) => Math.min(ms / 1000, 0.05))
+const ANGLE_PLONGEE = 46.548157698978
+
+test('⑫ bis MUTATION — sans le plafond, le `dt` RELEVÉ rouvre 4° et six pas au-dessus de 3°', () => {
+  // ⚠️ **SANS CETTE MUTATION, LE TEST SUIVANT SERAIT UNE TAUTOLOGIE.** C'est la
+  // loi du premier jet, au caractère près : la même courbe, le même `dt` écrêté,
+  // et AUCUN plafond angulaire.
+  let t = 0
+  let e = 0
+  let pointe = 0
+  let sup3 = 0
+  for (const dt of DT_GPU) {
+    const p = avancerFonduPose({ t, e, dt, duree: DUREE_FONDU_POSE_S, angleTotalDeg: ANGLE_PLONGEE, pasMaxDeg: Infinity })
+    const pas = ANGLE_PLONGEE * (p.e - e)
+    pointe = Math.max(pointe, pas)
+    if (pas > 3) sup3++
+    t = p.t; e = p.e
+    if (p.fini) break
+  }
+  assert.ok(pointe > 4, `la loi d’avant ne donne que ${pointe.toFixed(3)}° — le navigateur en a relevé 4,135`)
+  assert.ok(sup3 >= 6, `seulement ${sup3} pas au-dessus de 3° — le navigateur en a relevé 6`)
+})
+
+test('⑫ bis le plafond tient sur le `dt` RELEVÉ, et le balayage s’étire au lieu de sauter', () => {
+  let t = 0
+  let e = 0
+  let pointe = 0
+  let images = 0
+  let ms = 0
+  // la queue à 17 ms : une fois la surface chargée, l'application retrouve son
+  // rythme. Elle sert à mesurer de combien le balayage s'ÉTIRE, pas à l'aider.
+  const suite = [...INTERVALLES_GPU, ...Array(200).fill(17)]
+  for (const brut of suite) {
+    const dt = Math.min(brut / 1000, 0.05)
+    const p = avancerFonduPose({ t, e, dt, duree: DUREE_FONDU_POSE_S, angleTotalDeg: ANGLE_PLONGEE, pasMaxDeg: PAS_POSE_MAX_DEG })
+    pointe = Math.max(pointe, ANGLE_PLONGEE * (p.e - e))
+    t = p.t; e = p.e; images++; ms += brut
+    if (p.fini) break
+  }
+  assert.ok(e >= 1, 'le balayage ne s’est jamais terminé')
+  assert.ok(pointe <= PAS_POSE_MAX_DEG + 1e-9, `pas de pointe ${pointe.toFixed(4)}° au-dessus du plafond`)
+  // ⚠️ **LE PRIX EST BORNÉ, LUI AUSSI, ET IL EST ICI** : le même balayage passe
+  // de 40 images / 2 082 ms à 57 / 2 371 ms. On grave la borne haute pour qu'un
+  // réglage futur du plafond ne fasse pas glisser le balayage à cinq secondes
+  // sans que personne ne le voie.
+  assert.ok(ms < 3000, `le balayage s’étire à ${ms} ms — au-delà de trois secondes, ce n’est plus une transition`)
+  assert.ok(images < 80, `${images} images — l’étirement a dérapé`)
+})
+
+test('⑫ bis BRANCHEMENT — la plongée rejouée sur le `dt` RELEVÉ ne franchit plus le plafond', async () => {
+  // ⚠️ **C'EST LE TEST QUE LA RELECTURE DEMANDAIT** : la vraie machinerie
+  // (`Modes.update`), alimentée par le `dt` du navigateur et non par un 1/60
+  // parfait. Sur le code d'avant ce tour, il échoue à plus de 4°.
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56 })
+  m.mode = 'orbital'
+  m.altM = 500000
+  m._empriseVue = null
+  const incl = () => inclinaisonDeg(camera.position, controls.target)
+  await m._dive({ altM: 8000, zoom: null })
+  assert.ok(m._fonduPose, 'aucun balayage ne s’est armé : le test ne mord sur rien')
+  const altArrivee = m._altitudeFondM()
+  let plusGrandPas = 0
+  let precedent = incl()
+  const suite = [...DT_GPU, ...Array(200).fill(1 / 60)]
+  for (let i = 0; i < suite.length && m._fonduPose; i++) {
+    m.update(suite[i])
+    plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
+    precedent = incl()
+    assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'le balayage a fait bouger l’altitude de fond')
+  }
+  assert.equal(m._fonduPose, null, 'le balayage ne s’est jamais terminé')
+  assert.ok(Math.abs(incl() - 46.54816) < 0.01, `la pose finale vaut ${incl().toFixed(5)}°`)
+  assert.ok(plusGrandPas <= PAS_POSE_MAX_DEG + 1e-9,
+    `le plus grand pas vaut ${plusGrandPas.toFixed(3)}° par image — le plafond est à ${PAS_POSE_MAX_DEG}°`)
+  // ⚠️ **ET LE PLAFOND A BEL ET BIEN MORDU SUR CETTE SUITE-LÀ** : sans cette
+  // ligne, le test repasserait tout seul le jour où quelqu'un le retirerait.
+  assert.ok(plusGrandPas > PAS_POSE_MAX_DEG - 1e-6,
+    `le plafond n’a jamais mordu (pointe ${plusGrandPas.toFixed(3)}°) : ce dt ne prouve rien`)
 })
