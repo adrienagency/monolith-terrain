@@ -213,12 +213,16 @@ test('UNE SEULE liste de calques — le socle et le mode orbital passent par la 
   // le §0 du plan, et `entrerEnVol` : « une seconde liste aurait divergé au
   // premier calque ajouté »). Le seuil ne fabrique donc PAS sa propre liste :
   // il rappelle celle de `setSurfaceVisible`.
-  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = v\b/g) || []
+  // ⚠️ **`vue.socle` DEPUIS LA TÂCHE R1 ②** — l'entrée est bornée par
+  // `visibiliteSurface`, la liste, elle, n'a pas bougé : toujours une seule.
+  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = vue\.socle\b/g) || []
   assert.equal(listes.length, 1, 'la liste des calques du socle doit être écrite UNE fois')
   assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)/)
   assert.match(SRC_MAIN, /creerVeilleSocle\(\s*\{\s*appliquer:\s*poserVisibiliteSocle/)
   // et le hook de `modes.js` passe par la veille, pas par la liste en direct
-  assert.match(SRC_MAIN, /setSurfaceVisible\s*\(v\)\s*\{[\s\S]{0,2000}?veilleSocle\.poserMode\(v\)/)
+  // (fenêtre élargie : la branche `terre unique` de ce hook porte maintenant le
+  // relais des boutons de surface — Tâche R1 ② — et son commentaire avec)
+  assert.match(SRC_MAIN, /setSurfaceVisible\s*\(v\)\s*\{[\s\S]{0,4000}?veilleSocle\.poserMode\(v\)/)
 })
 
 test('`main.js` lit le drapeau : la production garde son socle à tous les zooms', () => {

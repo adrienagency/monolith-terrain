@@ -693,13 +693,25 @@ test('⑧ quater le bloc plat cède la place : `socleAffiche()` rend FAUX sous l
   // surface, donc APRÈS la passe de fond : il recouvrirait le crop en entier.
   assert.match(SRC_MAIN, /function socleAffiche\(\)\s*\{\s*if \(terreUniqueBranchee\) return false/)
   // et la liste des calques reste UNIQUE — on borne son entrée, on ne la double pas
-  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = v\b/g) || []
+  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = vue\.socle\b/g) || []
   assert.equal(listes.length, 1)
-  assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)\s*\{[\s\S]{0,400}?if \(terreUniqueBranchee\) v = false/)
+  // ⚠️ **LE BORNAGE A DÉMÉNAGÉ DANS `monde/visibilite-surface.js` — Tâche R1 ②**,
+  // et il n'a pas changé de sens : il vaut toujours pour le MAILLAGE. Ce qui a
+  // changé, c'est qu'il ne déborde plus sur les trois boutons du bas, qui ne
+  // parlent pas du maillage. Le module est PUR, donc la garde se vérifie
+  // désormais par le comportement (`test/visibilite-surface.test.js` ①②) au
+  // lieu d'une expression régulière — ici on ne garde que le câblage.
+  assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)\s*\{[\s\S]{0,1400}?const vue = visibiliteSurface\(\{ terreUnique: terreUniqueBranchee, surface: v \}\)/)
   // ⚠️ **ET IL FAUT QUE QUELQU'UN L'APPELLE.** Borner `v` ne sert à rien si la
   // fonction n'est jamais rappelée : c'est exactement ce qui s'est passé à la
   // première image du drapeau levé. La veille du crop la rappelle, LA MÊME.
-  assert.match(SRC_MAIN, /masquerSocle: \(\) => poserVisibiliteSocle\(false\)/)
+  // ⚠️ **ET IL L'APPELLE AVEC `true` DEPUIS LA TÂCHE R1 ②** : l'argument dit
+  // « sommes-nous en surface devant un bloc », pas « allume le bloc plat ». Le
+  // maillage est éteint par le BORNAGE du drapeau, quoi qu'on passe — ce que
+  // `test/visibilite-surface.test.js` ① prouve par le comportement. Passer
+  // `false` disait « nous ne sommes pas en surface », et c'est ce qui a effacé
+  // les trois boutons du bas.
+  assert.match(SRC_MAIN, /masquerSocle: \(\) => poserVisibiliteSocle\(true\)/)
 })
 
 test('⑧ quinquies l’estompage n’a QU’UN nourrisseur, drapeau levé ou baissé', () => {

@@ -75,6 +75,17 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
+// ══════ LES BOUTONS DU BAS — Tâche R1 ② ═══════════════════════════════
+//
+// > **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
+// > disparu (shuffle, affichage photographie aérienne...) »
+//
+// `poserVisibiliteSocle` bornait son entrée à faux sous le drapeau — ce qui est
+// juste pour le MAILLAGE du bloc plat — puis passait ce même booléen borné aux
+// trois boutons du bas, qui ne parlent pas du maillage mais de la vue. Deux
+// questions, un seul booléen. La loi vit dans un module pour la raison écrite
+// trois lignes plus haut : aucun test ne charge `main.js`.
+import { visibiliteSurface } from './monde/visibilite-surface.js'
 // ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3 ════════════════════════════════
 //
 // > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
@@ -4581,24 +4592,38 @@ function majCameraFond() {
 // Sans ça il y aurait encore DEUX Terres : le bloc plat est opaque et se dessine
 // dans la passe de surface, donc APRÈS la passe de fond — il recouvrirait le
 // crop en entier, et l'écran serait rigoureusement celui d'avant le chantier.
+// ⚠️ **ET LE BORNAGE NE DÉBORDE PAS SUR L'INTERFACE — Tâche R1 ②.** Adrien :
+// « Il me manque les boutons du bas en UI, ils ont disparu (shuffle, affichage
+// photographie aérienne...) ». Cette fonction confondait DEUX questions sous un
+// seul booléen : `v` répond à « le maillage du bloc plat est-il dessiné » — non,
+// sous le drapeau, à toutes les altitudes — mais les trois boutons du bas
+// répondent à « sommes-nous en vue de surface, devant un bloc », et là la
+// réponse est OUI : c'est simplement un autre bloc. Le commentaire qui vivait
+// sur la ligne d'`isoBtn` le disait lui-même — *« only makes sense over the
+// block »*. Il y a un bloc. La loi vit dans `monde/visibilite-surface.js`,
+// parce qu'aucun test de ce dépôt ne charge `main.js`.
 function poserVisibiliteSocle(v) {
-  if (terreUniqueBranchee) v = false
-  terrain.mesh.visible = v
-  labels.visible = v && params.labels
-  hud3.group.visible = v
+  const vue = visibiliteSurface({ terreUnique: terreUniqueBranchee, surface: v })
+  terrain.mesh.visible = vue.socle
+  labels.visible = vue.socle && params.labels
+  hud3.group.visible = vue.socle
   // GPX sprites draw with depthTest:false — hidden with the surface or
   // they'd float on top of the planet
-  gpxLayer.setVisible(v && params.gpxVisible)
-  clouds.setVisible(v)
-  plinth.setVisible(v && params.plinth && !params.regionMode)
-  if (regionSkirt) regionSkirt.mesh.visible = v
-  groundInfo.setVisible(v && params.groundInfo)
-  traffic.setVisible(v)
-  realWater?.setVisible(v && params.seaEnabled !== false) // cf. setSeaEnabled
-  mapLayers.setSurfaceVisible(v)
-  isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
-  cineBtn?.setVisible(v)
-  mapCorner?.setVisible(v) // cartography corner is surface-only too
+  gpxLayer.setVisible(vue.socle && params.gpxVisible)
+  clouds.setVisible(vue.socle)
+  plinth.setVisible(vue.socle && params.plinth && !params.regionMode)
+  if (regionSkirt) regionSkirt.mesh.visible = vue.socle
+  groundInfo.setVisible(vue.socle && params.groundInfo)
+  traffic.setVisible(vue.socle)
+  realWater?.setVisible(vue.socle && params.seaEnabled !== false) // cf. setSeaEnabled
+  mapLayers.setSurfaceVisible(vue.socle)
+  isoBtn?.setVisible(vue.boutons) // le raccourci isométrique n'a besoin que d'un bloc, pas du bloc PLAT
+  cineBtn?.setVisible(vue.boutons)
+  mapCorner?.setVisible(vue.boutons) // coin cartographie : de la surface, pas du maillage
+  // ⚠️ **ET `refreshOsmCredit` NE PREND PAS D'ARGUMENT, DONC RIEN À LUI FAIRE
+  // SUIVRE.** Elle relit l'état, dont `socleAffiche()`, qui rend faux sous le
+  // drapeau — et c'est JUSTE : le crédit GeoNames ne s'affiche que si les
+  // toponymes sont à l'écran, or `labels` suit `vue.socle` et reste éteint.
   refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
 }
 
@@ -5296,7 +5321,22 @@ const veilleCrop = creerVeilleCrop({
   // relais est dans `branchement-crop.js`, pas ici : c'est lui qui sait si la
   // chaîne est posée, et forcer l'estompage sans crop viderait l'écran.
   repos: veilleRepos,
-  masquerSocle: () => poserVisibiliteSocle(false),
+  // ⚠️ **IL PASSE `true`, ET CE N'EST PAS UNE FAUTE DE FRAPPE — Tâche R1 ②.**
+  // L'argument de `poserVisibiliteSocle` ne dit PAS « allume le bloc plat », il
+  // dit **« sommes-nous en vue de surface, devant un bloc »** — et ici la
+  // réponse est oui, c'est simplement un crop. Le maillage plat, lui, est
+  // éteint par le BORNAGE du drapeau (`monde/visibilite-surface.js`), pas par
+  // cet argument : sous `terre unique`, `vue.socle` vaut faux quoi qu'on passe.
+  //
+  // ⛔ **IL PASSAIT `false`, ET C'EST CE QUI A EFFACÉ LES BOUTONS DU BAS.**
+  // Adrien : « Il me manque les boutons du bas en UI, ils ont disparu (shuffle,
+  // affichage photographie aérienne...) ». Sous ce drapeau, `veilleSocle`
+  // n'applique JAMAIS — son seuil n'est pas nourri (`majSeuilSocle` sort avant
+  // `veilleSocle.maj`), donc son `auSeuil` reste au `socleAuDepart` faux et son
+  // `pose` ne change jamais. **Ce hook était donc le SEUL appelant de
+  // `poserVisibiliteSocle`, et il n'appelait qu'avec faux** : les trois boutons
+  // partaient à la première image de surface et rien ne les rallumait jamais.
+  masquerSocle: () => poserVisibiliteSocle(true),
   // ⚠️ **SANS CETTE RÉSERVATION, LES PAROIS ET LA RAMPE REFUSENT POUR TOUJOURS,
   // ET C'EST MESURÉ À L'ÉCRAN.** La Réunion z12, drapeau levé, **600 tuiles** de
   // globe en cache : `globe.tuilesAvecHauteurs().length` rendait **0**, donc
@@ -5379,6 +5419,20 @@ modes = new Modes({
       // pas un seuil de plus, et pourquoi l'estompage n'a qu'UN écrivain sous ce
       // drapeau : `src/monde/branchement-crop.js`, § « L'ORBITE RETIRE LE CROP ».
       if (terreUniqueBranchee) {
+        // ⚠️ **ET LES BOUTONS DE SURFACE SUIVENT LE MODE ICI, PARCE QUE SOUS CE
+        // DRAPEAU PERSONNE D'AUTRE NE LE LEUR DIT — Tâche R1 ②.** `veilleSocle`
+        // n'applique jamais (son seuil n'est pas nourri), donc l'unique appelant
+        // de `poserVisibiliteSocle` est `masquerSocle`, et il ne parle qu'à
+        // l'ENTRÉE en surface. Sans cette ligne, les trois boutons du bas
+        // survivraient à l'orbite, où il n'y a plus de bloc du tout.
+        //
+        // ⚠️ **ET C'EST ICI, PAS DANS `poserVisibiliteSocle`, PARCE QUE
+        // `modes.mode` MENT ENCORE À CET INSTANT.** `modes.js` appelle ce hook
+        // AVANT d'écrire `this.mode` (`setSurfaceVisible(false)` puis
+        // `this.mode = 'orbital'`, et symétriquement au retour) : lire le mode
+        // depuis la fonction rendrait exactement l'état d'avant, dans les deux
+        // sens. `v`, lui, porte la transition qui est en train d'avoir lieu.
+        poserVisibiliteSocle(v)
         veilleCrop.poserMode(v)
         return
       }
@@ -10669,6 +10723,27 @@ function molettePendantCadrageDamier(deltaY) {
 // basiques comme on a jusqu'à présent ». Les sept crans (poursuite au ras du
 // sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série
 // aléatoire) vivent dans camera-shots.js ; le huitième clic arrête tout.
+// ⛔ **SOUS `?terre=unique`, CE BOUTON PLONGE LA CAMÉRA SOUS LE SOL ET VIDE
+// L'ÉCRAN — mesuré, Tâche R1 ②.** Relevé le 2026-08-23, drapeau levé, premier
+// plan (poursuite au ras du sol) : `camera.position.y = −7,29`,
+// `altitudeCadrageM() = −1 780 m`, **stable sur 7,5 s** — ce n'est pas un
+// transitoire. Écran entièrement vide : on est sous le crop, et l'estompage
+// vaut 1, donc il n'y a rien d'autre à voir.
+//
+// **La cause est dans la construction de `shots`, pas dans le plan** :
+// `sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0` — le champ de hauteurs
+// du BLOC PLAT, celui qui n'est plus dessiné. Sous le drapeau, la surface à
+// l'écran est le crop du globe, qui ne porte ni la même échelle verticale ni le
+// même zéro ; le « plancher » que `camera-shots.js` respecte scrupuleusement
+// (`plancher()`, `altitudeDeSecurite()`) est donc le plancher d'un autre monde.
+//
+// ⚠️ **C'EST RÉVERSIBLE** : `shots.stop()` — le huitième clic — rend la vue
+// intacte (vérifié : la caméra revient à `y = 77,1`, distance 145,5). Le bouton
+// n'est donc pas un piège sans issue, mais il ne montre rien de bon.
+// **À trancher avec Adrien** : donner un `sampleGround` de globe aux plans, ou
+// masquer ce bouton-là sous le drapeau. Il est laissé VISIBLE parce que la
+// tâche demandait de rendre les boutons du bas, et ce défaut-ci est écrit ici
+// plutôt que corrigé à l'aveugle dans `camera-shots.js`.
 cineBtn = buildCineButton({
   next: () => {
     if (modes.mode !== 'surface' || modes.busy) return
@@ -10706,6 +10781,28 @@ isoBtn = buildIsoButton({
 })
 
 // bottom-left cartography corner (Adrien) : aerial toggle · base · shuffle
+//
+// ⚠️ **SOUS `?terre=unique`, CE COIN N'AGIT QU'À MOITIÉ, ET C'EST MESURÉ —
+// Tâche R1 ②.** La Tâche R1 a rendu ces boutons visibles (ils avaient disparu),
+// mais visible n'est pas branché. Relevé à l'écran le 2026-08-23, drapeau levé
+// (`.banc/R1/boutons-R1.json`) :
+//
+//   · **shuffle MARCHE, et se voit** : l'encre du globe est passée de `000000` à
+//     `101d12` et la texture de rampe a changé d'`uuid` — le crop se repeint
+//     entièrement. ⚠️ **Mais c'est un agrégat** : `shuffleLook` repose aussi la
+//     mer (`waterRebuild`, `realWater`), la matière et les effets de surface,
+//     qui écrivent dans `terrain` et `realWater` — invisibles sous le drapeau.
+//     Le tirage a bien changé `seaSeed` 9 879 → 7 943 et `surfaceFx` 9 → 6 :
+//     cette moitié-là tourne dans le vide.
+//   · **l'aérien est INERTE, et pire que muet** : le clic coche le bouton et
+//     pose `terrain.mapUniforms.uAerialOn = 1` — c'est-à-dire sur le bloc plat,
+//     qui n'est pas dessiné. Le globe n'a AUCUN uniforme d'aérien (recherche sur
+//     ses 88 uniformes : zéro), et `refreshAerialCore` n'écrit que dans
+//     `terrain.setAerial`. ⛔ **Et le crédit de licence, lui, S'AFFICHE** :
+//     « Orthophotos © IGN · NASA GIBS » apparaît sous une image qui n'est pas à
+//     l'écran, alors que `refreshOsmCredit` documente l'obligation inverse deux
+//     fois (« only while it is »). **À trancher avec Adrien** : brancher
+//     l'aérien sur le globe, ou masquer ce bouton-là sous le drapeau.
 mapCorner = buildMapCorner({
   toggleAerial: () => { params.aerialEnabled = !params.aerialEnabled; refreshAerial(); refreshAll() },
   resetBase: () => resetAll(),
