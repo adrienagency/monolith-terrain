@@ -78,7 +78,9 @@
 // est écrite en entier.
 //
 // ⚡ **CE QUE ÇA VAUT, SUR LES NORMALES DU RELIEF** (`ndu ≥ 0,7`) : irradiance
-// totale du crop contre celle du socle, **×1,1429 avant**, **×1,0006 après**.
+// totale du crop contre celle du socle, atlas RENDU dans la page avant et
+// après — **×1,1429 → ×0,9954** sur l'irradiance pure, **×1,0035** sur le
+// diffus RÉEL que le relief reçoit (`.banc/P12/D4-verif-irradiance-P12.json`).
 //
 // ══════════ LE SPÉCULAIRE EST RETIRÉ, ET IL EST RETIRÉ PAR SOUSTRACTION ═════
 //

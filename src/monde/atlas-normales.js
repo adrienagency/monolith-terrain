@@ -63,9 +63,11 @@
 // Deux faces, deux normales, aucun échantillonnage à biaiser.
 //
 // ⚡ **CE QUE ÇA VAUT, MESURÉ SUR LES NORMALES DU RELIEF** (`ndu ≥ 0,7`, là où
-// vit la surface du crop) — irradiance totale, formule du crop contre mesure
-// du socle : **×1,1429 avant**, **×1,0006 avec les deux pôles**, et **×0,9618**
-// si l'on avait pris la droite des moindres carrés de la sphère entière.
+// vit la surface du crop) — irradiance totale, formule du crop contre mesure du
+// socle, atlas RENDU dans la page avant et après : **×1,1429 → ×0,9954** sur
+// l'irradiance pure, et **×1,0035** sur le diffus RÉEL que le relief reçoit.
+// ⚠️ **Et ×0,9618 si l'on avait pris la droite des moindres carrés de la sphère
+// entière — ce chiffre-là est CALCULÉ sur l'atlas mesuré, jamais rendu.**
 // **Les pôles ne sont pas le choix commode : c'est le seul des trois qui
 // retombe sur le socle.**
 //
