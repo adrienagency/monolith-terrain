@@ -4987,6 +4987,28 @@ function contexteCrop() {
   // et le plus simple est de ne pas prendre la poignée du tout.
   const cote = terrain.mapUniforms.uCoastMaskOn.value > 0.5 ? terrain.mapUniforms.uCoastMask.value : null
   const sol = terrain.mapUniforms.uSolOn.value > 0.5 ? terrain.mapUniforms.uSol.value : null
+  // ══════════ LA PHOTO AÉRIENNE — Tâche R9 ═══════════════════════════════════
+  //
+  // ⛔ **LE BOUTON ÉTAIT VISIBLE ET INERTE.** `mapCorner.toggleAerial`
+  // (`ui/bars.js`) → `ctx.toggleAerial` → `refreshAerial` → `refreshAerialCore`
+  // → `aerialLayer.build(bounds)` → `terrain.setAerial(built)`. La chaîne
+  // entière tournait — elle allait au réseau, composait la mosaïque, posait le
+  // crédit — et **s'arrêtait sur le maillage plat**, invisible sous
+  // `?terre=unique`. Rien ne manquait au socle : c'est le dernier maillon,
+  // `contexteCrop → poserHabillage`, qui n'existait pas.
+  //
+  // ⚠️ **MÊME PATRON QUE `cote` ET `sol` JUSTE AU-DESSUS** : l'interrupteur du
+  // socle décide, la texture suit. `uAerialOn` porte déjà les quatre refus de
+  // `refreshAerialCore` (couche éteinte, pas de MNT, zone sans couverture,
+  // plancher NASA trop grossier) — le lire ici, c'est en hériter sans en écrire
+  // un cinquième.
+  //
+  // ⚠️ **ET `uAerial.value` N'EST PAS `null` QUAND LA COUCHE EST ÉTEINTE** :
+  // `terrain.setAerial(null)` ne touche QUE `uAerialOn`, la texture noire 1×1
+  // (ou la mosaïque périmée) reste liée. Sans la garde sur l'interrupteur, le
+  // globe recevrait donc une texture toujours vraie et **la photo ne
+  // s'éteindrait jamais**.
+  const aerien = terrain.mapUniforms.uAerialOn.value > 0.5 ? terrain.mapUniforms.uAerial.value : null
   // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
   //
   // ⛔ **LE TROU QUI FAISAIT DIRE À ADRIEN « PLUS AUCUNE TEXTURE SUR LA TERRE ».**
@@ -5088,6 +5110,17 @@ function contexteCrop() {
       solOffset: terrain.mapUniforms.uSolOffset.value,
       solScale: terrain.mapUniforms.uSolScale.value,
       solTexel: terrain.mapUniforms.uSolTexel.value,
+      // ══════ LA PHOTO AÉRIENNE — Tâche R9 ═══════════════════════════════════
+      //
+      // ⚠️ **L'AFFINE PASSE TOUJOURS, MOSAÏQUE OU PAS**, comme `solOffset` /
+      // `solScale` : ce sont des `Vector2` **MUTÉS EN PLACE** par
+      // `terrain.setAerial`, donc leur identité ne bouge jamais et
+      // `poserHabillage` les recopie composante par composante. Les conditionner
+      // à `aerien` n'aurait rien économisé et aurait ajouté une branche.
+      aerial: aerien,
+      aerialOpacite: terrain.mapUniforms.uAerialOpacity.value,
+      aerialOffset: terrain.mapUniforms.uAerialOffset.value,
+      aerialScale: terrain.mapUniforms.uAerialScale.value,
       amplitudeM: amplitudeM > 0 ? amplitudeM : null,
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,

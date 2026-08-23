@@ -706,6 +706,11 @@ function globeStub() {
       uHabOn: val(0), uCoastMask: val(null), uCoastMaskOn: val(0), uMargeCoteM: val(0),
       uSol: val(null), uSolLut: val(null), uSolOn: val(0), uSolOpacite: val(1),
       uSolOffset: val({ set() {} }), uSolScale: val({ set() {} }), uSolTexel: val({ set() {} }),
+      // la photo aérienne — Tâche R9 ; ce stub est une seconde copie de la liste
+      // de `globe.js`, et un uniforme oublié ici tombe en `TypeError`, pas en
+      // assertion.
+      uAerial: val(null), uAerialOn: val(0), uAerialOpacity: val(1),
+      uAerialOffset: val({ set() {} }), uAerialScale: val({ set() {} }),
       uContourInterval: val(500), uContourOpacity: val(0.55), uContourWeight: val(0.7),
       uGrainForceM: val(0), uGrainEchelle: val(96), uNormaleFineOn: val(0),
       uAnalysis: val(null), uAnalysisOn: val(0),

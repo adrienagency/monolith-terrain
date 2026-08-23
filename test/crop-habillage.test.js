@@ -138,15 +138,21 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // `rampWet` et `rampOklab` atteignent la sphère sans une seule couleur
   // recalculée. Le chiffre est REFAIT, pas cru : le commentaire de `globe.js`
   // qui l'annonce est vérifié juste en dessous.
+  // ⚠️ **NEUF DEPUIS LA TÂCHE R9** : `uAerial` porte la mosaïque de photo
+  // aérienne composée par `map/aerial-layer.js`. **UNE seule texture pour toute
+  // l'emprise**, posée par une affine — pas une par tuile de quadtree : le
+  // compte monte de un, et d'un seul, quel que soit le nombre de tuiles à
+  // l'écran. Sept unités restent libres.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 8, `le compte attendu est 8 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop), pas ${n}`)
+  assert.equal(n, 9, `le compte attendu est 9 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial), pas ${n}`)
   // ⚠️ **ET LE COMMENTAIRE QUI ANNONCE LE COMPTE DOIT DIRE LE MÊME NOMBRE.** Le
   // brief de la Tâche P2 le demandait nommément (« `globe.js:714` compte les
   // samplers — vérifie où en est ce compte avant d'ajouter ») : un pavé qui
   // annonce six pendant que le nuanceur en déclare huit est précisément le genre
   // de prose que le tour de mutation de la Tâche K ter a trouvée verte à tort.
   assert.match(GLOBE_SRC, /uAnalysis et uRampCrop font HUIT/)
+  assert.match(GLOBE_SRC, /uAerial fait NEUF/)
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════
@@ -178,9 +184,18 @@ test('② le dépôt confirme la dissymétrie : `uvSolDrape` retourne y, la lect
   assert.ok(!/cmUv\.y\s*=\s*1\.0\s*-/.test(TERRAIN_SRC.slice(cm - 400, cm)), 'le masque de côte s’est mis à retourner y')
 })
 
-test('② le nuanceur du globe applique le retournement à l’occupation du sol, et à elle seule', () => {
+test('② le nuanceur du globe retourne les DEUX couches drapées, et elles seules', () => {
+  // ⚠️ **DEUX DEPUIS LA TÂCHE R9, ET C'EST LA MÊME FAMILLE.** L'occupation du
+  // sol et la photo aérienne sont toutes deux des mosaïques de tuiles Web
+  // Mercator drapées, `flipY = true` — `aerial-layer.js` le dit en toutes
+  // lettres. Les champs CUITS (masque de côte, analyse), eux, sont posés
+  // `flipY = false` et ne se retournent pas. Un aérien lu en `cmUv` sortirait
+  // **inversé nord-sud** sans qu'aucune erreur ne se lève : c'est ce que cette
+  // assertion attrape.
   const sol = FRAG.slice(FRAG.indexOf('uSolOn > 0.5'), FRAG.indexOf('uSolOn > 0.5') + 400)
   assert.match(sol, /1\.0\s*-\s*\(\s*qCrop\.y\s*\*\s*0\.5\s*\+\s*0\.5\s*\)/, 'la couche drapée ne retourne pas y')
+  const aer = FRAG.slice(FRAG.indexOf('uAerialOn > 0.5'), FRAG.indexOf('uAerialOn > 0.5') + 400)
+  assert.match(aer, /1\.0\s*-\s*\(\s*qCrop\.y\s*\*\s*0\.5\s*\+\s*0\.5\s*\)/, 'la photo aérienne ne retourne pas y — elle sortira à l’envers')
   const cote = FRAG.slice(FRAG.indexOf('uCoastMaskOn > 0.5'), FRAG.indexOf('uCoastMaskOn > 0.5') + 300)
   assert.ok(!/1\.0\s*-\s*\(\s*qCrop\.y/.test(cote), 'le masque de côte retourne y alors que le socle ne le fait pas')
 })
@@ -604,6 +619,16 @@ function globeStub(crop = REPERE) {
       uSolOffset: val(vec2(0, 0)),
       uSolScale: val(vec2(1, 1)),
       uSolTexel: val(vec2(1 / 2048, 1 / 2048)),
+      // ⚠️ **LA PHOTO AÉRIENNE — Tâche R9, ET CE STUB EST UNE SECONDE COPIE DE
+      // LA LISTE.** Un uniforme ajouté à `globe.js` et oublié ici fait tomber
+      // ⑨a..⑨h sur un `TypeError`, pas sur une assertion : c'est le prix de
+      // pouvoir vérifier l'aller-retour bit à bit sans GPU, et il est payé
+      // sciemment. Les cinq valeurs sont celles du constructeur.
+      uAerial: val(null),
+      uAerialOn: val(0),
+      uAerialOpacity: val(1),
+      uAerialOffset: val(vec2(0, 0)),
+      uAerialScale: val(vec2(1, 1)),
       uContourInterval: val(HABILLAGE_MONDE.contourIntervalM),
       uContourOpacity: val(HABILLAGE_MONDE.contourOpacite),
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
