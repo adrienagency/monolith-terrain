@@ -22,7 +22,7 @@ import { Globe, sampleHeights } from '../src/globe.js'
 import { altitudeMaillage } from '../src/monde/fond-crop.js'
 import { tileToLatLon, latLonToSphere, R_GLOBE, EARTH_RADIUS_M } from '../src/geo.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
-import { contourCrop, PAS_CONTOUR } from '../src/monde/parois-crop.js'
+import { contourCrop, PAS_CONTOUR, construireSolideCrop } from '../src/monde/parois-crop.js'
 import { echantillonnerFond } from '../src/monde/fond-crop.js'
 import { creerEchelleContinue } from '../src/monde/echelle-continue.js'
 import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
@@ -313,7 +313,7 @@ test('⑤a `construireParoisCrop` POSE SON ANNEAU SUR `hauteurDessinee` — et p
     hauteurSurface(...a) { nSurface++; return Globe.prototype.hauteurSurface.apply(this, a) },
     hauteurDessinee(...a) { nDessinee++; return Globe.prototype.hauteurDessinee.apply(this, a) },
     _retaillerJupes: () => 0,
-    _paroisMateriau: () => null,
+    _materiauParois: () => null,
     _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
   }
   let sorti = null
@@ -545,4 +545,50 @@ test('⑥d le FOND MARIN entre bien dans la sonde du maillage — la mer, pas la
   g._fondCrop = { valeurs: new Float32Array(cote * cote).fill(-1500), cote, repere, portee: 0.5, bathy: true, profMaxM: 1500 }
   assert.ok(Math.abs(g.hauteurDessinee(lat, lon, liste) + 1500) < 1e-6,
     'avec un fond posé, la paroi doit descendre AVEC la surface : ' + g.hauteurDessinee(lat, lon, liste))
+})
+
+test('⑤d le fond du bloc retenu EST celui du solide — exécuté, pas cherché', () => {
+  // ⛔ **UNE SURVIVANTE A DÉMASQUÉ UNE ASSERTION DE NOM.** `test/mer-sphere.test.js`
+  // ⑫h exigeait `/this\._baseYCrop = solide\.baseY/` : la mutation
+  // `solide.baseY * 2` passait à travers, et avec elle le fond du rideau d'eau
+  // (Tâche P4) ET le plancher des jupes (Tâche P7), qui le lisent tous les deux.
+  // Ce chemin-ci n'est pas de la Tâche P11 — il est SOUS elle, et c'est
+  // précisément pour ça qu'il fallait le tenir.
+  const { heights, size } = tuileFactice()
+  const z = 12, tx = 2094, ty = 2270
+  const t = { z, x: tx, y: ty, heights, size, key: z + '/' + tx + '/' + ty }
+  const { lat, lon } = tileToLatLon(tx + 0.5, ty + 0.5, z)
+  const repere = repereCrop({ centre: { lat, lon }, zoom: z, tuilesParBloc: 1 })
+  const faux = {
+    _crop: repere,
+    _fondCrop: null,
+    _parois: null,
+    _baseYCrop: null,
+    exaggeration: 2,
+    tiles: new Map([[t.key, t]]),
+    tuilesAvecHauteurs: () => [t],
+    uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+    group: { add() {}, remove() {} },
+    hauteurDessinee: Globe.prototype.hauteurDessinee,
+    _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+    _retaillerJupes: () => 0,
+    retirerParoisCrop() { this._parois = null },
+    _materiauParois: () => null,
+  }
+  let leve = null
+  try { Globe.prototype.construireParoisCrop.call(faux, { couvertureMin: 0 }) } catch (e) { leve = e }
+  // le même solide, bâti à part : c'est LUI l'oracle, pas une expression recopiée
+  const attendu = construireSolideCrop({
+    repere,
+    forme: { coin: 0.08, expo: 4.4 },
+    hauteur: (la, lo) => faux.hauteurDessinee(la, lo, [t]),
+    rayon: R_GLOBE,
+    echelle: (R_GLOBE / EARTH_RADIUS_M) * faux.exaggeration,
+    plancherMer: 0,
+    couvertureMin: 0,
+  })
+  assert.equal(attendu.refus, null, JSON.stringify(attendu.refus))
+  assert.ok(Number.isFinite(attendu.baseY) && attendu.baseY < 0, 'baseY ' + attendu.baseY)
+  assert.ok(Object.is(faux._baseYCrop, attendu.baseY),
+    'le fond retenu vaut ' + faux._baseYCrop + ', le solide dit ' + attendu.baseY + (leve ? ' (levée : ' + leve.message + ')' : ''))
 })
