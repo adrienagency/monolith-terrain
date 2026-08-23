@@ -36,6 +36,13 @@ import { resChamp, spanChamp } from './mer-emprise.js'
 // jusqu'ici. Vérifié : `grep -rn "from '.*ocean" src/monde/` ne rend RIEN (le nom
 // du fichier n'y apparaît que dans des commentaires).
 import { distanceRivage, GLSL_JUPE_MER, couleursEauDuSocle } from './monde/mer-sphere.js'
+// ⚠️ **LA RÉFRACTION EST INJECTÉE, PLUS ÉCRITE ICI — Tâche R2.** Trois lignes de
+// ce fichier (le décalage de Snell, sa borne d'échantillonnage, le composite de
+// la lame) vivaient UNIQUEMENT ici, et la mer du crop n'en avait aucune. Elles
+// sont désormais dans `monde/eau-refraction.js`, PUR, et `globe.js` injecte le
+// MÊME texte. Aucune valeur n'a bougé : l'extraction est à l'expression près, et
+// `test/eau-refraction.test.js` exécute le texte extrait contre ses jumeaux JS.
+import { GLSL_REFRACTION, REFRACTION_NEUTRE, refractionDuSocle } from './monde/eau-refraction.js'
 // L'ÉCUME — une seule loi, deux lecteurs (Tâche P4). Même motif, même absence
 // de cycle : `monde/ecume-mer.js` n'importe RIEN du tout.
 // ⚠️ **ET LA LAME D'EAU DEPUIS LA TÂCHE P6**, pour exactement la même raison :
@@ -433,6 +440,7 @@ float vnoise(vec2 p) {
 }
 ${GLSL_ECUME}
 ${GLSL_LAME_EAU}
+${GLSL_REFRACTION}
 
 // sun caustics — the classic iterated-phase shimmer (Hoskins-style), cheap
 // and convincing where the water is clear
@@ -597,9 +605,13 @@ void main() {
   // v45 : la réfraction reste ACTIVE près des côtes (0.3 plancher) — c'est là
   // que le fond a du détail à tordre ; au large un fond uniforme ne montre
   // rien, l'ancien *vFade l'éteignait donc exactement où elle se voyait
-  vec2 refOff = N.xz * uRefract * 0.09 * (0.3 + 0.7 * vFade);
-  vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
-  col = mix(through, col, wOp);
+  // ⚠️ **LES TROIS LIGNES SONT INJECTÉES DEPUIS monde/eau-refraction.js —
+  // Tache R2.** Elles rendent EXACTEMENT ce qu'elles rendaient : le decalage est
+  // le meme produit dans le meme ordre, la borne les memes deux litteraux, et
+  // composeLameEau EST le mix. C'est une extraction, pas une reecriture.
+  vec2 refOff = decalageRefraction(N.xz, uRefract, vFade);
+  vec3 through = texture2D(uSceneTex, uvRefractee(screenUv, refOff)).rgb;
+  col = composeLameEau(through, col, wOp);
   // reflets de surface : jamais attenues par la transparence
   col = mix(col, uSky, fres * 0.35);
   // ⚠️ **glintTavelureMer ET blanchirEcume VIENNENT DE monde/ecume-mer.js —
@@ -874,7 +886,10 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uFoamScale: { value: 1 },
         uSceneTex: { value: null },
         uResolution: { value: new THREE.Vector2(1, 1) },
-        uRefract: { value: params.seaRefract ?? 0.6 },
+        // ⚠️ **LE NEUTRE VIENT DU MODULE — Tache R2.** `REFRACTION_NEUTRE`
+        // EST ce `0.6`, nomme une seule fois pour que la mer du crop puisse
+        // prendre le MEME defaut sans le recopier.
+        uRefract: { value: params.seaRefract ?? REFRACTION_NEUTRE },
         uSky: { value: new THREE.Color('#cfe3f2') },
         uDepthMax: { value: 2.2 },
         uGloss: { value: look.gloss },
@@ -1757,7 +1772,7 @@ export class RealWater {
       if (mat.uniforms.uTransp) mat.uniforms.uTransp.value = params.waterTransparency ?? 0.4
       if (mat.uniforms.uSunFx) mat.uniforms.uSunFx.value = params.waterSunFx ?? 1
       if (mat.uniforms.uFrost) mat.uniforms.uFrost.value = params.seaEdgeFrost ?? 0.5
-      if (mat.uniforms.uRefract) mat.uniforms.uRefract.value = params.seaRefract ?? 0.6
+      if (mat.uniforms.uRefract) mat.uniforms.uRefract.value = params.seaRefract ?? REFRACTION_NEUTRE
     }
   }
 
@@ -1870,6 +1885,11 @@ export class RealWater {
       // la NAPPE, celle dont P5 a mesuré qu'elle portait « presque tout
       // l'écart » sans pouvoir l'attribuer.
       eau: lameEauDuSocle(u),
+      // ⚠️ **LE CINQUIÈME RÉGLAGE DE LAME — Tâche R2, ET IL EST À PART.** Il ne
+      // passe pas par `lameEauDuSocle` parce que `ecume-mer.js` doit rester sans
+      // importation (`test/ecume-mer.test.js` ③c) et que son neutre vit dans
+      // `eau-refraction.js`. Même patron de lecture, même règle du neutre.
+      refraction: refractionDuSocle(u),
       // ⚠️ **ET LES DEUX COULEURS DE LA LAME.** `poserMer` porte un paramètre
       // `couleurs` que **personne n'a jamais passé** : la calotte vit sur
       // `couleursEau({})`, donc sur `params.lakeColor ?? '#8fc6e8'`. Le témoin

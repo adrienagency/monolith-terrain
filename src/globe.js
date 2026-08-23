@@ -168,6 +168,15 @@ import {
   GLSL_ECUME, GLSL_LAME_EAU, FREQ_TAVELURE,
   ACCALMIE_NEUTRE, ETAT_MER_NEUTRE, LAME_EAU_NEUTRE, CLAPOT_NORMALE,
 } from './monde/ecume-mer.js'
+// ══════════ LA RÉFRACTION DE LA LAME D'EAU — Tâche R2 ══════════════════════
+//
+// > **Adrien, 2026-08-23 :** « on dirait qu'elle est quasiment transparente ».
+//
+// Même patron que l'écume et la lame d'eau : la loi vit une seule fois dans un
+// module PUR, `ocean.js` et ce fichier injectent le MÊME texte. L'en-tête
+// d'`eau-refraction.js` porte la mesure du repère de normale — **le facteur 16,4
+// sur le Fresnel** — et l'ordre de composite qui manquait.
+import { GLSL_REFRACTION, REFRACTION_NEUTRE } from './monde/eau-refraction.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -408,6 +417,25 @@ uniform float uCropCoinN;
 // (globe.js, cq / pn du nuanceur des tuiles) : pas une seconde ecriture de la
 // superellipse, la meme, appliquee a une autre surface.
 uniform vec2 uMerBord;
+// ══════ LA RÉFRACTION EN ESPACE ÉCRAN — Tâche R2 ═════════════════════════
+// uMerScene : la copie du tampon d image prise JUSTE AVANT le dessin de la
+// nappe (grab pass, _mer.onBeforeRender). uMerResolution : la taille du tampon
+// de dessin, en pixels. uMerRefract : la tirette uRefract du socle, LUE par
+// majReglagesMer, jamais choisie ici.
+uniform sampler2D uMerScene;
+uniform vec2 uMerResolution;
+uniform float uMerRefract;
+// ⛔ LE REPERE DE LA NORMALE, ET C EST LE DEFAUT QUI FAISAIT LA MER PALE.
+// vNormMer est bati sur des coordonnees LOCALES du crop : son haut est
+// (0,1,0) LOCAL. Le fragment le confrontait a V = cameraPosition - vMonde, qui
+// est en repere MONDE. Mesure du 2026-08-23 a La Reunion : le haut local tombe
+// sur (0,7705 -0,3624 0,5243) en monde, soit 111,25 degres d ecart ; au centre
+// de la nappe dot(N_local, V) valait -0,7519 quand dot(N_monde, V) vaut
+// +0,5024. Ecrete a zero, le Fresnel saturait donc a son PLAFOND (0,5) au lieu
+// de 0,0305 : un facteur 16,4, et un lavage de 17,5 pour cent de couleur de
+// ciel sur toute la nappe au lieu de 1,07. uMerVersMonde est la rotation du
+// crop, posee depuis la matrice monde de la mer.
+uniform mat3 uMerVersMonde;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
@@ -421,6 +449,7 @@ varying float vJupe;
 ${GLSL_ECUME}
 ${GLSL_LAME_EAU}
 ${GLSL_JUPE_MER}
+${GLSL_REFRACTION}
 
 float bruitMer(vec2 q) {
   vec2 i = floor(q);
@@ -505,7 +534,14 @@ void main() {
   vec2 rp = vLocal / max(uMerUnite, 1e-9) * ${CLAPOT_NORMALE.freq.toFixed(1)};
   float r1 = bruitMer(rp + vec2(uMerTemps * 0.9, 0.0));
   float r2 = bruitMer(rp * 1.9 - vec2(0.0, uMerTemps * 1.2));
-  vec3 N = clapotNormale(normalize(vNormMer), uMerDetail, uMerCalmeVue, r1, r2);
+  // ══════ DEUX REPERES, DEUX USAGES — Tache R2 ════════════════════════════
+  // nLocal : le repere de la NAPPE. Sa paire horizontale xz est EXACTEMENT ce
+  // que le socle appelle N.xz — chez lui le haut du monde EST celui de la mer.
+  // C est elle que prend le decalage de refraction, sans aucune conversion.
+  // N : la meme normale, tournee dans le MONDE. C est elle, et elle seule, qui
+  // peut etre dotee avec V et L. Voir l en-tete de monde/eau-refraction.js.
+  vec3 nLocal = clapotNormale(normalize(vNormMer), uMerDetail, uMerCalmeVue, r1, r2);
+  vec3 N = normalize(uMerVersMonde * nLocal);
   // ══════ LE SOLEIL DU BLOC, PAS CELUI DE LA PLANETE — Tache P6 ════════════
   // uSunDir suit la CAMERA (main.js le repose par image sur camGlobe.position
   // tournee de 42°). Releve le 2026-08-22 : il pointait SOUS l horizon
@@ -516,6 +552,23 @@ void main() {
   float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
   // ⚠️ APRES fres, COMME DANS ocean.js : le plancher de Fresnel en fait partie.
   float opac = opaciteEau(dLagon, uMerTransp, fres);
+  // ══════ LE COMPOSITE REFRACTE — Tache R2, ET C EST L ORDRE QUI COMPTE ════
+  //
+  // ⛔ AVANT CETTE TACHE, LE CROP SORTAIT alpha = ... * opac. Le reflet de ciel
+  // et le glint solaire etaient donc DILUES par la transparence, c est-a-dire
+  // traites comme s ils venaient du FOND. ocean.js documente exactement ce
+  // defaut en v44 : « les reflets sont des reflets DE SURFACE : ils s
+  // appliquent APRES le composite de transparence, sinon ils sont dilues comme
+  // s ils venaient du fond, le glint avait disparu (Adrien) ». On compose donc
+  // ICI, dans le nuanceur, contre la copie du tampon d image, et l alpha ne
+  // porte plus que la geometrie (le bord du crop, le trait d eau, l ecume).
+  //
+  // ⚠️ LA PENTE EST CELLE DU REPERE LOCAL — voir nLocal plus haut. Le decalage,
+  // lui, est en UV D ECRAN des deux cotes : rien a convertir sur le gain.
+  vec2 uvEcran = gl_FragCoord.xy / uMerResolution;
+  vec2 refOff = decalageRefraction(nLocal.xz, uMerRefract, vFonduRive);
+  vec3 travers = texture2D(uMerScene, uvRefractee(uvEcran, refOff)).rgb;
+  col = composeLameEau(travers, col, opac);
   col = mix(col, uSky, fres * 0.35);
   vec3 H = normalize(L + V);
   // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
@@ -556,10 +609,13 @@ void main() {
     // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
     // socle tombe a 0,14 de sa valeur.
     col = blanchirEcume(col, ecume, uMerJour);
-    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeurEau) * opac, ecume * 0.85));
+    // ⚠️ PLUS DE opac ICI — Tache R2. Il vit desormais dans composeLameEau, et
+    // l alpha ne porte que ce qui est GEOMETRIQUE : le bord du crop, le trait
+    // d eau, l ecume. C est le max(shoreAA, foam * 0.85) d ocean.js, borde.
+    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeurEau), ecume * 0.85));
     return;
   }
-  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeurEau) * opac);
+  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeurEau));
 }
 `
 
@@ -569,6 +625,9 @@ void main() {
 // IMPORTÉE, pas recopiée : une constante dupliquée diverge en silence (§1 de
 // /threejs-optimisation, question 2).
 const CIRCONFERENCE_MERCATOR = CIRCONFERENCE_M
+
+/** Le tampon de travail du grab pass — un seul, comme `_v2` d'`ocean.js`. */
+const _tailleDessin = new THREE.Vector2()
 
 // LA RÉSOLUTION DU CHAMP — celui de la mer (Tâche F) et celui du fond du crop
 // (Tâche J bis), qui est le MÊME champ lu deux fois.
@@ -2517,6 +2576,12 @@ export class Globe {
     // `uCropOn = 0` (Tâche A), `uHabOn = 0` (Tâche C) et `RAMPE_MONDE` (Tâche D).
     this._mer = null
     this._merEtat = null
+    // ⚠️ **DÉCLARÉE ICI, ET PAS SEULEMENT ÉCRITE AU VOL** — Tour de correction
+    // R2. La cible du grab pass naissait `undefined` : la clôture du rapport
+    // annonçait `_merRefractRT: null` alors que la propriété n'existait pas
+    // encore. Un champ qui n'existe pas et un champ rendu se lisent pareil
+    // depuis la console, et c'est exactement ce qui a masqué la fuite.
+    this._merRefractRT = null
     // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
     this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
@@ -4252,6 +4317,24 @@ export class Globe {
         // qui est une grandeur de la calotte. Posé juste après, par
         // `_majBordMer` — un seul écrivain, celui que `poserEstompage` rappelle.
         uMerBord: { value: new THREE.Vector2(0, 1) },
+        // ══════ LA RÉFRACTION — Tâche R2 ════════════════════════════════════
+        //
+        // ⚠️ **`uMerScene` NAÎT NUL ET C'EST SANS DANGER** : `onBeforeRender`
+        // (posé plus bas) crée la copie du tampon AVANT le tout premier dessin
+        // de la nappe, exactement comme `ocean.js`. Il n'y a donc pas d'image
+        // où le nuanceur lise une texture absente.
+        uMerScene: { value: null },
+        uMerResolution: { value: new THREE.Vector2(1, 1) },
+        // ⚠️ **AU NEUTRE D'`ocean.js` À LA NAISSANCE, BRANCHÉ PAR IMAGE** —
+        // même règle que les quatre autres réglages de lame d'eau.
+        // `majReglagesMer` le pose depuis `uRefract` VIVANT du socle (relevé à
+        // **0,34** le 2026-08-23, pas le `0,6` du défaut).
+        uMerRefract: { value: REFRACTION_NEUTRE },
+        // ⚠️ **LA ROTATION DU CROP, POSÉE PAR IMAGE DANS `onBeforeRender`.** Sans
+        // elle, la normale de la mer est dotée avec `V` dans deux repères
+        // différents — voir la mesure dans `MER_FRAG` et dans
+        // `monde/eau-refraction.js`.
+        uMerVersMonde: { value: new THREE.Matrix3() },
       },
       vertexShader: MER_VERT
         .replace('__GERSTNER__', mod.GERSTNER_GLSL)
@@ -4298,6 +4381,57 @@ export class Globe {
     mesh.name = 'crop-mer'
     mesh.frustumCulled = false // les vagues la déplacent, et elle est immense
     mesh.renderOrder = 18 // le même que la mer du socle
+    // ══════ LE GRAB PASS — Tâche R2, ET C'EST LA QUESTION QUI DÉCIDAIT ══════
+    //
+    // **« À quel instant copier le tampon pour que la mer du crop réfracte le
+    // FOND MARIN et non le ciel ou le vide ? »** La réponse est `onBeforeRender`
+    // de la nappe elle-même, et elle est la MÊME que celle d'`ocean.js` — pour
+    // une raison qui ne dépend d'aucune des deux passes : `three` trie les
+    // objets TRANSPARENTS après les opaques, et `onBeforeRender` se déclenche
+    // juste avant l'appel de dessin. Au moment où il court, le tampon lié
+    // contient donc déjà les tuiles du crop, ses parois et son fond marin.
+    //
+    // ⚠️ **ET IL N'A PAS FALLU DE CIBLE DE RENDU À PROFONDEUR.** Le canevas de
+    // la page est bien construit sans tampon de profondeur (`main.js`,
+    // `depth: false`), mais la nappe n'est JAMAIS dessinée dedans : sous
+    // `?terre=unique` le globe est rendu par `passeFond`, une `RenderPass` du
+    // composeur, donc dans une cible de rendu — qui, elle, a sa profondeur.
+    //
+    // ⚠️ **`HalfFloatType`, ET LA LEÇON EST DÉJÀ PAYÉE DANS `ocean.js`** : « le
+    // composer rend en HalfFloat : la copie exige le MÊME type de stockage.
+    // RGBA8 depuis RGBA16F = INVALID_OPERATION silencieuse → texture NOIRE ».
+    mesh.onBeforeRender = (renderer) => {
+      const u2 = mat.uniforms
+      // la rotation du crop, relue par image : le crop se déplace, le rendez-vous
+      // entre sa normale et le monde ne doit pas se figer à la naissance.
+      u2.uMerVersMonde.value.setFromMatrix4(mesh.matrixWorld)
+      const taille = renderer.getDrawingBufferSize(_tailleDessin)
+      if (!this._merRefractRT || this._merRefractRT.image.width !== taille.x || this._merRefractRT.image.height !== taille.y) {
+        this._merRefractRT?.dispose()
+        this._merRefractRT = new THREE.FramebufferTexture(taille.x, taille.y)
+        this._merRefractRT.type = THREE.HalfFloatType
+      }
+      // ⛔ **LA LIAISON EST SORTIE DU `if`, ET C'EST UN DÉFAUT MESURÉ, PAS UNE
+      // PRÉCAUTION** — Tour de correction R2. La cible de copie appartient au
+      // GLOBE, les uniformes au MATÉRIAU, et `poserMer` refait un matériau neuf
+      // (`uMerScene: { value: null }`) à CHAQUE repose. Quand la cible existait
+      // déjà à la bonne taille, le `if` ne courait pas : le matériau neuf
+      // gardait `uMerScene` à `null`, donc la réfraction du crop lisait une
+      // texture absente dès la deuxième pose. `⑩n` de
+      // `test/mer-sphere.test.js` exerce ce cycle (pose · image · repose ·
+      // image) et rougit sur le code d'avant le tour de correction.
+      //
+      // ⚠️ **ET IL FAUT DIRE CE QUE CETTE LIGNE NE PROUVE PLUS** : depuis que
+      // `retirerMer` REND la cible (voir plus bas), une repose la recrée de
+      // toute façon, donc remettre ces deux lignes DANS le `if` ne se voit plus
+      // — la mutation M14 du tour de correction **survit, et c'est déclaré**.
+      // On les garde dehors quand même : la durée de vie du matériau et celle
+      // de la cible sont deux affaires distinctes, et les coupler a déjà coûté
+      // une réfraction morte en silence.
+      u2.uMerScene.value = this._merRefractRT
+      u2.uMerResolution.value.set(taille.x, taille.y)
+      renderer.copyFramebufferToTexture(this._merRefractRT)
+    }
     const M = new THREE.Matrix4().makeBasis(
       new THREE.Vector3(cal.base.est[0], cal.base.est[1], cal.base.est[2]),
       new THREE.Vector3(cal.base.haut[0], cal.base.haut[1], cal.base.haut[2]),
@@ -4696,6 +4830,16 @@ export class Globe {
     u.uMerJour.value = eau.jour
     u.uMerDetail.value = eau.detail
 
+    // ══════ LA RÉFRACTION — Tâche R2, ET ELLE EST À PART DES QUATRE ═════════
+    //
+    // ⚠️ **SON NEUTRE VIT DANS `monde/eau-refraction.js`, PAS DANS LE GROUPE
+    // « eau »**, parce que `ecume-mer.js` doit rester sans importation
+    // (`test/ecume-mer.test.js` ③c). Elle a donc sa propre garde, de la même
+    // forme : une valeur non finie rend le neutre, jamais la valeur du voisin.
+    u.uMerRefract.value = Number.isFinite(reglages?.refraction)
+      ? reglages.refraction
+      : REFRACTION_NEUTRE
+
     // ══════ LES DEUX COULEURS DE LA LAME — Tâche P6 ═════════════════════════
     //
     // ⚠️ **`copy`, PAS `set`, ET POUR LA MÊME RAISON QUE LES TROIS DU FOND** :
@@ -4766,6 +4910,24 @@ export class Globe {
     u.uOceanShallow.value.set(RAMPE_NAUTIQUE.peu)
     u.uOceanMid.value.set(RAMPE_NAUTIQUE.moyen)
     u.uOceanDeep.value.set(RAMPE_NAUTIQUE.fond)
+    // ⛔ **LA CIBLE DE COPIE SE REND AVANT LE GARDE-FOU `!this._mer`, ET C'EST
+    // UNE FUITE MESURÉE** — Tour de correction R2. La `FramebufferTexture` du
+    // grab pass appartient au GLOBE, pas au maillage : elle survivait donc à
+    // `retirerMer`, texture GPU comprise. Relevé par le relecteur, à chaud,
+    // après un cycle lever/baisser du drapeau dans la MÊME session : 1014 × 414
+    // en `HalfFloatType` encore allouée, et `renderer.info.memory.textures` qui
+    // ne rendait qu'une texture sur deux. C'est borné (une seule cible,
+    // réutilisée), donc ce n'est pas une croissance — mais c'est une ressource
+    // que `retirerMer` doit rendre, et la ligne de clôture « drapeau baissé,
+    // `_merRefractRT: null` » était FAUSSE après ce cycle.
+    //
+    // ⚠️ **ET ELLE EST AVANT LE `return`, DÉLIBÉRÉMENT** : le maillage peut
+    // avoir déjà disparu (une repose est un `retirerMer` de plus) sans que la
+    // cible, elle, ait été rendue. `⑩m` de `test/mer-sphere.test.js` mesure le
+    // CYCLE, pas l'état initial — un `_merRefractRT` qui naît nul rendrait vert
+    // n'importe quel test posé sur la page fraîche.
+    this._merRefractRT?.dispose()
+    this._merRefractRT = null
     if (!this._mer) return
     this.group.remove(this._mer)
     this._mer.geometry.dispose()

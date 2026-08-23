@@ -33,6 +33,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
+// ⚠️ **three ENTRE ICI AU TOUR DE CORRECTION R2** : la section ⑩ter exerce le
+// grab pass de `poserMer` pour de vrai (matrice de repère, cible de copie), et
+// aucune de ces classes n'a besoin d'un contexte WebGL pour être CONSTRUITE —
+// c'est déjà ce qui permet à ⑩e…⑩j d'exister.
+import * as THREE from 'three'
 
 import {
   fleche,
@@ -74,6 +79,7 @@ import {
   LAME_EAU_NEUTRE, lameEauDuSocle,
 } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
+import { REFRACTION_NEUTRE, refractionDuSocle } from '../src/monde/eau-refraction.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
 // lignes suffisent. Sans ce hook, `Globe.prototype.poserMer` ne peut être
@@ -1139,6 +1145,195 @@ test('⑩j retirer une mer POSÉE la fait vraiment disparaître du groupe', () =
   })
 })
 
+// ══════════ ⑩ter LE GRAB PASS, EXERCÉ — Tour de correction R2 ══════════════
+//
+// ⛔ **CINQ MUTATIONS SURVIVAIENT À 4 138 TESTS, ET TOUTES LES CINQ ÉTAIENT DES
+// BRANCHEMENTS.** La relecture de la Tâche R2 les a comptées : la loi pure
+// était bien gardée (`test/eau-refraction.test.js` ①②), les CÂBLES ne l'étaient
+// que par des expressions régulières sur le source. La plus grave —
+// `uMerVersMonde` posée depuis une matrice IDENTITÉ — **annule le correctif
+// central de la tâche** (la normale de la mer redevient locale, le Fresnel
+// resature à son plafond de 0,5, la mer redevient « quasiment transparente »)
+// et la seule garde était `/uMerVersMonde\.value\.setFromMatrix4\(/`, qui ne
+// regarde pas ce qu'on lui PASSE.
+//
+// ⚠️ **CES QUATRE-LÀ EXERCENT `onBeforeRender`, `retirerMer` ET
+// `majReglagesMer` POUR DE VRAI**, avec un rendeur bouchon qui compte ce qu'on
+// lui demande. Ce ne sont pas des greps : chacun calcule un nombre et le
+// compare à un nombre obtenu autrement. **Un `return` muet dans le code testé
+// les fait rougir, pas verdir.**
+
+/**
+ * Un rendeur qui ne rend rien mais qui DIT ce qu'on lui a demandé.
+ *
+ * ⚠️ Il porte la vraie signature des deux méthodes que le grab pass appelle :
+ * `getDrawingBufferSize(cible)` REMPLIT sa cible et la rend (c'est ce que fait
+ * `WebGLRenderer`), `copyFramebufferToTexture(texture)` note la texture reçue.
+ */
+function rendeurBouchon(largeur = 861, hauteur = 351) {
+  const r = {
+    copies: [],
+    taille: { largeur, hauteur },
+    getDrawingBufferSize(cible) {
+      cible.set(r.taille.largeur, r.taille.hauteur)
+      return cible
+    },
+    copyFramebufferToTexture(texture) {
+      r.copies.push(texture)
+    },
+  }
+  return r
+}
+
+test('⑩k `onBeforeRender` pose une matrice qui TOURNE VRAIMENT la normale de la mer', async () => {
+  // ⛔ **C'EST LA GARDE DU CORRECTIF CENTRAL DE R2, ET ELLE EST DU COMPORTEMENT.**
+  // On ne cherche pas `setFromMatrix4` dans le source : on POSE une mer, on
+  // rend une image, on prend la matrice POSÉE, on lui donne la normale d'une
+  // mer au repos — `(0, 1, 0)` en repère de nappe — et on regarde où elle
+  // tombe dans le monde. Une matrice identité la laisse sur place ; la vraie
+  // rotation du crop l'envoie sur le HAUT LOCAL de La Réunion.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(rendeurBouchon())
+
+  const M = g._mer.material.uniforms.uMerVersMonde.value
+  const nLocal = new THREE.Vector3(0, 1, 0) // la nappe au repos, en repère de nappe
+  const nMonde = nLocal.clone().applyMatrix3(M).normalize()
+
+  // ① où DOIT-ELLE tomber ? Sur le haut local du crop, calculé ICI, sans
+  //    `poserMer` : le rayon de la sphère au centre du crop.
+  const { origine, haut } = repereLocalCrop(REPERE, R_GLOBE)
+  const hautV = new THREE.Vector3(...haut)
+  assert.ok(nMonde.distanceTo(hautV) < 1e-9, `la normale tournée ${nMonde.toArray()} n est pas le haut du crop ${haut}`)
+  // et ce haut EST la géométrie du lieu : sa composante verticale vaut le sinus
+  // de la latitude du centre (−21,115° → −0,3602). Un témoin indépendant du
+  // module, qui dit que la matrice n'est pas « une rotation quelconque ».
+  assert.ok(Math.abs(hautV.y - Math.sin(CENTRE.lat * Math.PI / 180)) < 1e-6)
+
+  // ② et ce que ça change au FRESNEL, qui est tout l'objet de la correction.
+  //    Caméra plongeante au-dessus de la nappe, tout en repère MONDE.
+  const P = new THREE.Vector3(...origine)
+  const V = hautV.clone() // la caméra est droit au-dessus : V = le haut du crop
+  const fresnel = (N) => Math.min(Math.pow(1 - Math.max(N.dot(V), 0), 5), 0.5)
+  assert.ok(P.length() > 0, 'le crop doit être posé quelque part sur la sphère')
+  assert.ok(fresnel(nMonde) < 1e-9, `en vue plongeante le Fresnel doit être quasi nul, pas ${fresnel(nMonde)}`)
+  // ⛔ **LE DÉFAUT D'AVANT R2, CHIFFRÉ ICI MÊME** : la même normale laissée en
+  // repère de nappe est dotée avec un `V` du monde, le produit tombe sous zéro,
+  // il est écrêté, et le Fresnel SATURE à son plafond. C'est ce que rend la
+  // mutation « matrice identité », et c'est ce que ce test refuse.
+  assert.equal(fresnel(nLocal), 0.5, 'la normale NON tournée doit saturer le Fresnel — sinon ce test ne prouve rien')
+  // les deux repères sont à plus de 100° l'un de l'autre à cette latitude
+  assert.ok(nMonde.angleTo(nLocal) * 180 / Math.PI > 100)
+})
+
+test('⑩l `onBeforeRender` COPIE le tampon d image, à chaque image, sur la cible LIÉE', async () => {
+  // ⛔ **SANS CETTE COPIE LA RÉFRACTION LIT UNE TEXTURE JAMAIS RAFRAÎCHIE** — et
+  // rien dans le dépôt ne nommait `copyFramebufferToTexture` avant ce test.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  const r = rendeurBouchon(1014, 414)
+  const u = g._mer.material.uniforms
+
+  assert.equal(u.uMerScene.value, null, 'la cible ne doit pas exister avant la première image')
+  g._mer.onBeforeRender(r)
+  assert.equal(r.copies.length, 1, 'la première image doit copier le tampon')
+  assert.ok(u.uMerScene.value, 'la copie doit être LIÉE à l uniforme que le nuanceur lit')
+  assert.equal(r.copies[0], u.uMerScene.value, 'on copie dans la texture que le nuanceur échantillonne, pas dans une autre')
+  assert.equal(u.uMerResolution.value.x, 1014)
+  assert.equal(u.uMerResolution.value.y, 414)
+
+  // ⚠️ **ET À CHAQUE IMAGE, PAS UNE FOIS** : une copie prise à la naissance
+  // seulement rendrait une mer qui réfracte la première image pour toujours.
+  g._mer.onBeforeRender(r)
+  g._mer.onBeforeRender(r)
+  assert.equal(r.copies.length, 3)
+  assert.equal(new Set(r.copies).size, 1, 'la cible est réutilisée tant que la taille ne bouge pas')
+
+  // et quand le tampon change de taille, la cible suit — et reste liée
+  r.taille = { largeur: 640, hauteur: 480 }
+  g._mer.onBeforeRender(r)
+  assert.equal(u.uMerScene.value.image.width, 640)
+  assert.equal(u.uMerResolution.value.x, 640)
+  assert.equal(r.copies[3], u.uMerScene.value)
+})
+
+test('⑩m `retirerMer` REND la cible de copie — le CYCLE, pas l état initial', async () => {
+  // ⛔ **FUITE MESURÉE PAR LA RELECTURE DE R2**, à chaud, après un cycle
+  // lever/baisser du drapeau dans la MÊME session : la `FramebufferTexture`
+  // restait allouée, texture GPU comprise (~3,4 Mo à 1014 × 414, ~29 Mo en
+  // plein écran 2560 × 1440). ⚠️ **Un test posé sur la page fraîche serait vert
+  // sans rien prouver** — `_merRefractRT` naît nul. On mesure donc le cycle.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(rendeurBouchon())
+
+  const cible = g._merRefractRT
+  assert.ok(cible, 'le cycle doit commencer avec une cible VIVANTE, sinon il ne mesure rien')
+  let rendue = 0
+  cible.addEventListener('dispose', () => { rendue++ })
+
+  Globe.prototype.retirerMer.call(g)
+  assert.equal(rendue, 1, 'la cible de copie doit être rendue au GPU, pas seulement oubliée')
+  assert.equal(g._merRefractRT, null, '`_merRefractRT` doit être nul après un cycle lever/baisser')
+  // et deux baisses de suite ne jettent pas et ne redemandent rien
+  Globe.prototype.retirerMer.call(g)
+  assert.equal(rendue, 1)
+  assert.equal(g._merRefractRT, null)
+})
+
+test('⑩n une SECONDE pose garde la réfraction vivante — la liaison est hors du `if`', async () => {
+  // ⛔ **DÉFAUT TROUVÉ EN ÉCRIVANT ⑩l, ET IL EST DE PRODUCTION.** `poserMer`
+  // refait un matériau neuf à chaque repose (changement de crop, de portée) et
+  // ce matériau naît avec `uMerScene: { value: null }`. La liaison vivait DANS
+  // le `if` de création de la cible : à taille de tampon inchangée le `if` ne
+  // courait pas, et le matériau neuf gardait `uMerScene` à `null` — la
+  // réfraction du crop morte, en silence, dès la deuxième pose.
+  const g = globeAvecCrop()
+  const r = rendeurBouchon()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(r)
+  assert.ok(g._mer.material.uniforms.uMerScene.value, 'première pose : la cible est liée')
+
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(r)
+  const u = g._mer.material.uniforms
+  assert.ok(u.uMerScene.value, 'seconde pose : le matériau NEUF doit être lié à la cible, sinon il échantillonne du vide')
+  assert.equal(u.uMerScene.value, g._merRefractRT)
+  assert.equal(r.copies.at(-1), u.uMerScene.value)
+  assert.equal(u.uMerResolution.value.x, 861)
+})
+
+test('⑩o `majReglagesMer` PORTE la réfraction du socle, déplacée dans les deux sens', async () => {
+  // ⛔ **MUTATION SURVIVANTE I3** : `uMerRefract` forcée à `0` quand le socle en
+  // fournit une tue la réfraction du crop en pratique (le socle en fournit
+  // toujours une), et le motif de source ne lisait que le début de la ligne.
+  // On EXÉCUTE l'écrivain, et on déplace la valeur dans les deux sens.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  const u = g._mer.material.uniforms
+  const base = { vue: 1, surface: 1 }
+
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0.34 })
+  assert.equal(u.uMerRefract.value, 0.34, 'la tirette VIVANTE du socle doit arriver telle quelle')
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0.91 })
+  assert.equal(u.uMerRefract.value, 0.91, 'et elle doit REDESCENDRE aussi bien que monter')
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0 })
+  assert.equal(u.uMerRefract.value, 0, 'zéro est une valeur, pas une absence')
+  // sans socle à lire, le NEUTRE du module — jamais la valeur du voisin
+  Globe.prototype.majReglagesMer.call(g, base)
+  assert.equal(u.uMerRefract.value, REFRACTION_NEUTRE)
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: NaN })
+  assert.equal(u.uMerRefract.value, REFRACTION_NEUTRE)
+  // ⚠️ et le neutre n'est PAS ce que le socle vivant porte (0,34 relevé le
+  // 2026-08-23) : un test qui les confondrait ne verrait pas la mutation.
+  assert.notEqual(REFRACTION_NEUTRE, 0.34)
+})
+
 // ══════════ ⑪ LE BORD DE LA MER — Tâche J ═══════════════════════════════════
 //
 // ⚠️ **CE QUE CETTE SECTION DÉFEND EST UN DÉFAUT VU À L'ÉCRAN** : « la mer
@@ -1502,6 +1697,10 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
   }
   assert.deepEqual(d.get.call(socle), {
     vue: 0.4039, surface: 0.08, givre: 0.56, ciel,
+    // ⚠️ **Tâche R2** : pas d'`uRefract` sur le faux socle, donc le neutre
+    // d'`eau-refraction.js`. Il est À PART du groupe `eau` — son neutre ne peut
+    // pas vivre dans `ecume-mer.js`, qui doit rester sans importation (③c).
+    refraction: REFRACTION_NEUTRE,
     // ⚠️ **Tâche P5** : le faux socle ci-dessus ne porte AUCUN des six uniformes
     // d'état de mer, donc l'accesseur doit rendre le neutre — champ par champ.
     etat: ETAT_MER_NEUTRE,
@@ -1516,9 +1715,15 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
   })
   // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
   assert.deepEqual(d.get.call({ materials: [] }), {
-    vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE,
+    vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE, refraction: REFRACTION_NEUTRE,
     eau: LAME_EAU_NEUTRE, couleurs: null, soleilCouleur: null, spectre: null, echelleSpectre: null,
   })
+  // ⚠️ **ET LA RÉFRACTION REMONTE VRAIMENT — Tâche R2, DANS LES DEUX SENS.**
+  // Une concordance au défaut ne prouverait rien : on la déplace.
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: 0.34 } } }] }).refraction, 0.34)
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: 0.91 } } }] }).refraction, 0.91)
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: NaN } } }] }).refraction, REFRACTION_NEUTRE)
+  assert.equal(refractionDuSocle(null), REFRACTION_NEUTRE)
   // un givre non fini ne remonte pas
   assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
   // ⛔ **ET L'ÉTAT DE MER REMONTE VRAIMENT — la réserve n° 1 de P4, exécutée.**
