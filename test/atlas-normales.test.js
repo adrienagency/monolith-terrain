@@ -1,0 +1,349 @@
+// L'ATLAS DE NORMALES — Tâche P12.
+//
+// ⛔ CE QUE CES TESTS EXISTENT POUR EMPÊCHER, ET CE N'EST PAS UNE HYPOTHÈSE :
+// la sonde d'ambiante de P3 a rendu pendant onze tâches un coefficient de ciel
+// **27,7 % trop grand**, parce qu'elle échantillonnait UNE MOITIÉ de sphère de
+// normales et régressait dessus comme si l'irradiance ne dépendait que de
+// `N·haut`. Rien ne l'a signalé : le nombre était plausible, le rendu juste, et
+// l'erreur ne se voyait qu'en comparant le bloc au socle dans la même page.
+//
+// La parade est de ne plus rien échantillonner : on mesure exactement les DEUX
+// grandeurs que le nuanceur consomme, l'irradiance au zénith et au nadir. Ce
+// fichier vérifie que la géométrie, les plages de lecture et la réduction
+// disent bien ça — et **il APPARIE les deux conversions**, comme la Tâche P10
+// l'a fait pour la monnaie du gradient : une face et sa plage de lecture ne
+// peuvent pas dériver l'une de l'autre sans qu'un test rougisse.
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+import {
+  ZENITH,
+  NADIR,
+  NORMALES_ATLAS,
+  DEBORD,
+  ECART,
+  MARGE_MIN,
+  facesAtlas,
+  bandesLecture,
+  irradianceBande,
+  dispersionBande,
+} from '../src/monde/atlas-normales.js'
+
+const SONDE = readFileSync(new URL('../src/sonde-ambiante.js', import.meta.url), 'utf8')
+const SRC = readFileSync(new URL('../src/monde/atlas-normales.js', import.meta.url), 'utf8')
+
+// le coin `s` de la face `i`, tel que `facesAtlas` l'écrit
+const sommet = (f, i, s) => [f.positions[(i * 4 + s) * 3], f.positions[(i * 4 + s) * 3 + 1], f.positions[(i * 4 + s) * 3 + 2]]
+const normale = (f, i, s) => [f.normales[(i * 4 + s) * 3], f.normales[(i * 4 + s) * 3 + 1], f.normales[(i * 4 + s) * 3 + 2]]
+const bornesY = (f, i) => {
+  let lo = Infinity
+  let hi = -Infinity
+  for (let s = 0; s < 4; s++) {
+    const y = sommet(f, i, s)[1]
+    if (y < lo) lo = y
+    if (y > hi) hi = y
+  }
+  return [lo, hi]
+}
+
+// ══════════ ① LA GÉOMÉTRIE ══════════════════════════════════════════════════
+
+test('①a les deux normales sont les DEUX PÔLES, et rien d’autre', () => {
+  // ⚠️ Le nuanceur évalue `mix(sol, ciel, 0.5·ndu + 0.5)` : il vaut `ciel` à
+  // `ndu = +1` et `sol` à `ndu = −1`. Ce sont ces deux grandeurs-là qu'on
+  // mesure, donc ces deux normales-là et pas des voisines.
+  assert.deepEqual([...ZENITH], [0, 1, 0])
+  assert.deepEqual([...NADIR], [0, -1, 0])
+  assert.equal(NORMALES_ATLAS.length, 2)
+  for (const n of NORMALES_ATLAS) {
+    const l = Math.hypot(n[0], n[1], n[2])
+    assert.ok(Math.abs(l - 1) < 1e-15, `normale non unitaire : ${l}`)
+  }
+})
+
+test('①b ⛔ LA BANDE DU BAS EST LE NADIR — la ligne 0 est en bas', () => {
+  // ⛔ `readRenderTargetPixels` rend la ligne 0 EN BAS (convention OpenGL).
+  // Échanger les deux normales éclairerait le bloc par en dessous, et AUCUNE
+  // erreur ne serait levée : le ciel et le sol sont deux triplets du même type.
+  assert.equal(NORMALES_ATLAS[0], NADIR)
+  assert.equal(NORMALES_ATLAS[1], ZENITH)
+  const f = facesAtlas(NORMALES_ATLAS)
+  // la face 0 est la BASSE, et elle porte `ndu = −1`
+  assert.ok(bornesY(f, 0)[1] < bornesY(f, 1)[0], 'la face 0 doit être sous la face 1')
+  assert.equal(normale(f, 0, 0)[1], -1)
+  assert.equal(normale(f, 1, 0)[1], 1)
+})
+
+test('①c chaque face porte SA normale sur ses quatre sommets', () => {
+  const f = facesAtlas(NORMALES_ATLAS)
+  for (let i = 0; i < NORMALES_ATLAS.length; i++) {
+    for (let s = 0; s < 4; s++) assert.deepEqual(normale(f, i, s), [...NORMALES_ATLAS[i]])
+  }
+})
+
+test('①d les faces DÉBORDENT du cadre : aucun pixel lu n’est à couverture partielle', () => {
+  // ⚠️ Si une face s'arrêtait exactement sur le bord du cadre, le pixel du bord
+  // mélangerait la face et le fond — et le fond vaut ZÉRO, donc l'irradiance
+  // lue serait trop basse d'une fraction inconnue.
+  const f = facesAtlas(NORMALES_ATLAS)
+  const n = NORMALES_ATLAS.length
+  for (let i = 0; i < n; i++) {
+    let xlo = Infinity
+    let xhi = -Infinity
+    for (let s = 0; s < 4; s++) {
+      const x = sommet(f, i, s)[0]
+      if (x < xlo) xlo = x
+      if (x > xhi) xhi = x
+    }
+    assert.ok(xlo <= -1 - DEBORD + 1e-12, `face ${i} : bord gauche à ${xlo}`)
+    assert.ok(xhi >= 1 + DEBORD - 1e-12, `face ${i} : bord droit à ${xhi}`)
+  }
+  assert.ok(bornesY(f, 0)[0] <= -1 - DEBORD + 1e-12, 'la face du bas doit déborder par le bas')
+  assert.ok(bornesY(f, n - 1)[1] >= 1 + DEBORD - 1e-12, 'la face du haut doit déborder par le haut')
+  assert.ok(DEBORD > 0)
+})
+
+test('①e les faces sont SÉPARÉES d’un écart non nul, et posées en z = 0', () => {
+  const f = facesAtlas(NORMALES_ATLAS)
+  const trou = bornesY(f, 1)[0] - bornesY(f, 0)[1]
+  // ⚠️ tolérance de FLOTTANT SIMPLE : `facesAtlas` rend un `Float32Array`, donc
+  // 0,05 y vaut 0,050 000 000 745. Exiger 1e−12 sur une valeur passée par un
+  // float32 est une faute de précision, pas une exigence.
+  assert.ok(Math.abs(trou - 2 * ECART) < 1e-6, `écart mesuré ${trou}, attendu ${2 * ECART}`)
+  assert.ok(ECART > 0)
+  for (let i = 0; i < 2; i++) for (let s = 0; s < 4; s++) assert.equal(sommet(f, i, s)[2], 0)
+})
+
+test('①f l’enroulement est DIRECT : les faces regardent la caméra', () => {
+  // ⚠️ La caméra de la sonde est en +Z et regarde −Z. Une face à l'enroulement
+  // inverse serait vue de dos : `gl_FrontFacing` faux, et un jour où quelqu'un
+  // poserait `side: DoubleSide`, three retournerait la normale — donc le ciel
+  // et le sol s'échangeraient, en silence.
+  const f = facesAtlas(NORMALES_ATLAS)
+  for (let i = 0; i < 2; i++) {
+    for (const [p, q, r] of [[0, 1, 2], [0, 2, 3]]) {
+      const a = sommet(f, i, p)
+      const b = sommet(f, i, q)
+      const c = sommet(f, i, r)
+      const z = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+      assert.ok(z > 0, `face ${i}, triangle ${p}${q}${r} : normale géométrique en ${z}`)
+    }
+  }
+})
+
+test('①g l’index décrit deux triangles par face, sur les sommets de CETTE face', () => {
+  const f = facesAtlas(NORMALES_ATLAS)
+  assert.equal(f.index.length, 2 * 6)
+  assert.equal(f.positions.length, 2 * 4 * 3)
+  for (let i = 0; i < 2; i++) {
+    for (let k = 0; k < 6; k++) {
+      const v = f.index[i * 6 + k]
+      assert.ok(v >= i * 4 && v < (i + 1) * 4, `la face ${i} référence le sommet ${v}`)
+    }
+  }
+})
+
+test('①h la loi vaut pour un nombre QUELCONQUE de faces', () => {
+  // ⚠️ La géométrie ne doit pas être écrite « pour deux » : le jour où la sonde
+  // voudra un troisième point, elle ne doit pas redécouvrir le débord.
+  for (const n of [1, 3, 5]) {
+    const normales = Array.from({ length: n }, (_, i) => [0, -1 + (2 * i) / Math.max(1, n - 1) || 0, 0])
+    const f = facesAtlas(normales)
+    assert.equal(f.positions.length, n * 4 * 3)
+    for (let i = 0; i + 1 < n; i++) {
+      assert.ok(bornesY(f, i)[1] < bornesY(f, i + 1)[0], `faces ${i} et ${i + 1} non ordonnées`)
+    }
+    assert.ok(bornesY(f, 0)[0] <= -1 - DEBORD + 1e-12)
+    assert.ok(bornesY(f, n - 1)[1] >= 1 + DEBORD - 1e-12)
+  }
+})
+
+// ══════════ ② LES PLAGES DE LECTURE, APPARIÉES À LA GÉOMÉTRIE ═══════════════
+
+test('②a les plages ne se chevauchent pas et tiennent dans le tampon', () => {
+  for (const cote of [16, 32, 64, 128]) {
+    const b = bandesLecture(2, cote)
+    assert.ok(b[0].debut >= 0, `cote ${cote}`)
+    assert.ok(b[1].fin <= cote - 1, `cote ${cote}`)
+    assert.ok(b[0].fin < b[1].debut, `cote ${cote}`)
+    for (const p of b) assert.ok(p.fin >= p.debut, `plage vide à cote ${cote}`)
+  }
+})
+
+test('②b ⚡ L’INVARIANT QUI APPARIE LES DEUX CONVERSIONS', () => {
+  // ⚡ C'est la parade de la Tâche P10 (`TOUR × UNITE = 2πR`), appliquée ici :
+  // `facesAtlas` dit OÙ chaque normale est dessinée, `bandesLecture` dit OÙ on
+  // la lit. Ce sont DEUX conversions du même découpage, et rien ne les tenait
+  // ensemble. On l'écrit une fois : **le centre de chaque ligne lue doit tomber
+  // STRICTEMENT à l'intérieur de la face de sa bande.**
+  for (const cote of [16, 32, 64, 128, 256]) {
+    const f = facesAtlas(NORMALES_ATLAS)
+    const b = bandesLecture(NORMALES_ATLAS.length, cote)
+    for (let i = 0; i < 2; i++) {
+      const [lo, hi] = bornesY(f, i)
+      for (let ligne = b[i].debut; ligne <= b[i].fin; ligne++) {
+        const y = ((ligne + 0.5) / cote) * 2 - 1
+        assert.ok(y > lo && y < hi, `cote ${cote}, bande ${i}, ligne ${ligne} : y = ${y} hors de [${lo} ; ${hi}]`)
+      }
+    }
+  }
+})
+
+test('②c la marge écarte bien la couture, et sans elle l’invariant TOMBE', () => {
+  // ⚠️ La preuve que `MARGE` porte quelque chose : à marge nulle, une ligne lue
+  // tombe dans l'écart entre les deux faces, là où il n'y a RIEN à lire.
+  const f = facesAtlas(NORMALES_ATLAS)
+  const cote = 64
+  // ⚠️ `ecart = 0` retire la couture DU CALCUL sans la retirer de la géométrie :
+  // c'est exactement la mutation qu'on veut voir mourir.
+  const sansMarge = bandesLecture(2, cote, 0).map((p, i) => (i === 0 ? { debut: p.debut, fin: cote / 2 - 1 } : { debut: cote / 2, fin: p.fin }))
+  let fautes = 0
+  for (let i = 0; i < 2; i++) {
+    const [lo, hi] = bornesY(f, i)
+    for (let ligne = sansMarge[i].debut; ligne <= sansMarge[i].fin; ligne++) {
+      const y = ((ligne + 0.5) / cote) * 2 - 1
+      if (!(y > lo && y < hi)) fautes++
+    }
+  }
+  assert.ok(fautes > 0, 'à marge nulle, au moins une ligne doit tomber dans la couture')
+  assert.ok(MARGE_MIN >= 1)
+})
+
+test('②d les plages de la sonde livrée, à COTE = 64', () => {
+  assert.deepEqual(bandesLecture(2, 64), [{ debut: 0, fin: 28 }, { debut: 35, fin: 63 }])
+  // ⚠️ et la marge SUIT la taille : à 256, trois lignes n'auraient pas suffi
+  assert.deepEqual(bandesLecture(2, 256), [{ debut: 0, fin: 119 }, { debut: 136, fin: 255 }])
+})
+
+// ══════════ ③ LA RÉDUCTION ══════════════════════════════════════════════════
+
+function tampon(cote, valeur) {
+  const t = new Float32Array(cote * cote * 3)
+  for (let ligne = 0; ligne < cote; ligne++) {
+    for (let col = 0; col < cote; col++) {
+      const v = valeur(ligne, col)
+      const i = (ligne * cote + col) * 3
+      t[i] = v[0]
+      t[i + 1] = v[1]
+      t[i + 2] = v[2]
+    }
+  }
+  return t
+}
+
+test('③a E = π × (blanc − noir) : le facteur est celui de BRDF_Lambert', () => {
+  // ⚠️ La sortie d'une surface d'albédo 1 vaut `E / π` (`BRDF_Lambert` de
+  // three) : sans le π, l'irradiance rendue serait 3,14 fois trop petite et le
+  // bloc trois fois trop sombre. Un test qui compare deux moyennes entre elles
+  // ne le verrait pas — celui-ci compare à une valeur POSÉE.
+  const cote = 64
+  const blanc = tampon(cote, () => [0.5, 0.25, 0.125])
+  const noir = tampon(cote, () => [0.1, 0.05, 0.025])
+  const b = bandesLecture(2, cote)
+  const E = irradianceBande(blanc, noir, cote, b[1])
+  assert.ok(Math.abs(E[0] - 0.4 * Math.PI) < 1e-6, `${E[0]}`)
+  assert.ok(Math.abs(E[1] - 0.2 * Math.PI) < 1e-6)
+  assert.ok(Math.abs(E[2] - 0.1 * Math.PI) < 1e-6)
+})
+
+test('③b la soustraction du spéculaire est une SOUSTRACTION, et elle est bornée à 0', () => {
+  const cote = 32
+  const b = bandesLecture(2, cote)
+  // un noir plus clair que le blanc n'a pas de sens physique : on borne
+  const E = irradianceBande(tampon(cote, () => [0.1, 0.1, 0.1]), tampon(cote, () => [0.4, 0.4, 0.4]), cote, b[0])
+  assert.deepEqual(E, [0, 0, 0])
+  // et le spéculaire, lui, est bien retiré
+  const F = irradianceBande(tampon(cote, () => [1, 1, 1]), tampon(cote, () => [0.04, 0.04, 0.04]), cote, b[0])
+  assert.ok(Math.abs(F[0] - 0.96 * Math.PI) < 1e-6)
+})
+
+test('③c les deux bandes lisent DEUX endroits différents du tampon', () => {
+  // ⛔ Si les deux plages tombaient au même endroit, `ciel` et `sol` seraient
+  // égaux et le bloc s'éclairerait à plat — sans qu'aucune erreur ne soit levée.
+  const cote = 64
+  const b = bandesLecture(2, cote)
+  const blanc = tampon(cote, (ligne) => (ligne < cote / 2 ? [0.2, 0.2, 0.2] : [0.9, 0.9, 0.9]))
+  const noir = tampon(cote, () => [0, 0, 0])
+  const bas = irradianceBande(blanc, noir, cote, b[0])
+  const haut = irradianceBande(blanc, noir, cote, b[1])
+  assert.ok(Math.abs(bas[0] - 0.2 * Math.PI) < 1e-6, `bas = ${bas[0]}`)
+  assert.ok(Math.abs(haut[0] - 0.9 * Math.PI) < 1e-6, `haut = ${haut[0]}`)
+})
+
+test('③d la dispersion vaut ZÉRO sur une bande propre, et DÉNONCE un intrus', () => {
+  // ⚡ C'est le témoin de la mesure : tous les pixels d'une bande portent la
+  // MÊME normale, donc le même nombre. `coefAmbiante` le publie.
+  const cote = 64
+  const b = bandesLecture(2, cote)
+  const noir = tampon(cote, () => [0, 0, 0])
+  assert.equal(dispersionBande(tampon(cote, () => [0.5, 0.5, 0.5]), noir, cote, b[1]), 0)
+  // un pixel étranger DANS la plage : la dispersion le voit
+  const sale = tampon(cote, (ligne, col) => (ligne === b[1].debut + 3 && col === 7 ? [0.1, 0.1, 0.1] : [0.5, 0.5, 0.5]))
+  assert.ok(dispersionBande(sale, noir, cote, b[1]) > 0.7)
+  // le même pixel HORS de la plage : la marge fait son travail, elle ne le voit pas
+  const propre = tampon(cote, (ligne, col) => (ligne === b[1].debut - 1 && col === 7 ? [0.1, 0.1, 0.1] : [0.5, 0.5, 0.5]))
+  assert.equal(dispersionBande(propre, noir, cote, b[1]), 0)
+})
+
+test('③e une bande vide rend zéro plutôt que NaN', () => {
+  // ⚠️ Une division par zéro poserait NaN dans `uCielIrr`, et un NaN dans une
+  // irradiance peint un trou noir.
+  const E = irradianceBande(new Float32Array(48), new Float32Array(48), 4, { debut: 3, fin: 1 })
+  assert.deepEqual(E, [0, 0, 0])
+  assert.equal(dispersionBande(new Float32Array(48), new Float32Array(48), 4, { debut: 3, fin: 1 }), 0)
+})
+
+// ══════════ ④ LE BRANCHEMENT DANS LA SONDE ══════════════════════════════════
+
+test('④a la sonde IMPORTE le module et n’écrit plus sa géométrie', () => {
+  assert.match(SONDE, /from '\.\/monde\/atlas-normales\.js'/)
+  assert.match(SONDE, /facesAtlas\(NORMALES_ATLAS\)/)
+  assert.match(SONDE, /bandesLecture\(NORMALES_ATLAS\.length, COTE\)/)
+  // ⛔ la bille de P3 a disparu AVEC la loi qu'elle servait : plus de sphère,
+  // plus de disque à rejeter, plus de régression sur une demi-sphère
+  assert.doesNotMatch(SONDE, /SphereGeometry/)
+  assert.doesNotMatch(SONDE, /sx \* sx \+ sy \* sy/)
+})
+
+test('④b ⛔ LE SOL VIENT DE LA BANDE 0 ET LE CIEL DE LA BANDE 1', () => {
+  // ⛔ L'échange est invisible : deux triplets du même type, aucune erreur. Il
+  // retournerait l'éclairage indirect du bloc de haut en bas.
+  assert.match(SONDE, /const sol = irradianceBande\(blanc, noir, COTE, bandes\[0\]\)/)
+  assert.match(SONDE, /const ciel = irradianceBande\(blanc, noir, COTE, bandes\[1\]\)/)
+})
+
+test('④c le spéculaire n’est PAS coupé sur la sonde, et c’est délibéré', () => {
+  // ⚠️ three atténue le diffus indirect par `1 − max(totalScattering)` — mesuré
+  // **0,991** dans la page vivante (`.banc/P12/D4-verif-irradiance-P12.json`).
+  // Ce facteur, le relief du socle le subit ; la soustraction blanc − noir le
+  // retient. Poser `specularIntensity: 0` rendrait l'irradiance « pure » et le
+  // crop ressortirait presque 1 % trop clair.
+  assert.doesNotMatch(SONDE, /specularIntensity: 0/)
+  assert.match(SONDE, /roughness: 1, metalness: 0/)
+  // les deux rendus, et l'ordre : blanc puis noir
+  assert.ok(SONDE.indexOf('const blanc = rendreEtLire') < SONDE.indexOf('const noir = rendreEtLire'))
+})
+
+test('④d les gardes de P3 tiennent : cache, état du renderer, intensité 1', () => {
+  assert.match(SONDE, /const CACHE = new WeakMap\(\)/)
+  assert.match(SONDE, /const memo = CACHE\.get\(envTexture\)/)
+  assert.match(SONDE, /_scene\.environmentIntensity = 1/)
+  assert.match(SONDE, /shadowMap\.needsUpdate = ombreAvant/)
+  assert.match(SONDE, /renderer\.setRenderTarget\(cibleAvant\)/)
+  assert.match(SONDE, /_scene\.environment = null/)
+  assert.match(SONDE, /Object\.freeze/)
+})
+
+test('④e le module reste PUR : ni three, ni DOM, ni fetch', () => {
+  // ⚠️ **ON RETIRE LES COMMENTAIRES AVANT DE CHERCHER.** L'en-tête DIT que le
+  // module est pur — le mot « fetch » y figure — et un test qui lit le fichier
+  // entier rougirait sur sa propre documentation. La tautologie inverse, et
+  // elle s'écrit sans qu'on la voie.
+  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert.doesNotMatch(code, /\bimport\b/)
+  assert.doesNotMatch(code, /THREE|document|window|fetch|require\(/)
+  // et le témoin, sans lequel le retrait des commentaires ne prouverait rien
+  assert.match(SRC, /fetch/)
+})

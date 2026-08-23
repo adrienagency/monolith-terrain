@@ -36,18 +36,49 @@
 // son écart-type vaut **17,7 %** de sa moyenne, et un ciel HDRI est bleu en
 // haut et brun en bas. Rendre une moyenne unique aurait jeté cette variation.
 //
-// On rend donc **deux irradiances, zénith et nadir**, obtenues par une
-// RÉGRESSION LINÉAIRE de l'irradiance sur `N·haut` — et l'appelant les ajoute
-// aux deux couleurs de la lampe hémisphérique. Le nuanceur n'a alors rien de
-// plus à faire : `mix(sol, ciel, 0.5 · ndu + 0.5)` est déjà exactement la loi
-// que three écrit pour une `HemisphereLight`, et c'est aussi la meilleure
-// approximation du premier ordre d'un environnement.
+// On rend donc **deux irradiances, zénith et nadir**, que l'appelant ajoute aux
+// deux couleurs de la lampe hémisphérique. Le nuanceur n'a alors rien de plus à
+// faire : `mix(sol, ciel, 0.5 · ndu + 0.5)` est déjà exactement la loi que three
+// écrit pour une `HemisphereLight`.
 //
-// **La sonde est une SPHÈRE regardée de côté par une caméra ORTHOGRAPHIQUE.**
-// Pour une sphère unité vue ainsi, la normale du point qui tombe en `(sx, sy)`
-// de l'écran vaut `(sx, sy, √(1 − sx² − sy²))` : **`N·haut` EST la coordonnée
-// écran `sy`**, sans aucun calcul. Le haut du disque donne le zénith, le bas le
-// nadir, et tout l'entre-deux nourrit la régression.
+// ══════════ ⛔ ET LA PREMIÈRE VERSION LES OBTENAIT MAL — Tâche P12 ══════════
+//
+// La sonde de P3 était une **BILLE regardée de côté par une caméra
+// orthographique**, et elle régressait l'irradiance sur la coordonnée d'écran
+// `sy`. Son argument était juste — pour une sphère unité vue ainsi, `N·haut`
+// **est** `sy` — mais il ne dit rien du reste : **les normales visibles sont
+// toutes celles du demi-espace `Nz > 0`**, pondérées par l'aire d'écran.
+//
+// ⛔ **ET L'ENVIRONNEMENT N'EST PAS INVARIANT PAR ROTATION AUTOUR DE LA
+// VERTICALE.** Mesuré dans la page vivante le 2026-08-23 (La Réunion z12,
+// `.banc/P12/d3-hemisphere.js`) : à `ndu = 0,3`, l'irradiance va de **0,7225 à
+// 2,6446 selon l'azimut** — **146 % d'amplitude**. Les deux moitiés de sphère
+// rendent donc deux droites différentes, **×2,18 sur le terme de ciel**, et la
+// sonde livrée retombait à 2,2 % de la moitié qu'elle voyait : **son rendu
+// était juste, son échantillonnage était faux.**
+//
+// ⚡ **CE QUE ÇA COÛTAIT, MESURÉ TERME PAR TERME** (`.banc/P12/d1-irradiance.js`,
+// atlas de 1 600 normales, socle rallumé dans la même page) : le soleil du crop
+// est juste à **×1,0003**, sa lampe hémisphérique est **exacte**, et son
+// environnement dépasse de **×1,2772**. **Tout le dépassement du noteur vit
+// là.**
+//
+// ⚠️ **ET LA SECONDE FAUTE ÉTAIT UNE FAUTE DE MONNAIE, LA CINQUIÈME DE CE
+// CHANTIER** : `ciel` et `sol` ne sont pas les coefficients d'un ajustement, ce
+// sont **deux irradiances AUX PÔLES** — l'appelant les additionne à
+// `hemi.color` et `hemi.groundColor`, où `skyColor` est par définition
+// l'irradiance à `ndu = +1`. Y verser l'extrapolation d'une droite des moindres
+// carrés met une valeur juste dans la mauvaise monnaie.
+//
+// ➡️ **LA SONDE MESURE DONC EXACTEMENT LES DEUX GRANDEURS QUE LE NUANCEUR
+// CONSOMME, ET RIEN D'AUTRE** : deux faces, deux normales, `(0, +1, 0)` et
+// `(0, −1, 0)`. Il n'y a plus d'échantillonnage à biaiser. La géométrie, les
+// plages de lecture et la réduction vivent dans `src/monde/atlas-normales.js`,
+// **module pur, vérifiable sous node** — c'est là que la mesure du 2026-08-23
+// est écrite en entier.
+//
+// ⚡ **CE QUE ÇA VAUT, SUR LES NORMALES DU RELIEF** (`ndu ≥ 0,7`) : irradiance
+// totale du crop contre celle du socle, **×1,1429 avant**, **×1,0006 après**.
 //
 // ══════════ LE SPÉCULAIRE EST RETIRÉ, ET IL EST RETIRÉ PAR SOUSTRACTION ═════
 //
@@ -72,7 +103,15 @@
 
 import * as THREE from 'three'
 
-const COTE = 64 // pixels de côté — ~3 200 normales pour la régression
+import {
+  NORMALES_ATLAS,
+  facesAtlas,
+  bandesLecture,
+  irradianceBande,
+  dispersionBande,
+} from './monde/atlas-normales.js'
+
+const COTE = 64 // pixels de côté — deux bandes de 28 lignes utiles après marge
 const CACHE = new WeakMap() // texture d'environnement → { ciel, sol } gelé
 
 export const AMBIANTE_NULLE = Object.freeze({
@@ -82,7 +121,7 @@ export const AMBIANTE_NULLE = Object.freeze({
 
 let _scene = null
 let _cam = null
-let _bille = null
+let _atlas = null
 let _cible = null
 let _lecture = null
 
@@ -98,13 +137,31 @@ function demiFlottantVersFlottant(h) {
 function bati() {
   if (_scene) return
   _scene = new THREE.Scene()
-  _bille = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 48, 32),
+  // ⚠️ **LA GÉOMÉTRIE VIENT DU MODULE PUR, ELLE N'EST PAS ÉCRITE ICI.** Le
+  // débord, l'écart entre bandes et l'ordre bas→haut sont les trois choses qui
+  // décident de ce que la sonde mesure, et ce sont les trois que
+  // `test/atlas-normales.test.js` peut exercer sous node.
+  const f = facesAtlas(NORMALES_ATLAS)
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(f.positions, 3))
+  geo.setAttribute('normal', new THREE.BufferAttribute(f.normales, 3))
+  geo.setIndex(new THREE.BufferAttribute(f.index, 1))
+  // ⚠️ **LE MATÉRIAU EST CELUI DU RELIEF DU SOCLE** — `MeshPhysicalMaterial`,
+  // `roughness = 1`, `metalness = 0`, `specularIntensity` à son défaut de 1 :
+  // c'est ce qui fait que la soustraction blanc − noir retient le facteur
+  // d'énergie `1 − max(totalScattering)` que le relief subit lui aussi.
+  _atlas = new THREE.Mesh(
+    geo,
     new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 1, metalness: 0, envMapIntensity: 1 })
   )
-  _scene.add(_bille)
-  // orthographique, cadrée exactement sur le disque unité, regardant −Z : la
-  // coordonnée écran `sy` EST alors `N·haut` (voir l'en-tête)
+  // ⚠️ **AUCUNE OMBRE, ET AUCUN ÉCRÊTAGE PAR LE TRONC** : les faces débordent
+  // du cadre, donc leur boîte englobante déborde aussi.
+  _atlas.castShadow = false
+  _atlas.receiveShadow = false
+  _atlas.frustumCulled = false
+  _scene.add(_atlas)
+  // orthographique, cadrée exactement sur `[-1, 1]²`, regardant −Z : les faces
+  // sont posées en z = 0 et remplissent le cadre, débord compris
   _cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
   _cam.position.set(0, 0, 4)
   _cam.lookAt(0, 0, 0)
@@ -155,55 +212,36 @@ export function coefAmbiante(renderer, envTexture) {
   _scene.environmentIntensity = 1
   renderer.autoClear = true
   renderer.setClearColor(0x000000, 1)
-  _bille.material.color.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace)
+  _atlas.material.color.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace)
   const blanc = rendreEtLire(renderer)
-  _bille.material.color.setRGB(0, 0, 0, THREE.LinearSRGBColorSpace)
+  _atlas.material.color.setRGB(0, 0, 0, THREE.LinearSRGBColorSpace)
   const noir = rendreEtLire(renderer)
+  _atlas.material.color.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace)
   _scene.environment = null
   renderer.setRenderTarget(cibleAvant)
   renderer.autoClear = autoAvant
   renderer.setClearColor(clearAvant, alphaAvant)
   renderer.shadowMap.needsUpdate = ombreAvant
 
-  // Régression de E sur ndu = sy. `readRenderTargetPixels` rend la ligne 0 EN
-  // BAS (convention OpenGL), donc sy croît avec l'indice de ligne.
-  let n = 0
-  let sX = 0
-  let sXX = 0
-  const sY = [0, 0, 0]
-  const sXY = [0, 0, 0]
-  for (let ligne = 0; ligne < COTE; ligne++) {
-    const sy = ((ligne + 0.5) / COTE) * 2 - 1
-    for (let col = 0; col < COTE; col++) {
-      const i = (ligne * COTE + col) * 3
-      const sx = ((col + 0.5) / COTE) * 2 - 1
-      // hors du disque il n'y a pas de bille : la régression n'a rien à y lire
-      if (sx * sx + sy * sy > 0.98) continue
-      n++
-      sX += sy
-      sXX += sy * sy
-      for (let k = 0; k < 3; k++) {
-        // sortie = albédo · E / PI, albédo vaut 1 → E = PI · (blanc − noir)
-        const e = Math.max(0, (blanc[i + k] - noir[i + k]) * Math.PI)
-        sY[k] += e
-        sXY[k] += e * sy
-      }
-    }
-  }
+  // ⚠️ **LA BANDE DU BAS EST LE NADIR** (`readRenderTargetPixels` rend la ligne
+  // 0 en bas), et `NORMALES_ATLAS` est écrit dans cet ordre-là.
+  const bandes = bandesLecture(NORMALES_ATLAS.length, COTE)
+  const sol = irradianceBande(blanc, noir, COTE, bandes[0])
+  const ciel = irradianceBande(blanc, noir, COTE, bandes[1])
   let res = AMBIANTE_NULLE
-  const det = n * sXX - sX * sX
-  if (n > 16 && Math.abs(det) > 1e-9) {
-    const ciel = [0, 0, 0]
-    const sol = [0, 0, 0]
-    for (let k = 0; k < 3; k++) {
-      const b = (n * sXY[k] - sX * sY[k]) / det // la pente : (ciel − sol) / 2
-      const a = (sY[k] - b * sX) / n // l'ordonnée : (ciel + sol) / 2
-      ciel[k] = Math.max(0, a + b)
-      sol[k] = Math.max(0, a - b)
-    }
-    if (ciel.every(Number.isFinite) && sol.every(Number.isFinite)) {
-      res = Object.freeze({ ciel: Object.freeze(ciel), sol: Object.freeze(sol), pixels: n })
-    }
+  if (ciel.every(Number.isFinite) && sol.every(Number.isFinite)) {
+    res = Object.freeze({
+      ciel: Object.freeze(ciel.map((v) => Math.max(0, v))),
+      sol: Object.freeze(sol.map((v) => Math.max(0, v))),
+      // ⚠️ **LE TÉMOIN DE LA MESURE** : tous les pixels d'une bande portent la
+      // même normale, donc le même nombre. Un écart non nul dit qu'un pixel de
+      // couture ou de fond est entré dans la moyenne.
+      dispersion: Math.max(
+        dispersionBande(blanc, noir, COTE, bandes[0]),
+        dispersionBande(blanc, noir, COTE, bandes[1])
+      ),
+      pixels: (bandes[0].fin - bandes[0].debut + 1 + bandes[1].fin - bandes[1].debut + 1) * COTE,
+    })
   }
   CACHE.set(envTexture, res)
   return res
@@ -211,5 +249,5 @@ export function coefAmbiante(renderer, envTexture) {
 
 /** Pour les bancs : l'intérieur de la sonde, sans le cache. */
 export function _sondeInterne() {
-  return { COTE, scene: _scene, bille: _bille, cible: _cible }
+  return { COTE, scene: _scene, atlas: _atlas, cible: _cible, bandes: bandesLecture(NORMALES_ATLAS.length, COTE) }
 }
