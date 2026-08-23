@@ -21,7 +21,7 @@ import { overzoomTile } from './bathy.js'
 import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
-import { construireSolideCrop, rabattementBorne } from './monde/parois-crop.js'
+import { construireSolideCrop, normalesParois, rabattementBorne } from './monde/parois-crop.js'
 import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
@@ -4862,15 +4862,22 @@ export class Globe {
     // propre `#define`, et ce nuanceur-ci n'a pas à en dépendre.
     geo.setAttribute('aoCrop', new THREE.BufferAttribute(solide.couleurs, 3, true))
     geo.setIndex(new THREE.BufferAttribute(solide.indices, 1))
-    // ⚠️ DÉ-INDEXÉ PUIS NORMALES DE FACE. Des normales moyennées auraient lissé
-    // l'arête entre le mur et le fond, et `plinth.js` explique pourquoi ce serait
-    // faux : « c'est elle qui donne au liseré d'arête sa cassure nette ». Le coût
-    // est de trois sommets par triangle au lieu d'un — 9 180 au lieu de 2 042 sur
-    // le contour par défaut. ⚠️ **ET LE CHIFFRE SE RECONSTITUE** : 9 180 sommets ×
-    // (12 o de position + 12 o de normale + 3 o d'occlusion) = **247 860 o, soit
-    // 242,1 Kio** — la valeur que rend `byteLength` sur la géométrie posée.
+    // ⚠️ DÉ-INDEXÉ, PUIS NORMALES DE FACE — SAUF SUR LE CONGÉ. Des normales
+    // moyennées auraient lissé l'arête entre le mur et le fond, et `plinth.js`
+    // explique pourquoi ce serait faux : « c'est elle qui donne au liseré
+    // d'arête sa cassure nette ». Le coût est de trois sommets par triangle au
+    // lieu d'un.
+    //
+    // ⛔ **`computeVertexNormals` NE SUFFIT PLUS DEPUIS LA TÂCHE P13**, et c'est
+    // le cœur du portage du congé : la normale de FACE rendrait les trois
+    // segments de l'arc comme **trois facettes**, « l'inverse exact de
+    // l'intention » (`plinth.js`). `normalesParois` rend la normale de face
+    // partout et la normale ANALYTIQUE sur le congé — **dans le module PUR**,
+    // donc tenue par des tests qui l'EXÉCUTENT, et non par un `assert.match` sur
+    // cette ligne-ci. Le test ⑬d apparie sa sortie à `computeVertexNormals` de
+    // three sur tout ce qui n'est pas le congé.
     const plate = geo.toNonIndexed()
-    plate.computeVertexNormals()
+    plate.setAttribute('normal', new THREE.BufferAttribute(normalesParois(solide), 3))
     plate.computeBoundingSphere()
     geo.dispose()
 

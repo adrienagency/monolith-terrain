@@ -561,8 +561,18 @@ test('⑤bis-a le rideau pose EXACTEMENT le même tableau d indices que les PARO
   // `construireSolideCrop` (`parois-crop.js` §④) DÉMONTRE son orientation ligne
   // à ligne, et `test/crop-parois.test.js` l exige par volume signé. Les deux
   // pièces tracent le même anneau (`contourCrop`, même pas, même forme) et
-  // rangent leurs sommets pareil (0…n−1 en haut, n…2n−1 en bas) : leurs
-  // triangles de mur DOIVENT donc être les mêmes entiers, dans le même ordre.
+  // rangent leurs sommets pareil : leurs triangles de mur DOIVENT donc être les
+  // mêmes entiers, dans le même ordre.
+  //
+  // ⚠️ **CE QUE LA TÂCHE P13 A CHANGÉ, ET POURQUOI CE TEST TIENT QUAND MÊME.**
+  // Le solide compte désormais SEPT rangs (chanfrein, mur, bande d occlusion,
+  // congé) au lieu de deux ; les indices `n…2n−1` ne sont plus le fond mais le
+  // pied du CHANFREIN. Le premier bandeau garde cependant exactement les mêmes
+  // ENTIERS — `parois-crop.js` §④ sort ses bandeaux dans l ordre des rangs, `k`
+  // tournant à l intérieur — et c est le SENS DE PARCOURS que ce test compare,
+  // pas la hauteur des sommets. ⚠️ **Il compare donc maintenant le bandeau de
+  // chanfrein au rideau, et non plus le mur entier ; l invariant d orientation
+  // est le même pour tous les bandeaux.**
   const j = construireJupeMer({ repere: REPERE, rayon: 100, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } })
   const s = solideCrop()
   const n = j.compte.anneau

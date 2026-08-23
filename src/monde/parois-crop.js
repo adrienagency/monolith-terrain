@@ -130,7 +130,7 @@
 //      acceptable que tenue par un test**, et `test/crop-parois.test.js` la
 //      confronte point par point à `contactAO`.
 //
-// **PERDUES — cinq, et voici pourquoi :**
+// **PERDUES — deux, et voici pourquoi :**
 //   ⑧ `masqueArrondi` et ⑨ `bords` — **SANS OBJET ICI, structurellement.** Les
 //      deux existent pour le DAMIER : « deux congés qui se font face à une
 //      jointure creusent une rainure » (`damier-bords.js`). Le crop est **un
@@ -139,26 +139,72 @@
 //      deux paramètres dont l'entrée n'existe pas. ⚠️ **Et ce n'est plus vrai le
 //      jour où un damier de crops apparaît** — la Tâche H et les « crops
 //      continentaux » du §8 le rouvriraient.
-//   ⑩ `chanfrein` et ⑪ `arrondi` / ⑫ `arrondiSeg` — **UNE VRAIE PERTE, ASSUMÉE
-//      ET DATÉE.** Le liseré d'arête haute et le congé bas sont le geste qui
-//      donne sa matière au socle (« il est vraiment arrondi, et c'est un vrai
-//      chanfrein dessous », capture d'Adrien). Trois raisons de ne pas les
-//      porter dans CETTE tâche, dans l'ordre de leur poids :
-//        · ils demandent la machinerie de bissectrice et d'onglet de
-//          `buildSlabWalls` (~35 lignes) **plus** des normales analytiques pour
-//          le congé — sans elles, trois segments se lisent comme trois facettes,
-//          « l'inverse exact de l'intention » ;
-//        · le chanfrein fait rentrer le mur sous son sommet, donc **rétrécit la
-//          base** de 0,29 % de la largeur. C'est minuscule, mais c'est
-//          littéralement la décision 2 qu'on entamerait, et une entame se
-//          rediscute avec Adrien, pas toute seule ;
-//        · leur garde-fou (`min(x, (topMax − baseY) × 0,25)`) est calibré sur un
-//          socle à exagération 2,8. **Le globe est à 18** (Tâche E), donc
-//          `topMax − baseY` y est six fois plus grand qu'il ne le sera : tout
-//          rayon posé maintenant serait à reposer après la Tâche E.
-//      ⚠️ **CONSÉQUENCE VISIBLE, ET IL FAUT LA DIRE : le bloc a pour l'instant
-//      des arêtes VIVES, en haut comme en bas.** C'est plus dur, plus « CAO »,
-//      que le socle d'aujourd'hui.
+//
+// ══════════ 5 bis. LE CHANFREIN ET LE CONGÉ — LA PERTE, REPRISE (Tâche P13) ══
+//
+// ⑩ `chanfrein` · ⑪ `arrondi` · ⑫ `arrondiSeg` **SONT PORTÉS DEPUIS LA TÂCHE
+// P13.** La Tâche B les avait laissés de côté en écrivant trois raisons ; ce §
+// dit, une par une, ce qu'elles sont devenues. **Aucune n'est effacée : deux
+// sont périmées par des décisions postérieures, une est payée et chiffrée.**
+//
+//   ⚡ **LA TROISIÈME EST PÉRIMÉE, ET ELLE L'EST DEUX FOIS.** Elle disait : « leur
+//      garde-fou `min(x, (topMax − baseY) × 0,25)` est calibré sur un socle à
+//      exagération 2,8, **le globe est à 18**, donc tout rayon posé maintenant
+//      serait à reposer ».
+//        ① ⚠️ **L'exagération du globe est FIXE À 2 depuis la décision D10**
+//           (`EXAGERATION_UNIQUE`, `zoom-continu.js` §1 ter, Adrien le
+//           2026-08-22 : « une exagération d'altitude unique à ×2 sur toute la
+//           map »). Il n'y a plus rien à reposer après coup.
+//        ② ⚡ **ET SURTOUT : LES DEUX VALEURS SONT ANCRÉES À LA LARGEUR, QUE
+//           L'EXAGÉRATION NE TOUCHE PAS.** Seul le garde-fou dépend de la
+//           hauteur du mur — et il ne mord ni à 2 ni à 18. Relevé sur le banc
+//           de `test/crop-parois.test.js` (relief d'essai, centre 45° N) :
+//           mur **0,107 909** contre un garde-fou de **0,026 977**, pour un
+//           congé de **2,618·10⁻³** et un chanfrein de **4,654·10⁻⁴**. Il
+//           faudrait donc un mur **10,3 fois plus écrasé** pour que le congé
+//           soit rogné, **58 fois** pour le chanfrein. Le test ⑬f mesure ces
+//           deux marges au lieu de les supposer, et vérifie que le garde-fou
+//           mord bel et bien quand on l'y force.
+//
+//   ⚡ **LA PREMIÈRE EST PAYÉE — la machinerie EST ici.** Bissectrice, onglet et
+//      normales analytiques du congé sont portés plus bas, et l'appariement des
+//      deux conventions de normale est tenu par un test qui confronte
+//      `normalesParois` à `computeVertexNormals` de three (⑬d). ⚠️ **Sans les
+//      normales analytiques, trois segments d'arc se liraient comme trois
+//      facettes — « l'inverse exact de l'intention »** ; c'est pourquoi le
+//      congé ne se contente PAS des normales de face que `globe.js` calculait.
+//
+//   ⚠️ **LA DEUXIÈME EST RÉELLE, ET ELLE EST CHIFFRÉE PLUTÔT QU'ARBITRÉE.** Le
+//      chanfrein fait rentrer le mur sous son sommet. La Tâche B y voyait une
+//      entame de la décision 2 (« LA BASE A LA MÊME TAILLE QUE LE DESSUS »).
+//      **Ce que la décision 2 interdit, c'est la CONVERGENCE RADIALE**, et elle
+//      reste interdite : le mur garde exactement la même empreinte sur toute sa
+//      hauteur (test ⑬b, au bit près). Ce que le chanfrein retire, c'est un
+//      retrait CONSTANT — **`2 × 0,16 / 56 = 0,571 % de la largeur** —, et le
+//      congé un second de **`2 × 0,9 / 56 = 3,214 %`** sur la seule hauteur du
+//      congé. ⚡ **Ce sont les proportions EXACTES du socle d'Adrien** : c'est
+//      lui, l'objet de référence, et c'est lui qui porte le liseré que le noteur
+//      réclame depuis la note 01. Faire l'inverse — garder l'arête vive pour
+//      préserver une base au millimètre — préserverait une lettre contre
+//      l'objet qu'elle décrit.
+//
+// ⚠️ **ET LA MONNAIE EST LE PIÈGE PRINCIPAL DE CE PORTAGE.** `SOCLE_CHANFREIN`
+// vaut **0,16 unité de scène** sur un socle **large de 56**. Le crop, lui, fait
+// **0,163 unité de large** : recopier 0,16 y aurait posé un chanfrein presque
+// aussi large que le bloc entier. C'est la faute qui a été payée cinq fois sur
+// ce chantier (`uMerHoule` ×121,6, `skirtDrop` ×10, l'ancre `uOceanDepth`…).
+// ➡️ **Les deux valeurs sont donc des FRACTIONS DE LA LARGEUR**, exactement
+// comme `FRACTION_PROFONDEUR = 7 / 56`, et exactement comme
+// `RETRAIT_EAU_CROP = (0,16 + 0,06) / 28` de `mer-sphere.js` — qui est **déjà**
+// dans cette monnaie-là.
+//
+// ⚡ **ET CE VOISIN-LÀ EST LA PREUVE QUE LE CHANFREIN MANQUAIT.**
+// `RETRAIT_EAU_CROP` rentre l'eau du crop de **chanfrein + marge**, c'est-à-dire
+// de la distance qui la met DANS le mur du socle. Tant que le mur du crop
+// n'était pas rentré du chanfrein, cette eau était rentrée d'un chanfrein de
+// trop : les deux pièces se lisaient dans deux géométries différentes. **Le
+// portage les remet d'accord**, et le test ⑬e le vérifie contre le fichier de
+// `mer-sphere.js` plutôt que contre un nombre recopié.
 //
 // ⚠️ **ET LA DÉCISION 5 RESTE :** « la gravure ne s'écrit qu'à l'arrêt ». Ce
 // module reconstruit toute la géométrie à chaque appel — il n'est pas fait pour
@@ -227,6 +273,36 @@ export const FRACTION_PROFONDEUR = 7 / 56
 
 /** La bande d'occlusion, en fraction de la hauteur du mur. `plinth.js` : 0,12. */
 export const FRACTION_BANDE_AO = 0.12
+
+/**
+ * Le liseré d'arête haute, en FRACTION DE LA LARGEUR du bloc — §5 bis.
+ *
+ * ⚠️ **0,16 / 56, ET LES DEUX CHIFFRES SONT AU DÉPÔT** : `SOCLE_CHANFREIN = 0.16`
+ * et `TERRAIN_SIZE = 56`. Écrire `0.16` tel quel dans un crop large de
+ * **0,163 unité** aurait posé un chanfrein aussi large que le bloc.
+ * ⚡ **ET LA FRACTION EST LA BONNE MONNAIE POUR UNE RAISON D'ÉCRAN, PAS SEULEMENT
+ * D'ALGÈBRE** : `plinth.js` calibre 0,16 pour que le liseré fasse « ~3 px au
+ * cadrage large » sur un socle qui occupe ~1 000 px. Les deux blocs sont cadrés
+ * pour remplir la même fraction d'image ; **à fraction de largeur égale, le
+ * liseré fait le même nombre de pixels.** Une valeur en unités de scène, elle,
+ * ne voudrait rien dire d'un bloc à l'autre.
+ * ⚠️ Recopié, pas importé (`plinth.js` tire three.js) — `test/crop-parois.test.js`
+ * ⑬a RELIT `src/plinth.js` sur le disque et refuse la divergence.
+ */
+export const FRACTION_CHANFREIN = 0.16 / 56
+
+/** Le rayon du congé bas, même monnaie. `plinth.js` : `SOCLE_ARRONDI = 0.9`. */
+export const FRACTION_ARRONDI = 0.9 / 56
+
+/** Les segments de l'arc du congé. `plinth.js` : `SOCLE_ARRONDI_SEG = 3`. */
+export const ARRONDI_SEG = 3
+
+/**
+ * Le garde-fou de `buildSlabWalls` : ni le chanfrein ni le congé ne mangent
+ * plus du quart du mur. **Sur un bloc écrasé, un pli qui descend jusqu'au pied
+ * n'est plus un pli, c'est un biseau qui remplace le mur.**
+ */
+export const PART_MUR_MAX = 0.25
 
 /** L'assombrissement au contact. `plinth.js` : SOCLE_AO_FORCE = 0,2. */
 export const FORCE_AO = 0.2
@@ -427,6 +503,11 @@ export function repereLocalCrop(repere, rayon) {
  *   se bâtir** (§7). Rend alors `{ refus: 'couverture', couverture }`.
  * @param {number} [arg.aoForce] - profondeur de l'occlusion de contact
  * @param {number|null} [arg.aoBande] - la bande IMPOSÉE, en unités monde
+ * @param {number} [arg.fractionChanfrein] - le liseré d'arête haute, EN FRACTION
+ *   DE LA LARGEUR (§5 bis). `0` rend l'arête vive d'avant la Tâche P13.
+ * @param {number} [arg.fractionArrondi] - le rayon du congé bas, même monnaie.
+ *   `0` rend l'arête basse vive.
+ * @param {number} [arg.arrondiSeg] - les segments de l'arc du congé.
  */
 export function construireSolideCrop({
   repere,
@@ -442,6 +523,9 @@ export function construireSolideCrop({
   couvertureMin = 1,
   aoForce = FORCE_AO,
   aoBande = null,
+  fractionChanfrein = FRACTION_CHANFREIN,
+  fractionArrondi = FRACTION_ARRONDI,
+  arrondiSeg = ARRONDI_SEG,
 } = {}) {
   if (!repere || !Number.isFinite(repere.demi)) {
     throw new TypeError('construireSolideCrop : il faut un `repere` (repereCrop)')
@@ -565,33 +649,163 @@ export function construireSolideCrop({
     return { refus: 'couverture', couverture, vus, manquants, anneau, compte: { anneau: n } }
   }
 
-  // ─── ③ LES SOMMETS ───────────────────────────────────────────────────────
+  // ─── ③ LE PROFIL DU MUR — CHANFREIN, MUR, BANDE, CONGÉ (§5 bis) ──────────
   //
-  // 0 … n−1     l'anneau HAUT, sur la surface exacte
-  // n … 2n−1    l'anneau BAS : le MÊME x et le MÊME z, y = baseY (§2)
-  // 2n          le centre du fond
-  // 2n+1        le point de surface au centre du crop — le sommet du couvercle
-  const nbSommets = 2 * n + 2
+  // ⚠️ **LES DEUX RENTRÉES SONT BORNÉES PAR LE MÊME GARDE-FOU QUE `plinth.js`** :
+  // ni l'une ni l'autre ne mange plus du quart du mur. Il ne mord plus au réglage
+  // livré — l'exagération est fixe à 2 — mais il reste la seule chose qui protège
+  // un bloc écrasé, et le test ⑬f mesure de combien il est loin de mordre plutôt
+  // que de l'affirmer.
+  const mur = Math.max(0, hautMax - baseY)
+  const frCh = Number.isFinite(fractionChanfrein) ? Math.max(0, fractionChanfrein) : FRACTION_CHANFREIN
+  const frRd = Number.isFinite(fractionArrondi) ? Math.max(0, fractionArrondi) : FRACTION_ARRONDI
+  const ch = Math.min(frCh * largeur, mur * PART_MUR_MAX)
+  const rd = Math.min(frRd * largeur, mur * PART_MUR_MAX)
+  const segArc = rd > 0 ? Math.max(1, Math.round(Number.isFinite(arrondiSeg) ? arrondiSeg : ARRONDI_SEG)) : 0
+
+  // ══════ LA BISSECTRICE ET L'ONGLET — PORTÉS DE `buildSlabWalls` ═══════════
+  //
+  // On prend la BISSECTRICE des deux arêtes voisines, allongée de `1/cos(θ/2)` :
+  // le retrait perpendiculaire vaut alors exactement la distance voulue sur les
+  // DEUX faces, y compris dans un angle droit. Une simple direction « vers le
+  // centre » y creuserait un cran de `d·(1 − 1/√2)`.
+  //
+  // ⚠️ **LE SIGNE SE DÉMONTRE, IL NE SE RECOPIE PAS.** `contourCrop` court dans
+  // le sens des `u` croissants sur le côté NORD (`v = −1`), c'est-à-dire vers
+  // l'EST ; dans le repère local (`x = est`, `z = sud`) la direction du segment
+  // y vaut `(+1, 0)` et `[−dz/L, +dx/L]` rend `(0, +1)` — vers le SUD, donc vers
+  // le DEDANS. C'est la même démonstration que celle du §④ pour l'orientation
+  // des faces, et le test ⑬b la refait en mesurant l'empreinte.
+  const bissX = new Float64Array(n)
+  const bissZ = new Float64Array(n)
+  const onglet = new Float64Array(n)
+  const normSeg = (ax, az, bx, bz) => {
+    const dx = bx - ax
+    const dz = bz - az
+    const L = Math.hypot(dx, dz)
+    return L > 1e-15 ? [-dz / L, dx / L] : null
+  }
+  for (let k = 0; k < n; k++) {
+    const p = (k - 1 + n) % n
+    const s = (k + 1) % n
+    const a = normSeg(hautX[p], hautZ[p], hautX[k], hautZ[k])
+    const b = normSeg(hautX[k], hautZ[k], hautX[s], hautZ[s])
+    const na = a || b
+    const nb = b || a
+    if (!na || !nb) { bissX[k] = 0; bissZ[k] = 0; onglet[k] = 1; continue }
+    const mx = na[0] + nb[0]
+    const mz = na[1] + nb[1]
+    const L = Math.hypot(mx, mz)
+    if (L < 1e-12) { bissX[k] = 0; bissZ[k] = 0; onglet[k] = 1; continue }
+    bissX[k] = mx / L
+    bissZ[k] = mz / L
+    // onglet borné, comme `plinth.js` : un repli très aigu ferait diverger 1/cos
+    const cos = Math.max(0.35, bissX[k] * na[0] + bissZ[k] * na[1])
+    onglet[k] = 1 / cos
+  }
+
+  // ══════ LES RANGS DU PROFIL ═══════════════════════════════════════════════
+  //
+  // ⓪ la surface           · `d = 0`  — ⚠️ **LE SOMMET DU MUR NE BOUGE PAS.** Il
+  //    doit rester exactement sur le bord du relief, sinon on voit le jour sous
+  //    la carte. C'est le pied du chanfrein qui rentre, jamais sa tête.
+  // ① le pied du chanfrein · `d = ch`
+  // ② le haut de la bande d'occlusion · `d = ch`
+  //    ⚠️ **CE RANG N'EXISTAIT PAS, ET SON ABSENCE ÉTAIT UN DÉFAUT.** L'occlusion
+  //    de contact voyage en couleur de sommet : avec deux rangs seulement, elle
+  //    s'interpolait LINÉAIREMENT sur toute la hauteur du mur, et la « bande » de
+  //    12 % ne contenait aucun sommet — elle n'existait pas. `plinth.js` écrit le
+  //    même constat sur le socle (« sur un mur de 33 unités l'assombrissement
+  //    s'étalait sur 33 »). Le rang ② la fixe à une hauteur MONDE.
+  // ③ … ③+segArc  le congé, de θ = 0 (le pied du mur) à θ = 90° (le fond)
+  //
+  // Les altitudes sont forcées DÉCROISSANTES : sur un bord très bas, le pied du
+  // chanfrein peut passer sous le départ du congé.
+  const yFil = baseY + rd
+  const yChanfrein = (k) => Math.max(ch > 0 ? hautY[k] - ch : hautY[k], yFil)
+  const rangs = []
+  const pousseRang = (fy, fd) => {
+    const y = new Float64Array(n)
+    const d = new Float64Array(n)
+    for (let k = 0; k < n; k++) { y[k] = fy(k); d[k] = fd(k) }
+    rangs.push({ y, d })
+  }
+  pousseRang((k) => hautY[k], () => 0)
+  if (ch > 0) pousseRang(yChanfrein, () => ch)
+  pousseRang((k) => Math.min(Math.max(baseY + bande, yFil), yChanfrein(k)), () => ch)
+  const rangArc0 = rangs.length
+  for (let m = 0; m <= segArc; m++) {
+    const th = segArc > 0 ? (Math.PI / 2) * (m / segArc) : 0
+    const yArc = baseY + rd - rd * Math.sin(th)
+    const dArc = ch + rd - rd * Math.cos(th)
+    pousseRang(() => yArc, () => dArc)
+  }
+  const R = rangs.length
+
+  // ─── ③ bis LES SOMMETS ───────────────────────────────────────────────────
+  //
+  // rang r, point k → `r·n + k` · R·n = le centre du fond · R·n+1 = le sommet du
+  // couvercle-témoin. **Le rang 0 reste les indices 0 … n−1** : le couvercle et
+  // le premier bandeau de mur gardent donc exactement les entiers d'avant.
+  const nbSommets = R * n + 2
   const positions = new Float32Array(nbSommets * 3)
   const couleurs = new Uint8Array(nbSommets * 3)
+  // les normales ANALYTIQUES du congé — voir `normalesParois`. Elles ne sont
+  // lues que sur les rangs d'arc ; ailleurs le tableau porte la normale de
+  // bissectrice, qui n'est jamais consommée.
+  const normales = new Float32Array(nbSommets * 3)
   const teinte = (i, y) => {
     const ao = Math.round(255 * occlusionContact(y, baseY, bande, aoForce))
     couleurs[i * 3] = ao; couleurs[i * 3 + 1] = ao; couleurs[i * 3 + 2] = ao
   }
-  for (let k = 0; k < n; k++) {
-    positions[k * 3] = hautX[k]; positions[k * 3 + 1] = hautY[k]; positions[k * 3 + 2] = hautZ[k]
-    teinte(k, hautY[k])
-    const b = n + k
-    positions[b * 3] = hautX[k]; positions[b * 3 + 1] = baseY; positions[b * 3 + 2] = hautZ[k]
-    teinte(b, baseY)
+  for (let r = 0; r < R; r++) {
+    const rang = rangs[r]
+    // ══════ LA NORMALE DU CONGÉ, ET LE SIGNE QUI LA SOUDE ══════════════════
+    //
+    // ⚠️ **LES NORMALES DE CE SOLIDE POINTENT VERS LE DEHORS** — c'est ce que
+    // le §④ démontre sur le sens de parcours, et ce que le volume signé positif
+    // exigé par `test/crop-parois.test.js` confirme. La normale d'arc est donc
+    // **`(−bissectrice · cos θ, −sin θ, −bissectrice · cos θ)`** : horizontale
+    // SORTANTE à θ = 0, VERS LE BAS à θ = 90°.
+    //
+    // ⚡ **C'EST CETTE DOUBLE COÏNCIDENCE QUI SOUDE LE CONGÉ** : à θ = 0 elle
+    // vaut la normale du mur (raccord invisible), à θ = 90° celle du fond
+    // (`(0, −1, 0)`, le fond étant plan). Le test ⑬d les apparie toutes les deux
+    // contre `computeVertexNormals` de three plutôt que contre un nombre écrit.
+    //
+    // ⚠️ **ET LE SIGNE DE LA VERTICALE EST LE PIÈGE HISTORIQUE.** `plinth.js`
+    // raconte la version où seule la moitié de la normale était retournée : « la
+    // bande du congé recevait la lumière comme si elle était tournée vers le
+    // ciel », et Adrien a lu « la base du socle est traitée comme un objet
+    // séparé ». Ce n'en était pas un : c'était un signe.
+    const th = r >= rangArc0 && segArc > 0 ? (Math.PI / 2) * ((r - rangArc0) / segArc) : 0
+    const cth = Math.cos(th)
+    const sth = Math.sin(th)
+    for (let k = 0; k < n; k++) {
+      const i = r * n + k
+      const d = rang.d[k] * onglet[k]
+      positions[i * 3] = hautX[k] + bissX[k] * d
+      positions[i * 3 + 1] = rang.y[k]
+      positions[i * 3 + 2] = hautZ[k] + bissZ[k] * d
+      teinte(i, rang.y[k])
+      const nx = -bissX[k] * cth
+      const ny = -sth
+      const nz = -bissZ[k] * cth
+      const L = Math.hypot(nx, ny, nz) || 1
+      normales[i * 3] = nx / L
+      normales[i * 3 + 1] = ny / L
+      normales[i * 3 + 2] = nz / L
+    }
   }
-  positions[2 * n * 3] = 0; positions[2 * n * 3 + 1] = baseY; positions[2 * n * 3 + 2] = 0
-  teinte(2 * n, baseY)
+  positions[R * n * 3] = 0; positions[R * n * 3 + 1] = baseY; positions[R * n * 3 + 2] = 0
+  teinte(R * n, baseY)
+  normales[R * n * 3 + 1] = -1
   const sommet = surface(0, 0)
-  positions[(2 * n + 1) * 3] = sommet[0]
-  positions[(2 * n + 1) * 3 + 1] = sommet[1]
-  positions[(2 * n + 1) * 3 + 2] = sommet[2]
-  teinte(2 * n + 1, sommet[1])
+  positions[(R * n + 1) * 3] = sommet[0]
+  positions[(R * n + 1) * 3 + 1] = sommet[1]
+  positions[(R * n + 1) * 3 + 2] = sommet[2]
+  teinte(R * n + 1, sommet[1])
+  normales[(R * n + 1) * 3 + 1] = 1
 
   // ─── ④ LES FACES ─────────────────────────────────────────────────────────
   //
@@ -603,26 +817,57 @@ export function construireSolideCrop({
   // c'est-à-dire vers le DEHORS sur le côté nord. Le volume signé qu'en tire
   // `auditerSolide` est donc positif, et le test l'exige explicitement — Ā seule
   // ne verrait pas un solide retourné (§1 d'`audit-solide.js`).
-  const parois = 2 * n
-  const fond = n
-  const indices = new Uint32Array((parois + fond) * 3)
-  let w = 0
-  for (let k = 0; k < n; k++) {
-    const j = (k + 1) % n
-    indices[w++] = k; indices[w++] = j; indices[w++] = n + k
-    indices[w++] = j; indices[w++] = n + j; indices[w++] = n + k
+  //
+  // ⚠️ **LES BANDEAUX SORTENT DANS L'ORDRE DES RANGS, ET `k` TOURNE À
+  // L'INTÉRIEUR.** Le premier bandeau garde donc exactement les entiers d'avant
+  // la Tâche P13 — c'est ce que `test/ecume-mer.test.js` ⑤bis-a compare au
+  // rideau d'eau pour prouver que les deux pièces tournent dans le même sens.
+  //
+  // ⚠️ **UN TRIANGLE DONT DEUX SOMMETS SE CONFONDENT N'EST PAS ÉMIS.** Deux
+  // rangs peuvent coïncider en un point — un bord très bas dont le chanfrein
+  // tombe déjà sous la bande d'occlusion, un bloc plat dont le congé est plus
+  // haut qu'elle. `plinth.js` laisse `pousse` jeter ces triangles ; ici ils
+  // seraient COMPTÉS, et `auditerSolide` exige `degeneres === 0`. La comparaison
+  // se fait sur les coordonnées **telles qu'elles sont rangées** (`Float32`) :
+  // deux `Float64` distincts qui tombent sur le même `Float32` feraient un
+  // dégénéré que le tampon porterait et qu'une comparaison en double raterait.
+  const memePoint = (a, b) => (
+    positions[a * 3] === positions[b * 3] &&
+    positions[a * 3 + 1] === positions[b * 3 + 1] &&
+    positions[a * 3 + 2] === positions[b * 3 + 2]
+  )
+  const listeIndices = []
+  let triArc0 = -1
+  for (let r = 0; r < R - 1; r++) {
+    if (r === rangArc0) triArc0 = listeIndices.length / 3
+    const hautRang = r * n
+    const basRang = (r + 1) * n
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n
+      const p0 = hautRang + k
+      const q0 = hautRang + j
+      const p1 = basRang + k
+      const q1 = basRang + j
+      if (!memePoint(p0, p1)) listeIndices.push(p0, q0, p1)
+      if (!memePoint(q0, q1)) listeIndices.push(q0, q1, p1)
+    }
   }
+  if (triArc0 < 0) triArc0 = listeIndices.length / 3
+  const parois = listeIndices.length / 3
   // le fond, vu de dessous : l'anneau tourne dans l'autre sens qu'au-dessus
+  const dernier = (R - 1) * n
   for (let k = 0; k < n; k++) {
     const j = (k + 1) % n
-    indices[w++] = 2 * n; indices[w++] = n + k; indices[w++] = n + j
+    listeIndices.push(R * n, dernier + k, dernier + j)
   }
+  const fond = listeIndices.length / 3 - parois
+  const indices = Uint32Array.from(listeIndices)
   // LE COUVERCLE-TÉMOIN — NON LIVRÉ, voir le §6
   const indicesCouvercle = new Uint32Array(n * 3)
   let c = 0
   for (let k = 0; k < n; k++) {
     const j = (k + 1) % n
-    indicesCouvercle[c++] = 2 * n + 1; indicesCouvercle[c++] = j; indicesCouvercle[c++] = k
+    indicesCouvercle[c++] = R * n + 1; indicesCouvercle[c++] = j; indicesCouvercle[c++] = k
   }
 
   return {
@@ -634,6 +879,7 @@ export function construireSolideCrop({
     indices,
     indicesCouvercle,
     couleurs,
+    normales,
     anneau,
     origine: { x: O[0], y: O[1], z: O[2] },
     base: {
@@ -647,6 +893,77 @@ export function construireSolideCrop({
     largeur,
     profondeur: prof,
     bande,
-    compte: { anneau: n, parois, fond, couvercle: n, sommets: nbSommets },
+    chanfrein: ch,
+    arrondi: rd,
+    rangs: R,
+    rangArc: rangArc0,
+    triArc: triArc0,
+    compte: { anneau: n, parois, fond, couvercle: n, sommets: nbSommets, rangs: R },
   }
+}
+
+/**
+ * LES NORMALES DE LA GÉOMÉTRIE DÉ-INDEXÉE — **normales de FACE partout, sauf
+ * sur le congé, qui prend les siennes, ANALYTIQUES.**
+ *
+ * ⛔ **POURQUOI CETTE FONCTION EXISTE PLUTÔT QU'UN `computeVertexNormals`.**
+ * `globe.js` dé-indexait puis appelait `computeVertexNormals`, qui rend la
+ * normale de FACE de chaque triangle. C'est exactement ce qu'il faut pour le
+ * mur et pour le liseré d'arête — « c'est elle qui donne au liseré sa cassure
+ * nette » (`plinth.js`) — et exactement ce qu'il ne faut PAS pour le congé :
+ * **trois segments à normales de face se lisent comme trois facettes, l'inverse
+ * exact de l'intention.** Le congé n'est pas une silhouette, c'est une normale.
+ *
+ * ⚠️ **ET ELLE EST ICI, DANS LE MODULE PUR, POUR UNE RAISON DE PREUVE.** Écrite
+ * dans `globe.js` elle n'aurait été gardée que par une assertion sur le TEXTE
+ * SOURCE — le trou que le tour de correction P8-P12 a démasqué (une mutation qui
+ * échangeait deux valeurs dans l'objet retourné a survécu à 4 082 tests parce
+ * que le garde était un `assert.match`). Ici, elle s'exécute sous node.
+ *
+ * ⚠️ **L'ORDRE DES SOMMETS EST CELUI DE `BufferGeometry.toNonIndexed()`** : le
+ * sommet non indexé `t` est le sommet indexé `indices[t]`, dans l'ordre. C'est
+ * la seule chose que cette fonction suppose de three, et le test ⑬d la confronte
+ * à three pour de bon.
+ *
+ * @param {object} solide - ce que rend `construireSolideCrop`
+ * @returns {Float32Array} 3 réels par sommet DÉ-INDEXÉ, dans l'ordre de `indices`
+ */
+export function normalesParois(solide) {
+  if (!solide || !solide.positions || !solide.indices) {
+    throw new TypeError('normalesParois : il faut le solide de `construireSolideCrop`')
+  }
+  const { positions, indices, normales, triArc, compte } = solide
+  const sortie = new Float32Array(indices.length * 3)
+  const finArc = compte.parois
+  for (let t = 0; t < indices.length; t += 3) {
+    const ia = indices[t]
+    const ib = indices[t + 1]
+    const ic = indices[t + 2]
+    const tri = t / 3
+    if (normales && tri >= triArc && tri < finArc) {
+      for (let c = 0; c < 3; c++) {
+        const src = indices[t + c] * 3
+        sortie[(t + c) * 3] = normales[src]
+        sortie[(t + c) * 3 + 1] = normales[src + 1]
+        sortie[(t + c) * 3 + 2] = normales[src + 2]
+      }
+      continue
+    }
+    // la normale de FACE, au produit vectoriel — la formule de three, à la
+    // lettre : (b − a) × (c − a), normalisée.
+    const ax = positions[ia * 3], ay = positions[ia * 3 + 1], az = positions[ia * 3 + 2]
+    const bx = positions[ib * 3] - ax, by = positions[ib * 3 + 1] - ay, bz = positions[ib * 3 + 2] - az
+    const cx = positions[ic * 3] - ax, cy = positions[ic * 3 + 1] - ay, cz = positions[ic * 3 + 2] - az
+    let nx = by * cz - bz * cy
+    let ny = bz * cx - bx * cz
+    let nz = bx * cy - by * cx
+    const L = Math.hypot(nx, ny, nz)
+    if (L > 0) { nx /= L; ny /= L; nz /= L }
+    for (let c = 0; c < 3; c++) {
+      sortie[(t + c) * 3] = nx
+      sortie[(t + c) * 3 + 1] = ny
+      sortie[(t + c) * 3 + 2] = nz
+    }
+  }
+  return sortie
 }

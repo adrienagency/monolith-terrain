@@ -56,8 +56,13 @@ import { readFileSync } from 'node:fs'
 import {
   contourCrop,
   construireSolideCrop,
+  normalesParois,
   occlusionContact,
   FRACTION_PROFONDEUR,
+  FRACTION_CHANFREIN,
+  FRACTION_ARRONDI,
+  ARRONDI_SEG,
+  PART_MUR_MAX,
   PAS_CONTOUR,
   rabattementBorne,
 } from '../src/monde/parois-crop.js'
@@ -69,7 +74,14 @@ import { auditerSolide } from '../src/monde/audit-solide.js'
 import { dansDalle } from '../src/damier-bords.js'
 import { dansFenetre, exposantCoin } from '../src/fenetre-clip.js'
 import { ZOOM_SOCLE, LARGEUR_SOCLE_M } from '../src/monde/seuil-socle.js'
-import { contactAO, bandeContact, SOCLE_AO_BANDE, SOCLE_AO_FORCE } from '../src/plinth.js'
+import {
+  contactAO, bandeContact, SOCLE_AO_BANDE, SOCLE_AO_FORCE,
+  SOCLE_CHANFREIN, SOCLE_ARRONDI, SOCLE_ARRONDI_SEG, SOCLE_MARGE_EAU,
+} from '../src/plinth.js'
+import { RETRAIT_EAU_CROP } from '../src/monde/mer-sphere.js'
+import { COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
+import * as THREE from 'three'
+import { tileToLatLon, R_GLOBE, EARTH_RADIUS_M } from '../src/geo.js'
 
 // Les réglages par défaut du produit — `main.js:588` et `main.js:590`, les mêmes
 // que ceux dont `test/crop-sphere.test.js` se sert.
@@ -201,50 +213,143 @@ test('MUTATION — les parois RETOURNÉES passent la fermeture et tombent sur le
 
 // ══════════ ③ LA DÉCISION 2 D'ADRIEN — VERTICALES, PARALLÈLES, MÊME TAILLE ══
 
+/** L'étendue horizontale d'un rang du profil. */
+function etendueRang(s, r) {
+  const n = s.compte.anneau
+  const { positions } = s
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
+  for (let k = 0; k < n; k++) {
+    const p = (r * n + k) * 3
+    x0 = Math.min(x0, positions[p]); x1 = Math.max(x1, positions[p])
+    z0 = Math.min(z0, positions[p + 2]); z1 = Math.max(z1, positions[p + 2])
+  }
+  return { largeur: x1 - x0, profondeur: z1 - z0 }
+}
+
 test('LES PAROIS SONT VERTICALES ET PARALLÈLES — pas radiales', () => {
   // ⚠️ **LA DÉCISION D'ADRIEN, ET ELLE PRIME SUR LA JUSTESSE PHYSIQUE.** Dans le
   // repère local du crop, `y` EST la verticale (le rayon au centre du crop) :
-  // une paroi verticale a donc, en haut et en bas, exactement les mêmes `x` et
+  // une paroi verticale a donc, sur toute sa hauteur, exactement les mêmes `x` et
   // `z`. Des parois RADIALES les feraient converger vers le centre de la
   // planète, et l'écart serait de `profondeur / rayon` — mesuré plus bas.
-  const { positions, anneau } = SOLIDE
+  //
+  // ⚠️ **CE QUE LA TÂCHE P13 A CHANGÉ, ET CE QU'ELLE N'A PAS CHANGÉ.** Le mur
+  // ne part plus du rang 0 (la surface) mais du rang 1 (le pied du chanfrein) ;
+  // il court du rang 1 au rang `rangArc`, c'est-à-dire au départ du congé. **Sur
+  // toute cette hauteur l'empreinte est IDENTIQUE AU BIT** — c'est ce que la
+  // décision 2 interdit de perdre, et c'est plus exigeant qu'avant, parce que le
+  // test porte maintenant sur TROIS rangs au lieu de deux.
+  const { positions, anneau, rangArc } = SOLIDE
   const n = anneau.length
   let pire = 0
-  for (let k = 0; k < n; k++) {
-    const h = k * 3
-    const b = (n + k) * 3
-    pire = Math.max(pire, Math.abs(positions[h] - positions[b]), Math.abs(positions[h + 2] - positions[b + 2]))
+  for (let r = 2; r <= rangArc; r++) {
+    for (let k = 0; k < n; k++) {
+      const a = (n + k) * 3
+      const b = (r * n + k) * 3
+      pire = Math.max(pire, Math.abs(positions[a] - positions[b]), Math.abs(positions[a + 2] - positions[b + 2]))
+    }
   }
-  assert.equal(pire, 0, `l empreinte se déplace de ${pire} unité entre le haut et le bas`)
+  assert.equal(pire, 0, `l empreinte se déplace de ${pire} unité le long du mur`)
+  // et le mur porte bien de la hauteur : un test sur des rangs confondus ne
+  // prouverait rien
+  const hautMur = positions[(n + 0) * 3 + 1] - positions[(rangArc * n) * 3 + 1]
+  assert.ok(hautMur > 0, `le mur est de hauteur nulle : ${hautMur}`)
 })
 
-test('LA BASE A LA MÊME TAILLE QUE LE DESSUS, et elle est PLATE', () => {
-  const { positions, anneau, baseY } = SOLIDE
+test('LA BASE EST PLATE, ET SON RETRAIT EST CELUI DU SOCLE — pas une convergence radiale', () => {
+  const { positions, anneau, baseY, rangs, chanfrein, arrondi, largeur } = SOLIDE
   const n = anneau.length
-  // plate : tous les sommets du bas sont exactement à `baseY`. ⚠️ `Math.fround`
-  // parce que `positions` est un Float32Array : sans lui l'assertion mesurerait
-  // l'arrondi du tampon, pas la planéité du fond.
+  // plate : tous les sommets du DERNIER rang sont exactement à `baseY`.
+  // ⚠️ `Math.fround` parce que `positions` est un Float32Array : sans lui
+  // l'assertion mesurerait l'arrondi du tampon, pas la planéité du fond.
   const plancher = Math.fround(baseY)
+  const dernier = rangs - 1
   for (let k = 0; k < n; k++) {
-    assert.equal(positions[(n + k) * 3 + 1], plancher, `le sommet bas ${k} n est pas sur le plan de base`)
+    assert.equal(positions[(dernier * n + k) * 3 + 1], plancher, `le sommet bas ${k} n est pas sur le plan de base`)
   }
-  // même taille : l'étendue horizontale du bas est celle du haut, au bit près
-  const etendue = (offset) => {
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
-    for (let k = 0; k < n; k++) {
-      const p = (offset + k) * 3
-      x0 = Math.min(x0, positions[p]); x1 = Math.max(x1, positions[p])
-      z0 = Math.min(z0, positions[p + 2]); z1 = Math.max(z1, positions[p + 2])
+  // ⚠️ **CE QUE LA DÉCISION 2 INTERDIT RESTE INTERDIT, ET CE QUE LE SOCLE FAIT
+  // EST DÉSORMAIS FAIT.** La base rentre de `chanfrein + congé` — un retrait
+  // CONSTANT, le même que celui du socle d'Adrien — et surtout PAS de la
+  // convergence radiale, qui serait proportionnelle à la profondeur.
+  //
+  // ⚠️ **LE RETRAIT SE MESURE PAR SOMMET, PAS SUR LA BOÎTE ENGLOBANTE, ET
+  // L'ÉCART EST INSTRUCTIF.** Sur la boîte, le relevé rend **2,836·10⁻³** au
+  // lieu de **3,104·10⁻³** — non parce que le retrait varie, mais parce que le
+  // MAXIMUM en `x` change de sommet entre les deux rangs : le côté du crop est
+  // presque plat dans le repère local (la projection sphérique le courbe à
+  // peine), et l'argmax glisse de 24 points pour un écart de 3·10⁻⁵ d'altitude
+  // horizontale. **Une assertion sur la boîte aurait mesuré ce glissement et
+  // l'aurait imputé à la bissectrice.**
+  //
+  // ⚠️ **ET C'EST UN RETRAIT PERPENDICULAIRE, PAS UNE LONGUEUR DE DÉPLACEMENT —
+  // C'EST TOUT L'OBJET DE L'ONGLET.** La bissectrice est allongée de
+  // `1/cos(θ/2)` pour que la rentrée PERPENDICULAIRE vaille `d` sur les DEUX
+  // faces voisines ; le déplacement, lui, vaut `d/cos(θ/2)` et dépasse donc `d`
+  // dans les coins — relevé **+1,07 % au pire**, soit un angle de 16,7° au
+  // raccord du côté droit et de l'arc. **Une assertion sur la longueur du
+  // déplacement aurait pris l'onglet pour une erreur ; c'est la mesure
+  // perpendiculaire qui décrit ce que le mur fait.** Sans onglet, un coin droit
+  // se creuserait d'un cran de `d·(1 − 1/√2)`, soit 29 %.
+  const normaleSeg = (a, b) => {
+    const dx = positions[b * 3] - positions[a * 3]
+    const dz = positions[b * 3 + 2] - positions[a * 3 + 2]
+    const L = Math.hypot(dx, dz)
+    return [-dz / L, dx / L] // vers le DEDANS (cf. §③ bis de parois-crop.js)
+  }
+  let pirePerp = 0
+  let pireDeplacement = 0
+  for (let k = 0; k < n; k++) {
+    const p = (k - 1 + n) % n
+    const s = (k + 1) % n
+    const ox = positions[(dernier * n + k) * 3] - positions[k * 3]
+    const oz = positions[(dernier * n + k) * 3 + 2] - positions[k * 3 + 2]
+    pireDeplacement = Math.max(pireDeplacement, Math.hypot(ox, oz))
+    for (const [a, b] of [[p, k], [k, s]]) {
+      const nn = normaleSeg(a, b)
+      pirePerp = Math.max(pirePerp, Math.abs(ox * nn[0] + oz * nn[1] - (chanfrein + arrondi)))
     }
-    return { largeur: x1 - x0, profondeur: z1 - z0 }
   }
-  const haut = etendue(0)
-  const bas = etendue(n)
-  assert.equal(bas.largeur, haut.largeur, 'la base n a pas la largeur du dessus')
-  assert.equal(bas.profondeur, haut.profondeur, 'la base n a pas la profondeur du dessus')
-  // et le témoin : des parois RADIALES auraient rétréci la base de ce facteur-là
-  const retrait = haut.largeur * ((SOLIDE.hautMax - baseY) / RAYON)
-  assert.ok(retrait > 1e-6, `le témoin radial est trop petit pour valoir preuve : ${retrait}`)
+  // ⚠️ **LE SEUIL EST LE QUANTUM DU TAMPON, PAS UN CONFORT.** `positions` est un
+  // `Float32Array` : à la magnitude de ces coordonnées (~0,082 unité) le pas
+  // représentable vaut `2⁻²³ × 0,082 ≈ 9,8·10⁻⁹`. Le résidu relevé est
+  // **7,97·10⁻⁹** — l'arrondi du tampon, et rien d'autre. Un seuil plus serré
+  // mesurerait le `Float32`, pas la géométrie.
+  assert.ok(pirePerp < 3e-8,
+    `la rentrée perpendiculaire s écarte de ${pirePerp} de chanfrein + congé (${chanfrein + arrondi})`)
+  assert.ok(pireDeplacement > chanfrein + arrondi,
+    'le déplacement ne dépasse jamais la rentrée : l onglet ne fait rien, le test ne prouve rien')
+  const retraitMesure = chanfrein + arrondi
+  // et la base est STRICTEMENT plus petite que le dessus, sur les DEUX axes
+  const haut = etendueRang(SOLIDE, 0)
+  const bas = etendueRang(SOLIDE, dernier)
+  assert.ok(bas.largeur < haut.largeur && bas.profondeur < haut.profondeur,
+    `la base ne rentre pas : ${JSON.stringify({ haut, bas })}`)
+  // ⚡ ET LES PROPORTIONS SONT CELLES DU SOCLE, pas des nombres d'ici :
+  // 2 × 0,16 / 56 = 0,571 % pour le chanfrein, 2 × 0,9 / 56 = 3,214 % pour le congé
+  assert.ok(Math.abs((2 * chanfrein) / largeur - (2 * SOCLE_CHANFREIN) / 56) < 1e-9)
+  assert.ok(Math.abs((2 * arrondi) / largeur - (2 * SOCLE_ARRONDI) / 56) < 1e-9)
+  // ⚠️ **LE TÉMOIN RADIAL — ET IL NE SE DISTINGUE PAS PAR SA TAILLE, IL SE
+  // DISTINGUE PAR SA DÉPENDANCE.** Au relevé, la convergence radiale vaudrait
+  // **1,323·10⁻³** contre un retrait de **3,104·10⁻³** : même ordre de grandeur,
+  // rapport 2,35. **Un test qui les séparerait par un seuil ne prouverait rien.**
+  // Ce qui les sépare, c'est que le retrait du chanfrein est CONSTANT et que la
+  // convergence radiale est PROPORTIONNELLE À LA PROFONDEUR. On triple donc la
+  // profondeur : le retrait ne bouge pas, le témoin radial triple.
+  const radial = haut.largeur * ((SOLIDE.hautMax - baseY) / RAYON)
+  assert.ok(radial > 1e-6, `le témoin radial est trop petit pour valoir preuve : ${radial}`)
+  // ⚠️ **SUR LE SOLIDE PLAT, PARCE QUE LÀ LE MUR EST EXACTEMENT LA PROFONDEUR.**
+  // Sur le relief, `hautMax − baseY` est dominé par l'amplitude du terrain
+  // (0,808 pour 0,020 de profondeur à ×18) : tripler la profondeur n'y bougerait
+  // le témoin que de 5 %, et le test ne mesurerait pas ce qu'il annonce.
+  const creux = construireSolideCrop({ ...commun, hauteur: plat, fractionProfondeur: FRACTION_PROFONDEUR * 3 })
+  const radialPlat = etendueRang(SOLIDE_PLAT, 0).largeur * ((SOLIDE_PLAT.hautMax - SOLIDE_PLAT.baseY) / RAYON)
+  const radialCreux = etendueRang(creux, 0).largeur * ((creux.hautMax - creux.baseY) / RAYON)
+  assert.ok(radialCreux / radialPlat > 2.9,
+    `le témoin radial ne suit pas la profondeur (${radialPlat} → ${radialCreux}) : il ne témoigne de rien`)
+  const retraitPlat = SOLIDE_PLAT.chanfrein + SOLIDE_PLAT.arrondi
+  const retraitCreux = creux.chanfrein + creux.arrondi
+  assert.ok(Math.abs(retraitCreux - retraitPlat) / retraitPlat < 1e-3,
+    `le retrait suit la profondeur (${retraitPlat} → ${retraitCreux}) : ce n est pas un chanfrein, c est une convergence`)
 })
 
 // ══════════ ④ LA PAROI S'APPUIE SUR LA SURFACE EXACTE AU POINT DE COUPE ═════
@@ -444,16 +549,59 @@ test('l OCCLUSION DE CONTACT est celle de `plinth.js`, recopiée et VERROUILLÉE
 })
 
 test('les couleurs de sommet portent l occlusion, et elles sont SOMBRES au pied', () => {
-  const { couleurs, positions, anneau, baseY, bande } = SOLIDE
+  const { couleurs, positions, anneau, baseY, bande, rangs } = SOLIDE
   const n = anneau.length
   assert.equal(couleurs.length, positions.length / 3 * 3)
-  // au pied du mur : l'assombrissement plein
-  const aoPied = couleurs[n * 3] / 255
+  // ⚠️ **LE PIED DU MUR EST LE DERNIER RANG, PAS LE RANG `n`** — depuis la Tâche
+  // P13 le profil en compte sept, et `n` est le pied du CHANFREIN, tout en haut.
+  const pied = (rangs - 1) * n
+  assert.equal(positions[pied * 3 + 1], Math.fround(baseY), 'le dernier rang n est pas le fond')
+  const aoPied = couleurs[pied * 3] / 255
   assert.ok(aoPied < 0.85, `le pied du mur n est pas assombri : ${aoPied}`)
   // très au-dessus de la bande : plein jour
   let clair = 0
   for (let k = 0; k < n; k++) if (positions[k * 3 + 1] > baseY + bande * 2) clair++
   assert.ok(clair > n * 0.5, 'moins de la moitié de l anneau haut est hors de la bande de contact')
+})
+
+test('⑬0 LA BANDE D OCCLUSION CONTIENT DES SOMMETS — le rang que la Tâche B n avait pas', () => {
+  // ⛔ **LE DÉFAUT QUE LE RANG ② FERME, ET IL SE MESURE.** L'occlusion voyage en
+  // couleur de sommet : avec DEUX rangs seulement (la surface et le fond), elle
+  // s'interpolait linéairement sur toute la hauteur du mur — la bande de 12 %
+  // ne contenait aucun sommet, donc elle n'existait pas. `plinth.js` écrit le
+  // même constat sur le socle. Le témoin : à mi-hauteur de la bande, un mur à
+  // deux rangs rend une occlusion QUASI PLEINE, le profil à sept rangs rend
+  // celle que `occlusionContact` prescrit.
+  const { couleurs, positions, anneau, baseY, bande, rangs } = SOLIDE
+  const n = anneau.length
+  let dansLaBande = 0
+  for (let i = 0; i < positions.length / 3; i++) {
+    const y = positions[i * 3 + 1]
+    if (y > baseY && y <= baseY + bande) dansLaBande++
+  }
+  assert.ok(dansLaBande >= n, `${dansLaBande} sommets dans la bande de contact, il en faut au moins un rang`)
+  // et l'octet cuit est bien celui de la loi, au sommet le plus proche du milieu
+  // de la bande — pas un point d'une droite tendue du haut au fond
+  const cible = baseY + bande * 0.5
+  let meilleur = -1
+  let ecart = Infinity
+  for (let i = 0; i < positions.length / 3; i++) {
+    const d = Math.abs(positions[i * 3 + 1] - cible)
+    if (d < ecart) { ecart = d; meilleur = i }
+  }
+  const attendu = Math.round(255 * occlusionContact(positions[meilleur * 3 + 1], baseY, bande, 0.2))
+  assert.equal(couleurs[meilleur * 3], attendu)
+  // ⚠️ **LE TÉMOIN À DEUX RANGS, ET IL VA DANS LE SENS QU'IL FAUT REGARDER.**
+  // Avec le seul rang du haut et le seul rang du fond, l'octet cuit à cette
+  // altitude serait celui d'une DROITE tendue de 1 (le haut) à `1 − force` (le
+  // fond) : l'assombrissement s'étale alors sur tout le mur, et à mi-bande il
+  // est BEAUCOUP TROP SOMBRE. Relevé : **207 contre 243** — c'est-à-dire un
+  // contact qui bave sur 100 % de la hauteur au lieu de 12 %.
+  const t = (positions[meilleur * 3 + 1] - baseY) / (SOLIDE.hautMax - baseY)
+  const naif = 255 * (occlusionContact(baseY, baseY, bande, 0.2) * (1 - t) + t)
+  assert.ok(attendu - naif > 20,
+    `le rang ② ne change rien : profil ${attendu}, interpolation à deux rangs ${naif.toFixed(1)}`)
+  assert.equal(rangs, 7, 'le profil livré compte sept rangs')
 })
 
 // ══════════ ⑧ LE NUANCEUR — LA COUVERTURE DOUCE, VÉRIFIÉE COMME TEXTE ═══════
@@ -871,9 +1019,354 @@ test('P7 · `globe.js` APPELLE la borne, et il ne la réécrit pas', () => {
   // un pavé de prose faisait compter une occurrence de trop.
   const corps = g.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
   assert.match(corps, /rabattementBorne\(d\.rabattement, rayon, rPlancher\)/)
-  assert.match(corps, /import \{ construireSolideCrop, rabattementBorne \}/)
+  assert.match(corps, /import \{ construireSolideCrop, normalesParois, rabattementBorne \}/)
   // une seconde écriture de la loi — un `Math.min` sur le rabattement ailleurs —
   // est exactement ce que ce chantier a payé quatre fois sur la mer.
   const occurrences = (corps.match(/rabattementBorne/g) || []).length
   assert.equal(occurrences, 2, 'la borne doit être IMPORTÉE une fois et APPELÉE une fois')
+})
+
+// ══════════ ⑬ LE CHANFREIN ET LE CONGÉ — LA PERTE DE LA TÂCHE B, REPRISE ════
+//
+// ⛔ **CE POSTE EST LE SEUL INCHANGÉ DEPUIS LA PREMIÈRE NOTATION**, et le noteur
+// l'a réécrit quatre fois dans les mêmes termes : « un fin liseré lumineux court
+// sur toute l'arête haute du mur du socle ; sur le crop, pris à la même seconde,
+// rien ». C'est un geste qu'Adrien avait lui-même demandé sur son socle : « il
+// est vraiment arrondi, et c'est un vrai chanfrein dessous ».
+//
+// ⚠️ **CE QUE CETTE SECTION NE PROUVE PAS** : que ça se VOIT. Aucun test sous
+// node ne rend un pixel. Elle prouve que la géométrie et les normales sont
+// celles du socle, dans la bonne monnaie ; l'écran est dans le rapport.
+
+/** Le solide, avec les réglages du banc et les surcharges qu'on veut. */
+const solideAvec = (options) => construireSolideCrop({ ...commun, hauteur: relief, ...options })
+
+/** L'écart angulaire, en degrés, entre deux normales unitaires. */
+const angleEntre = (a, b) => {
+  const d = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))
+  return (Math.acos(d) * 180) / Math.PI
+}
+
+test('⑬a LES DEUX VALEURS VIENNENT DE `plinth.js`, ET LA MONNAIE EST LA LARGEUR', () => {
+  // ⚠️ **RECOPIÉES, PAS IMPORTÉES** — `plinth.js` tire three.js et `terrain.js`.
+  // La recopie n'est acceptable QUE tenue par un test, et le voici : il lit les
+  // constantes du socle et refuse la divergence.
+  assert.equal(SOCLE_CHANFREIN, 0.16)
+  assert.equal(SOCLE_ARRONDI, 0.9)
+  assert.equal(SOCLE_ARRONDI_SEG, 3)
+  assert.equal(FRACTION_CHANFREIN, SOCLE_CHANFREIN / 56)
+  assert.equal(FRACTION_ARRONDI, SOCLE_ARRONDI / 56)
+  assert.equal(ARRONDI_SEG, SOCLE_ARRONDI_SEG)
+  // ⛔ **ET LE PIÈGE QUE CETTE MONNAIE ÉVITE, CHIFFRÉ.** Recopier `0.16` tel quel
+  // dans un crop large de 0,164 unité aurait posé un chanfrein nettement PLUS
+  // LARGE que le bloc : c'est la faute de monnaie que ce chantier a payée cinq
+  // fois. La fraction, elle, rend 4,69·10⁻⁴.
+  const brut = SOCLE_CHANFREIN / SOLIDE.largeur
+  assert.ok(brut > 0.9, `le témoin de monnaie ne mord pas : ${brut}`)
+  assert.ok(Math.abs(SOLIDE.chanfrein / SOLIDE.largeur - SOCLE_CHANFREIN / 56) < 1e-12)
+})
+
+test('⑬b LE CHANFREIN RENTRE LE MUR — et le SOMMET du mur ne bouge pas d un bit', () => {
+  const vif = solideAvec({ fractionChanfrein: 0, fractionArrondi: 0 })
+  const n = SOLIDE.compte.anneau
+  // ⚠️ **LE SOMMET DU MUR NE BOUGE PAS.** Il doit rester exactement sur le bord
+  // du relief : c'est le pied du chanfrein qui rentre, jamais sa tête. Sinon on
+  // voit le jour sous la carte, et c'est la classe de défaut que tout ce module
+  // passe son temps à éviter.
+  for (let k = 0; k < n * 3; k++) {
+    assert.equal(SOLIDE.positions[k], vif.positions[k], `le rang 0 a bougé à l indice ${k}`)
+  }
+  // ⚡ **ET ON LE PROUVE EN LE BOUGEANT, DANS LES DEUX SENS.**
+  for (const facteur of [0.5, 2, 4]) {
+    const s = solideAvec({ fractionChanfrein: FRACTION_CHANFREIN * facteur })
+    assert.ok(Math.abs(s.chanfrein / SOLIDE.chanfrein - facteur) < 1e-9,
+      `chanfrein ×${facteur} rend ${s.chanfrein / SOLIDE.chanfrein}`)
+    // le pied du chanfrein descend d'autant, et le sommet ne bouge toujours pas
+    const chuteAttendue = SOLIDE.chanfrein * facteur
+    const chute = s.positions[0 * 3 + 1] - s.positions[(n + 0) * 3 + 1]
+    assert.ok(Math.abs(chute - chuteAttendue) < 1e-7, `la chute du chanfrein vaut ${chute} pour ${chuteAttendue}`)
+  }
+  // et à zéro, le rang du chanfrein DISPARAÎT — pas un rang plat de plus
+  assert.equal(vif.rangs, 3, 'sans chanfrein ni congé, le profil doit tomber à trois rangs')
+  assert.equal(SOLIDE.rangs, 7)
+  // ⚡ **LA GÉOMÉTRIE D'AVANT LA TÂCHE P13 EST EXACTEMENT RÉCUPÉRABLE** : à
+  // fractions nulles, la base a de nouveau la taille du dessus, au bit près.
+  const hautVif = etendueRang(vif, 0)
+  const basVif = etendueRang(vif, vif.rangs - 1)
+  assert.equal(basVif.largeur, hautVif.largeur)
+  assert.equal(basVif.profondeur, hautVif.profondeur)
+  assert.equal(auditer(vif).sain, true, auditer(vif).raison)
+})
+
+test('⑬c LE CONGÉ SUIT UN ARC DE CERCLE, et ses segments se comptent', () => {
+  const n = SOLIDE.compte.anneau
+  const { positions, baseY, chanfrein, arrondi, rangArc, rangs } = SOLIDE
+  assert.equal(rangs - rangArc, ARRONDI_SEG + 1, 'le congé doit porter segArc + 1 rangs')
+  // le profil, rang par rang : y = baseY + r(1 − sin θ), rentrée = ch + r(1 − cos θ)
+  for (let m = 0; m <= ARRONDI_SEG; m++) {
+    const th = (Math.PI / 2) * (m / ARRONDI_SEG)
+    const r = rangArc + m
+    const yVoulu = baseY + arrondi - arrondi * Math.sin(th)
+    const dVoulu = chanfrein + arrondi - arrondi * Math.cos(th)
+    let pireY = 0
+    let pireD = 0
+    for (let k = 0; k < n; k++) {
+      pireY = Math.max(pireY, Math.abs(positions[(r * n + k) * 3 + 1] - yVoulu))
+      // la rentrée, mesurée PERPENDICULAIREMENT au segment suivant de l'anneau
+      const s = (k + 1) % n
+      const dx = positions[s * 3] - positions[k * 3]
+      const dz = positions[s * 3 + 2] - positions[k * 3 + 2]
+      const L = Math.hypot(dx, dz)
+      const nx = -dz / L
+      const nz = dx / L
+      const ox = positions[(r * n + k) * 3] - positions[k * 3]
+      const oz = positions[(r * n + k) * 3 + 2] - positions[k * 3 + 2]
+      pireD = Math.max(pireD, Math.abs(ox * nx + oz * nz - dVoulu))
+    }
+    assert.ok(pireY < 3e-8, `rang d arc ${m} : altitude à ${pireY} de l arc`)
+    assert.ok(pireD < 3e-8, `rang d arc ${m} : rentrée à ${pireD} de l arc`)
+  }
+  // le dernier rang est le fond, exactement
+  assert.equal(positions[((rangs - 1) * n) * 3 + 1], Math.fround(baseY))
+  // ⚡ **BOUGÉ DANS LES DEUX SENS** : le compte de rangs suit `arrondiSeg`.
+  for (const seg of [1, 2, 6]) {
+    const s = solideAvec({ arrondiSeg: seg })
+    assert.equal(s.rangs - s.rangArc, seg + 1, `arrondiSeg ${seg} rend ${s.rangs - s.rangArc} rangs d arc`)
+    assert.equal(auditer(s).sain, true)
+  }
+  // et le congé à zéro rend l'arête vive : un seul rang d'arc, posé au fond
+  const sansConge = solideAvec({ fractionArrondi: 0 })
+  assert.equal(sansConge.arrondi, 0)
+  assert.equal(sansConge.rangs - sansConge.rangArc, 1)
+  assert.equal(auditer(sansConge).sain, true)
+})
+
+test('⑬d LES NORMALES — le congé est LISSE, le reste est de FACE, et three l arbitre', () => {
+  // ⚠️ **L APPARIEMENT DES DEUX ÉCRITURES, PAS UN NOMBRE RECOPIÉ.** `globe.js`
+  // dé-indexe puis pose `normalesParois` ; l ORACLE est `computeVertexNormals`
+  // de three sur la même géométrie dé-indexée. Là où le congé n est pas en jeu,
+  // les deux doivent coïncider ; sur le congé, elles doivent DIFFÉRER — sinon
+  // le portage n a rien porté.
+  const s = SOLIDE
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(s.positions.slice(), 3))
+  geo.setIndex(new THREE.BufferAttribute(s.indices.slice(), 1))
+  const plate = geo.toNonIndexed()
+  plate.computeVertexNormals()
+  const face = plate.getAttribute('normal').array
+  const notre = normalesParois(s)
+  assert.equal(notre.length, face.length)
+
+  let pireHorsArc = 0
+  let pireSurArc = 0
+  let arcsFacettes = 0
+  for (let t = 0; t < s.indices.length; t += 3) {
+    const tri = t / 3
+    const surArc = tri >= s.triArc && tri < s.compte.parois
+    const lus = []
+    for (let c = 0; c < 3; c++) {
+      const i = (t + c) * 3
+      const a = [notre[i], notre[i + 1], notre[i + 2]]
+      const b = [face[i], face[i + 1], face[i + 2]]
+      lus.push(a)
+      const ecart = angleEntre(a, b)
+      if (surArc) pireSurArc = Math.max(pireSurArc, ecart)
+      else pireHorsArc = Math.max(pireHorsArc, ecart)
+    }
+    // ⚠️ **LA DÉFINITION MÊME DE « FACETTE » : les trois coins d un triangle
+    // portent la MÊME normale.** Sur le congé, une bonne part des triangles doit
+    // en porter des différentes, sinon les trois segments se liront comme trois
+    // facettes — « l inverse exact de l intention » (`plinth.js`).
+    if (surArc && angleEntre(lus[0], lus[1]) < 1e-6 && angleEntre(lus[0], lus[2]) < 1e-6) arcsFacettes++
+  }
+  assert.ok(pireHorsArc < 0.05,
+    `hors du congé, nos normales s écartent de celles de three de ${pireHorsArc}°`)
+  assert.ok(pireSurArc > 5,
+    `sur le congé, nos normales valent celles de face à ${pireSurArc}° près : le congé est facetté`)
+  const arcs = s.compte.parois - s.triArc
+  assert.ok(arcsFacettes < arcs * 0.51,
+    `${arcsFacettes} triangles de congé sur ${arcs} portent trois normales égales`)
+
+  // ⚡ **LES DEUX SOUDURES, MESURÉES.** À θ = 0 la normale du congé vaut celle
+  // du mur (raccord invisible) ; à θ = 90° elle vaut celle du fond, (0, −1, 0).
+  const n = s.compte.anneau
+  const N = s.normales
+  const bas = (s.rangs - 1) * n
+  for (let k = 0; k < n; k += 97) {
+    const debut = [N[(s.rangArc * n + k) * 3], N[(s.rangArc * n + k) * 3 + 1], N[(s.rangArc * n + k) * 3 + 2]]
+    assert.ok(Math.abs(debut[1]) < 1e-6, `à θ = 0 la normale du congé n est pas horizontale : ${debut}`)
+    const fin = [N[(bas + k) * 3], N[(bas + k) * 3 + 1], N[(bas + k) * 3 + 2]]
+    assert.ok(angleEntre(fin, [0, -1, 0]) < 1e-3, `à θ = 90° la normale du congé vaut ${fin}`)
+  }
+  // ⚠️ **ET LE SENS EST VÉRIFIÉ, PAS SUPPOSÉ.** `plinth.js` raconte la version où
+  // seule la moitié de la normale était retournée : « la base du socle est
+  // traitée comme un objet séparé », a lu Adrien. La normale du fond du crop est
+  // vers le BAS — c est ce que la face du fond rend, et le congé doit l épouser.
+  const premierFond = s.compte.parois * 3
+  const nf = [face[premierFond * 3], face[premierFond * 3 + 1], face[premierFond * 3 + 2]]
+  assert.ok(angleEntre(nf, [0, -1, 0]) < 1e-3, `la face du fond regarde ${nf}, pas vers le bas`)
+})
+
+test('⑬e L EAU DU CROP ÉTAIT RENTRÉE D UN CHANFREIN QUI N EXISTAIT PAS', () => {
+  // ⛔ **LE CONSTAT QUI A DÉCIDÉ LA MONNAIE.** `mer-sphere.js` rentre le rideau
+  // d eau de `RETRAIT_EAU_CROP = (0,16 + 0,06) / 28`, « recopié de `plinth.js` »
+  // où l eau se pose à `HALF − SOCLE_CHANFREIN − SOCLE_MARGE_EAU`, c est-à-dire
+  // DANS le mur. **Tant que le mur du crop n était pas rentré du chanfrein,
+  // cette eau était rentrée d un chanfrein de trop** : les deux pièces se
+  // lisaient dans deux géométries différentes.
+  assert.equal(COTE_CROP_UNITES, 56)
+  assert.equal(RETRAIT_EAU_CROP, (SOCLE_CHANFREIN + SOCLE_MARGE_EAU) / (COTE_CROP_UNITES / 2))
+  // ⚡ **L INVARIANT QUI APPARIE LES DEUX CONVERSIONS** : le retrait de l eau,
+  // moins celui du mur, doit valoir exactement la marge d eau du socle — les
+  // deux exprimés en demi-côtés de crop.
+  const murEnDemiCotes = 2 * FRACTION_CHANFREIN // 0,16/56 en pleine largeur → 0,16/28 en demi-côté
+  assert.ok(Math.abs((RETRAIT_EAU_CROP - murEnDemiCotes) - SOCLE_MARGE_EAU / (COTE_CROP_UNITES / 2)) < 1e-15,
+    `l eau et le mur ne se répondent pas : ${RETRAIT_EAU_CROP - murEnDemiCotes}`)
+  // et l eau reste STRICTEMENT dans le mur, pas dessus
+  assert.ok(RETRAIT_EAU_CROP > murEnDemiCotes)
+  // ⚠️ **LE TÉMOIN DE CE QUI ÉTAIT FAUX** : sans chanfrein, l écart entre l eau
+  // et le mur valait le chanfrein PLUS la marge — soit 3,67 fois trop.
+  const avant = RETRAIT_EAU_CROP / (RETRAIT_EAU_CROP - murEnDemiCotes)
+  assert.ok(avant > 3.6 && avant < 3.8, `le témoin d avant vaut ${avant}`)
+})
+
+test('⑬f LE GARDE-FOU DU QUART DE MUR — sa marge est MESURÉE, et il mord quand on l y force', () => {
+  // ⚠️ **LA TROISIÈME RAISON DE LA TÂCHE B VIVAIT ICI**, et c était la datante :
+  // « leur garde-fou est calibré sur un socle à exagération 2,8, le globe est à
+  // 18 ». L exagération est FIXE À 2 depuis D10, et surtout les deux valeurs
+  // sont ancrées à la LARGEUR, que l exagération ne touche pas. Seul le
+  // garde-fou dépend de la hauteur du mur. **On mesure de combien il est loin de
+  // mordre, aux deux exagérations, plutôt que de l affirmer.**
+  assert.equal(PART_MUR_MAX, 0.25)
+  for (const exag of [2, 18]) {
+    const s = construireSolideCrop({ ...commun, echelle: (RAYON / RAYON_TERRE_M) * exag, hauteur: relief })
+    const mur = s.hautMax - s.baseY
+    assert.ok(Math.abs(s.chanfrein - FRACTION_CHANFREIN * s.largeur) < 1e-12,
+      `à ×${exag} le chanfrein est rogné : ${s.chanfrein}`)
+    assert.ok(Math.abs(s.arrondi - FRACTION_ARRONDI * s.largeur) < 1e-12,
+      `à ×${exag} le congé est rogné : ${s.arrondi}`)
+    // la marge : de combien le mur devrait s écraser pour que la borne morde
+    const margeConge = (mur * PART_MUR_MAX) / s.arrondi
+    const margeChanfrein = (mur * PART_MUR_MAX) / s.chanfrein
+    assert.ok(margeConge > 5, `à ×${exag} le congé n est qu à ×${margeConge.toFixed(1)} de la borne`)
+    assert.ok(margeChanfrein > margeConge, 'le chanfrein doit être plus loin de la borne que le congé')
+  }
+  // ⚡ **ET IL MORD QUAND ON L Y FORCE** — sans quoi on ne saurait pas qu il est
+  // branché. Un bloc plat, profondeur ramenée à un centième : le mur devient
+  // plus petit que quatre congés, et les deux rentrées tombent au quart du mur.
+  const ecrase = construireSolideCrop({ ...commun, hauteur: plat, fractionProfondeur: FRACTION_PROFONDEUR / 100 })
+  const murEcrase = ecrase.hautMax - ecrase.baseY
+  assert.ok(ecrase.arrondi < FRACTION_ARRONDI * ecrase.largeur, 'le garde-fou ne rogne rien')
+  assert.equal(ecrase.arrondi, murEcrase * PART_MUR_MAX)
+  assert.equal(auditer(ecrase).sain, true, auditer(ecrase).raison)
+})
+
+test('⑬g LE SOLIDE RESTE SAIN AVEC LE CHANFREIN ET LE CONGÉ — aucun triangle dégénéré', () => {
+  // ⚠️ **`plinth.js` LAISSE `pousse` JETER LES TRIANGLES DÉGÉNÉRÉS ; ICI ILS
+  // SERAIENT COMPTÉS.** Deux rangs peuvent coïncider en un point — un bloc plat
+  // dont le congé est plus haut que la bande d occlusion, un bord si bas que son
+  // chanfrein tombe déjà sous elle. `auditerSolide` exige `degeneres === 0`.
+  for (const [nom, s] of [
+    ['relief', SOLIDE],
+    ['plat', SOLIDE_PLAT],
+    ['accroché', SOLIDE_ACCROCHE],
+    ['coin vif', solideAvec({ forme: { coin: 0, expo: 2 } })],
+    ['congé large', solideAvec({ fractionArrondi: FRACTION_ARRONDI * 4 })],
+    ['un seul segment', solideAvec({ arrondiSeg: 1 })],
+  ]) {
+    const v = auditer(s)
+    assert.equal(v.degeneres, 0, `${nom} : ${v.degeneres} triangle(s) dégénéré(s)`)
+    assert.equal(v.sain, true, `${nom} : ${v.raison}`)
+    assert.equal(v.oriente, true, `${nom} : volume signé ${v.volume}`)
+  }
+  // ⚡ **ET LES DEUX SOLIDES EN PORTENT VRAIMENT, EN NOMBRE DIFFÉRENT** : c est
+  // la preuve que la garde sert, et qu elle ne sert pas à vide.
+  //   · sur le RELIEF : **212 triangles jetés sur 12 240** — les bords les plus
+  //     bas, dont le pied de chanfrein tombe déjà sous la bande d occlusion ;
+  //   · sur le PLAT : **exactement un bandeau, 2 040** — sa bande d occlusion
+  //     (0,12 × mur) est plus basse que son congé (0,129 × mur), donc le rang ②
+  //     et le départ du congé se confondent PARTOUT.
+  const plein = SOLIDE.compte.anneau * 2 * (SOLIDE.rangs - 1)
+  assert.equal(plein, 12240)
+  assert.ok(SOLIDE.compte.parois < plein && SOLIDE.compte.parois > plein * 0.9,
+    `relief : ${SOLIDE.compte.parois} triangles de paroi sur ${plein}`)
+  assert.equal(SOLIDE_PLAT.compte.parois, plein - SOLIDE_PLAT.compte.anneau * 2,
+    `plat : ${SOLIDE_PLAT.compte.parois} triangles, il en manque autre chose qu un bandeau`)
+  assert.ok(SOLIDE_PLAT.compte.parois < SOLIDE.compte.parois,
+    `le solide plat porte ${SOLIDE_PLAT.compte.parois} triangles de paroi, autant que le solide en relief`)
+})
+
+test('⑬h `globe.js` POSE nos normales sur la géométrie — EXÉCUTÉ, pas cherché dans le texte', () => {
+  // ⛔⛔ **LA LEÇON LA PLUS RÉCENTE DE CE CHANTIER, APPLIQUÉE ICI.** Le tour de
+  // correction P8-P12 a démasqué une mutation qui échangeait deux valeurs dans
+  // l objet RETOURNÉ et qui a survécu à 4 082 tests, parce que le seul garde
+  // était un `assert.match` sur le texte source. **Le trou vivait là où le
+  // module exige un renderer — donc là où personne ne l avait exécuté.**
+  //
+  // ⚠️ **CE CHEMIN-CI N EXIGE PAS DE RENDERER**, seulement three : on peut donc
+  // l EXÉCUTER, et c est ce que fait ce test. Il monte le `Globe` minimal du
+  // patron de `test/maillage-tuile.test.js` ⑤d, appelle `construireParoisCrop`
+  // pour de bon, et confronte l attribut `normal` de la géométrie POSÉE à
+  // `normalesParois` du solide bâti à part. **Remettre `computeVertexNormals`
+  // dans `globe.js` tombe ici, et nulle part ailleurs.**
+  const t = { z: 12, x: 2094, y: 2270, key: '12/2094/2270' }
+  const cote = 32
+  t.size = cote
+  t.heights = new Float32Array(cote * cote)
+  for (let j = 0; j < cote; j++) {
+    for (let i = 0; i < cote; i++) t.heights[j * cote + i] = 400 + 900 * Math.sin(i * 0.7) * Math.cos(j * 0.5)
+  }
+  const { lat, lon } = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  const repere = repereCrop({ centre: { lat, lon }, zoom: t.z, tuilesParBloc: 1 })
+  let pose = null
+  const faux = {
+    _crop: repere,
+    _fondCrop: null,
+    _parois: null,
+    _baseYCrop: null,
+    exaggeration: 2,
+    tiles: new Map([[t.key, t]]),
+    tuilesAvecHauteurs: () => [t],
+    uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+    group: { add(m) { pose = m }, remove() {} },
+    hauteurDessinee: Globe.prototype.hauteurDessinee,
+    _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+    _retaillerJupes: () => 0,
+    retirerParoisCrop() { this._parois = null },
+    _materiauParois: () => null,
+  }
+  const rendu = Globe.prototype.construireParoisCrop.call(faux, { couvertureMin: 0 })
+  assert.ok(rendu && rendu.mesh, `les parois n ont pas été bâties : ${JSON.stringify(rendu && rendu.refus)}`)
+  assert.ok(pose, 'la géométrie n a pas été ajoutée au groupe')
+
+  // l ORACLE : le même solide, bâti à part, et NOS normales
+  const attendu = construireSolideCrop({
+    repere,
+    forme: { coin: 0.08, expo: 4.4 },
+    hauteur: (la, lo) => faux.hauteurDessinee(la, lo, [t]),
+    rayon: R_GLOBE,
+    echelle: (R_GLOBE / EARTH_RADIUS_M) * faux.exaggeration,
+    plancherMer: 0,
+    couvertureMin: 0,
+  })
+  assert.equal(attendu.refus, null)
+  const voulu = normalesParois(attendu)
+  const obtenu = pose.geometry.getAttribute('normal').array
+  assert.equal(obtenu.length, voulu.length,
+    `la géométrie porte ${obtenu.length / 3} normales, le solide en veut ${voulu.length / 3}`)
+  let pire = 0
+  for (let i = 0; i < voulu.length; i++) pire = Math.max(pire, Math.abs(obtenu[i] - voulu[i]))
+  assert.equal(pire, 0, `les normales posées s écartent de ${pire} de `
+    + `celles de \`normalesParois\` — \`globe.js\` en calcule d autres`)
+
+  // ⚡ **ET LE TÉMOIN QUI REND CE TEST DISCRIMINANT** : `computeVertexNormals`
+  // rendrait AUTRE CHOSE sur le congé. Sans cet écart, l assertion du dessus
+  // serait vraie quelle que soit la ligne écrite dans `globe.js`.
+  const temoin = pose.geometry.clone()
+  temoin.computeVertexNormals()
+  const face = temoin.getAttribute('normal').array
+  let ecartTemoin = 0
+  for (let i = 0; i < face.length; i++) ecartTemoin = Math.max(ecartTemoin, Math.abs(face[i] - voulu[i]))
+  assert.ok(ecartTemoin > 0.05,
+    `\`computeVertexNormals\` rend la même chose à ${ecartTemoin} près : le test ne distingue rien`)
 })
