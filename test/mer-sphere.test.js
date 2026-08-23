@@ -1259,6 +1259,32 @@ test('⑩l `onBeforeRender` COPIE le tampon d image, à chaque image, sur la cib
   assert.equal(r.copies[3], u.uMerScene.value)
 })
 
+test('⑩o `majReglagesMer` PORTE la réfraction du socle, déplacée dans les deux sens', async () => {
+  // ⛔ **MUTATION SURVIVANTE I3** : `uMerRefract` forcée à `0` quand le socle en
+  // fournit une tue la réfraction du crop en pratique (le socle en fournit
+  // toujours une), et le motif de source ne lisait que le début de la ligne.
+  // On EXÉCUTE l'écrivain, et on déplace la valeur dans les deux sens.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  const u = g._mer.material.uniforms
+  const base = { vue: 1, surface: 1 }
+
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0.34 })
+  assert.equal(u.uMerRefract.value, 0.34, 'la tirette VIVANTE du socle doit arriver telle quelle')
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0.91 })
+  assert.equal(u.uMerRefract.value, 0.91, 'et elle doit REDESCENDRE aussi bien que monter')
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: 0 })
+  assert.equal(u.uMerRefract.value, 0, 'zéro est une valeur, pas une absence')
+  // sans socle à lire, le NEUTRE du module — jamais la valeur du voisin
+  Globe.prototype.majReglagesMer.call(g, base)
+  assert.equal(u.uMerRefract.value, REFRACTION_NEUTRE)
+  Globe.prototype.majReglagesMer.call(g, { ...base, refraction: NaN })
+  assert.equal(u.uMerRefract.value, REFRACTION_NEUTRE)
+  // ⚠️ et le neutre n'est PAS ce que le socle vivant porte (0,34 relevé le
+  // 2026-08-23) : un test qui les confondrait ne verrait pas la mutation.
+  assert.notEqual(REFRACTION_NEUTRE, 0.34)
+})
+
 // ══════════ ⑪ LE BORD DE LA MER — Tâche J ═══════════════════════════════════
 //
 // ⚠️ **CE QUE CETTE SECTION DÉFEND EST UN DÉFAUT VU À L'ÉCRAN** : « la mer
