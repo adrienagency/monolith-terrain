@@ -251,7 +251,12 @@ test('③ le fondu de rive est la MÊME loi des deux côtés, pas deux transcrip
   assert.match(ECUME_SRC, /float fonduRessacMer\(float declin\)/)
   assert.match(OCEAN_NU, /vFade\s*=\s*fonduRessacMer\(/)
   assert.match(GLOBE_NU, /vFonduRive\s*=\s*fonduRessacMer\(/)
-  assert.match(GLOBE_NU, /decalageRefraction\(\s*[\w.]+\s*,\s*uMerRefract\s*,\s*vFonduRive\s*\)/)
+  // ⚠️ **`fonduRive`, SANS `v`, DEPUIS LA TÂCHE R5** : le fragment de la calotte
+  // calcule lui-même son fondu de rive au lieu de recevoir le varying. La LOI
+  // est celle de la ligne du dessus (`fonduRessacMer`), inchangée ; c'est la
+  // FRÉQUENCE d'échantillonnage qui a changé, pour rejoindre celle d'`ocean.js`,
+  // dont le fragment lit `uField` lui-même depuis toujours.
+  assert.match(GLOBE_NU, /decalageRefraction\(\s*[\w.]+\s*,\s*uMerRefract\s*,\s*fonduRive\s*\)/)
 })
 
 // ══════════ ④ LE BRANCHEMENT ═══════════════════════════════════════════════
@@ -408,7 +413,9 @@ function courirBloc(bloc, entrees, texture2D) {
 function entreesDe(nuanceur, { force, rive, opac }) {
   const commun = { col: [...CORPS] }
   return nuanceur === 'globe.js'
-    ? { ...commun, uMerResolution: RESOLUTION, nLocal: NORMALE, uMerRefract: force, vFonduRive: rive, uMerScene: 'tampon', opac }
+    // ⚠️ `fonduRive` (Tâche R5) et non plus `vFonduRive` : MÊME rôle, même
+    // valeur d'essai, autre fréquence d'échantillonnage dans la source.
+    ? { ...commun, uMerResolution: RESOLUTION, nLocal: NORMALE, uMerRefract: force, fonduRive: rive, uMerScene: 'tampon', opac }
     : { ...commun, uResolution: RESOLUTION, N: NORMALE, uRefract: force, vFade: rive, uSceneTex: 'tampon', wOp: opac }
 }
 
