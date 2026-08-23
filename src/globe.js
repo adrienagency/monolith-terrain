@@ -2486,6 +2486,12 @@ export class Globe {
     // que le téléchargement d'un hémisphère que personne n'a demandé. Hors du
     // drapeau, rien de tout cela n'existe.
     this._cropAttendu = params.cropAttendu ?? false
+    // ⚠️ **ET LA RETENUE N'EST PAS LE DRAPEAU — correction C1.** `_cropAttendu`
+    // décrit le RÉGIME (il arme la contre-pression pour toute la session) ;
+    // `_cropDejaPose` date le moment où l'on a CESSÉ D'IGNORER où est le crop.
+    // Seul le second éteint la retenue de descente, et il ne se rallume jamais :
+    // voir `poserCrop` et `_retenueAvantCrop`.
+    this._cropDejaPose = false
     // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Posé par `main.js` quand le globe
     // passe dans sa propre scène de fond ; voir `setVisible`, qui cesse alors
     // d'être l'interrupteur. Déclaré ici pour qu'il ne naisse pas `undefined`
@@ -2945,6 +2951,23 @@ export class Globe {
       }
     }
     this._crop = rep
+    // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
+    // QUI L'A EXIGÉ — Tâche R3, correction C1.** La première version de
+    // `cropAttendu` était un booléen à vie ; or `retirerCrop` remet `_crop` à
+    // `null` sur DEUX chemins nominaux (au-dessus de `SEUIL_MORT_M`, et à toute
+    // sortie du mode surface — `branchement-crop.js`, `retirer(g)`). Le globe se
+    // retrouvait donc à écarter tout `z > ROOT_Z` au nom d'un crop qui n'existait
+    // plus : mesuré dans l'application vivante, même `modes.enterOrbit()`,
+    // **283 tuiles dessinées avant le correctif contre 16 après**, cache 1 425
+    // contre 112. La planète entière ramenée à ses seize racines. Ce n'était pas
+    // un cas de panne : c'est une molette.
+    //
+    // ⚠️ **UNE FOIS POSÉ, C'EST POSÉ POUR LA SESSION.** Ce qui justifiait la
+    // retenue, c'est « on ne sait pas encore OÙ » — une ignorance qui ne revient
+    // jamais : après un retrait, `_horsCropSeul` retombe sur son `false` d'avant
+    // et le quadtree redescend normalement. Gardé par `test/dalles-crop.test.js`
+    // ⑧ (orbite) et ⑧ bis (le compte de tuiles dessinées).
+    this._cropDejaPose = true
     const u = this.uniforms
     u.uCropCentre.value.set(rep.cx, rep.cy)
     u.uCropDemi.value = rep.demi
@@ -3017,7 +3040,7 @@ export class Globe {
     //
     // ⚠️ **ET SANS `cropAttendu`, CETTE LIGNE EST LE `return false` D'AVANT, AU
     // BIT PRÈS** : la production (pas de drapeau, pas de crop) ne voit rien.
-    if (!this._crop) return this._cropAttendu && z > ROOT_Z
+    if (!this._crop) return this._retenueAvantCrop() && z > ROOT_Z
     if (!this._cropSeul && !this.estompePlein()) return false
     return !tuileDansCrop(z, x, y, this._crop)
   }
@@ -3052,6 +3075,23 @@ export class Globe {
    * Les deux derniers sont donc le FILET (un panoramique rapide, un dézoom),
    * pas le gain. C'est écrit pour que personne ne leur attribue les 68 tuiles.
    */
+  /**
+   * La descente est-elle RETENUE, faute de savoir où sera le crop ? — R3/C1.
+   *
+   * ⛔ **DEUX CONDITIONS, ET LA SECONDE A ÉTÉ PAYÉE PAR UNE RÉGRESSION LIVRÉE.**
+   * `cropAttendu` seul ne suffit pas : `retirerCrop` rend `_crop` à `null`
+   * au-dessus de `SEUIL_MORT_M` et à chaque sortie du mode surface, si bien
+   * qu'un drapeau à vie clouait le globe à ses seize racines dès qu'on montait
+   * en orbite — 283 tuiles dessinées contre 16, mesuré dans l'application.
+   *
+   * ⚠️ **CE N'EST PAS `!this._crop`**, et l'écrire ainsi rejouerait le défaut :
+   * la question n'est pas « y a-t-il un crop MAINTENANT » (non, en orbite) mais
+   * « a-t-on déjà su où il était ». Une ignorance qui ne revient jamais.
+   */
+  _retenueAvantCrop() {
+    return this._cropAttendu && !this._cropDejaPose
+  }
+
   _contrePression() {
     return this.continu || this._cropAttendu
   }
@@ -6261,7 +6301,7 @@ export class Globe {
     // racine**. La planète disparaîtrait pendant les onze premières images.
     // C'est exactement le `kids.length > 0 &&` que la Tâche P14 a retiré comme
     // code mort — il l'était, et il cesse de l'être si on coupe trop bas.
-    if (this._cropAttendu && !this._crop) wantSplit = false
+    if (this._retenueAvantCrop() && !this._crop) wantSplit = false
 
     // ADMISSION : on ne commence un raffinement que si le crédit de la frame
     // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,

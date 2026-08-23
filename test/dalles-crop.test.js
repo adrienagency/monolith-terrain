@@ -374,3 +374,95 @@ test('⑦ ter le harnais de démarrage est DÉTERMINISTE — sinon ① et ① bi
   assert.deepEqual(b, a, 'deux démarrages identiques ne demandent pas les mêmes URL')
   assert.ok(a.length > 20, `le harnais ne charge que ${a.length} URL : il ne prouve rien`)
 })
+
+// ═══════════════════════════════ ⑧ L'ORBITE — la régression livrée (C1) ══════
+//
+// ⛔ **CE BLOC EXISTE PARCE QUE LA PREMIÈRE VERSION DE CETTE TÂCHE A LIVRÉ UNE
+// RÉGRESSION QU'AUCUN DES 4 131 TESTS DU DÉPÔT NE VOYAIT.** `retirerCrop()`
+// rend `_crop` à `null` sur deux chemins nominaux — au-dessus de
+// `SEUIL_MORT_M`, et à toute sortie du mode surface. Avec un `cropAttendu` à
+// vie, le globe écartait alors tout `z > ROOT_Z` au nom d'un crop qui n'existait
+// plus : mesuré dans l'application, `modes.enterOrbit()` rendait **16 tuiles
+// dessinées au lieu de 283**.
+//
+// ⚠️ **LE TEST NE PORTE AUCUN NOMBRE MAGIQUE.** Il rejoue la MÊME scène avec et
+// sans le drapeau et exige que les deux dessinent EXACTEMENT les mêmes tuiles :
+// c'est la seule forme qui reste vraie si le harnais, la caméra ou les seuils
+// changent un jour.
+
+/**
+ * Le geste central du produit « une seule Terre » : on est sur le bloc, on
+ * remonte à la planète. Le crop est posé, puis RETIRÉ, puis la caméra s'éloigne.
+ */
+async function puisEnOrbite({ cropAttendu }) {
+  servir()
+  _resetTileMemo()
+  _resetDemSource()
+  const globe = new Globe({ globeContinu: false, cropAttendu })
+  globe.setVisible(true)
+  const camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 0.5, 1400)
+
+  poserCamera(camera, 100.2)
+  globe.poserCrop({ centre: { lat: LAT, lon: LON }, zoom: 12, tuilesParBloc: 3 })
+  globe.poserCropSeul(true)
+  for (let k = 0; k < 12; k++) { globe.update(camera, 0.016); await calme(globe) }
+
+  // le dézoom : exactement ce que `branchement-crop.js` fait au-dessus de
+  // `SEUIL_MORT_M` — le crop est retiré, la retenue du repos avec lui.
+  globe.poserCropSeul(false)
+  globe.retirerCrop()
+  assert.equal(globe._crop, null, 'le harnais n’a pas retiré le crop : il ne mesure pas l’orbite')
+  poserCamera(camera, 140)
+  for (let k = 0; k < 20; k++) { globe.update(camera, 0.016); await calme(globe) }
+
+  const dessinees = new Set()
+  for (const t of globe.tiles.values()) if (t.mesh?.visible) dessinees.add(t.key)
+  return { globe, dessinees, urls: new Set(urls) }
+}
+
+test('⑧ EN ORBITE, crop retiré : le drapeau ne change RIEN au dessin', async () => {
+  const avec = await puisEnOrbite({ cropAttendu: true })
+  const sans = await puisEnOrbite({ cropAttendu: false })
+  assert.deepEqual(
+    [...avec.dessinees].sort(), [...sans.dessinees].sort(),
+    `orbite : ${avec.dessinees.size} tuiles dessinées avec le drapeau contre ${sans.dessinees.size} sans`,
+  )
+})
+
+test('⑧ bis EN ORBITE, la planète est ENTIÈRE — pas seize racines', async () => {
+  // ⚠️ Le témoin d'échec exact de la régression : si la retenue reste armée,
+  // `_drawn` retombe au nombre de racines et rien de plus fin n'est demandé.
+  const { globe, urls: vues } = await puisEnOrbite({ cropAttendu: true })
+  assert.ok(
+    globe._drawn > globe.roots.length,
+    `${globe._drawn} tuiles dessinées pour ${globe.roots.length} racines : le globe est cloué à ses racines en orbite`,
+  )
+  const fines = [...vues].map(zoomDeUrl).filter((z) => z !== null && z > 2)
+  assert.ok(fines.length > 0, 'aucune tuile plus fine que z2 n’a été demandée en orbite')
+})
+
+test('⑧ ter la retenue ne se RALLUME jamais : elle s’éteint à la PREMIÈRE pose', async () => {
+  // ⚠️ **CE N'EST PAS `!this._crop`, ET C'EST TOUT LE CORRECTIF C1.** Une garde
+  // écrite « pas de crop en ce moment » rejouerait la régression à l'identique.
+  const { globe } = await demarrage({ cropAttendu: true })
+  assert.equal(globe._retenueAvantCrop(), true, 'la retenue devrait être armée avant toute pose')
+  globe.poserCrop({ centre: { lat: LAT, lon: LON }, zoom: 12, tuilesParBloc: 3 })
+  assert.equal(globe._retenueAvantCrop(), false)
+  globe.retirerCrop()
+  assert.equal(globe._crop, null)
+  assert.equal(globe._retenueAvantCrop(), false, 'le retrait du crop a RALLUMÉ la retenue — c’est la régression C1')
+})
+
+test('⑨ MNT en panne : le globe reste à ses racines, et c’est la décision écrite', async () => {
+  // ⚠️ **CE N'EST PLUS UNE RÉSERVE, C'EST UN COMPORTEMENT TESTÉ.** Sous
+  // `?terre=unique`, `poserCrop` n'est appelé qu'une fois `largeurBlocM() > 0` :
+  // si le MNT ne vient jamais, il n'est jamais appelé. Le globe reste alors à
+  // z2 — c'est ASSUMÉ (le bloc plat est éteint sous ce drapeau, et une planète
+  // grossière vaut mieux qu'un hémisphère que personne n'a demandé), mais ça
+  // doit être écrit quelque part qui rougisse si ça change.
+  const { globe } = await demarrage({ cropAttendu: true, images: 60 })
+  assert.equal(globe._crop, null)
+  assert.equal(globe._drawn, globe.roots.length)
+  assert.equal([...zoomsDemandes().keys()].filter((z) => z > 2).length, 0)
+  assert.equal(globe.queue.length, 0, 'le globe demande encore des tuiles en boucle')
+})
