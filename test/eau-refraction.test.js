@@ -328,3 +328,149 @@ test('⑥ l’alpha du crop ne porte PLUS l’opacité du corps d’eau', () => 
   // et `opac` sert TOUJOURS — dans le composite, à sa place
   assert.match(FRAG, /composeLameEau\([^)]*opac\)/)
 })
+
+// ══════════ ⑦ LE BLOC DE RÉFRACTION DES DEUX NUANCEURS, **EXÉCUTÉ** ═════════
+//
+// ⛔ **TOUR DE CORRECTION R2 — LES DEUX MUTATIONS QUI ONT SURVÉCU AUX MOTIFS.**
+// La relecture a montré que ⑥ accepte les DEUX ordres de `composeLameEau` (le
+// motif `composeLameEau\([^)]*opac\)` ne regarde pas ses opérandes) et que rien
+// n'empêchait `ocean.js` — **la PRODUCTION** — de cesser d'échantillonner
+// décalé : `texture2D(uSceneTex, screenUv)` au lieu de
+// `texture2D(uSceneTex, uvRefractee(screenUv, refOff))` laissait 4 138 tests
+// verts et tuait la réfraction du socle.
+//
+// ➡️ **On ne cherche donc plus ces lignes : on les EXÉCUTE.** Le bloc est
+// DÉCOUPÉ dans le vrai fichier (de `gl_FragCoord.xy /` jusqu'au `;` de
+// `composeLameEau`), traduit comme au ②, et couru avec un `texture2D` bouchon
+// qui NOTE la coordonnée qu'on lui demande. Aucune formule n'est réécrite ici ;
+// les valeurs attendues viennent des jumeaux JS du module, calculées à part.
+//
+// ⚠️ **CE QUE ÇA NE PROUVE TOUJOURS PAS** : que le GPU exécute ce texte. Cela
+// prouve que le texte, exécuté, va chercher le fond AU BON ENDROIT et compose
+// dans le BON SENS. L'image, c'est `.banc/R2/` qui la porte.
+
+/** Le bloc de réfraction tel qu'il est écrit dans le fichier, commentaires ôtés. */
+function blocRefraction(src) {
+  const i = src.indexOf('gl_FragCoord.xy /')
+  assert.ok(i > 0, 'aucune UV d’écran dans ce nuanceur')
+  const j = src.indexOf('composeLameEau(', i)
+  assert.ok(j > i, 'le bloc ne compose pas la lame d’eau')
+  const fin = src.indexOf(';', j)
+  return src.slice(src.lastIndexOf('\n', i) + 1, fin + 1)
+}
+
+/** ⚠️ **SEULS LES MOTS DU LANGAGE SONT REMPLACÉS** — même règle qu'au ②. */
+function traduireBloc(bloc) {
+  return bloc
+    .replace(/\bvec[234]\s+(\w+)\s*=/g, 'let $1 =')
+    .replace(/gl_FragCoord\.xy\s*\/\s*(\w+)/g, 'div2(FRAG, $1)')
+    .replace(/\b(\w+)\.xz\b/g, 'xz($1)')
+    .replace(/\.rgb\b/g, '')
+}
+
+const DIV2 = (a, b) => [a[0] / b[0], a[1] / b[1]]
+const XZ = (v) => [v[0], v[2]]
+const MOTS_CLES = new Set(['let', 'const', 'return', 'true', 'false'])
+const OUTILS = ['div2', 'xz', 'FRAG', 'texture2D', 'decalageRefraction', 'uvRefractee', 'composeLameEau']
+
+// Le fragment testé, la taille du tampon, la normale et les deux couleurs — des
+// nombres CHOISIS ICI, distincts les uns des autres pour qu'aucune confusion
+// d'opérande ne puisse passer inaperçue.
+const FRAG_TEST = [400.5, 200.5]
+const RESOLUTION = [861, 351]
+const NORMALE = [0.3, 0.9327379053088815, -0.2] // unitaire, penchée : sa pente xz vaut (0,3 ; −0,2)
+const FOND = [0.11, 0.22, 0.33] // ce que rend le tampon copié
+const CORPS = [0.77, 0.66, 0.55] // le corps d'eau, `col` à l'entrée du bloc
+
+/**
+ * Le bloc, couru. `entrees` donne une valeur à CHAQUE nom libre du bloc ; un
+ * nom qui n'y serait pas fait ÉCHOUER le test au lieu de valoir `undefined`.
+ */
+function courirBloc(bloc, entrees, texture2D) {
+  const traduit = traduireBloc(bloc)
+  const declares = [...traduit.matchAll(/\blet (\w+)/g)].map((m) => m[1])
+  const noms = [...new Set([...traduit.matchAll(/[A-Za-z_]\w*/g)].map((m) => m[0]))]
+  const libres = noms.filter((n) => !declares.includes(n) && !OUTILS.includes(n) && !MOTS_CLES.has(n))
+  for (const n of libres) {
+    assert.ok(n in entrees, `le bloc lit « ${n} », que ce test ne sait pas nourrir — nomme-le`)
+  }
+  const preambule = libres.map((n) => `let ${n} = E[${JSON.stringify(n)}];`).join('\n')
+  const sortie = `return { ${[...new Set([...declares, ...libres])].join(', ')} }`
+  // eslint-disable-next-line no-new-func
+  return new Function(
+    'E', 'FRAG', 'div2', 'xz', 'texture2D', 'decalageRefraction', 'uvRefractee', 'composeLameEau',
+    `${preambule}\n${traduit}\n${sortie}`
+  )(entrees, FRAG_TEST, DIV2, XZ, texture2D, decalageRefraction, uvRefractee, composeLameEau)
+}
+
+/** ⚠️ **PAR NOM, ET C'EST DÉLIBÉRÉ** : un renommage doit faire ROUGIR ce test,
+ *  pas le rendre muet. Chaque nom est un RÔLE, jamais une formule. */
+function entreesDe(nuanceur, { force, rive, opac }) {
+  const commun = { col: [...CORPS] }
+  return nuanceur === 'globe.js'
+    ? { ...commun, uMerResolution: RESOLUTION, nLocal: NORMALE, uMerRefract: force, vFonduRive: rive, uMerScene: 'tampon', opac }
+    : { ...commun, uResolution: RESOLUTION, N: NORMALE, uRefract: force, vFade: rive, uSceneTex: 'tampon', wOp: opac }
+}
+
+const NUANCEURS = [['globe.js', GLOBE_NU], ['ocean.js', OCEAN_NU]]
+
+test('⑦ les deux nuanceurs vont chercher le fond AU POINT DÉCALÉ — exécuté, pas grepé', () => {
+  for (const [nom, src] of NUANCEURS) {
+    const bloc = blocRefraction(src)
+    const uvEcran = [FRAG_TEST[0] / RESOLUTION[0], FRAG_TEST[1] / RESOLUTION[1]]
+
+    // ① à force NULLE, on lit le fond DROIT DEVANT — le témoin qui dit que la
+    //    coordonnée notée est bien celle de l'échantillonnage.
+    let demandees = []
+    courirBloc(bloc, entreesDe(nom, { force: 0, rive: 1, opac: 0.5 }), (t, uv) => {
+      demandees.push([t, uv])
+      return [...FOND]
+    })
+    assert.equal(demandees.length, 1, `${nom} : le fond doit être échantillonné UNE fois`)
+    assert.equal(demandees[0][0], 'tampon', `${nom} : le fond doit être lu sur le tampon copié`)
+    assert.ok(Math.abs(demandees[0][1][0] - uvEcran[0]) < 1e-15, `${nom} : à force nulle, aucun décalage`)
+    assert.ok(Math.abs(demandees[0][1][1] - uvEcran[1]) < 1e-15)
+
+    // ② à force VIVANTE, la coordonnée demandée est EXACTEMENT celle du module.
+    //    ⛔ C'est l'assertion qui tue « `texture2D(uSceneTex, screenUv)` », la
+    //    mutation qui tuait la réfraction de la PRODUCTION sans un test rouge.
+    const force = 0.34 // la tirette VIVANTE relevée sur le socle le 2026-08-23
+    const rive = 0.5
+    demandees = []
+    courirBloc(bloc, entreesDe(nom, { force, rive, opac: 0.5 }), (t, uv) => {
+      demandees.push([t, uv])
+      return [...FOND]
+    })
+    const attendu = uvRefractee(uvEcran, decalageRefraction([NORMALE[0], NORMALE[2]], force, rive))
+    assert.ok(Math.abs(demandees[0][1][0] - attendu[0]) < 1e-15, `${nom} : u ${demandees[0][1][0]} contre ${attendu[0]}`)
+    assert.ok(Math.abs(demandees[0][1][1] - attendu[1]) < 1e-15, `${nom} : v ${demandees[0][1][1]} contre ${attendu[1]}`)
+    // et le décalage EXISTE : sans ça les deux assertions ci-dessus seraient
+    // vraies pour rien — c'est le témoin de la mutation.
+    assert.ok(Math.abs(attendu[0] - uvEcran[0]) > 1e-6, 'le témoin doit vraiment déplacer la coordonnée')
+    assert.ok(Math.abs(attendu[1] - uvEcran[1]) > 1e-6)
+  }
+})
+
+test('⑦ le composite met le FOND dessous et le corps d’eau dessus — dans cet ordre', () => {
+  // ⛔ **MUTATION I2 DE LA RELECTURE** : `composeLameEau(col, travers, opac)`
+  // échange le fond et le corps d'eau. L'image change massivement et le motif
+  // ⑥ accepte les deux ordres. Ici on lit la couleur SORTANTE.
+  for (const [nom, src] of NUANCEURS) {
+    const bloc = blocRefraction(src)
+    const tampon = () => [...FOND]
+
+    // opacité NULLE : l'eau est une vitre, on voit le fond réfracté, et LUI SEUL
+    const vitre = courirBloc(bloc, entreesDe(nom, { force: 0.34, rive: 0.5, opac: 0 }), tampon)
+    assert.deepEqual(vitre.col, FOND, `${nom} : à opacité nulle la lame doit rendre le FOND, pas le corps d’eau`)
+
+    // opacité PLEINE : la lame est une peinture, le fond disparaît
+    const peinture = courirBloc(bloc, entreesDe(nom, { force: 0.34, rive: 0.5, opac: 1 }), tampon)
+    assert.deepEqual(peinture.col, CORPS, `${nom} : à opacité pleine la lame doit rendre le CORPS d’eau`)
+
+    // et entre les deux, le mélange est celui du jumeau JS, canal par canal
+    const moitie = courirBloc(bloc, entreesDe(nom, { force: 0.34, rive: 0.5, opac: 0.37 }), tampon)
+    assert.deepEqual(moitie.col, composeLameEau(FOND, CORPS, 0.37))
+    // ⚠️ le témoin de la mutation : l'ordre inverse rend une AUTRE couleur
+    assert.notDeepEqual(composeLameEau(FOND, CORPS, 0.37), composeLameEau(CORPS, FOND, 0.37))
+  }
+})
