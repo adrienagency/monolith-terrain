@@ -126,9 +126,12 @@ import {
   // NU : ni rampe, ni peinture, donc pas de `natLuminance`, dont
   // `GLSL_ECLAIRAGE` dépend. C'est la MÊME loi, injectée seule.
   GLSL_IRRADIANCE,
-  // ⚠️ **LA NORMALE PAR FRAGMENT — Tâche P9.** Même patron : la loi (celle de
-  // Mikkelsen, que `three` porte) et sa dérivation vivent dans le module PUR ;
-  // ce fichier n'en injecte que le texte.
+  // ⚠️ **LA NORMALE PAR FRAGMENT — Tâche P9, RÉÉCRITE PAR P10.** Même patron :
+  // la loi et sa dérivation vivent dans le module PUR ; ce fichier n'en injecte
+  // que le texte. ⚡ **DEUX MORCEAUX DEPUIS P10** : le repère de sol part au
+  // nuanceur de SOMMETS (`latlon` y est un attribut exact), la normale reste au
+  // nuanceur de fragments.
+  GLSL_REPERE_SOL,
   GLSL_NORMALE_FINE,
   RECIPROQUE_PI,
   ECLAIRAGE_MONDE,
@@ -722,7 +725,30 @@ function gridFor(z) {
 
 // ---------------------------------------------------------------- shader
 
+// ══════════ LES DEUX CONVERSIONS DE LA NORMALE FINE — Tâche P10 ════════════
+//
+// ⚠️ **ELLES SONT INJECTÉES DANS LE TEXTE GLSL, PAS RECOPIÉES À LA MAIN**, et
+// elles DÉRIVENT toutes les deux de `R_GLOBE` et `EARTH_RADIUS_M` — les deux
+// constantes de `geo.js` sur lesquelles `_buildMesh` pose déjà ses sommets
+// (`dispScale = (R_GLOBE / EARTH_RADIUS_M) * exagération`). Un chiffre écrit en
+// dur ici serait la CINQUIÈME faute de monnaie de ce chantier.
+//
+// ⛔ **ET CE N'EST PAS `CIRCONFERENCE_M` (40 075 016,686 m, l'équateur WGS84)**,
+// que `habillage-crop.js` emploie pour convertir des demi-côtés de Mercator en
+// mètres de sol RÉELS. Ici on mesure une distance SUR LA SPHÈRE DU GLOBE, et
+// cette sphère-là a le rayon MOYEN `EARTH_RADIUS_M = 6 371 000` : c'est lui,
+// et lui seul, qui rend la pente cohérente avec `uUnitesParMetre`. Les deux
+// diffèrent de 0,11 % — invisible, et faux.
+const TOUR_SPHERE_M = 2 * Math.PI * EARTH_RADIUS_M
+// unités de scène par mètre de SOL — l'échelle HORIZONTALE, celle que
+// l'exagération ne touche PAS (elle n'étire que le relief).
+const UNITES_PAR_METRE_SOL = R_GLOBE / EARTH_RADIUS_M
+
 const VERT = /* glsl */ `
+// ⚠️ INJECTE, PAS RECOPIE — Tache P10. Le repere de sol est la DERIVEE de
+// latLonToSphere ; son jumeau JS (repereSolSphere) est rejoue sous node contre
+// latLonToSphere elle-meme dans test/crop-eclairage.test.js.
+${GLSL_REPERE_SOL}
 varying vec2 vUv;
 varying vec3 vNormalW;
 varying vec2 vLatLon;
@@ -749,26 +775,43 @@ varying vec2 vLatLon;
 // ⚠️ ET C'EST UN varying, PAS UN ATTRIBUT : aucun octet de geometrie en plus,
 // contrairement a la cible de morphing chiffree a +23 % par l'etude.
 varying float vProfCam;
-// LA POSITION EN ESPACE DE VUE — Tache P9, la normale par fragment.
+// LE REPERE DE SOL EN ESPACE MONDE — Tache P10, la normale par fragment.
 //
-// ⚠️ EN ESPACE DE VUE, ET C'EST LA MEME RAISON QUE vProfCam JUSTE AU-DESSUS :
-// la normale fine a besoin de dFdx(P) et dFdy(P), c'est-a-dire de la TANGENTE
-// d'ecran de la surface. Une coordonnee MONDE de magnitude 100 a un ulp
-// float32 de 0,38 m quand cette tangente vaut quelques dizaines de metres par
-// pixel : la derivee serait bruitee de plusieurs pour cent. mv.xyz est relatif
-// a la CAMERA — quelques unites — et sa derivee est nette.
+// ⛔ P9 PASSAIT LA POSITION EN ESPACE DE VUE (vVue) POUR EN PRENDRE dFdx ET
+// dFdy. C'est cette derivee d'ecran qui rendait la normale sensible a la PARITE
+// des quads : 10,872 octets de residu pour UN pixel de camera contre 0,030 au
+// socle (notation-03 §4). Elle est partie, et vVue avec elle.
 //
-// ⚠️ ET C'EST UN varying DE PLUS, PAS UN ATTRIBUT : aucun octet de geometrie
-// en plus, et mv est deja calcule ci-dessous pour vProfCam et gl_Position.
-varying vec3 vVue;
+// ⚠️ ICI, RIEN N'EST UNE DERIVEE. latlon est un ATTRIBUT — la latitude et la
+// longitude EXACTES du sommet, deja la pour le graticule et pour la decoupe —,
+// donc le repere est une fonction de la POSITION. Un decalage entier de camera
+// ne peut plus le changer.
+//
+// ⚠️ ET LA PRECISION N'EST PLUS UN SUJET : ces vecteurs sont UNITAIRES. La
+// raison qui obligeait P9 a l'espace de vue (l'ulp float32 a magnitude 100 vaut
+// 0,486 m) ne s'applique pas a un vecteur de longueur 1.
+//
+// ⚠️ DEUX VARYINGS ET PAS TROIS : le triedre est DIRECT, donc le fragment
+// retrouve le nord par cross(haut, est). Un varying de vec3 coute plus cher
+// qu'un produit vectoriel par fragment.
+varying vec3 vEstW;
+varying vec3 vHautW;
 attribute vec2 latlon;
 void main() {
   vUv = uv;
   vLatLon = latlon;
   vNormalW = normalize(mat3(modelMatrix) * normal);
+  // ⚠️ mat3(modelMatrix) ET PAS LE REPERE NU : le groupe du globe pourrait
+  // porter une rotation un jour, et vNormalW, uSunDir et uHemiHaut vivent tous
+  // dans l'espace MONDE. Poser le repere dans l'espace du MODELE ferait glisser
+  // la lumiere le jour ou quelqu'un tourne le groupe, sans qu'aucune erreur ne
+  // soit levee.
+  vec3 estL, nordL, hautL;
+  repereSolSphere(latlon.x, latlon.y, estL, nordL, hautL);
+  vEstW = mat3(modelMatrix) * estL;
+  vHautW = mat3(modelMatrix) * hautL;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vProfCam = -mv.z;
-  vVue = mv.xyz;
   gl_Position = projectionMatrix * mv;
 }
 `
@@ -789,10 +832,18 @@ varying vec2 vLatLon;
 // que celle du socle (10,250 contre 8,723 en energie, lumiere coupee des deux
 // cotes), et c'est son OMBRAGE qui manque en entier — parce que ses normales
 // viennent d'une grille de 5 625 sommets sur le bloc contre 594 434 au socle.
-varying vec3 vVue;
+varying vec3 vEstW;
+varying vec3 vHautW;
 uniform float uNormaleFineOn;
 // unites de scene par METRE de relief : (R_GLOBE / EARTH_RADIUS_M) x exageration
 uniform float uUnitesParMetre;
+// ⚠️ LA FRACTION DU MONDE MERCATOR QUE COUVRE UNE UNITE D'UV : 1 / 2^z, DONC
+// PROPRE A LA TUILE, comme uTex et uTilePx. Elle donne les metres de sol par
+// unite d'uv (le tour de la sphere x cos(latitude) x elle), c'est-a-dire la
+// MONNAIE qui convertit une denivelee en metres en une PENTE. La mettre dans
+// this.uniforms, partage, ferait juger toutes les tuiles sur le niveau de la
+// derniere chargee -- exactement le defaut que uTilePx documente juste a cote.
+uniform float uUvParMonde;
 uniform sampler2D uTex;
 uniform sampler2D uRamp;
 uniform vec3 uSunDir;
@@ -1123,11 +1174,60 @@ ${GLSL_NATUREL}
 // dans node_modules/three plutot que de croire ce commentaire.
 ${GLSL_ECLAIRAGE}
 
-// ⚠️ INJECTE, PAS RECOPIE — Tache P9. La loi de Mikkelsen, celle que porte
-// three (bumpmap_pars_fragment.glsl.js), moins la normalisation de sigma que
-// son propre commentaire dit etre une convention d'artiste. La derivation et
-// l'ecart sont ecrits dans src/monde/eclairage-crop.js, §6 de l'en-tete.
+// ⚠️ INJECTE, PAS RECOPIE — Tache P10. Le champ de hauteur pose sur le plan
+// tangent : N = normalize(haut - gEst.est - gNord.nord). Elle REMPLACE la loi
+// de Mikkelsen de P9, dont les derivees d'ecran rendaient la normale sensible a
+// la parite des quads. La derivation, la mesure et le pourquoi sont ecrits dans
+// src/monde/eclairage-crop.js, §6 de l'en-tete.
 ${GLSL_NORMALE_FINE}
+
+// ══════ LA HAUTEUR DU BLOC, ECRITE UNE FOIS — Tache P10 ════════════════════
+//
+// ⚠️ DEUX APPELANTS, UNE SEULE ECRITURE. main() la compose sur un decodage
+// ANTIALIASE (cinq taps) ; le gradient de la normale fine la rappelle QUATRE
+// fois, sur un decodage simple, aux voisins en espace UV. Recopier la loi du
+// fond marin ou celle du grain dans le gradient aurait fait deux ecritures qui
+// divergent -- la cicatrice que terrain.js documente deja.
+//
+// ⛔ ET IL EN FAUT DEUX, PAS UNE, PARCE QUE L'ORDRE DU DEPOT PASSE ENTRE LES
+// DEUX : main() lit sousEau APRES le fond marin mais AVANT le grain. Les fondre
+// en une seule fonction deplacerait ce test d'un cran, et la rampe changerait de
+// branche sur les fragments ou le grain fait passer h de negatif a positif.
+//
+// ⚠️ ET LA BORNE DU CHAMP N'EST PAS DECORATIVE : au-dela de uFondPortee
+// demi-cotes, une texture en ClampToEdge prolongerait sa derniere ligne sur
+// toute la planete estompee sans qu'aucune erreur ne soit levee.
+// ⚠️ LES DEUX PARAMETRES S'APPELLENT qCrop ET h, COMME AU POINT D'APPEL, ET
+// C'EST DELIBERE : test/fond-crop.test.js EXTRAIT ce bloc de la source pour
+// l'EXECUTER contre altitudeSonde. Les renommer ne casserait pas le nuanceur —
+// il casserait la seule chose qui LIT ce nuanceur.
+float hauteurFond(vec2 qCrop, float h) {
+  if (uFondOn > 0.5 && uCropOn > 0.5
+      && max(abs(qCrop.x), abs(qCrop.y)) <= uFondPortee && h <= 0.0) {
+    h = min(texture2D(uFondChamp, qCrop / (2.0 * uFondPortee) + 0.5).r * uFondMetres, 0.0);
+  }
+  return h;
+}
+// ⚠️ INDEXE SUR LE CROP, JAMAIS SUR vUv NI SUR L'ECRAN, et il ne mord que sur
+// la TERRE (h > 0) comme le landFactor du socle : les raisons sont ecrites au
+// point d'appel, dans main().
+float hauteurGrain(vec2 qCrop, float h) {
+  if (uGrainForceM > 0.0 && h > 0.0) {
+    vec2 gp = qCrop * uGrainEchelle;
+    float g1 = mnNoise(gp);
+    float g2 = mnNoise(gp * 2.17 + vec2(19.3, -7.1));
+    h += uGrainForceM * ((g1 - 0.5) * 2.0 + (g2 - 0.5) * 0.7);
+  }
+  return h;
+}
+// La MEME hauteur qu'au point courant, prise ailleurs. ⚠️ decodeMeters ET PAS
+// decodeMetersAA : le lissage de l'AA vaut cinq taps, donc VINGT pour les
+// quatre lectures du gradient ; et il est deja porte par le PAS, qui couvre une
+// empreinte de pixel entiere.
+float hauteurEchant(vec2 uv, vec2 q) {
+  float hh = hauteurFond(q, decodeMeters(uv));
+  return uHabOn > 0.5 ? hauteurGrain(q, hh) : hh;
+}
 
 // ══════ LA COUCHE APPARENCE — Tache P3, et le gabarit d'ouverture l'ALLUME ══
 //
@@ -1304,7 +1404,9 @@ void main() {
     if (couvertureCrop <= 0.0) discard;
   }
 
-  float h = decodeMetersAA(vUv);
+  // ⚠️ L'APPEL EST hauteurFond, PAS LE CORPS : la MEME loi sert au gradient de
+  // la normale fine, quatre fragments plus bas (Tache P10).
+  float h = hauteurFond(qCrop, decodeMetersAA(vUv));
 
   // ══════ LE FOND DU CROP — Tache J bis ══════════════════════════════════════
   //
@@ -1321,12 +1423,7 @@ void main() {
   // demi-cotes ; au-dela, une texture en ClampToEdge prolongerait sa derniere
   // ligne sur toute la planete estompee, sans qu'aucune erreur ne soit levee.
   // C'est le meme garde que echantillonnerFond, ecrit deux fois parce que le
-  // GPU ne sait pas rendre null.
-  if (uFondOn > 0.5 && uCropOn > 0.5
-      && max(abs(qCrop.x), abs(qCrop.y)) <= uFondPortee && h <= 0.0) {
-    float hFond = texture2D(uFondChamp, qCrop / (2.0 * uFondPortee) + 0.5).r * uFondMetres;
-    h = min(hFond, 0.0);
-  }
+  // GPU ne sait pas rendre null. Le corps est hauteurFond, ci-dessus.
 
   // ══════ L'HABILLAGE, POSTES ③ ET ② — Tache C ═══════════════════════════════
   //
@@ -1362,12 +1459,7 @@ void main() {
     // ⚠️ ET IL NE MORD QUE SUR LA TERRE (h > 0), comme le landFactor du socle :
     // sans cela le fond marin se couvrirait d'une rugosite que la bathymetrie ne
     // porte pas, et les courbes bathymetriques se mettraient a onduler.
-    if (uGrainForceM > 0.0 && h > 0.0) {
-      vec2 gp = qCrop * uGrainEchelle;
-      float g1 = mnNoise(gp);
-      float g2 = mnNoise(gp * 2.17 + vec2(19.3, -7.1));
-      h += uGrainForceM * ((g1 - 0.5) * 2.0 + (g2 - 0.5) * 0.7);
-    }
+    h = hauteurGrain(qCrop, h);
     // ② LE MASQUE DE COTE. La lecture tombe au MEME TEXEL que celle du socle —
     // la demonstration est en tete de src/monde/habillage-crop.js, et
     // test/crop-habillage.test.js la rejoue contre latLonToWorld du depot.
@@ -1580,16 +1672,59 @@ void main() {
   //
   // ⚠️ ET LA BASE EST LA SPHERE NUE, JAMAIS vNormalW : ce dernier PORTE deja la
   // pente de la grille, et le perturber par le gradient COMPLET de h compterait
-  // deux fois la composante grossiere. Le globe est « une sphere de rayon
-  // R_GLOBE = 100 centree a l'origine » (monde/frontiere-rendu.js), donc le
-  // centre de la planete en espace de vue est viewMatrix x (0, 0, 0, 1).
+  // deux fois la composante grossiere. vHautW EST cette sphere nue, posee par le
+  // nuanceur de sommets depuis l'attribut latlon.
+  //
+  // ⛔ ET LE GRADIENT EST PRIS EN ESPACE TEXTURE, PLUS EN ESPACE ECRAN — Tache
+  // P10. La loi de P9 lisait dFdx(h) / dFdy(h) : une difference finie sur le
+  // VOISIN D'ECRAN, donc sur un voisin qui CHANGE avec la parite du quad 2 x 2.
+  // Mesure du noteur (notation-03 §4, .banc/vues-notation-03/N3-mouvement) : un
+  // decalage de camera d'UN pixel laissait 10,872 octets de residu contre 0,030
+  // au socle, et 38,49 % des pixels de surface bougeaient de plus de 8 octets.
+  // Aux decalages PAIRS, qui conservent la parite, le residu retombait a 0,800.
   if (uNormaleFineOn > 0.5) {
-    vec3 nSphere = normalize(vVue - vec3(viewMatrix[3]));
-    nMonde = nMondeDepuisVue(
-      mat3(viewMatrix),
-      normaleFineCrop(dFdx(vVue), dFdy(vVue), nSphere,
-                      dFdx(h) * uUnitesParMetre, dFdy(h) * uUnitesParMetre)
-    );
+    // ⚠️ RE-ORTHONORMALISE : l'interpolation lineaire de deux vecteurs unitaires
+    // n'en rend pas un unitaire, et sur une tuile de bas niveau (z2 couvre 90
+    // degres) l'ecart n'est pas negligeable.
+    vec3 haut = normalize(vHautW);
+    vec3 est = vEstW - haut * dot(haut, vEstW);
+    est = normalize(est);
+    vec3 nord = cross(haut, est);
+
+    // ⚠️ LA MONNAIE, ET C'EST LE POINT OU CE CHANTIER A DEJA PAYE QUATRE FOIS.
+    // Une unite d'uv couvre 1 / 2^z de tour de Mercator, donc uUvParMonde x le
+    // tour de la sphere x cos(latitude) METRES DE SOL. Mercator est conforme :
+    // la meme longueur vaut pour u et pour v.
+    float cosLat = max(cos(radians(vLatLon.x)), 1e-4);
+    float metresParUv = ${TOUR_SPHERE_M} * uUvParMonde * cosLat;
+    float uniteParUv = metresParUv * ${UNITES_PAR_METRE_SOL};
+
+    // ⚠️ LE PAS NE VIENT D'AUCUNE DERIVEE D'ECRAN, SINON LA PARITE RENTRERAIT
+    // PAR LA FENETRE. mppEcran = vProfCam x uMppFacteur est la grandeur de la
+    // Tache K : les metres de sol par pixel, fonction de la seule DISTANCE.
+    // Sans elle (uMppFacteur = 0, la production), le pas retombe au texel.
+    float pasEmpreinte = uMppFacteur > 0.0
+      ? 0.5 * vProfCam * uMppFacteur / metresParUv
+      : 0.0;
+    float pas = max(1.0 / uTilePx, pasEmpreinte);
+
+    // ⚠️ ET qCrop SUIT L'UV, PARCE QUE hauteurEchant LIT LES DEUX. uv.x va vers
+    // l'EST (mercator x croissant) ; uv.y va vers le NORD, donc vers un mercator
+    // y DECROISSANT — c'est le « 1 - v » de _buildMesh. Le signe moins est ce
+    // retournement, et lui seul.
+    float qParUv = uUvParMonde / max(uCropDemi, 1e-9);
+    vec2 dqU = vec2(qParUv * pas, 0.0);
+    vec2 dqV = vec2(0.0, -qParUv * pas);
+    float dhU = hauteurEchant(vUv + vec2(pas, 0.0), qCrop + dqU)
+              - hauteurEchant(vUv - vec2(pas, 0.0), qCrop - dqU);
+    float dhV = hauteurEchant(vUv + vec2(0.0, pas), qCrop + dqV)
+              - hauteurEchant(vUv - vec2(0.0, pas), qCrop - dqV);
+
+    // la pente de sol : une denivelee en unites de scene par une distance en
+    // unites de scene. Le 2 x pas du denominateur est celui de la difference
+    // CENTREE, et uUnitesParMetre porte l'exageration -- pas uniteParUv.
+    float k = uUnitesParMetre / (2.0 * pas * uniteParUv);
+    nMonde = normaleParGradientSol(dhU * k, dhV * k, est, nord, haut);
   }
   float nduCrop = dot(nMonde, uHemiHaut);
   float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
@@ -2557,7 +2692,7 @@ export class Globe {
     // peuvent venir de deux sources de tailles différentes (voir `planTuile`).
     // Le mettre dans `this.uniforms`, partagé, aurait fait juger la minification
     // de toutes les tuiles sur la taille de la dernière chargée.
-    this._materialFor = (texture, tilePx = 256) =>
+    this._materialFor = (texture, tilePx = 256, uvParMonde = 1) =>
       new THREE.ShaderMaterial({
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -2565,6 +2700,13 @@ export class Globe {
           ...this.uniforms,
           uTex: { value: texture },
           uTilePx: { value: tilePx },
+          // ⚠️ **PROPRE À LA TUILE POUR LA MÊME RAISON QUE `uTilePx`** : c'est
+          // `1 / 2^z`, la fraction du monde Mercator qu'une unité d'`uv` couvre.
+          // Partagée, elle ferait juger la pente de toutes les tuiles sur le
+          // niveau de la dernière chargée. **Le défaut `1` est le niveau ZÉRO** :
+          // une tuile sans niveau déclaré rend une pente 4 096 fois trop faible,
+          // donc un bloc PLAT — visible, pas silencieux.
+          uUvParMonde: { value: uvParMonde },
         },
         // LE MÉLANGE SUIT LE CROP — Tâche B, Étape 5. ⚠️ **PAS TOUJOURS VRAI, ET
         // C'EST LA PRODUCTION QU'ON PROTÈGE** : `transparent` fait passer l'objet
@@ -5478,7 +5620,10 @@ export class Globe {
     // sa position courante, pour que `_retaillerJupe` soit idempotente.
     geo.userData.jupe = { nV, bord: border, rabattement: skirtDrop }
 
-    const mesh = new THREE.Mesh(geo, this._materialFor(t.texture, t.size))
+    // ⚠️ **`2 ** -t.z` ET PAS `1 / (1 << t.z)`** : `t.z` monte à 22 dans les vues
+    // de surface, et un décalage d'entier 32 bits y serait encore juste — mais
+    // il déborderait à 31, sans un mot. La puissance flottante n'a pas de bord.
+    const mesh = new THREE.Mesh(geo, this._materialFor(t.texture, t.size, 2 ** -t.z))
     mesh.position.copy(origine) // la position mondiale vit ICI, plus dans les sommets
     mesh.visible = false
     mesh.name = t.key

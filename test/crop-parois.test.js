@@ -474,7 +474,13 @@ test('les couleurs de sommet portent l occlusion, et elles sont SOMBRES au pied'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
 const DEBUT_CROP = GLOBE_SRC.indexOf('if (uCropOn > 0.5) {')
-const FIN_CROP = GLOBE_SRC.indexOf('float h = decodeMetersAA', DEBUT_CROP)
+// ⚠️ **LA BORNE BASSE EST LA PREMIÈRE LIGNE D'APRÈS LE BLOC, ET ELLE A BOUGÉ
+// À LA TÂCHE P10** : `float h = decodeMetersAA(vUv);` est devenu
+// `float h = hauteurFond(qCrop, decodeMetersAA(vUv));`, parce que la loi du fond
+// marin est désormais une FONCTION — la normale par fragment la rappelle quatre
+// fois. Si cette ligne disparaît à son tour, `FIN_CROP` vaut −1 et la première
+// assertion du test le dit.
+const FIN_CROP = GLOBE_SRC.indexOf('float h = hauteurFond(', DEBUT_CROP)
 const BLOC = GLOBE_SRC.slice(DEBUT_CROP, FIN_CROP)
 
 test('le bloc de découpe est BORNÉ — sans quoi tout le reste du nuanceur y entre', () => {

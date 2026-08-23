@@ -258,11 +258,42 @@ export function eclairerCrop({ mapCol, base, teinte, hn, ndu, ndl, soleil, ciel,
 //     `(cos az cos el, sin el, sin az cos el)` — sa composante `z` est donc
 //     dirigée vers le SUD, et sa composante nord vaut `−sin az cos el`.
 
-/** La verticale locale du crop, dans le repère du globe. */
-export function hautLocal(latDeg, lonDeg) {
+/**
+ * Le repère de sol en un point de la sphère : est, nord, haut.
+ *
+ * ⚠️ **UNE SEULE ÉCRITURE DES TROIS VECTEURS, ET C'EST LA TÂCHE P10 QUI L'A
+ * IMPOSÉE.** Ils étaient écrits DEUX fois dans ce fichier — `hautLocal` et le
+ * corps de `directionSoleilLocale` — et la normale par fragment en aurait
+ * demandé une troisième, en GLSL. « Deux écritures jumelles finiraient par
+ * diverger » (`terrain.js`) : les deux appellent désormais celle-ci, et le
+ * jumeau GLSL est `GLSL_REPERE_SOL`, INJECTÉ dans le nuanceur de sommets.
+ *
+ * ⚡ **ET LE TRIÈDRE EST DIRECT** : `est × nord = haut`, donc
+ * `haut × est = nord` — c'est ce qui permet au nuanceur de fragment de
+ * n'interpoler que DEUX varyings et de retrouver le troisième par un produit
+ * vectoriel.
+ *
+ * @param {number} latDeg latitude en degrés
+ * @param {number} lonDeg longitude en degrés
+ * @returns {{est:number[], nord:number[], haut:number[]}}
+ */
+export function repereSolSphere(latDeg, lonDeg) {
   const la = latDeg * D2R
   const lo = lonDeg * D2R
-  return [Math.cos(la) * Math.sin(lo), Math.sin(la), Math.cos(la) * Math.cos(lo)]
+  const cla = Math.cos(la)
+  const sla = Math.sin(la)
+  const clo = Math.cos(lo)
+  const slo = Math.sin(lo)
+  return {
+    est: [clo, 0, -slo],
+    nord: [-sla * slo, cla, -sla * clo],
+    haut: [cla * slo, sla, cla * clo],
+  }
+}
+
+/** La verticale locale du crop, dans le repère du globe. */
+export function hautLocal(latDeg, lonDeg) {
+  return repereSolSphere(latDeg, lonDeg).haut
 }
 
 /**
@@ -280,14 +311,10 @@ export function hautLocal(latDeg, lonDeg) {
 export function directionSoleilLocale(azDeg, elDeg, latDeg, lonDeg) {
   const az = azDeg * D2R
   const el = elDeg * D2R
-  const la = latDeg * D2R
-  const lo = lonDeg * D2R
   const cEst = Math.cos(az) * Math.cos(el)
   const cHaut = Math.sin(el)
   const cNord = -Math.sin(az) * Math.cos(el)
-  const est = [Math.cos(lo), 0, -Math.sin(lo)]
-  const haut = [Math.cos(la) * Math.sin(lo), Math.sin(la), Math.cos(la) * Math.cos(lo)]
-  const nord = [-Math.sin(la) * Math.sin(lo), Math.cos(la), -Math.sin(la) * Math.cos(lo)]
+  const { est, nord, haut } = repereSolSphere(latDeg, lonDeg)
   const v = [
     est[0] * cEst + haut[0] * cHaut + nord[0] * cNord,
     est[1] * cEst + haut[1] * cHaut + nord[1] * cNord,
@@ -478,130 +505,171 @@ vec3 eclairerCrop(vec3 mapCol, vec3 base, float teinte, float hn, float ndu, flo
 // lumière ne le voyait pas.** D'où cette section : reconstruire la normale AU
 // FRAGMENT depuis la hauteur que le fragment tient déjà.
 //
-// ══════════ LA LOI EST CELLE DE MIKKELSEN, ET `three` LA PORTE ══════════════
+// ══════════ ⛔ ET CETTE LOI-LÀ A ÉTÉ RETIRÉE — Tâche P10 ════════════════════
 //
-// `three/src/renderers/shaders/ShaderChunk/bumpmap_pars_fragment.glsl.js`
-// (`perturbNormalArb`, d'après *Bump Mapping Unparametrized Surfaces on the
-// GPU*, Morten S. Mikkelsen). La dérivation, écrite ici parce qu'elle justifie
-// le seul point où l'on s'écarte de `three` :
+// **P9 a livré la loi de Mikkelsen** (`three`,
+// `bumpmap_pars_fragment.glsl.js`), qui reconstruit la normale depuis les
+// **dérivées d'écran** `dFdx`/`dFdy` de la hauteur. Elle a fermé le poste au
+// repos — **68,3 % → 98,02 %** de l'énergie de détail du socle — et **P9 a
+// déclaré n'avoir rien mesuré en mouvement** (sa réserve n° 4).
 //
-//     S(x, y) = P(x, y) + N · h(x, y)
-//     dS/dx = sx + N·hx        dS/dy = sy + N·hy
-//     n = dS/dx × dS/dy = sx×sy − hx·R1 − hy·R2
-//         avec R1 = sy × N, R2 = N × sx, et sx×sy = det · N,
-//         det = sx · R1
+// ⛔ **LE NOTEUR L'A MESURÉ, ET LE PRIX ÉTAIT LOURD** (`notation-03.md` §4 ;
+// données brutes `.banc/vues-notation-03/N3-mouvement-N03.json`). Le protocole
+// n'a besoin ni d'horloge ni de parallaxe : on décale la caméra d'un nombre
+// **entier de pixels** (`setViewOffset`), donc l'image rendue DOIT être l'image
+// de départ translatée d'autant. Ce qui reste après recalage est le
+// scintillement. Résidu moyen, en octets de luminance, cadrage intérieur :
 //
-// ⛔ **ET VOICI L'ÉCART, ASSUMÉ ET NÉCESSAIRE : `three` NORMALISE `sx` ET `sy`,
-// PAS NOUS.** Son commentaire le dit — *« normalize is done to ensure that the
-// bump map looks the same regardless of the texture's scale »* : c'est une
-// convention d'ARTISTE, qui rend la pente proportionnelle au dénivelé PAR PIXEL
-// D'ÉCRAN au lieu du dénivelé PAR MÈTRE DE SOL. Sous elle, la même montagne
-// s'aplatirait en s'éloignant et se creuserait en s'approchant. Le crop veut la
-// normale GÉOMÉTRIQUE, celle que `_buildMesh` calcule déjà par différences
-// centrées sur la surface déplacée — donc `sigma` non normalisé, et `h` dans la
-// même unité de longueur que `P`.
+// | décalage | socle | crop, normale fine ON | crop OFF |
+// |---|---|---|---|
+// | **1 px** | **0,030** | ⛔ **10,872** | 0,863 |
+// | 2 px | 0,001 | **0,800** | 0,834 |
+// | **3 px** | **0,030** | ⛔ **10,856** | 0,865 |
 //
-// ⚠️ **LE REPÈRE EST CELUI DE LA VUE, ET LA PRÉCISION L'EXIGE.** `VERT` explique
-// déjà pourquoi les sommets sont en RTC : *« ne pas payer l'ulp float32 à
-// magnitude 100 (0,486 m) »*. Une coordonnée MONDE de magnitude 100 a un ulp de
-// 0,38 m, quand `dFdx(P)` sur un pixel vaut ici quelques dizaines de mètres :
-// la dérivée serait bruitée de plusieurs pour cent. En espace de VUE, `P` est
-// relatif à la caméra — quelques unités — et la dérivée est nette.
+// ⚡ **ÉNORME AUX DÉCALAGES IMPAIRS, NUL AUX PAIRS : LA SIGNATURE NOMME LA
+// CAUSE.** Un décalage PAIR conserve la parité des quads 2 × 2 sur lesquels le
+// GPU évalue `dFdx`/`dFdy` ; un décalage IMPAIR la retourne, et la différence
+// finie change de voisin. **38,49 % des pixels de surface bougeaient de plus de
+// 8 octets pour UN SEUL pixel de caméra — 360 fois le socle.**
 //
-// ⚠️ **LA NORMALE DE BASE EST CELLE DE LA SPHÈRE NUE, JAMAIS `vNormalW`.**
-// `vNormalW` PORTE DÉJÀ la pente du maillage : la perturber par le gradient
-// COMPLET de `h` compterait deux fois la composante grossière. La sphère est
-// centrée à l'origine du monde — `frontiere-rendu.js` l'écrit (*« une sphère de
-// rayon `R_GLOBE` = 100 centrée à l'origine »*) et le relevé le confirme
-// (`globe.group.matrixWorld` a une translation de **(0, 0, 0)**,
-// `.banc/P9/S6-normale-P9.json`) —, donc la normale de sphère en espace de vue
-// vaut `normalize(pVue − viewMatrix · (0, 0, 0, 1))`.
+// ⚠️ **CE DÉFAUT NE SE RÈGLE PAS, IL CHANGE DE LOI.** Baisser le gain ne ferait
+// que réduire l'amplitude d'un défaut STRUCTUREL : tant que le gradient est une
+// différence finie prise sur le voisin d'ÉCRAN, il dépend de QUEL voisin, donc
+// de la parité. **La sortie est de prendre le gradient là où la donnée vit :
+// dans la texture de hauteur.**
 //
-// ⚡ **CE QUE ÇA REND À L'ÉCRAN, MESURÉ AVANT D'ÊTRE ÉCRIT** (`.banc/P9/S6`,
-// rustine posée dans la page, témoin de compilation à **0 canal** éteinte) :
-// énergie de détail **10,966 → 15,733** contre **16,069** au socle, soit
-// **68,2 % → 97,9 %** ; et la part de la lumière dans le modelé du crop passe de
-// **6,6 % à 20,0 %**.
+// ══════════ LA LOI LIVRÉE — LE GRADIENT EN ESPACE TEXTURE ═══════════════════
+//
+// La surface du crop est un **champ de hauteur posé sur la sphère** : en un
+// point, le sol a un repère orthonormé (est, nord, haut) et le relief monte le
+// long de `haut`. La normale d'un tel champ est la définition même, sans une
+// ligne de Mikkelsen :
+//
+//     N = normalize( haut − gEst · est − gNord · nord )
+//
+// où `gEst` et `gNord` sont les pentes **au sol**, c'est-à-dire les dérivées de
+// la hauteur par unité de DISTANCE, les deux dans la même unité de longueur.
+// Le sol monte vers l'est ⇒ la normale se penche vers l'ouest : le signe est
+// lisible à l'œil, ce que la forme de Mikkelsen ne permettait pas.
+//
+// ⚡ **ET C'EST LA MÊME LOI, PAS UNE APPROXIMATION.** La formule de Mikkelsen
+// est invariante par changement de paramétrage — `test/crop-eclairage.test.js`
+// ⑧b l'assertait déjà pour l'échelle. Nourrie du paramétrage (est, nord), qui
+// est ORTHONORMÉ, elle donne `R1 = nord × haut = est`, `R2 = haut × est = nord`
+// et `det = est · est = 1` : elle **SE RÉDUIT** à l'expression ci-dessus.
+// ⚡ **Le test ⑧a le rejoue terme à terme contre l'écriture de P9**, qui survit
+// dans le seul fichier de test, comme oracle.
+//
+// ⚠️ **CE QU'ON GAGNE EN INVARIANCE, ET C'EST TOUT LE POINT.** Les trois
+// vecteurs du repère viennent de `latlon` — un ATTRIBUT de sommet, donc une
+// fonction exacte de la position, jamais du voisin d'écran. Les deux pentes
+// viennent de quatre `texture2D` aux voisins en espace UV, à un pas qui ne
+// dépend que de `vProfCam` (un varying) et d'uniformes. ⚡ **Aucune dérivée
+// d'écran n'entre plus dans la normale : un décalage entier de caméra rend la
+// même image, translatée.**
+//
+// ⚠️ **ET LA PRÉCISION N'EST PLUS UN SUJET.** P9 devait travailler en espace de
+// VUE parce que `dFdx(P)` sur une coordonnée monde de magnitude 100 se noyait
+// dans l'ulp float32 (0,38 m). Ici les trois vecteurs sont **unitaires** et la
+// hauteur est lue en MÈTRES : il n'y a plus de grande magnitude à différencier,
+// et le varying `vVue` de P9 disparaît avec la loi qu'il servait.
+//
+// ══════════ LE PAS DES QUATRE LECTURES, ET POURQUOI IL N'EST PAS UN TEXEL ═══
+//
+// ⚠️ **UN PAS D'UN TEXEL EST LA RÉPONSE ÉVIDENTE ET ELLE EST INCOMPLÈTE.** La
+// texture de hauteur d'une tuile fait 256 (ou 512) texels ; au cadrage de la
+// notation, le bloc en montre **plus d'un par pixel d'écran** — la texture est
+// MINIFIÉE. Une différence centrée à un texel échantillonnerait donc plus fin
+// que ce que l'écran peut porter, et nourrirait le crénelage que la notation
+// reproche DÉJÀ au crop au repos (`notation-03.md` §3 ①).
+//
+// ➡️ **Le pas est donc le plus grand des deux : un texel, ou la demi-empreinte
+// du pixel** — de sorte que la différence centrée couvre une empreinte
+// complète, exactement la bande que `dFdx(h)` couvrait. C'est ce qui laisse
+// l'ÉNERGIE de relief là où P9 l'a mise tout en retirant la parité.
+//
+// ⚡ **ET L'EMPREINTE SE LIT SANS UNE SEULE DÉRIVÉE D'ÉCRAN** : la Tâche K a
+// posé `uMppFacteur`, les mètres de sol par pixel PAR UNITÉ DE DISTANCE CAMÉRA,
+// et `vProfCam` porte la distance. `mppEcran = vProfCam × uMppFacteur` est donc
+// une fonction de la POSITION — c'est justement pourquoi la Tâche K l'a écrite
+// (« ni du niveau de la tuile, ni de l'inclinaison de la caméra »). ⚠️ **Et
+// quand elle n'est pas posée (`uMppFacteur = 0`, la production), le pas retombe
+// au texel : jamais sur `fwidth`, qui ramènerait la parité par la fenêtre.**
 
 /**
- * La normale d'une surface déplacée en hauteur, au point où l'on est.
+ * La normale d'un champ de hauteur posé sur un plan tangent.
  *
  * ⚠️ **VECTEURS EN TABLEAUX DE TROIS, ET PAS DE `three`** : ce module est PUR
  * (voir l'en-tête), et `test/crop-eclairage.test.js` le rejoue sous node contre
- * un ORACLE INDÉPENDANT — la surface déplacée y est construite point par point
- * et sa normale prise par un vrai produit vectoriel.
+ * un ORACLE INDÉPENDANT — la surface est construite point par point et sa
+ * normale prise par un vrai produit vectoriel — PUIS contre la loi de Mikkelsen
+ * de P9, qui survit dans le test comme second oracle.
  *
- * ⚡ **CE QU'ELLE DÉCRIT EXACTEMENT, ET IL FAUT LE DIRE : LE PLAN DE `n`,
- * DÉPLACÉ DE `h`.** La formule ne rend PAS la normale de la surface engendrée
- * par `sx` et `sy` : elle remplace `sx × sy` par `det · n`, c'est-à-dire qu'elle
- * perturbe **la normale qu'on lui DONNE**. C'est précisément ce qu'on veut ici —
- * `n` est la normale de la SPHÈRE NUE, et `h` porte tout le relief ; les
- * tangentes ne servent qu'à mesurer la distance au sol par pixel. Perturber
- * `vNormalW` à la place compterait deux fois la pente du maillage.
+ * ⚠️ **LES DEUX PENTES SONT SANS DIMENSION** : `gEst` est la montée de la
+ * surface par unité de distance vers l'est, dans la MÊME unité de longueur des
+ * deux côtés. C'est l'appelant qui convertit — et c'est là que vit la faute de
+ * MONNAIE que ce chantier a payée quatre fois.
  *
- * ⛔ **ET UNE PROJECTION DES TANGENTES SUR LE PLAN DE `n` NE CHANGERAIT RIEN —
- * C'EST UNE SURVIVANTE DE MUTATION QUI L'A PROUVÉ, ET LA VERSION D'AVANT DE CE
- * COMMENTAIRE ÉTAIT FAUSSE.** L'algèbre : `(sy − n(sy·n)) × n = sy × n` (le
- * terme retiré est colinéaire à `n`), donc `R1` et `R2` sont inchangés ; et
- * `det = (sx − n(sx·n)) · R1 = sx · R1` puisque `R1 ⟂ n`. **Trois lignes de code
- * mort, retirées** — le dixième code mort de ce chantier trouvé par une
- * survivante. L'invariance est désormais une ASSERTION (⑧a), pas une croyance.
+ * ⚠️ **LE CAS DÉGÉNÉRÉ REND `haut`**, jamais un vecteur nul : `normalize(0)`
+ * plus loin rendrait NaN, et un NaN dans une normale peint un trou noir.
  *
- * @param {number[]} sx la tangente d'écran en x, dans l'unité de `P`
- * @param {number[]} sy la tangente d'écran en y
- * @param {number[]} n la normale de la surface de BASE (normalisée)
- * @param {number} dhx la dérivée d'écran de `h` en x, dans la MÊME unité que `P`
- * @param {number} dhy la dérivée d'écran de `h` en y
+ * @param {number} gEst pente au sol vers l'est
+ * @param {number} gNord pente au sol vers le nord
+ * @param {number[]} est vecteur unitaire vers l'est
+ * @param {number[]} nord vecteur unitaire vers le nord
+ * @param {number[]} haut vecteur unitaire vers le haut (la sphère nue)
  * @returns {number[]} la normale perturbée, normalisée
  */
-export function normaleParDeplacement(sx, sy, n, dhx, dhy) {
-  const croix = (a, b) => [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ]
-  const point = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-  const r1 = croix(sy, n)
-  const r2 = croix(n, sx)
-  const det = point(sx, r1)
-  const s = det < 0 ? -1 : det > 0 ? 1 : 0
+export function normaleParGradientSol(gEst, gNord, est, nord, haut) {
   const v = [
-    Math.abs(det) * n[0] - s * (dhx * r1[0] + dhy * r2[0]),
-    Math.abs(det) * n[1] - s * (dhx * r1[1] + dhy * r2[1]),
-    Math.abs(det) * n[2] - s * (dhx * r1[2] + dhy * r2[2]),
+    haut[0] - gEst * est[0] - gNord * nord[0],
+    haut[1] - gEst * est[1] - gNord * nord[1],
+    haut[2] - gEst * est[2] - gNord * nord[2],
   ]
   const l = Math.hypot(v[0], v[1], v[2])
-  if (!(l > 0)) return [n[0], n[1], n[2]]
+  if (!(l > 0)) return [haut[0], haut[1], haut[2]]
   return [v[0] / l, v[1] / l, v[2] / l]
 }
 
 /**
- * Le texte GLSL de la même loi — INJECTÉ, jamais recopié.
+ * Le texte GLSL du repère de sol — INJECTÉ dans le nuanceur de SOMMETS.
  *
- * ⚠️ **`normaleFineCrop` REND SA NORMALE EN ESPACE DE VUE**, comme ses entrées.
- * L'appelant la ramène au monde par la transposée de `mat3(viewMatrix)` (une
- * rotation : sa transposée EST son inverse). GLSL ES 1.0 n'a pas `transpose()`,
- * d'où `nMondeDepuisVue`, écrit ici plutôt que sur place.
+ * ⚠️ **AU SOMMET ET PAS AU FRAGMENT, ET C'EST UNE ÉCONOMIE MESURABLE** :
+ * `latlon` est un ATTRIBUT, donc quatre `sin`/`cos` par SOMMET — 5 625 sur le
+ * bloc — au lieu de quatre par FRAGMENT, soit 144 631 au cadrage de la
+ * notation. Le fragment ré-orthonormalise ce qu'il reçoit : l'interpolation
+ * linéaire de deux vecteurs unitaires n'en rend pas un unitaire.
+ */
+export const GLSL_REPERE_SOL = /* glsl */ `
+// ═══ LE REPERE DE SOL — src/monde/eclairage-crop.js, Tache P10 ═════════════
+// La derivee de latLonToSphere (src/geo.js), pas une seconde convention :
+// P = R (cos la sin lo, sin la, cos la cos lo), est = dP/dlo, nord = dP/dla.
+// Triedre DIRECT : est x nord = haut, donc haut x est = nord.
+void repereSolSphere(float latDeg, float lonDeg, out vec3 est, out vec3 nord, out vec3 haut) {
+  float la = radians(latDeg);
+  float lo = radians(lonDeg);
+  float cla = cos(la), sla = sin(la), clo = cos(lo), slo = sin(lo);
+  est = vec3(clo, 0.0, -slo);
+  nord = vec3(-sla * slo, cla, -sla * clo);
+  haut = vec3(cla * slo, sla, cla * clo);
+}
+`
+
+/**
+ * Le texte GLSL de la loi — INJECTÉ dans le nuanceur de FRAGMENTS, jamais
+ * recopié. ⚠️ **ELLE REND SA NORMALE DANS L'ESPACE DE SES ENTRÉES**, c'est-à-
+ * dire en espace MONDE : plus de transposée à écrire, plus d'aller-retour, et
+ * `nMondeDepuisVue` s'en va avec la loi de P9 qu'elle servait.
  */
 export const GLSL_NORMALE_FINE = /* glsl */ `
-// ═══ LA NORMALE PAR FRAGMENT — src/monde/eclairage-crop.js, Tache P9 ═══════
-// Loi de Mikkelsen, celle que porte three (bumpmap_pars_fragment.glsl.js),
-// SANS la normalisation de sigma : elle rendrait la pente proportionnelle au
-// denivele par PIXEL au lieu du denivele par METRE. Voir l'en-tete du module.
-vec3 normaleFineCrop(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy) {
-  // ⚠️ ELLE PERTURBE LA NORMALE QU'ON LUI DONNE : n est la SPHERE NUE, les
-  // tangentes ne servent qu'a mesurer la distance au sol par pixel. Projeter
-  // sx et sy sur le plan de n ne changerait RIEN (voir le module).
-  vec3 r1 = cross(sy, n);
-  vec3 r2 = cross(n, sx);
-  float det = dot(sx, r1);
-  vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
-  vec3 v = abs(det) * n - grad;
+// ═══ LA NORMALE PAR FRAGMENT — src/monde/eclairage-crop.js, Tache P10 ══════
+// Le champ de hauteur pose sur le plan tangent, sans une ligne de Mikkelsen :
+// on retranche a la verticale les deux pentes DE SOL. Le sol monte vers l'est,
+// la normale se penche vers l'ouest. Les pentes sont SANS DIMENSION : c'est
+// l'appelant qui convertit, et c'est la que vit la faute de monnaie.
+vec3 normaleParGradientSol(float gEst, float gNord, vec3 est, vec3 nord, vec3 haut) {
+  vec3 v = haut - gEst * est - gNord * nord;
   float l = length(v);
-  return l > 0.0 ? v / l : n;
-}
-// La transposee d'une rotation EST son inverse : (V^T u)_i = dot(colonne_i, u).
-vec3 nMondeDepuisVue(mat3 V, vec3 u) {
-  return normalize(vec3(dot(V[0], u), dot(V[1], u), dot(V[2], u)));
+  return l > 0.0 ? v / l : haut;
 }
 `

@@ -50,11 +50,17 @@ import {
   environnementEffectif,
   GLSL_ECLAIRAGE,
   GLSL_OMBRE_PEINTURE,
-  // ⚠️ **La normale par fragment — Tache P9.**
-  normaleParDeplacement,
+  // ⚠️ **La normale par fragment — Tache P9, RÉÉCRITE PAR P10.**
+  repereSolSphere,
+  normaleParGradientSol,
+  GLSL_REPERE_SOL,
   GLSL_NORMALE_FINE,
 } from '../src/monde/eclairage-crop.js'
 import { GLSL_MELANGE, APPARENCE_MONDE } from '../src/monde/melange-crop.js'
+// ⚠️ **L'ORACLE DU REPÈRE DE SOL — Tâche P10.** `repereSolSphere` PRÉTEND être
+// la dérivée de `latLonToSphere` ; on la lui oppose plutôt que de croire son
+// commentaire. C'est la même discipline que ⑧c, qui lit `three`.
+import { latLonToSphere } from '../src/geo.js'
 import { LUMA_709 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
@@ -996,21 +1002,34 @@ test('⑦c SANS donnée de paroi, la paroi retombe sur les tuiles — AU BIT PR�
   assert.ok(u.uParoiCielIrr.value.x > 0.18, 'la lampe hemispherique reste')
 })
 
-// ══════════ ⑧ LA NORMALE PAR FRAGMENT — Tâche P9 ════════════════════════════
+// ══════════ ⑧ LA NORMALE PAR FRAGMENT — Tâche P9, RÉÉCRITE PAR P10 ══════════
+//
+// ⛔ **P9 AVAIT LIVRÉ LA LOI DE MIKKELSEN, ET ELLE A ÉTÉ RETIRÉE.** Elle
+// reconstruisait la normale depuis `dFdx(h)` / `dFdy(h)` — une différence finie
+// prise sur le VOISIN D'ÉCRAN, donc sur un voisin qui change avec la parité du
+// quad 2 × 2. Le noteur l'a mesuré (`notation-03.md` §4) : un décalage de caméra
+// d'UN pixel laissait **10,872 octets de résidu contre 0,030 au socle**, et
+// **38,49 % des pixels de surface** bougeaient de plus de 8 octets. Aux
+// décalages PAIRS, qui conservent la parité, le résidu retombait à **0,800**.
+//
+// La loi livrée par P10 est le champ de hauteur posé sur le plan tangent :
+// `N = normalize(haut − gEst·est − gNord·nord)`, avec un repère qui vient de
+// l'attribut `latlon` et deux pentes qui viennent de quatre lectures de texture.
 //
 // ⚠️ **CE QUE CE BLOC VÉRIFIE, ET DANS QUEL ORDRE** :
-//   ⑧a la loi PURE, contre un oracle INDÉPENDANT — la surface déplacée est
-//      construite point par point et sa normale obtenue par un vrai produit
-//      vectoriel de différences finies. Le jumeau JS n'est donc pas comparé à
-//      lui-même ;
-//   ⑧b l'INVARIANCE D'ÉCHELLE D'ÉCRAN, qui est la propriété pour laquelle on
-//      s'écarte de `three` — et le contre-exemple, la version de `three`, est
-//      rejoué à côté pour montrer qu'elle, elle ne l'a pas ;
-//   ⑧c la RÉFÉRENCE, LUE DANS `node_modules/three` : les quatre termes y sont,
-//      et le `normalize( dFdx( surf_pos` aussi. Notre écart est donc réel,
-//      nommé, et pas un oubli ;
-//   ⑧d la TRANSCRIPTION GLSL, terme à terme, sur le texte SANS SES COMMENTAIRES ;
-//   ⑧e le BRANCHEMENT dans le nuanceur — la faiblesse récurrente du chantier ;
+//   ⑧a la loi PURE, contre un oracle INDÉPENDANT — la surface est construite
+//      point par point et sa normale obtenue par un vrai produit vectoriel de
+//      différences finies. Le jumeau JS n'est donc pas comparé à lui-même ;
+//   ⑧b ⚡ **LA RÉDUCTION** : la loi livrée EST celle de Mikkelsen nourrie d'un
+//      repère orthonormé. L'écriture de P9 survit ici, comme SECOND oracle, et
+//      les deux doivent rendre le même vecteur au 1e−12 ;
+//   ⑧c la RÉFÉRENCE, LUE DANS `node_modules/three` : l'oracle de ⑧b est bien la
+//      formule de `three`, terme à terme, et pas notre souvenir d'elle ;
+//   ⑧d le REPÈRE DE SOL, contre `latLonToSphere` du dépôt, et la
+//      TRANSCRIPTION GLSL des deux lois, sur le texte SANS SES COMMENTAIRES ;
+//   ⑧e le BRANCHEMENT dans le nuanceur — la faiblesse récurrente du chantier —
+//      et ⚡ **l'absence de TOUTE dérivée d'écran dans le bloc**, qui est la
+//      seule chose que node puisse dire de l'invariance par translation ;
 //   ⑧f le BRANCHEMENT dans la chaîne : `poserHabillage`, `retirerHabillage`,
 //      `CHAMPS_HABILLAGE`, `contexteCrop` et `setExaggeration`.
 
@@ -1018,183 +1037,327 @@ test('⑦c SANS donnée de paroi, la paroi retombe sur les tuiles — AU BIT PR�
 const CROIX = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 const NORME = (v) => Math.hypot(v[0], v[1], v[2])
 const UNITE = (v) => { const l = NORME(v); return [v[0] / l, v[1] / l, v[2] / l] }
+const POINT = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 /**
- * L'ORACLE INDÉPENDANT — il ne connaît pas `normaleParDeplacement`.
+ * L'ORACLE INDÉPENDANT — il ne connaît pas `normaleParGradientSol`.
  *
- * ⚠️ **CE QU'IL DÉCRIT, ET C'EST LE POINT DÉLICAT DE TOUT CE BLOC : LE PLAN DE
- * `n`, DÉPLACÉ DE `h` LE LONG DE `n`.** C'est la surface que le crop peint — la
- * sphère nue, plus le relief le long de son rayon — et c'est celle que la
- * formule de Mikkelsen rend, puisqu'elle perturbe la normale QU'ON LUI DONNE.
- * Les tangentes d'écran, elles, viennent de la surface DÉPLACÉE : leur
- * composante radiale n'est pas un déplacement au sol, on la retire.
- * ⚡ **Et c'est bien le même objet des deux côtés** : ⑧a assert plus bas que
- * `normaleParDeplacement` est INVARIANTE par cette projection, donc que la
- * retirer de la loi (ce qu'a fait la campagne de mutation) est un no-op.
- *
- * On CONSTRUIT la surface en trois points et on prend le produit vectoriel des
- * deux différences finies. C'est la définition, pas la formule de Mikkelsen.
+ * On CONSTRUIT trois points de la surface — l'origine, un pas vers l'est, un pas
+ * vers le nord, chacun remonté de la hauteur que la pente y donne — et on prend
+ * le produit vectoriel des deux différences. C'est la DÉFINITION d'une normale,
+ * pas une formule.
  */
-function normaleOracle(sx, sy, n, dhx, dhy) {
-  // ⚠️ **LE DÉPLACEMENT SE FAIT DEPUIS LE PLAN DE `n`**, parce que c'est la
-  // surface qu'on décrit : la sphère nue, plus `h` le long de son rayon. Les
-  // tangentes d'écran portent déjà la pente du maillage ; leur composante
-  // radiale n'est pas un déplacement au sol.
-  const proj = (v) => { const d = v[0] * n[0] + v[1] * n[1] + v[2] * n[2]; return [v[0] - n[0] * d, v[1] - n[1] * d, v[2] - n[2] * d] }
-  const tx = proj(sx)
-  const ty = proj(sy)
-  const a = [tx[0] + n[0] * dhx, tx[1] + n[1] * dhx, tx[2] + n[2] * dhx]
-  const b = [ty[0] + n[0] * dhy, ty[1] + n[1] * dhy, ty[2] + n[2] * dhy]
-  const c = CROIX(a, b)
-  // le produit vectoriel donne la normale au SIGNE de l'orientation près : on la
-  // remet du côté de la normale de base, comme le fait `sign(fDet)`.
-  const s = c[0] * n[0] + c[1] * n[1] + c[2] * n[2] >= 0 ? 1 : -1
+function normaleOracle(gEst, gNord, est, nord, haut) {
+  const p = (a, b) => [
+    est[0] * a + nord[0] * b + haut[0] * (gEst * a + gNord * b),
+    est[1] * a + nord[1] * b + haut[1] * (gEst * a + gNord * b),
+    est[2] * a + nord[2] * b + haut[2] * (gEst * a + gNord * b),
+  ]
+  const c = CROIX(p(1, 0), p(0, 1))
+  const s = POINT(c, haut) >= 0 ? 1 : -1
   return UNITE([c[0] * s, c[1] * s, c[2] * s])
 }
 
-test('⑧a la normale par déplacement suit la DÉFINITION — oracle indépendant', () => {
-  // ① gradient nul : la normale ne bouge pas d'un bit.
-  assert.deepEqual(normaleParDeplacement([1, 0, 0], [0, 0, 1], [0, 1, 0], 0, 0), [0, 1, 0])
-  // ② un cas à la main, vérifiable de tête : pente 1/2 vers l'est.
-  const n2 = normaleParDeplacement([1, 0, 0], [0, 0, 1], [0, 1, 0], 0.5, 0)
+/**
+ * ⚡ **LE SECOND ORACLE : L'ÉCRITURE DE P9, MOT POUR MOT.**
+ *
+ * ⚠️ **ELLE NE VIT PLUS QUE DANS CE FICHIER, ET C'EST VOULU.** La loi de
+ * Mikkelsen a quitté `src/` avec la Tâche P10 — ⑧c prouve juste en dessous que
+ * cette transcription est bien celle de `three` — mais elle reste le meilleur
+ * témoin que la nouvelle loi n'a rien changé à la GÉOMÉTRIE : la nouvelle est
+ * l'ancienne, nourrie d'un paramétrage orthonormé.
+ */
+function normaleMikkelsen(sx, sy, n, dhx, dhy) {
+  const r1 = CROIX(sy, n)
+  const r2 = CROIX(n, sx)
+  const det = POINT(sx, r1)
+  const s = det < 0 ? -1 : det > 0 ? 1 : 0
+  const v = [
+    Math.abs(det) * n[0] - s * (dhx * r1[0] + dhy * r2[0]),
+    Math.abs(det) * n[1] - s * (dhx * r1[1] + dhy * r2[1]),
+    Math.abs(det) * n[2] - s * (dhx * r1[2] + dhy * r2[2]),
+  ]
+  const l = NORME(v)
+  if (!(l > 0)) return [n[0], n[1], n[2]]
+  return [v[0] / l, v[1] / l, v[2] / l]
+}
+
+/** Quelques repères de sol RÉELS, pris sur la sphère du globe. */
+const LIEUX = [
+  [-21.115, 55.536], // La Réunion, le cadrage intérieur de la notation
+  [-21.05, 55.25], // La Réunion, le cadrage côte
+  [0, 0], // le point origine — là où sin/cos sont dégénérés
+  [45.83, 6.865], // le Mont-Blanc
+  [-33.9, 151.2], // l'antipode de longitude
+  [78.2, -15.6], // haute latitude, longitude négative
+]
+
+test('⑧a la normale par gradient suit la DÉFINITION — oracle indépendant', () => {
+  const { est, nord, haut } = repereSolSphere(-21.115, 55.536)
+  // ① gradient nul : la normale EST la verticale, au bit près.
+  assert.deepEqual(normaleParGradientSol(0, 0, est, nord, haut), UNITE(haut))
+  // ② un cas à la main, vérifiable de tête : pente 1/2 vers l'est, repère canonique.
+  const n2 = normaleParGradientSol(0.5, 0, [1, 0, 0], [0, 0, -1], [0, 1, 0])
   const attendu = UNITE([-0.5, 1, 0])
   for (let i = 0; i < 3; i++) assert.ok(Math.abs(n2[i] - attendu[i]) < 1e-12, `${n2} contre ${attendu}`)
   // ⚠️ **ET LE SENS EST LE BON** : le sol MONTE vers l'est, donc la normale se
   // penche vers l'OUEST. Une mutation de signe passerait l'égalité de norme.
   assert.ok(n2[0] < 0, 'la normale se penche du mauvais cote')
-  // ③ ⚡ **LE BALAYAGE CONTRE L'ORACLE**, sur des repères et des pentes variés —
-  // y compris un repère NON orthogonal et une base inclinée, où une formule
-  // approchée « (−hx, 1, −hy) » tomberait.
-  const bases = [
-    { sx: [1, 0, 0], sy: [0, 0, 1], n: [0, 1, 0] },
-    { sx: [0.7, 0.1, 0], sy: [0.2, -0.05, 0.9], n: UNITE([0.2, 0.95, -0.1]) },
-    { sx: [3, -1, 2], sy: [-1, 0.5, 4], n: UNITE([1, 2, 3]) },
-    { sx: [0.001, 0, 0], sy: [0, 0, 0.001], n: [0, 1, 0] },
-  ]
+  // ③ ⚡ **LE BALAYAGE CONTRE L'ORACLE**, sur des repères de sol RÉELS et des
+  // pentes qui vont de la plaine à la falaise.
   let compares = 0
-  for (const b of bases) {
+  for (const [lat, lon] of LIEUX) {
+    const r = repereSolSphere(lat, lon)
     for (const t of balayage(11)) {
-      const dhx = (t - 0.5) * 0.9
-      const dhy = (0.5 - t) * 0.4
-      const a = normaleParDeplacement(b.sx, b.sy, b.n, dhx, dhy)
-      const o = normaleOracle(b.sx, b.sy, b.n, dhx, dhy)
+      const gE = (t - 0.5) * 4.2
+      const gN = (0.5 - t) * 1.7
+      const a = normaleParGradientSol(gE, gN, r.est, r.nord, r.haut)
+      const o = normaleOracle(gE, gN, r.est, r.nord, r.haut)
       for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - o[i]) < 1e-9, `${a} contre l'oracle ${o}`)
       compares++
     }
   }
-  assert.ok(compares >= 48, `banc vide : ${compares} comparaisons`)
-  // ④ ⛔ **L'INVARIANCE PAR PROJECTION, ET ELLE VIENT D'UNE SURVIVANTE DE
-  // MUTATION.** La loi portait trois lignes qui projetaient `sx` et `sy` sur le
-  // plan de `n` ; retirées, AUCUN test ne rougissait. L'algèbre dit pourquoi :
-  // `(sy − n(sy·n)) × n = sy × n`, et `det` ne voit pas la part radiale parce
-  // que `R1 ⟂ n`. Les trois lignes sont parties ; l'invariance reste, ASSERTÉE.
-  for (const b of bases) {
-    const proj = (v) => { const d = v[0] * b.n[0] + v[1] * b.n[1] + v[2] * b.n[2]; return [v[0] - b.n[0] * d, v[1] - b.n[1] * d, v[2] - b.n[2] * d] }
-    const a = normaleParDeplacement(b.sx, b.sy, b.n, 0.31, -0.12)
-    const c = normaleParDeplacement(proj(b.sx), proj(b.sy), b.n, 0.31, -0.12)
-    for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - c[i]) < 1e-12, `la projection n'est plus un no-op : ${a} contre ${c}`)
-  }
-  // ⑤ ⚠️ **LE CAS DÉGÉNÉRÉ, ET IL EST ATTEIGNABLE** : au pixel où les deux
-  // tangentes d'écran sont colinéaires (une silhouette), `det` vaut zéro et le
-  // gradient aussi — la loi doit rendre la normale de BASE, pas un vecteur nul
-  // que `normalize` ferait exploser en NaN plus loin.
-  const degenere = normaleParDeplacement([1, 0, 0], [2, 0, 0], [0, 1, 0], 0, 0)
-  assert.deepEqual(degenere, [0, 1, 0])
+  assert.ok(compares >= 60, `banc vide : ${compares} comparaisons`)
+  // ④ ⚠️ **LE CAS DÉGÉNÉRÉ, ET IL RESTE ATTEIGNABLE** : un repère nul (une
+  // interpolation qui s'annule) doit rendre `haut`, jamais un vecteur nul qu'un
+  // `normalize` plus loin transformerait en NaN — et un NaN dans une normale
+  // peint un trou noir.
+  assert.deepEqual(normaleParGradientSol(0, 0, [0, 0, 0], [0, 0, 0], [0, 0, 0]), [0, 0, 0])
+  // ⑤ ⛔ **ET LES DEUX PENTES NE SONT PAS INTERCHANGEABLES.** Une mutation qui
+  // les échange fait tourner le gradient de quatre-vingt-dix degrés et éclaire
+  // les flancs perpendiculaires ; elle a survécu au premier tour de P9.
+  const r = repereSolSphere(-21.115, 55.536)
+  const droit = normaleParGradientSol(0.7, 0.2, r.est, r.nord, r.haut)
+  const echange = normaleParGradientSol(0.2, 0.7, r.est, r.nord, r.haut)
+  assert.ok(NORME([droit[0] - echange[0], droit[1] - echange[1], droit[2] - echange[2]]) > 0.05,
+    'echanger les deux pentes ne change rien : le test ne mord pas')
 })
 
-test('⑧b ⚡ L’INVARIANCE D’ÉCHELLE D’ÉCRAN — la raison de s’écarter de three', () => {
-  // La géométrie ne dépend pas du zoom : rendre le MÊME sol deux fois plus près
-  // double `dFdx(P)` ET `dFdx(h)`, et la normale doit être INCHANGÉE.
-  const sx = [0.7, 0.1, 0]
-  const sy = [0.2, -0.05, 0.9]
-  const n = UNITE([0.2, 0.95, -0.1])
-  const a = normaleParDeplacement(sx, sy, n, 0.13, -0.04)
-  for (const k of [0.25, 2, 17]) {
-    const b = normaleParDeplacement(sx.map((v) => v * k), sy.map((v) => v * k), n, 0.13 * k, -0.04 * k)
-    for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - b[i]) < 1e-12, `k=${k} : ${b} contre ${a}`)
+test('⑧b ⚡ LA RÉDUCTION — la loi livrée EST celle de Mikkelsen, nourrie du repère', () => {
+  // ⚠️ **C'EST L'ASSERTION QUI AUTORISE P10 À RETIRER LA LOI DE P9.** Mikkelsen
+  // perturbe la normale qu'on lui donne à partir d'un paramétrage QUELCONQUE
+  // (`sx`, `sy`) et des dérivées de `h` DANS CE PARAMÉTRAGE. Nourrie de
+  // (est, nord) — orthonormé, donc `R1 = est`, `R2 = nord`, `det = 1` —, elle
+  // rend exactement `haut − gEst·est − gNord·nord`, normalisé.
+  let compares = 0
+  for (const [lat, lon] of LIEUX) {
+    const { est, nord, haut } = repereSolSphere(lat, lon)
+    for (const t of balayage(13)) {
+      const gE = (t - 0.5) * 3.1
+      const gN = (0.5 - t) * 2.6
+      const a = normaleParGradientSol(gE, gN, est, nord, haut)
+      const m = normaleMikkelsen(est, nord, haut, gE, gN)
+      for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - m[i]) < 1e-12, `${a} contre Mikkelsen ${m}`)
+      compares++
+    }
   }
-  // ⛔ **ET LE CONTRE-EXEMPLE : LA VERSION DE `three`, REJOUÉE ICI, N'A PAS
-  // CETTE PROPRIÉTÉ.** C'est elle qui normalise `sigma` ; son commentaire dit
-  // pourquoi (« regardless of the texture's scale »), et c'est une convention
-  // d'ARTISTE. Sous elle, la même montagne s'aplatit en s'éloignant.
-  const troisJS = (sxx, syy, nn, dhx, dhy) => normaleParDeplacement(UNITE(sxx), UNITE(syy), nn, dhx, dhy)
-  const t1 = troisJS(sx, sy, n, 0.13, -0.04)
-  const t2 = troisJS(sx.map((v) => v * 2), sy.map((v) => v * 2), n, 0.13 * 2, -0.04 * 2)
-  assert.ok(Math.abs(t1[0] - t2[0]) > 0.02, 'la version de three serait invariante : le contre-exemple ne mord pas')
+  assert.ok(compares >= 60, `banc vide : ${compares} comparaisons`)
+  // ⛔ **ET CE N'EST PAS UNE ÉGALITÉ TRIVIALE** : nourrie d'un paramétrage NON
+  // orthonormé — celui des tangentes d'ÉCRAN, que P9 employait — la formule de
+  // Mikkelsen rend un AUTRE vecteur. C'est bien le repère qui fait la réduction,
+  // pas la formule.
+  const { est, nord, haut } = repereSolSphere(-21.115, 55.536)
+  const oblique = [est[0] * 2 + nord[0] * 0.6, est[1] * 2 + nord[1] * 0.6, est[2] * 2 + nord[2] * 0.6]
+  const autre = normaleMikkelsen(oblique, nord, haut, 0.4, -0.2)
+  const droit = normaleParGradientSol(0.4, -0.2, est, nord, haut)
+  assert.ok(NORME([autre[0] - droit[0], autre[1] - droit[1], autre[2] - droit[2]]) > 0.02,
+    'le contre-exemple ne mord pas : la reduction serait vraie pour n\'importe quoi')
 })
 
-test('⑧c la référence est LUE DANS node_modules/three, et l’écart est nommé', () => {
+test('⑧c l’oracle de ⑧b EST la formule de three, LUE DANS node_modules', () => {
   const bump = readFileSync(
     new URL('../node_modules/three/src/renderers/shaders/ShaderChunk/bumpmap_pars_fragment.glsl.js', import.meta.url),
     'utf8'
   ).replace(/\s+/g, ' ')
-  // les quatre termes de Mikkelsen sont bien ceux-là, chez three
+  // les quatre termes de Mikkelsen sont bien ceux que `normaleMikkelsen` écrit
   assert.match(bump, /vec3 R1 = cross\( vSigmaY, vN \);/)
   assert.match(bump, /vec3 R2 = cross\( vN, vSigmaX \);/)
   assert.match(bump, /float fDet = dot\( vSigmaX, R1 \)/)
   assert.match(bump, /vec3 vGrad = sign\( fDet \) \* \( dHdxy\.x \* R1 \+ dHdxy\.y \* R2 \);/)
   assert.match(bump, /return normalize\( abs\( fDet \) \* surf_norm - vGrad \);/)
-  // ⚡ **ET L'ÉCART EST RÉEL** : c'est bien three qui normalise, et nous qui ne
-  // le faisons pas. Le jour où three cesse de normaliser, ce test rougit et le
-  // commentaire du module devient faux : il faudra le corriger.
+  // ⛔ **ET C'EST BIEN SUR DES DÉRIVÉES D'ÉCRAN QUE `three` LA NOURRIT** : c'est
+  // exactement ce que P10 a retiré, et ce que `three` continue de faire.
   assert.match(bump, /vec3 vSigmaX = normalize\( dFdx\( surf_pos\.xyz \) \);/)
-  const nu = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '')
-  assert.ok(!/normalize\s*\(\s*sx\s*\)/.test(nu) && !/normalize\s*\(\s*sy\s*\)/.test(nu),
-    'le crop normalise sigma : il reprend la convention d\'artiste de three, et la pente suivrait le zoom')
+  // ⛔ **ET PLUS AUCUNE LIGNE DE MIKKELSEN NE VIT DANS `src/`** : ni `cross`, ni
+  // `sign(det)`, ni `abs(det)`. Si elle y revient, c'est que quelqu'un a refait
+  // le chemin de P9 sans lire notation-03 §4.
+  const loi = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/sign\s*\(/.test(loi) && !/cross\s*\(/.test(loi),
+    'la loi livree porte encore la forme de Mikkelsen')
 })
 
-test('⑧d le GLSL est la TRANSCRIPTION du jumeau JS — terme à terme, sans commentaires', () => {
-  // ⚠️ **SANS SES COMMENTAIRES** : la Tâche K ter a trouvé une assertion verte
-  // parce qu'elle lisait une formule DANS UN COMMENTAIRE.
+test('⑧d le repère de sol EST la dérivée de latLonToSphere — et le GLSL est son jumeau', () => {
+  // ① ⚡ **CONTRE LE DÉPÔT, PAS CONTRE SON PROPRE COMMENTAIRE.** `haut` doit
+  // être `latLonToSphere` normalisé, et les deux tangentes ses dérivées, prises
+  // NUMÉRIQUEMENT sur la fonction du dépôt elle-même.
+  const eps = 1e-6
+  const pos = (la, lo) => { const v = latLonToSphere(la, lo, 1); return [v.x, v.y, v.z] }
+  for (const [lat, lon] of LIEUX) {
+    const { est, nord, haut } = repereSolSphere(lat, lon)
+    const p = pos(lat, lon)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(haut[i] - p[i]) < 1e-12, `haut n'est pas latLonToSphere en ${lat},${lon}`)
+    const dE = UNITE(pos(lat, lon + eps).map((v, i) => v - pos(lat, lon - eps)[i]))
+    const dN = UNITE(pos(lat + eps, lon).map((v, i) => v - pos(lat - eps, lon)[i]))
+    for (let i = 0; i < 3; i++) {
+      assert.ok(Math.abs(est[i] - dE[i]) < 1e-6, `est n'est pas dP/dlon en ${lat},${lon}`)
+      assert.ok(Math.abs(nord[i] - dN[i]) < 1e-6, `nord n'est pas dP/dlat en ${lat},${lon}`)
+    }
+    // ② ⚡ **LE TRIÈDRE EST DIRECT** — c'est ce qui autorise le nuanceur de
+    // fragment à n'interpoler que DEUX varyings et à retrouver le nord par
+    // `cross(haut, est)`. Un trièdre indirect retournerait le nord, donc
+    // l'éclairage des versants nord-sud, sans qu'aucune erreur ne se lève.
+    const c = CROIX(est, nord)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(c[i] - haut[i]) < 1e-12, `est x nord n'est pas haut en ${lat},${lon}`)
+    const cn = CROIX(haut, est)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(cn[i] - nord[i]) < 1e-12, `haut x est n'est pas nord en ${lat},${lon}`)
+    // et il est ORTHONORMÉ
+    for (const v of [est, nord, haut]) assert.ok(Math.abs(NORME(v) - 1) < 1e-12)
+    assert.ok(Math.abs(POINT(est, nord)) < 1e-12 && Math.abs(POINT(est, haut)) < 1e-12 && Math.abs(POINT(nord, haut)) < 1e-12)
+  }
+  // ③ ⚠️ **ET LES DEUX AUTRES LECTEURS DU REPÈRE PASSENT PAR LUI** : les trois
+  // vecteurs étaient écrits DEUX fois dans le module avant P10.
+  for (const [lat, lon] of LIEUX) {
+    assert.deepEqual(hautLocal(lat, lon), repereSolSphere(lat, lon).haut)
+  }
+  const MOD_NU = readFileSync(new URL('../src/monde/eclairage-crop.js', import.meta.url), 'utf8')
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ')
+  assert.match(MOD_NU, /export function hautLocal\(latDeg, lonDeg\) \{ return repereSolSphere\(latDeg, lonDeg\)\.haut \}/,
+    'hautLocal reecrit la verticale au lieu de la lire')
+  assert.match(MOD_NU, /const \{ est, nord, haut \} = repereSolSphere\(latDeg, lonDeg\)/,
+    'directionSoleilLocale reecrit le repere au lieu de le lire')
+  // ④ LA TRANSCRIPTION GLSL, terme à terme, SANS SES COMMENTAIRES.
+  const rep = GLSL_REPERE_SOL.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ')
+  assert.match(rep, /void repereSolSphere\(float latDeg, float lonDeg, out vec3 est, out vec3 nord, out vec3 haut\) \{/)
+  assert.match(rep, /float la = radians\(latDeg\); float lo = radians\(lonDeg\);/)
+  assert.match(rep, /est = vec3\(clo, 0\.0, -slo\);/)
+  assert.match(rep, /nord = vec3\(-sla \* slo, cla, -sla \* clo\);/)
+  assert.match(rep, /haut = vec3\(cla \* slo, sla, cla \* clo\);/)
   const nu = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ')
-  assert.match(nu, /vec3 normaleFineCrop\(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy\) \{/)
-  assert.match(nu, /vec3 r1 = cross\(sy, n\);/)
-  assert.match(nu, /vec3 r2 = cross\(n, sx\);/)
-  assert.match(nu, /float det = dot\(sx, r1\);/)
-  // ⛔ **ET AUCUNE PROJECTION** : elle serait un no-op (⑧a l'assert), donc trois
-  // lignes de code mort dans un nuanceur exécuté par fragment.
-  assert.ok(!/dot\(sx, n\)/.test(nu), 'le GLSL projette : trois lignes mortes par fragment')
-  assert.match(nu, /vec3 grad = sign\(det\) \* \(dhx \* r1 \+ dhy \* r2\);/)
-  assert.match(nu, /vec3 v = abs\(det\) \* n - grad;/)
-  assert.match(nu, /return l > 0\.0 \? v \/ l : n;/)
-  // et la transposée, qui n'existe pas en GLSL ES 1.0
-  assert.match(nu, /vec3 nMondeDepuisVue\(mat3 V, vec3 u\) \{ return normalize\(vec3\(dot\(V\[0\], u\), dot\(V\[1\], u\), dot\(V\[2\], u\)\)\); \}/)
+  assert.match(nu, /vec3 normaleParGradientSol\(float gEst, float gNord, vec3 est, vec3 nord, vec3 haut\) \{/)
+  assert.match(nu, /vec3 v = haut - gEst \* est - gNord \* nord;/)
+  assert.match(nu, /float l = length\(v\);/)
+  assert.match(nu, /return l > 0\.0 \? v \/ l : haut;/)
   // ⚠️ **CE QUI RESTE HORS DE PORTÉE, ET IL FAUT LE DIRE** : que le GPU exécute
-  // ce texte. Ce que ce fichier peut faire, c'est garantir que le JS que ⑧a
-  // vérifie contre un oracle et le GLSL disent la MÊME chose ; l'écran, lui, est
-  // dans `.banc/P9/` et dans le compte rendu de la tâche.
+  // ce texte. Ce fichier garantit que le JS que ⑧a et ⑧b vérifient et le GLSL
+  // disent la MÊME chose ; l'écran, lui, est dans `.banc/P10/`.
 })
 
-test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, échelle, varying', () => {
-  const nu = FRAG_NU.replace(/\s+/g, ' ')
+// ⚡ **LE NUANCEUR CUIT, PAS LA SOURCE — Tâche P10.** `FRAG` est un template
+// literal : lu dans le fichier, il porte encore le nom des deux conversions. Le
+// matériau, lui, porte le TEXTE QUE LE GPU COMPILE, avec les nombres dedans — et
+// c'est le seul endroit où l'on peut vérifier que la monnaie injectée est la
+// bonne, et que l'injection a bien eu lieu.
+const MAT_CUIT = new Globe({ radius: 100, globeExaggeration: 18 })._materialFor(null, 256, 2 ** -12)
+const FRAG_CUIT = MAT_CUIT.fragmentShader.replace(/\/\/[^\n]*/g, '')
+const VERT_CUIT = MAT_CUIT.vertexShader.replace(/\/\/[^\n]*/g, '')
+
+test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et AUCUNE dérivée', () => {
+  const nu = FRAG_CUIT.replace(/\s+/g, ' ')
   // ① la garde est un UNIFORME, déclaré, et le bloc est SOUS elle
-  assert.match(FRAG_NU, /uniform float uNormaleFineOn;/)
-  assert.match(FRAG_NU, /uniform float uUnitesParMetre;/)
-  assert.match(nu, /if \(uNormaleFineOn > 0\.5\) \{ vec3 nSphere/)
+  assert.match(FRAG_CUIT, /uniform float uNormaleFineOn;/)
+  assert.match(FRAG_CUIT, /uniform float uUnitesParMetre;/)
+  assert.match(FRAG_CUIT, /uniform float uUvParMonde;/)
+  assert.match(nu, /if \(uNormaleFineOn > 0\.5\) \{ vec3 haut = normalize\(vHautW\);/)
+  const bloc = nu.slice(nu.indexOf('if (uNormaleFineOn > 0.5)'), nu.indexOf('float nduCrop'))
   // ② ⛔ LA BASE EST LA SPHÈRE NUE, PAS `vNormalW` — c'est le point où un
   // implémenteur pressé compterait deux fois la pente du maillage.
-  assert.match(nu, /vec3 nSphere = normalize\(vVue - vec3\(viewMatrix\[3\]\)\);/)
-  const bloc = nu.slice(nu.indexOf('if (uNormaleFineOn > 0.5)'), nu.indexOf('float nduCrop'))
   assert.ok(!/vNormalW/.test(bloc), 'la normale fine part de vNormalW : la pente grossiere est comptee deux fois')
-  // ③ l'échelle est APPLIQUÉE aux DEUX dérivées, pas à une seule
-  assert.match(bloc, /dFdx\(h\) \* uUnitesParMetre, dFdy\(h\) \* uUnitesParMetre/)
-  // ⛔ **ET LES QUATRE ARGUMENTS SONT APPARIÉS DANS LE BON ORDRE — une mutation
-  // qui échange les deux TANGENTES a survécu au premier tour.** `dFdx(vVue)`
-  // doit aller avec `dFdx(h)` : appariés à l'envers, le gradient tourne de
-  // quatre-vingt-dix degrés et la lumière éclaire les flancs perpendiculaires.
-  assert.match(bloc, /normaleFineCrop\(dFdx\(vVue\), dFdy\(vVue\), nSphere, dFdx\(h\) \* uUnitesParMetre, dFdy\(h\) \* uUnitesParMetre\)/)
-  // ④ et c'est bien `h`, la hauteur du fragment APRÈS le fond marin et le grain
-  assert.ok(nu.indexOf('if (uNormaleFineOn > 0.5)') > nu.indexOf('h += uGrainForceM'),
-    'la normale fine est calculee AVANT le grain : elle deriverait une autre surface')
-  // ⑤ le varying existe des DEUX côtés
-  const VERT_SRC = GLOBE_SRC.slice(GLOBE_SRC.indexOf('const VERT ='), GLOBE_SRC.indexOf('const FRAG ='))
-  assert.match(VERT_SRC.replace(/\/\/[^\n]*/g, ''), /varying vec3 vVue;/)
-  assert.match(VERT_SRC.replace(/\/\/[^\n]*/g, ''), /vVue = mv\.xyz;/)
-  assert.match(FRAG_NU, /varying vec3 vVue;/)
-  // ⑥ et le texte de la loi est INJECTÉ, pas recopié
+  // ③ ⚡ **ET AUCUNE DÉRIVÉE D'ÉCRAN N'ENTRE DANS LE BLOC.** C'est TOUT ce que
+  // node peut dire de l'invariance par translation — et c'est exactement la
+  // régression que la Tâche P10 répare : `dFdx`, `dFdy` et `fwidth` y étaient.
+  assert.ok(!/\bdFdx\b|\bdFdy\b|\bfwidth\b/.test(bloc),
+    'une derivee d ecran est revenue dans la normale fine : la parite des quads avec')
+  // ④ ⛔ LA MONNAIE — les deux conversions, et elles sont APPARIÉES. `metresParUv`
+  // porte le cosinus de la latitude (Mercator rétrécit vers les pôles) et
+  // `uniteParUv` la ramène en unités de scène ; `uUnitesParMetre` porte
+  // l'exagération, `UNITES_PAR_METRE_SOL` ne la porte PAS. Les intervertir
+  // rendrait des pentes fausses d'un facteur `exagération²`, en silence.
+  assert.match(bloc, /float cosLat = max\(cos\(radians\(vLatLon\.x\)\), 1e-4\);/)
+  assert.match(bloc, /float metresParUv = [\d.]+ \* uUvParMonde \* cosLat;/)
+  assert.match(bloc, /float uniteParUv = metresParUv \* [\d.e-]+;/)
+  assert.match(bloc, /float k = uUnitesParMetre \/ \(2\.0 \* pas \* uniteParUv\);/)
+  assert.match(bloc, /normaleParGradientSol\(dhU \* k, dhV \* k, est, nord, haut\)/)
+  // ⑤ le PAS : le texel est un PLANCHER, l'empreinte l'emporte quand elle est
+  // plus grande, et sans `uMppFacteur` on retombe sur le texel — jamais sur
+  // `fwidth`, qui ramènerait la parité par la fenêtre.
+  assert.match(bloc, /float pasEmpreinte = uMppFacteur > 0\.0 \? 0\.5 \* vProfCam \* uMppFacteur \/ metresParUv : 0\.0;/)
+  assert.match(bloc, /float pas = max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
+  // ⑥ ⛔ LE DÉCALAGE DE `qCrop` SUIT L'UV, ET LE SIGNE DU NORD EST RETOURNÉ.
+  // `uv.y` croît vers le NORD (`1 - v` dans `_buildMesh`) quand le `y` de
+  // Mercator croît vers le SUD. Le signe perdu, le fond marin serait lu de
+  // l'autre côté du bloc — invisible sur un fond plat, faux sur un talus.
+  assert.match(bloc, /vec2 dqU = vec2\(qParUv \* pas, 0\.0\);/)
+  assert.match(bloc, /vec2 dqV = vec2\(0\.0, -qParUv \* pas\);/)
+  // ⑦ les quatre lectures sont CENTRÉES : `+pas` contre `−pas`, sur les deux axes
+  assert.match(bloc, /float dhU = hauteurEchant\(vUv \+ vec2\(pas, 0\.0\), qCrop \+ dqU\) - hauteurEchant\(vUv - vec2\(pas, 0\.0\), qCrop - dqU\);/)
+  assert.match(bloc, /float dhV = hauteurEchant\(vUv \+ vec2\(0\.0, pas\), qCrop \+ dqV\) - hauteurEchant\(vUv - vec2\(0\.0, pas\), qCrop - dqV\);/)
+  // ⑧ ⚡ ET `hauteurEchant` EST LA MÊME LOI QUE `main()` — une seule écriture du
+  // fond marin et du grain. Un second `texture2D(uFondChamp` dans le fragment
+  // serait la « seconde écriture jumelle » que `terrain.js` documente.
+  assert.equal((FRAG_CUIT.match(/texture2D\(uFondChamp/g) || []).length, 1,
+    'le fond marin est lu par DEUX ecritures dans le nuanceur')
+  assert.equal((FRAG_CUIT.match(/mnNoise\(gp\)/g) || []).length, 1,
+    'le grain est ecrit DEUX fois dans le nuanceur')
+  assert.match(nu, /float hauteurEchant\(vec2 uv, vec2 q\) \{ float hh = hauteurFond\(q, decodeMeters\(uv\)\); return uHabOn > 0\.5 \? hauteurGrain\(q, hh\) : hh; \}/)
+  // et `main()` passe par les deux mêmes fonctions, dans l'ordre du dépôt
+  assert.match(nu, /float h = hauteurFond\(qCrop, decodeMetersAA\(vUv\)\);/)
+  assert.match(nu, /h = hauteurGrain\(qCrop, h\);/)
+  assert.ok(nu.indexOf('bool sousEau =') > nu.indexOf('float h = hauteurFond(qCrop'),
+    'sousEau est lu AVANT le fond marin')
+  assert.ok(nu.indexOf('bool sousEau =') < nu.indexOf('h = hauteurGrain(qCrop, h);'),
+    'le grain est applique AVANT sousEau : la rampe changerait de branche')
+  // ⑨ les deux varyings existent des DEUX côtés, et `vVue` est bien parti
+  assert.match(VERT_CUIT, /varying vec3 vEstW;/)
+  assert.match(VERT_CUIT, /varying vec3 vHautW;/)
+  assert.match(VERT_CUIT.replace(/\s+/g, ' '), /repereSolSphere\(latlon\.x, latlon\.y, estL, nordL, hautL\);/)
+  assert.match(VERT_CUIT.replace(/\s+/g, ' '), /vEstW = mat3\(modelMatrix\) \* estL; vHautW = mat3\(modelMatrix\) \* hautL;/)
+  // ⚠️ **ET LE REPÈRE EST BIEN ARRIVÉ DANS LE TEXTE COMPILÉ**, pas seulement
+  // dans la source : une injection oubliée ne se verrait qu'à l'écran.
+  assert.match(VERT_CUIT.replace(/\s+/g, ' '), /void repereSolSphere\(float latDeg, float lonDeg, out vec3 est, out vec3 nord, out vec3 haut\)/)
+  assert.match(FRAG_CUIT, /varying vec3 vEstW;/)
+  assert.match(FRAG_CUIT, /varying vec3 vHautW;/)
+  assert.ok(!/\bvVue\b/.test(GLOBE_NU), 'le varying vVue de P9 est reste : il ne sert plus personne')
+  // ⑩ et le texte des deux lois est INJECTÉ, pas recopié
+  assert.ok(GLOBE_NU.includes('${GLSL_REPERE_SOL}'), 'le globe recopie le repere au lieu de l\'injecter')
   assert.ok(GLOBE_NU.includes('${GLSL_NORMALE_FINE}'), 'le globe recopie la loi au lieu de l\'injecter')
-  assert.ok(!/vec3 normaleFineCrop\(vec3/.test(GLOBE_NU.replace('${GLSL_NORMALE_FINE}', '')),
-    'une SECONDE ecriture de normaleFineCrop vit dans globe.js')
+  const sansInjection = GLOBE_NU.replace('${GLSL_REPERE_SOL}', '').replace('${GLSL_NORMALE_FINE}', '')
+  assert.ok(!/vec3 normaleParGradientSol\(float/.test(sansInjection),
+    'une SECONDE ecriture de normaleParGradientSol vit dans globe.js')
+  assert.ok(!/void repereSolSphere\(float/.test(sansInjection),
+    'une SECONDE ecriture de repereSolSphere vit dans globe.js')
+})
+
+test('⑧e bis ⛔ `uUvParMonde` EST PROPRE À LA TUILE, ET IL VAUT `1 / 2^z`', () => {
+  // ⚠️ **C'EST LA MONNAIE DE LA PENTE, ET CE CHANTIER A DÉJÀ PAYÉ QUATRE FOIS
+  // CETTE FAMILLE DE FAUTES** (`uMerHoule` ×121,6, `skirtDrop` ×10). Une valeur
+  // partagée ferait juger toutes les tuiles sur le niveau de la dernière
+  // chargée — exactement le défaut que `uTilePx` documente à côté d'elle.
+  const g = new Globe({ radius: 100, globeExaggeration: 18 })
+  // ① le défaut est le niveau ZÉRO, donc un bloc PLAT : visible, pas silencieux.
+  assert.equal(g._materialFor(null, 256).uniforms.uUvParMonde.value, 1)
+  // ② et il n'est PAS dans `this.uniforms` : il ne s'étale pas
+  assert.equal(g.uniforms.uUvParMonde, undefined, 'uUvParMonde est partage par toutes les tuiles')
+  // ③ POSÉ, il suit le niveau — dans les DEUX sens, et sur toute la plage utile
+  for (const z of [0, 2, 6, 12, 15, 22]) {
+    assert.equal(g._materialFor(null, 256, 2 ** -z).uniforms.uUvParMonde.value, 2 ** -z)
+  }
+  // ④ ⚡ **ET C'EST BIEN `_buildMesh` QUI LE POSE**, avec le niveau de SA tuile.
+  assert.match(GLOBE_NU.replace(/\s+/g, ' '),
+    /this\._materialFor\(t\.texture, t\.size, 2 \*\* -t\.z\)/)
+  // ⑤ ⚠️ **LA CONVERSION EN MÈTRES DE SOL EST JUSTE, ET ELLE EST VÉRIFIABLE À LA
+  // MAIN** : une unité d'uv à z12, à la latitude de La Réunion, couvre la
+  // largeur d'une tuile — 9 129 m relevés par `_makeDemSampler` (P9 publie
+  // `extentMeters = 27 381` pour les TROIS tuiles du bloc).
+  const tour = Number(FRAG_CUIT.match(/float metresParUv = ([\d.]+) \* uUvParMonde/)[1])
+  const largeur = tour * 2 ** -12 * Math.cos((-21.115 * Math.PI) / 180)
+  assert.ok(Math.abs(largeur * 3 - 27381) < 400, `le bloc ferait ${largeur * 3} m au lieu de 27 381`)
+  // ⛔ **ET CE N'EST PAS `CIRCONFERENCE_M`** : la sphère du globe a le rayon
+  // MOYEN, celui que `uUnitesParMetre` emploie. Prendre l'équateur WGS84 ferait
+  // 0,11 % d'erreur — invisible, et faux.
+  assert.ok(Math.abs(tour - 2 * Math.PI * 6371000) < 1, `le tour vaut ${tour}`)
+  assert.ok(Math.abs(tour - 40075016.686) > 40000, 'le tour est celui de l\'equateur WGS84')
 })
 
 test('⑧f ⛔ LE BRANCHEMENT DANS LA CHAÎNE — pose, retrait, veille, contexte, échelle', () => {
