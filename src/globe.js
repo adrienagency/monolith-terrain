@@ -1704,7 +1704,7 @@ void main() {
     // Tache K : les metres de sol par pixel, fonction de la seule DISTANCE.
     // Sans elle (uMppFacteur = 0, la production), le pas retombe au texel.
     float pasEmpreinte = uMppFacteur > 0.0
-      ? 0.5 * vProfCam * uMppFacteur / metresParUv
+      ? vProfCam * uMppFacteur / metresParUv
       : 0.0;
     float pas = max(1.0 / uTilePx, pasEmpreinte);
 

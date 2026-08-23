@@ -1282,7 +1282,7 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et
   // ⑤ le PAS : le texel est un PLANCHER, l'empreinte l'emporte quand elle est
   // plus grande, et sans `uMppFacteur` on retombe sur le texel — jamais sur
   // `fwidth`, qui ramènerait la parité par la fenêtre.
-  assert.match(bloc, /float pasEmpreinte = uMppFacteur > 0\.0 \? 0\.5 \* vProfCam \* uMppFacteur \/ metresParUv : 0\.0;/)
+  assert.match(bloc, /float pasEmpreinte = uMppFacteur > 0\.0 \? vProfCam \* uMppFacteur \/ metresParUv : 0\.0;/)
   assert.match(bloc, /float pas = max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
   // ⑥ ⛔ LE DÉCALAGE DE `qCrop` SUIT L'UV, ET LE SIGNE DU NORD EST RETOURNÉ.
   // `uv.y` croît vers le NORD (`1 - v` dans `_buildMesh`) quand le `y` de
