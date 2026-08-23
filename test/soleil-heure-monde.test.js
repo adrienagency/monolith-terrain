@@ -66,6 +66,10 @@ const SRC_MAIN = fs.readFileSync(path.join(RACINE, 'src/main.js'), 'utf8')
 const LAT = 30.8804
 const LON = -5.5899
 const H_VIDEO = 3 + 22 / 60
+// ⚠️ LE JOUR DE LA VIDÉO, FIGÉ — même patron que `daycycle.test.js` (`JUNE`,
+// `DEC`) et `light-gain.test.js` (`REF`). Sans lui les seuils d'élévation
+// ci-dessous suivent la saison du jour où le test tourne.
+const JOUR_VIDEO = new Date(Date.UTC(2026, 7, 23))
 
 const R2D = 180 / Math.PI
 const scal = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -75,7 +79,7 @@ const elevationVue = (dir, lat, lon) => Math.asin(Math.max(-1, Math.min(1, scal(
 // ══════════ ① LA LOI — ET C'EST LA MONNAIE QUI EST GARDÉE ═══════════════════
 
 test('① la nuit du lieu filmé est une nuit ASTRONOMIQUE, et le cycle porte les deux monnaies', () => {
-  const s = lightingFor(H_VIDEO, LAT, LON)
+  const s = lightingFor(H_VIDEO, LAT, LON, JOUR_VIDEO)
   assert.ok(s.sunElevation < -20, `03h22 doit être une nuit franche, lu ${s.sunElevation}`)
   // et la lampe, elle, est relevée au-dessus de l'horizon : les deux monnaies
   // existent bel et bien, dans le même objet.
@@ -85,7 +89,7 @@ test('① la nuit du lieu filmé est une nuit ASTRONOMIQUE, et le cycle porte le
 test('① le soleil du monde SUIT L HEURE — et il passe sous l horizon la nuit', () => {
   const vues = []
   for (const h of [0, H_VIDEO, 6, 9, 12, 15, 18, 21]) {
-    const s = lightingFor(h, LAT, LON)
+    const s = lightingFor(h, LAT, LON, JOUR_VIDEO)
     const dir = soleilMondeDeLHeure(s, { lat: LAT, lon: LON })
     assert.ok(dir, `une direction à ${h} h`)
     assert.ok(Math.abs(Math.hypot(...dir) - 1) < 1e-12, 'vecteur unitaire')
@@ -103,7 +107,7 @@ test('① le soleil du monde SUIT L HEURE — et il passe sous l horizon la nuit
 })
 
 test('① ⛔ LA MAUVAISE MONNAIE RENDRAIT LE PLEIN JOUR À 3 h DU MATIN', () => {
-  const s = lightingFor(H_VIDEO, LAT, LON)
+  const s = lightingFor(H_VIDEO, LAT, LON, JOUR_VIDEO)
   // ce que `params.sunElevation` porte, c'est `s.elevation` — la LAMPE.
   const faux = directionSoleilLocale(s.azimuth, s.elevation, LAT, LON)
   assert.ok(elevationVue(faux, LAT, LON) > 30,
@@ -115,7 +119,7 @@ test('① ⛔ LA MAUVAISE MONNAIE RENDRAIT LE PLEIN JOUR À 3 h DU MATIN', () =>
 })
 
 test('① le lieu compte : deux points de la planète ne voient pas le même soleil', () => {
-  const s = lightingFor(12, LAT, LON)
+  const s = lightingFor(12, LAT, LON, JOUR_VIDEO)
   const ici = soleilMondeDeLHeure(s, { lat: LAT, lon: LON })
   // l'antipode du lieu, au MÊME instant : le soleil doit y être sous l'horizon.
   assert.ok(elevationVue(ici, -LAT, LON + 180) < 0,
@@ -123,7 +127,7 @@ test('① le lieu compte : deux points de la planète ne voient pas le même sol
 })
 
 test('① sans lieu ni cycle, elle rend null plutôt qu un vecteur inventé', () => {
-  const s = lightingFor(12, LAT, LON)
+  const s = lightingFor(12, LAT, LON, JOUR_VIDEO)
   assert.equal(soleilMondeDeLHeure(null, { lat: LAT, lon: LON }), null)
   assert.equal(soleilMondeDeLHeure(s, { lat: NaN, lon: LON }), null)
   assert.equal(soleilMondeDeLHeure(s, { lat: LAT, lon: undefined }), null)
