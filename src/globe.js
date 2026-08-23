@@ -104,6 +104,12 @@ import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './
 // lecteurs (`_buildMesh` qui pose les sommets, `hauteurDessinee` qui les relit),
 // et une table recopiée diverge en silence.
 import { segmentsTuile, interpolerMaille } from './monde/maillage-tuile.js'
+// LA MÉMOIRE DES TUILES DE MNT — Tâche R3, correction I3. ⚠️ **ELLE A
+// DÉMÉNAGÉ, ELLE N'A PAS CHANGÉ** : même Map, même borne de 32 Mo, même LRU.
+// Elle vit désormais dans un module PUR parce que `dem.js` en est le SECOND
+// lecteur : les neuf tuiles z12 du bloc étaient téléchargées deux fois par
+// chargement (2,705 Mo), une fois par chaque chemin, faute d'une mémoire commune.
+import { memoTuiles, tuileMemorisee, viderMemoTuiles } from './monde/memo-tuiles-mnt.js'
 // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
 //
 // ⚠️ **CE N'EST PAS UNE COPIE DU SOCLE, C'EST LE MÊME TEXTE.** `terrain.js`
@@ -2073,13 +2079,11 @@ function poserIrradiance(cible, couleurHex, intensite) {
 // ne bouge pas d'un octet — 32 Mo, le coude mesuré ci-dessus — et sur un globe
 // entièrement AWS le comportement est identique au bit près (128 × 256 Kio =
 // exactement 32 Mo, donc exactement 128 entrées retenues).
-const TILE_MEMO_OCTETS_MAX = 128 * 256 * 256 * 4 // 32 Mo d'ImageBitmap décodé
-
-/** url → Promise<ImageBitmap>, LRU bornée. Exportée pour les tests. */
-export const _tileMemo = new Map()
-// coût de chaque entrée, en octets — même clé, même ordre que `_tileMemo`
-const _tileMemoCout = new Map()
-let _tileMemoOctets = 0
+// ⚠️ **LA BORNE ET LA MAP VIVENT MAINTENANT DANS `monde/memo-tuiles-mnt.js`**
+// (Tâche R3, I3), et le paragraphe ci-dessus reste le sien : c'est la MESURE qui
+// fonde les 32 Mo, et elle n'a pas bougé. Ce fichier ne fait que réexporter la
+// Map sous son nom historique — `test/globe-reseau.test.js` la lit ainsi.
+export const _tileMemo = memoTuiles
 
 // ═══════════ LE JOURNAL RÉSEAU — la source de `debitObserve` (Tâche 4 bis) ════
 //
@@ -2140,9 +2144,7 @@ function maintenant() {
 
 /** Remise à zéro de la mémoire de tuiles — tests uniquement. */
 export function _resetTileMemo() {
-  _tileMemo.clear()
-  _tileMemoCout.clear()
-  _tileMemoOctets = 0
+  viderMemoTuiles()
 }
 
 // ═══════════ LA SOURCE DE RELIEF — UNE POLITIQUE, PAS UNE URL ═══════════════
@@ -2217,13 +2219,12 @@ export function planTuile(z, x, y, source = activeDemSource()) {
 // Une SEULE entrée par URL, promesse comprise : deux demandes qui se
 // chevauchent partagent la requête au lieu d'en lancer deux.
 function tileBitmap(url, octets = 256 * 256 * 4) {
-  const memo = _tileMemo.get(url)
-  if (memo) {
-    _tileMemo.delete(url)
-    _tileMemo.set(url, memo) // ré-insertion = most-recently-used
-    return memo
-  }
-  const p = (async () => {
+  // ⚠️ **LA MÉMOIRE EST PARTAGÉE AVEC `dem.js` DEPUIS LA TÂCHE R3 (I3).** Le
+  // chargeur ci-dessous n'est appelé QUE sur un manque : si le bloc du socle est
+  // déjà passé par `loadDem`, ses neuf tuiles z12 ne repartent plus sur le
+  // réseau. Le reste — LRU, budget, « un échec ne se mémorise pas » — est celui
+  // d'avant, déplacé sans être touché.
+  return tuileMemorisee(url, () => (async () => {
     const debut = maintenant()
     let r
     try {
@@ -2248,31 +2249,7 @@ function tileBitmap(url, octets = 256 * 256 * 4) {
     // latence d'aller-retour et l'appellerait « débit ».
     noterReponse({ octets: blob?.size, debut, fin: maintenant() })
     return createImageBitmap(blob)
-  })()
-  _tileMemo.set(url, p)
-  _tileMemoCout.set(url, octets)
-  _tileMemoOctets += octets
-  // Un ÉCHEC ne se mémorise pas : `_pump` réessaie une fois, et une panne figée
-  // priverait la session de la tuile pour de bon.
-  // ⚠️ `p.then(null, …)` et pas `p.catch(…)` en tête de chaîne : cette branche
-  // de surveillance ABSORBE le rejet, sinon chaque tuile en panne lèverait un
-  // unhandledrejection à côté de `_pump` qui, lui, l'a bien traité.
-  p.then(null, () => {
-    if (_tileMemo.get(url) === p) oublieTuile(url)
-  })
-  // les entrées EN VOL viennent d'être insérées, elles sont donc en tête de
-  // fraîcheur : la purge par la queue ne peut pas casser la déduplication
-  while (_tileMemoOctets > TILE_MEMO_OCTETS_MAX && _tileMemo.size > 1) {
-    oublieTuile(_tileMemo.keys().next().value)
-  }
-  return p
-}
-
-function oublieTuile(url) {
-  if (!_tileMemo.has(url)) return
-  _tileMemoOctets -= _tileMemoCout.get(url) ?? 0
-  _tileMemoCout.delete(url)
-  _tileMemo.delete(url)
+  })(), octets)
 }
 
 // terrarium PNG/WebP → { texture, heights Float32Array(px*px), size }
@@ -2448,6 +2425,59 @@ export class Globe {
     // `flags.js` — délibérément : le lecteur de `FLAGS.globeContinu` est
     // `src/main.js`, qui ne passe ici qu'un booléen.
     this.continu = params.globeContinu ?? false
+    // ═══════════ UN CROP EST ATTENDU — Tâche R3 ════════════════════════════
+    //
+    // **Adrien, 2026-08-23** : « Tu charges beaucoup trop de dalles. […] On ne
+    // doit calculer que les dalles qui font partie du socle, et pas ce qui est
+    // à l'extérieur du socle. »
+    //
+    // ⚠️ **CE DRAPEAU EXISTE PARCE QUE `_horsCropSeul` NE PEUT RIEN COUPER
+    // AVANT QUE LE CROP SOIT POSÉ, ET QUE C'EST LÀ QUE TOUT SE PERD.** Relevé
+    // au navigateur (La Réunion, `?terre=unique&frontiere=1&seuil=1&socle=quadtree`,
+    // trois chargements, `_request` instrumenté depuis `window.__exp` —
+    // `scripts/sonde-dalles.mjs`) : **114 demandes de tuiles partent AVANT que
+    // `poserCrop` ait été appelé**. Le même 114 des deux côtés, mais pas la même
+    // part : **114 sur 191 (59,7 %) avec `?globe=continu`** — 4 tirages,
+    // `.banc/R3/avant-jalons-A2.json` — et **114 sur 159 (71,7 %) sans**, le
+    // régime par défaut — 3 tirages, `.banc/R3/avant-jalons-B.json`. La dernière
+    // demande sans crop tombe à l'image **3 à 12** selon le tirage, la première
+    // avec crop à l'image **39 à 63**.
+    // ⚠️ **CES BORNES SONT DES INTERVALLES PARCE QUE LA TRACE LE DIT.** Une
+    // première version de ce commentaire écrivait « image 11 / image 41 », les
+    // valeurs d'un tirage, sans qu'aucun fichier ne les porte : la sonde
+    // n'enregistrait pas le numéro d'image. Elle l'enregistre.
+    // Dont **les 64 tuiles z3,
+    // c'est-à-dire la planète entière**, parce que la caméra est déjà à
+    // l'altitude du bloc et que le quadtree, lui, ne sait pas encore qu'on ne
+    // lui demandera qu'un carré de trois tuiles. Sans `?globe=continu` ces 64
+    // tuiles partent TOUTES sur le réseau (63 hors du futur crop) ; avec, la
+    // purge de file en absorbe 63 — mais après les avoir créées, enfilées et
+    // triées.
+    //
+    // ⚠️ **CE N'EST PAS `_cropSeul`, ET LES DEUX NE SE REMPLACENT PAS.**
+    // `_cropSeul` est un ÉTAT DE REPOS que la veille lève et baisse au fil de
+    // l'altitude ; celui-ci est une PROMESSE DE NAISSANCE, posée une fois par
+    // `main.js` sous `?terre=unique`, jamais retirée : « ce globe ne servira
+    // qu'un crop, ne descends pas tant que tu ne sais pas où il est ».
+    //
+    // ⚠️ **ET IL RETIENT LA DESCENTE, PAS LE DESSIN.** Les racines z2 restent
+    // parcourues et dessinées (voir `_horsCropSeul`) : la planète est là, en
+    // gros, sous le voile de chargement — ce qui ne part pas, c'est la descente
+    // vers un endroit qu'on n'a pas encore choisi.
+    //
+    // ⛔ **CE QUE ÇA COÛTE SI LE MNT NE CHARGE JAMAIS** : le crop n'est jamais
+    // posé (`majSeuilSocle` sort tant que `largeurBlocM()` vaut 0), donc le
+    // globe reste à z2. C'est une DÉCISION, pas un oubli : sous `?terre=unique`
+    // le bloc plat est éteint pour de bon, et une planète grossière vaut mieux
+    // que le téléchargement d'un hémisphère que personne n'a demandé. Hors du
+    // drapeau, rien de tout cela n'existe.
+    this._cropAttendu = params.cropAttendu ?? false
+    // ⚠️ **ET LA RETENUE N'EST PAS LE DRAPEAU — correction C1.** `_cropAttendu`
+    // décrit le RÉGIME (il arme la contre-pression pour toute la session) ;
+    // `_cropDejaPose` date le moment où l'on a CESSÉ D'IGNORER où est le crop.
+    // Seul le second éteint la retenue de descente, et il ne se rallume jamais :
+    // voir `poserCrop` et `_retenueAvantCrop`.
+    this._cropDejaPose = false
     // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Posé par `main.js` quand le globe
     // passe dans sa propre scène de fond ; voir `setVisible`, qui cesse alors
     // d'être l'interrupteur. Déclaré ici pour qu'il ne naisse pas `undefined`
@@ -2907,6 +2937,23 @@ export class Globe {
       }
     }
     this._crop = rep
+    // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
+    // QUI L'A EXIGÉ — Tâche R3, correction C1.** La première version de
+    // `cropAttendu` était un booléen à vie ; or `retirerCrop` remet `_crop` à
+    // `null` sur DEUX chemins nominaux (au-dessus de `SEUIL_MORT_M`, et à toute
+    // sortie du mode surface — `branchement-crop.js`, `retirer(g)`). Le globe se
+    // retrouvait donc à écarter tout `z > ROOT_Z` au nom d'un crop qui n'existait
+    // plus : mesuré dans l'application vivante, même `modes.enterOrbit()`,
+    // **283 tuiles dessinées avant le correctif contre 16 après**, cache 1 425
+    // contre 112. La planète entière ramenée à ses seize racines. Ce n'était pas
+    // un cas de panne : c'est une molette.
+    //
+    // ⚠️ **UNE FOIS POSÉ, C'EST POSÉ POUR LA SESSION.** Ce qui justifiait la
+    // retenue, c'est « on ne sait pas encore OÙ » — une ignorance qui ne revient
+    // jamais : après un retrait, `_horsCropSeul` retombe sur son `false` d'avant
+    // et le quadtree redescend normalement. Gardé par `test/dalles-crop.test.js`
+    // ⑧ (orbite) et ⑧ bis (le compte de tuiles dessinées).
+    this._cropDejaPose = true
     const u = this.uniforms
     u.uCropCentre.value.set(rep.cx, rep.cy)
     u.uCropDemi.value = rep.demi
@@ -2970,9 +3017,69 @@ export class Globe {
    * retrouve en cache sans un octet de réseau.
    */
   _horsCropSeul(z, x, y) {
-    if (!this._crop) return false
+    // ⚠️ **PAS ENCORE DE CROP, MAIS ON SAIT QU'IL VIENT — Tâche R3.** Sous
+    // `cropAttendu`, tant que `_crop` est `null` on refuse TOUT ce qui est plus
+    // fin que les racines : c'est la seule réponse qui ait un sens quand on sait
+    // qu'on ne montrera qu'un carré mais pas encore lequel. Les racines, elles,
+    // passent — sans elles il n'y aurait pas de planète du tout, et
+    // `chargeRacines` les demande de toute façon.
+    //
+    // ⚠️ **ET SANS `cropAttendu`, CETTE LIGNE EST LE `return false` D'AVANT, AU
+    // BIT PRÈS** : la production (pas de drapeau, pas de crop) ne voit rien.
+    if (!this._crop) return this._retenueAvantCrop() && z > ROOT_Z
     if (!this._cropSeul && !this.estompePlein()) return false
     return !tuileDansCrop(z, x, y, this._crop)
+  }
+
+  /**
+   * La contre-pression de file est-elle armée ? — Tâche R3.
+   *
+   * ⚠️ **CE N'ÉTAIT PAS UNE DÉCOUVERTE, C'ÉTAIT UN ARBITRAGE OUBLIÉ.** Le plan
+   * du 2026-08-08 (`docs/superpowers/plans/2026-08-08-globe-continu.md:1554`)
+   * l'avait mesuré et écrit : « 473 tuiles en chargement, file à 462, pour un
+   * cache de 600. (…) C'est délibéré, mais ce n'est pas une raison de
+   * l'oublier : à trancher avec Adrien. » Quinze jours plus tard, Adrien
+   * signale le symptôme.
+   *
+   * ⛔ **ET L'ARBITRAGE N'EST PAS « ON LÈVE LES GARDES ».** `FLAGS.globeContinu`
+   * vaut **`false`** : le globe ordinaire, celui de la production, tourne
+   * `continu: false`. Lever les trois gardes changerait donc la PRODUCTION,
+   * ce que la clôture de cette tâche interdit explicitement (« drapeau baissé,
+   * la production doit être RIGOUREUSEMENT inchangée »). On ÉLARGIT donc la
+   * garde au régime `terre unique` au lieu de la retirer : la contre-pression
+   * couvre les deux régimes du crop, et pas une image de la production ne
+   * change.
+   *
+   * ⚠️ **CE QUE LA MESURE DIT DES TROIS MÉCANISMES, ET C'EST INÉGAL.** Sur la
+   * scène relevée (La Réunion, caméra posée sur le crop) :
+   *   · `_purgerFile` **paie** : sans elle, 190 tuiles réseau au lieu de 122,
+   *     dont 63 tuiles z3 entièrement hors crop ;
+   *   · `PLAFOND_FILE` **ne se déclenche jamais** — `_refusFile` relevé à 0,
+   *     la file ne monte pas à 256 sur cette scène ;
+   *   · le rang d'éviction **n'est jamais atteint** — 175 tuiles en cache pour
+   *     un budget de 1 700, `_evictJusqua` ne passe pas.
+   * Les deux derniers sont donc le FILET (un panoramique rapide, un dézoom),
+   * pas le gain. C'est écrit pour que personne ne leur attribue les 68 tuiles.
+   */
+  /**
+   * La descente est-elle RETENUE, faute de savoir où sera le crop ? — R3/C1.
+   *
+   * ⛔ **DEUX CONDITIONS, ET LA SECONDE A ÉTÉ PAYÉE PAR UNE RÉGRESSION LIVRÉE.**
+   * `cropAttendu` seul ne suffit pas : `retirerCrop` rend `_crop` à `null`
+   * au-dessus de `SEUIL_MORT_M` et à chaque sortie du mode surface, si bien
+   * qu'un drapeau à vie clouait le globe à ses seize racines dès qu'on montait
+   * en orbite — 283 tuiles dessinées contre 16, mesuré dans l'application.
+   *
+   * ⚠️ **CE N'EST PAS `!this._crop`**, et l'écrire ainsi rejouerait le défaut :
+   * la question n'est pas « y a-t-il un crop MAINTENANT » (non, en orbite) mais
+   * « a-t-on déjà su où il était ». Une ignorance qui ne revient jamais.
+   */
+  _retenueAvantCrop() {
+    return this._cropAttendu && !this._cropDejaPose
+  }
+
+  _contrePression() {
+    return this.continu || this._cropAttendu
   }
 
   /**
@@ -5480,7 +5587,14 @@ export class Globe {
     // tuile évincée ne doit pas revenir d'elle-même sur le réseau. (Le tri
     // spatial seul rend les tuiles bloquées évinçables — hors de lui, la
     // question ne se pose pas et le chemin reste celui d'avant, au bit près.)
-    if (this.continu && this._enQuarantaine(key)) t.state = 'error'
+    // ⚠️ **LA QUARANTAINE SUIT LE RANG 0, ELLE N'EST PAS UN QUATRIÈME
+    // MÉCANISME — Tâche R3.** Le commentaire ci-dessus le dit lui-même : « le
+    // tri spatial seul rend les tuiles bloquées évinçables — hors de lui, la
+    // question ne se pose pas ». En armant le rang 0 sous `cropAttendu`, la
+    // question SE POSE : une `error` évincée renaîtrait `empty` et repartirait
+    // aussitôt sur le réseau. Étendre la garde ici est le corollaire de
+    // l'autre, pas un élargissement de périmètre.
+    if (this._contrePression() && this._enQuarantaine(key)) t.state = 'error'
     this.tiles.set(key, t)
     return t
   }
@@ -5493,7 +5607,7 @@ export class Globe {
 
   _request(t, priority) {
     if (t.state !== 'empty') return
-    if (this.continu && this._enQuarantaine(t.key)) return
+    if (this._contrePression() && this._enQuarantaine(t.key)) return
     // ⚠️ LE PLAFOND DE FILE SE TESTE **AVANT** LA MARQUE `loading`, ET C'EST TOUT
     // LE SUJET (plan « globe continu », Tâche 4 bis, correction 1). `_request`
     // marquait `loading` puis enfilait : un refus posé après la marque aurait
@@ -5506,7 +5620,7 @@ export class Globe {
     // c'est de la contre-pression, pas un abandon. La tuile repart dès que la
     // file redescend, sans que personne ait à tenir une liste d'attente
     // parallèle — laquelle serait une seconde file, non bornée celle-là.
-    if (this.continu && this.queue.length >= PLAFOND_FILE) {
+    if (this._contrePression() && this.queue.length >= PLAFOND_FILE) {
       this._refusFile++
       return
     }
@@ -5609,7 +5723,7 @@ export class Globe {
   // erreur, sans test rouge, sans rien à l'écran. C'est le rappel explicite que
   // la Tâche 4 sexies a posé sur `_rechargeTuiles`, et il vaut ici mot pour mot.
   _purgerFile() {
-    if (!this.continu || !this.queue.length) return 0
+    if (!this._contrePression() || !this.queue.length) return 0
     const garde = []
     let n = 0
     for (const e of this.queue) {
@@ -6160,6 +6274,21 @@ export class Globe {
       ? t.z < zCrop
       : t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
 
+    // ⚠️ **ON NE DESCEND PAS VERS UN ENDROIT QU'ON N'A PAS ENCORE CHOISI —
+    // Tâche R3.** `cropAttendu` sans `_crop`, c'est l'intervalle de démarrage :
+    // la caméra est déjà à l'altitude du bloc, donc `ratio` réclame z13, mais
+    // la veille attend le MNT pour dire OÙ. Les racines restent parcourues et
+    // dessinées ; seule la descente est retenue.
+    //
+    // ⛔ **ET C'EST ICI, PAS DANS `_children` — LE PIÈGE EST DOCUMENTÉ QUINZE
+    // LIGNES PLUS BAS.** `_children` filtre déjà par `_horsCropSeul`, donc il
+    // rendrait une liste VIDE ; or `[].every(…)` vaut `true`, la descente
+    // « réussit » dans le vide et le `return` qui suit **saute le dessin de la
+    // racine**. La planète disparaîtrait pendant les onze premières images.
+    // C'est exactement le `kids.length > 0 &&` que la Tâche P14 a retiré comme
+    // code mort — il l'était, et il cesse de l'être si on coupe trop bas.
+    if (this._retenueAvantCrop() && !this._crop) wantSplit = false
+
     // ADMISSION : on ne commence un raffinement que si le crédit de la frame
     // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,
     // descendre ne coûte rien — ni crédit ni réseau : on passe sans débiter.
@@ -6324,7 +6453,7 @@ export class Globe {
     // socle intrinsèquement irremplissable — il redemanderait à chaque image ce
     // que l'éviction lui reprend à chaque image.
     const vivantes = [...this.tiles.values()].filter((t) => t.z > ROOT_Z && !this.gardeHauteurs.has(t.key))
-    const bloquees = this.continu
+    const bloquees = this._contrePression()
       ? vivantes.filter((t) => this._bloquee(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b))
       : []
     const candidates = vivantes.filter((t) => t.state === 'ready' && !(t.mesh && t.mesh.visible))

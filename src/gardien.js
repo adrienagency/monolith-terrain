@@ -928,13 +928,18 @@ export const PROTECTIONS = [
   },
   {
     cle: 'globe-tuiles',
-    module: 'src/globe.js',
-    identifiant: 'TILE_MEMO_OCTETS_MAX',
-    protege: 'la mémoire des tuiles du globe',
+    // ⚠️ **LA MÉMOIRE A DÉMÉNAGÉ, LE BUDGET N'A PAS BOUGÉ — Tâche R3 (I3).**
+    // Elle vivait dans `src/globe.js` sous le nom `TILE_MEMO_OCTETS_MAX` ;
+    // `src/dem.js` en est devenu le SECOND lecteur (les neuf tuiles z12 du bloc
+    // étaient téléchargées deux fois par chargement), et une mémoire commune ne
+    // pouvait pas rester dans un module qui tire `three`.
+    module: 'src/monde/memo-tuiles-mnt.js',
+    identifiant: 'MEMO_OCTETS_MAX',
+    protege: 'la mémoire des tuiles de MNT, partagée par le globe ET le socle',
     contre: 'un cache d’ImageBitmap décodés sans fin',
     critere:
       '32 Mo d’ImageBitmap décodé, éviction LRU — un budget en OCTETS et non en entrées depuis que les tuiles font 256 px (AWS) ou 512 px (Mapterhorn) ; 6 chargements simultanés au plus',
-    pur: false,
+    pur: true,
   },
   {
     cle: 'cellules-geo',

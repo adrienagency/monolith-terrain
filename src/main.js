@@ -4146,7 +4146,17 @@ function distanceCadrageM() {
 // comprise** ; c'est exactement ce que « quatorzième lecteur » veut dire.
 // ⚠️ Conséquence à connaître : `?terre=unique&exag=paliers` NE rend PAS son
 // exagération 18 au globe. Pour la revoir, il faut baisser `?terre`.
-globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee })
+// ⚠️ **`cropAttendu` EST LE QUINZIÈME PASSAGER, ET IL DIT UNE PROMESSE — Tâche
+// R3.** Sous `?terre=unique`, ce globe ne servira JAMAIS qu'un crop : la veille
+// finira par appeler `poserCrop`, et rien d'autre ne sera montré. Le lui dire
+// à la naissance est la seule façon de couvrir la **dizaine de premières
+// images** (dernière demande sans crop relevée aux images 3 à 12 selon le
+// tirage), pendant lesquelles `majSeuilSocle` attend encore le MNT
+// (`largeurBlocM() > 0`) et où le quadtree, laissé libre, descend sur la
+// planète entière : **114 demandes de tuiles par chargement**, soit **59,7 %
+// des 191 avec `?globe=continu`** et **71,7 % des 159 sans**. Voir `_cropAttendu` dans
+// `globe.js` pour le relevé et pour ce que ça coûte quand le MNT ne vient pas.
+globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee, cropAttendu: terreUniqueBranchee })
 
 // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
 //
