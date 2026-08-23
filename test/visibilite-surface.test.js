@@ -173,6 +173,67 @@ test('③ les trois boutons reçoivent `vue.boutons`, le maillage reçoit `vue.s
   }
 })
 
+test('③ LE COMPTE DES LECTEURS — la garde de CLASSE, pas de cas particulier', () => {
+  // ⛔ **LES MUTATIONS M11 ET M12 SURVIVAIENT, ET C'EST CE TEST QUI LES TUE.**
+  // La relecture a montré qu'on pouvait rebrancher `labels.visible` ou
+  // `clouds.setVisible` de `vue.socle` sur `vue.boutons` — donc rallumer un
+  // calque du bloc PLAT par-dessus le crop — **sans qu'un seul test ne rougisse**.
+  // Seul `terrain.mesh.visible` était gardé, un calque sur quatorze.
+  //
+  // ⚠️ **LE TROU PRÉEXISTAIT, MAIS LA TÂCHE R1 EN A ÉLARGI LA SURFACE** : avant
+  // elle il n'y avait qu'une variable dans cette fonction, il y en a maintenant
+  // trois, et deux des trois sont la mauvaise réponse pour un calque de socle.
+  //
+  // ⚠️ **UN COMPTE, PAS UNE LISTE.** Vérifier nommément les quatorze calques
+  // laisserait passer le quinzième, ajouté demain sur la mauvaise grandeur. Le
+  // compte, lui, rougit sur toute redistribution — dans les deux sens : muter un
+  // lecteur de `vue.socle` vers `vue.boutons` fait 10/3 au lieu de 11/2.
+  const i = MAIN.indexOf('function poserVisibiliteSocle(')
+  assert.ok(i > 0)
+  // on retire les commentaires : le corps CITE les trois noms en prose, et une
+  // assertion qui compterait les citations serait rouge sur une correction de
+  // style et verte sur un calque rebranché.
+  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
+  const compte = (n) => (corps.match(new RegExp('vue\\.' + n, 'g')) || []).length
+  assert.equal(compte('socle'), 11,
+    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 11 — un calque du bloc plat a changé de grandeur`)
+  assert.equal(compte('boutons'), 2,
+    `${compte('boutons')} lecteurs de \`vue.boutons\` au lieu de 2 (isoBtn et mapCorner)`)
+  assert.equal(compte('cine'), 1,
+    `${compte('cine')} lecteur de \`vue.cine\` au lieu de 1 (cineBtn seul)`)
+  // et la fonction ne lit RIEN d'autre que la loi : pas de quatrième grandeur
+  // improvisée à côté.
+  assert.equal((corps.match(/vue\.\w+/g) || []).length, 11 + 2 + 1,
+    'un champ de `vue` autre que `socle`, `boutons` et `cine` est lu dans le corps')
+})
+
+test('③ LE RELAIS DE MODE — sans lui les boutons survivent à l’orbite (mutation M5)', () => {
+  // ⛔ **LA MUTATION M5 SURVIVAIT : supprimer cette ligne laissait les quatre
+  // boutons `display:flex` EN MODE ORBITAL, mesuré à l'écran, sans qu'un seul
+  // test ne rougisse.** Le troisième correctif de ② était livré sans garde.
+  //
+  // ⚠️ **UNE ASSERTION DE TEXTE SUFFIT CONTRE UNE SUPPRESSION**, et c'est le seul
+  // outil disponible : aucun test de ce dépôt ne charge `main.js`. Elle ne
+  // protégerait pas d'une réécriture du corps — c'est pourquoi la grandeur du
+  // repos, elle, a été extraite en module (`monde/grandeur-repos.js`) ; ici il
+  // n'y a pas de corps à extraire, seulement un appel à ne pas perdre.
+  const i = MAIN.indexOf('    setSurfaceVisible(v) {')
+  assert.ok(i > 0, '`setSurfaceVisible` a disparu ou changé de forme')
+  const corps = MAIN.slice(i, MAIN.indexOf('\n    },', i)).replace(/\/\/[^\n]*/g, '')
+  const branche = corps.slice(corps.indexOf('if (terreUniqueBranchee)'), corps.indexOf('return'))
+  assert.ok(branche.length > 0, 'la branche `terre unique` de `setSurfaceVisible` a disparu')
+  assert.ok(/poserVisibiliteSocle\(v\)/.test(branche),
+    'le relais de mode a disparu : les boutons du bas survivront à l’orbite')
+  // ⚠️ **ET IL PRÉCÈDE `veilleCrop.poserMode(v)`** : celle-ci retire le crop en
+  // partant, donc l'ordre inverse poserait les boutons sur un état déjà démonté.
+  assert.ok(branche.indexOf('poserVisibiliteSocle(v)') < branche.indexOf('veilleCrop.poserMode(v)'),
+    'le relais des boutons doit précéder le démontage du crop')
+  // ⛔ **ET IL PASSE `v`, PAS UN LITTÉRAL** — `poserVisibiliteSocle(true)` ici
+  // rendrait les boutons éternels, `false` les tuerait pour toujours.
+  assert.ok(!/poserVisibiliteSocle\((true|false)\)/.test(branche),
+    'le relais de mode reçoit un littéral au lieu de la transition `v`')
+})
+
 test('③ `main.js` importe la loi plutôt que de la réécrire', () => {
   assert.ok(/import \{ visibiliteSurface \} from '\.\/monde\/visibilite-surface\.js'/.test(MAIN),
     'la loi n’est pas importée')
