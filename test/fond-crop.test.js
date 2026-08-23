@@ -837,6 +837,20 @@ test('⑩b `surLeFond` EST la condition qui décide de la hauteur — exécutée
       }
     }
   }
+  // ⛔ **ET LES DEUX GARDES DE PRODUCTION SONT DES ET, PAS DES OU.** `uFondOn`
+  // et `uCropOn` valent ZÉRO drapeau baissé (relevé dans la page) : si l'un
+  // d'eux cessait de couper, la vue orbitale de production lirait un champ
+  // qu'elle n'a pas — et un `&&` changé en `||` ne se voit sur aucune capture
+  // du crop, où les deux valent 1.
+  for (const [uFondOn, uCropOn] of [[0, 1], [1, 0], [0, 0]]) {
+    const ech = -2116.3 / 22753.57142857143
+    assert.equal(surLeFondDuNuanceur(uFondOn, uCropOn, 3, 22753.57142857143, { x: 0, y: 0 }, -50, ech), false,
+      `uFondOn=${uFondOn} uCropOn=${uCropOn} : la condition doit être FAUSSE`)
+    assert.equal(fondDuNuanceur(uFondOn, uCropOn, 3, 22753.57142857143, { x: 0, y: 0 }, -50, ech), -50,
+      `uFondOn=${uFondOn} uCropOn=${uCropOn} : la hauteur du MNT doit passer intacte`)
+  }
+  // et le témoin : les deux à 1, la même entrée bascule bien
+  assert.equal(surLeFondDuNuanceur(1, 1, 3, 22753.57142857143, { x: 0, y: 0 }, -50, -2116.3 / 22753.57142857143), true)
 })
 
 test('⑩c la condition n’est écrite QU’UNE FOIS, et `hauteurFond` la lit', () => {
@@ -862,6 +876,15 @@ test('⑩d ⛔ `fondMarin` EST RELEVÉ AVANT LE GRAIN — le grain change le SIG
   const iGrain = nu.indexOf('h = hauteurGrain(qCrop, h);')
   assert.ok(iHauteur > 0 && iFond > iHauteur, '`fondMarin` doit être relevé APRÈS la composition de la hauteur')
   assert.ok(iGrain > iFond, '`fondMarin` doit être relevé AVANT le grain')
+  // ⛔ **ET IL N'EST ÉCRIT QU'UNE FOIS — UNE SURVIVANTE L'A EXIGÉ.** La campagne
+  // a AJOUTÉ un second `fondMarin = surLeFond(qCrop, h)` après le grain, et le
+  // test n'a pas rougi : le premier était toujours là, et l'ordre tenait. Ce
+  // qu'il faut interdire n'est pas « une lecture après le grain », c'est
+  // « plus d'une lecture ».
+  assert.equal((nu.match(/fondMarin = surLeFond/g) || []).length, 1,
+    '`fondMarin` est affecté plusieurs fois : la dernière affectation gagne, et elle peut être après le grain')
+  assert.equal((nu.match(/\bfondMarin\b/g) || []).length, 2,
+    '`fondMarin` doit avoir exactement UN auteur et UN lecteur')
   // et le grain PEUT bien retourner le signe : ce n'est pas une précaution
   // théorique — on l'exécute sur la loi du dépôt
   const g = (a, b) => a + 12 * ((b - 0.5) * 2 + (0.3 - 0.5) * 0.7)

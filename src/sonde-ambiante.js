@@ -111,7 +111,12 @@ import {
   dispersionBande,
 } from './monde/atlas-normales.js'
 
-const COTE = 64 // pixels de côté — deux bandes de 28 lignes utiles après marge
+const COTE = 64 // pixels de côté — deux bandes de 29 lignes utiles après marge
+// ⚠️ **UNE SEULE ÉCRITURE DES PLAGES, ET C'EST UNE SURVIVANTE QUI L'A EXIGÉE.**
+// Elles étaient calculées DEUX fois — dans `coefAmbiante` et dans
+// `_sondeInterne` — et la campagne a pu changer la première sans que le test,
+// qui cherchait la chaîne, s'en aperçoive : il la retrouvait dans la seconde.
+const BANDES = bandesLecture(NORMALES_ATLAS.length, COTE)
 const CACHE = new WeakMap() // texture d'environnement → { ciel, sol } gelé
 
 export const AMBIANTE_NULLE = Object.freeze({
@@ -154,11 +159,17 @@ function bati() {
     geo,
     new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 1, metalness: 0, envMapIntensity: 1 })
   )
-  // ⚠️ **AUCUNE OMBRE, ET AUCUN ÉCRÊTAGE PAR LE TRONC** : les faces débordent
-  // du cadre, donc leur boîte englobante déborde aussi.
+  // ⚠️ **AUCUNE OMBRE** : la sonde ne mesure QUE l'environnement, et une carte
+  // d'ombres la ferait dépendre de ce que la scène d'accueil contient.
+  //
+  // ⚠️ **ET PAS DE `frustumCulled = false`, PARCE QU'IL SERAIT MORT.** Une
+  // mutation de la campagne P12 l'a remis à `true` et A SURVÉCU ; la recherche
+  // du code mort donne la raison : la sphère englobante de l'atlas est centrée
+  // sur l'origine, que le tronc de la caméra contient — l'objet n'est jamais
+  // écrêté, quelle que soit la valeur. Une ligne qu'aucun test ne peut défendre
+  // est une ligne qui ment sur ce qui protège la mesure.
   _atlas.castShadow = false
   _atlas.receiveShadow = false
-  _atlas.frustumCulled = false
   _scene.add(_atlas)
   // orthographique, cadrée exactement sur `[-1, 1]²`, regardant −Z : les faces
   // sont posées en z = 0 et remplissent le cadre, débord compris
@@ -225,9 +236,8 @@ export function coefAmbiante(renderer, envTexture) {
 
   // ⚠️ **LA BANDE DU BAS EST LE NADIR** (`readRenderTargetPixels` rend la ligne
   // 0 en bas), et `NORMALES_ATLAS` est écrit dans cet ordre-là.
-  const bandes = bandesLecture(NORMALES_ATLAS.length, COTE)
-  const sol = irradianceBande(blanc, noir, COTE, bandes[0])
-  const ciel = irradianceBande(blanc, noir, COTE, bandes[1])
+  const sol = irradianceBande(blanc, noir, COTE, BANDES[0])
+  const ciel = irradianceBande(blanc, noir, COTE, BANDES[1])
   let res = AMBIANTE_NULLE
   if (ciel.every(Number.isFinite) && sol.every(Number.isFinite)) {
     res = Object.freeze({
@@ -237,10 +247,10 @@ export function coefAmbiante(renderer, envTexture) {
       // même normale, donc le même nombre. Un écart non nul dit qu'un pixel de
       // couture ou de fond est entré dans la moyenne.
       dispersion: Math.max(
-        dispersionBande(blanc, noir, COTE, bandes[0]),
-        dispersionBande(blanc, noir, COTE, bandes[1])
+        dispersionBande(blanc, noir, COTE, BANDES[0]),
+        dispersionBande(blanc, noir, COTE, BANDES[1])
       ),
-      pixels: (bandes[0].fin - bandes[0].debut + 1 + bandes[1].fin - bandes[1].debut + 1) * COTE,
+      pixels: (BANDES[0].fin - BANDES[0].debut + 1 + BANDES[1].fin - BANDES[1].debut + 1) * COTE,
     })
   }
   CACHE.set(envTexture, res)
@@ -249,5 +259,5 @@ export function coefAmbiante(renderer, envTexture) {
 
 /** Pour les bancs : l'intérieur de la sonde, sans le cache. */
 export function _sondeInterne() {
-  return { COTE, scene: _scene, atlas: _atlas, cible: _cible, bandes: bandesLecture(NORMALES_ATLAS.length, COTE) }
+  return { COTE, scene: _scene, atlas: _atlas, cible: _cible, bandes: BANDES }
 }

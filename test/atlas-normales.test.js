@@ -36,6 +36,7 @@ const SRC = readFileSync(new URL('../src/monde/atlas-normales.js', import.meta.u
 
 // le coin `s` de la face `i`, tel que `facesAtlas` l'écrit
 const sommet = (f, i, s) => [f.positions[(i * 4 + s) * 3], f.positions[(i * 4 + s) * 3 + 1], f.positions[(i * 4 + s) * 3 + 2]]
+const sommetIndexe = (f, v) => [f.positions[v * 3], f.positions[v * 3 + 1], f.positions[v * 3 + 2]]
 const normale = (f, i, s) => [f.normales[(i * 4 + s) * 3], f.normales[(i * 4 + s) * 3 + 1], f.normales[(i * 4 + s) * 3 + 2]]
 const bornesY = (f, i) => {
   let lo = Infinity
@@ -121,15 +122,18 @@ test('①f l’enroulement est DIRECT : les faces regardent la caméra', () => {
   // inverse serait vue de dos : `gl_FrontFacing` faux, et un jour où quelqu'un
   // poserait `side: DoubleSide`, three retournerait la normale — donc le ciel
   // et le sol s'échangeraient, en silence.
+  // ⚠️ **ON LIT L'INDEX, PAS L'ORDRE DES COINS — une survivante l'a exigé.**
+  // La campagne a retourné les DEUX triangles dans `idx.set(...)` et le test
+  // n'a pas rougi : il supposait `[0,1,2]` et `[0,2,3]`. Or c'est l'INDEX que
+  // le GPU parcourt, et c'est lui qui décide de `gl_FrontFacing`.
   const f = facesAtlas(NORMALES_ATLAS)
-  for (let i = 0; i < 2; i++) {
-    for (const [p, q, r] of [[0, 1, 2], [0, 2, 3]]) {
-      const a = sommet(f, i, p)
-      const b = sommet(f, i, q)
-      const c = sommet(f, i, r)
-      const z = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-      assert.ok(z > 0, `face ${i}, triangle ${p}${q}${r} : normale géométrique en ${z}`)
-    }
+  assert.equal(f.index.length, 12)
+  for (let t = 0; t < f.index.length / 3; t++) {
+    const a = sommetIndexe(f, f.index[t * 3])
+    const b = sommetIndexe(f, f.index[t * 3 + 1])
+    const c = sommetIndexe(f, f.index[t * 3 + 2])
+    const z = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    assert.ok(z > 0, `triangle ${t} (${f.index[t * 3]},${f.index[t * 3 + 1]},${f.index[t * 3 + 2]}) : normale géométrique en ${z}`)
   }
 })
 
@@ -300,7 +304,12 @@ test('③e une bande vide rend zéro plutôt que NaN', () => {
 test('④a la sonde IMPORTE le module et n’écrit plus sa géométrie', () => {
   assert.match(SONDE, /from '\.\/monde\/atlas-normales\.js'/)
   assert.match(SONDE, /facesAtlas\(NORMALES_ATLAS\)/)
-  assert.match(SONDE, /bandesLecture\(NORMALES_ATLAS\.length, COTE\)/)
+  // ⚠️ **UNE SEULE FOIS — UNE SURVIVANTE L'A EXIGÉ.** Les plages étaient
+  // calculées dans `coefAmbiante` ET dans `_sondeInterne` : la campagne a changé
+  // la première, et ce test a retrouvé la chaîne dans la seconde.
+  assert.equal((SONDE.match(/bandesLecture\(/g) || []).length, 1,
+    'les plages de lecture sont calculées DEUX fois : une mutation de l une passerait inaperçue')
+  assert.match(SONDE, /const BANDES = bandesLecture\(NORMALES_ATLAS\.length, COTE\)/)
   // ⛔ la bille de P3 a disparu AVEC la loi qu'elle servait : plus de sphère,
   // plus de disque à rejeter, plus de régression sur une demi-sphère
   assert.doesNotMatch(SONDE, /SphereGeometry/)
@@ -310,8 +319,8 @@ test('④a la sonde IMPORTE le module et n’écrit plus sa géométrie', () => 
 test('④b ⛔ LE SOL VIENT DE LA BANDE 0 ET LE CIEL DE LA BANDE 1', () => {
   // ⛔ L'échange est invisible : deux triplets du même type, aucune erreur. Il
   // retournerait l'éclairage indirect du bloc de haut en bas.
-  assert.match(SONDE, /const sol = irradianceBande\(blanc, noir, COTE, bandes\[0\]\)/)
-  assert.match(SONDE, /const ciel = irradianceBande\(blanc, noir, COTE, bandes\[1\]\)/)
+  assert.match(SONDE, /const sol = irradianceBande\(blanc, noir, COTE, BANDES\[0\]\)/)
+  assert.match(SONDE, /const ciel = irradianceBande\(blanc, noir, COTE, BANDES\[1\]\)/)
 })
 
 test('④c le spéculaire n’est PAS coupé sur la sonde, et c’est délibéré', () => {
@@ -327,9 +336,22 @@ test('④c le spéculaire n’est PAS coupé sur la sonde, et c’est délibér�
 })
 
 test('④d les gardes de P3 tiennent : cache, état du renderer, intensité 1', () => {
+  // ⛔ **LA GARDE QUI TIENT LA PRODUCTION INTOUCHÉE** : sans environnement, la
+  // sonde ne rend RIEN et l'appelant reçoit une ambiante nulle. Une sonde qui
+  // tenterait de rendre avec `envTexture` à `null` peindrait un coefficient de
+  // zéro — ou lancerait, sur le chemin du démarrage.
+  assert.match(SONDE, /if \(!renderer \|\| !envTexture\) return AMBIANTE_NULLE/)
   assert.match(SONDE, /const CACHE = new WeakMap\(\)/)
   assert.match(SONDE, /const memo = CACHE\.get\(envTexture\)/)
+  assert.match(SONDE, /_scene\.environment = envTexture/)
   assert.match(SONDE, /_scene\.environmentIntensity = 1/)
+  // ⛔ **ET TOUT CE QUE LA SONDE EMPRUNTE AU RENDERER, ELLE LE REND.** Le §0 du
+  // plan liste `autoClear === false` comme la première façon dont un banc a menti
+  // sur ce chantier, et `PasseFond` a déjà avaleé `shadowMap.needsUpdate` une
+  // fois. Une sonde qui laisse l'un des quatre derrière elle casse la page qui
+  // l'appelle, pas elle-même.
+  assert.match(SONDE, /renderer\.autoClear = autoAvant/)
+  assert.match(SONDE, /renderer\.setClearColor\(clearAvant, alphaAvant\)/)
   assert.match(SONDE, /shadowMap\.needsUpdate = ombreAvant/)
   assert.match(SONDE, /renderer\.setRenderTarget\(cibleAvant\)/)
   assert.match(SONDE, /_scene\.environment = null/)
