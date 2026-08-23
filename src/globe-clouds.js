@@ -34,6 +34,9 @@ uniform sampler2D uTex;
 uniform vec3 uSunDir;
 uniform float uTime;
 uniform float uFade;
+// LE PLANCHER DE NUIT DE LA COQUILLE — Tache R7, tour de correction.
+// 1.0 = la coquille d'AVANT, au bit pres (voir le terminateur plus bas).
+uniform float uNuitCoquille;
 
 void main() {
   // primary cover drifts east very slowly; a counter-drifting second sample
@@ -47,6 +50,18 @@ void main() {
   // same soft sun curve as the globe tiles, so the shell belongs to the map
   float diff = max(dot(normalize(vN), uSunDir), 0.0);
   vec3 col = a.rgb * (0.74 + 0.30 * diff);
+
+  // ET IL LUI MANQUAIT LE TERMINATEUR DES TUILES — Tache R7, tour de
+  // correction. La ligne au-dessus a un plancher de 0,74 SANS day : la coquille
+  // ne pouvait PAS devenir nocturne. Tant que uSunDir suivait la camera
+  // personne ne le voyait ; R7 met la face nuit en plein cadre, et les bandes
+  // de nuages se sont mises a BRILLER en blanc au-dessus d'une planete eteinte.
+  // Le voici, avec le MEME plancher reglable que les tuiles.
+  //
+  // NEUTRE AU BIT PRES EN PRODUCTION : uNuitCoquille = 1.0 rend
+  // 1.0 + (1.0 - 1.0) * day, c'est-a-dire exactement 1.0.
+  float day = smoothstep(-0.22, 0.16, dot(normalize(vN), uSunDir));
+  col *= uNuitCoquille + (1.0 - uNuitCoquille) * day;
 
   gl_FragColor = vec4(col, alpha * 0.78 * uFade);
 }
@@ -135,6 +150,8 @@ export class GlobeClouds {
       uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.5).normalize() },
       uTime: { value: 0 },
       uFade: { value: 1 },
+      // Tache R7 : 1 = la coquille d'avant, au bit pres. Voir setNuitCoquille.
+      uNuitCoquille: { value: 1 },
     }
 
     const geo = new THREE.SphereGeometry(radius * 1.015, 96, 64)
@@ -163,6 +180,15 @@ export class GlobeClouds {
 
   setSunDir(v) {
     this.uniforms.uSunDir.value.copy(v).normalize()
+  }
+
+  // Le gain de la face NUIT de la coquille — Tâche R7, tour de correction.
+  // 1 la laisse telle qu'elle a toujours été ; sous le drapeau
+  // `soleilHeureMonde` elle s'aligne sur le plancher des tuiles, sans quoi les
+  // nuages brillent au-dessus d'une planète éteinte. Valeur et mesure :
+  // `monde/soleil-monde.js`.
+  setNuitCoquille(v) {
+    if (Number.isFinite(v)) this.uniforms.uNuitCoquille.value = v
   }
 
   setVisible(v) {

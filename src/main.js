@@ -58,7 +58,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive, planeteEclaireeActive } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive, planeteEclaireeActive, soleilHeureMondeActif } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond } from './monde/frontiere-rendu.js'
@@ -122,6 +122,9 @@ import { coefAmbiante } from './sonde-ambiante.js'
 // `scene.environmentIntensity` »), écrite une fois, vérifiable sous node. C'est
 // elle qui dit LAQUELLE des deux textures sonder pour la paroi du crop.
 import { environnementEffectif } from './monde/eclairage-crop.js'
+// L'HEURE DE LA PLANÈTE — Tâche R7. La loi vit dans ce module PUR (et il
+// n'en écrit pas une seconde : il appelle `directionSoleilLocale` de P3).
+import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from './monde/soleil-monde.js'
 // LE REPOS DE LA VUE — Tâche N. ⚠️ **PUR, POUR LA MÊME RAISON QUE LES TROIS
 // VEILLES CI-DESSUS** : c'est un SEUIL, et le seuil du socle a produit onze
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
@@ -1533,6 +1536,14 @@ function applyTimeOfDay(hour) {
   })
   params.sunAzimuth = s.azimuth
   params.sunElevation = s.elevation
+  // ⚠️ **LES DEUX MONNAIES SONT ICI, CÔTE À CÔTE, ET C'EST VOULU — Tâche R7.**
+  // La ligne au-dessus porte la LAMPE (`s.elevation`, relevée à +40° la nuit
+  // « so the moon shines from above ») : c'est la bonne pour MODELER le relief.
+  // La ligne ci-dessous porte l'ASTRE (`s.sunElevation`, −26,12° à 03h22 au lieu
+  // filmé) : c'est la seule qui dise de quel côté du terminateur la planète est.
+  // ⛔ Échanger les deux rendrait le plein jour à 3 h du matin. C'est le défaut
+  // « une grandeur juste dans la mauvaise monnaie », et il se referme ICI.
+  soleilMonde = soleilMondeDeLHeure(s, { lat: params.demLat, lon: params.demLon })
   params.sunIntensity = s.sunIntensity // ← dérivée : heure × sunGain
   params.hemiIntensity = s.hemiIntensity // ← dérivée : heure × hemiGain
   params.envLight = s.envIntensity // ← dérivée : heure × envGain
@@ -1583,6 +1594,53 @@ function applyTimeOfDay(hour) {
   tenteAllumageNuit({ nuit: wantDark, lecture: !!cycleTemporelActif })
 }
 
+// ══════════ L'HEURE DE LA PLANÈTE — Tâche R7 ════════════════════════════════
+//
+// ⛔ **LA PLANÈTE NE LISAIT PAS L'HEURE : ELLE LISAIT LA CAMÉRA.** La boucle
+// d'image reposait `globe.setSunDir(_orbSun)` à chaque tour, sur la position de
+// la caméra tournée de 42°, dans les DEUX modes. **Mesuré au banc R7** (Chrome
+// sans tête, caméra IMMOBILE, seule l'horloge bouge) : `uSunDir` vaut
+// `(0,23049 · −0,36868 · 0,90053)` **au bit près aux huit heures essayées** —
+// une élévation solaire de **+51,60° à minuit comme à midi** — pendant que le
+// crop juste à côté suivait l'heure (+15,1° à 6 h, +57,2° à midi). Traces et
+// captures dans `.banc/R7/`.
+//
+// ⚠️ **DEUX ÉCRITURES POUR UN SEUL UNIFORME, ET C'EST LA SECONDE QUI GAGNAIT.**
+// `placeSun` poussait déjà `sun.position` vers le globe (ligne ci-dessous) ;
+// la boucle d'image l'écrasait à l'image suivante. Le banc a attrapé l'instant
+// exact où les deux se croisent : un relevé sur quarante-deux montre `uSunDir`
+// égal au soleil de la scène, les quarante et un autres au vecteur caméra.
+//
+// ⚠️ **ET `sun.position` N'AURAIT PAS SUFFI NON PLUS** : c'est un vecteur du
+// repère du SOCLE (est / haut / nord au lieu du bloc), porté à un rayon de 34.
+// Le globe a son propre repère. La conversion est celle de la Tâche P3
+// (`monde/eclairage-crop.js`), et `monde/soleil-monde.js` dit POURQUOI elle doit
+// partir de l'élévation ASTRONOMIQUE (`s.sunElevation`, celle que `lightingFor`
+// vient de rendre) et surtout pas de `params.sunElevation`, qui porte la lampe.
+const soleilHeureMonde = soleilHeureMondeActif()
+const _soleilMonde = new THREE.Vector3()
+
+// ⛔ **LA DIRECTION EST CALCULÉE DANS `applyTimeOfDay`, PAS ICI, ET C'EST UNE
+// MUTATION SURVIVANTE QUI L'A EXIGÉ.** Le tour 1 lisait `skyState` au moment de
+// poser : il suffisait alors d'une ligne à 70 lignes de là —
+// `skyState = { ...s, sunElevation: s.elevation }` — pour rendre le PLEIN JOUR À
+// 3 h DU MATIN sans qu'un seul des 4 204 tests bouge. Le piège de la monnaie
+// était NOMMÉ, il n'était pas FERMÉ. Il l'est maintenant par construction : la
+// seule lecture de l'élévation astronomique se fait sur le `s` FRAIS que
+// `lightingFor` vient de rendre, à deux lignes de `params.sunElevation = s.elevation`,
+// là où les deux monnaies sont côte à côte et où un lecteur les compare.
+let soleilMonde = null
+
+/**
+ * La direction à pousser dans `globe.setSunDir` — repli sur le comportement
+ * d'avant dès qu'une donnée manque (démarrage : `applyTimeOfDay` n'a pas encore
+ * tourné, `soleilMonde` est encore nul).
+ */
+function soleilDuGlobe() {
+  if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') return sun.position
+  return soleilMonde ? _soleilMonde.fromArray(soleilMonde) : sun.position
+}
+
 function placeSun() {
   const az = THREE.MathUtils.degToRad(params.sunAzimuth)
   const el = THREE.MathUtils.degToRad(params.sunElevation)
@@ -1600,7 +1658,7 @@ function placeSun() {
   sun.intensity = on ? params.sunIntensity * Math.min(1, atten(el) / atten(THREE.MathUtils.degToRad(16))) : 0
   hemi.intensity = params.hemiIntensity
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
-  if (globe) globe.setSunDir(sun.position)
+  if (globe) globe.setSunDir(soleilDuGlobe()) // Tâche R7 — l'heure, pas la caméra
   if (clouds) clouds.setSunDir(sun.position)
   sunDisc.update(sun.position, skyState?.sunColor ?? '#fff4ea', skyState?.elevation ?? params.sunElevation)
   // le disque qu'on VOIT ne doit jamais contredire l'ombrage (voir sun-disc.js) :
@@ -4396,7 +4454,12 @@ setTimeout(assureRacinesGlobe, DELAI_FILET_RACINES_MS)
 
 syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
-globe.setSunDir(sun.position)
+globe.setSunDir(soleilDuGlobe()) // Tâche R7 — même aiguillage qu'en vol
+// LE PLANCHER DE NUIT DE LA PLANÈTE — Tâche R7, tour de correction. Drapeau
+// baissé, `plancherNuitMonde(false)` est l'IDENTITÉ : la production ne bouge
+// pas. Levé, la face nuit reste une CARTE, sombre et froide, au lieu de fondre
+// vers le fond crème du décor. Le pourquoi et les mesures : `soleil-monde.js`.
+globe.setNuitPlanete(plancherNuitMonde(soleilHeureMonde))
 // soleil orbital lié à la caméra (voir tick) — scratch vectors hors boucle
 const _orbSun = new THREE.Vector3()
 const _upY = new THREE.Vector3(0, 1, 0)
@@ -12136,10 +12199,26 @@ function tick() {
     // trafic que ça ouvre n'a PAS été mesuré sur un vol complet — c'est écrit
     // dans le compte rendu de la tâche, et c'est l'une des raisons du drapeau.
     globe.update(camGlobe, dtAmb)
-    // le soleil du fond suit la même loi qu'en orbite (voir juste dessous) :
-    // un soleil de scène laisserait la moitié du fond dans la nuit
-    _orbSun.copy(camGlobe.position).normalize().applyAxisAngle(_upY, -0.73)
-    globe.setSunDir(_orbSun)
+    // ══════ L'HEURE DE LA PLANÈTE — Tâche R7 ═══════════════════════════════
+    //
+    // Le soleil du fond suivait la même loi qu'en orbite (voir juste dessous) :
+    // « un soleil de scène laisserait la moitié du fond dans la nuit ».
+    //
+    // ⛔ **ET C'EST ICI QUE LE SEUIL SE VOYAIT LE PLUS**, parce que le fond et le
+    // crop sont à l'écran EN MÊME TEMPS : le crop est éclairé par l'heure depuis
+    // la Tâche P3, la planète dans laquelle il est creusé l'était par la caméra.
+    // Mesuré au banc R7, La Réunion, caméra immobile, huit heures : la planète
+    // voyait le soleil à **+51,60° aux huit heures** pendant que le crop le
+    // voyait de +12,3° à +57,2°.
+    //
+    // ⚠️ **SOUS LE DRAPEAU, ON NE REPOSE PLUS RIEN ICI** : `placeSun` a déjà
+    // poussé le soleil de l'heure, et il ne bouge que quand l'heure ou le lieu
+    // bougent. Une pose par image serait un troisième écrivain pour un uniforme
+    // qui en avait déjà deux de trop.
+    if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') {
+      _orbSun.copy(camGlobe.position).normalize().applyAxisAngle(_upY, -0.73)
+      globe.setSunDir(_orbSun)
+    }
   }
   if (modes.mode === 'orbital') {
     // dtAmb : seule la coquille de nuages qui orbite la planète (globe-clouds.js)
@@ -12150,8 +12229,17 @@ function tick() {
     // restait à jamais dans la nuit). Décalé de ~42° pour que la face visible
     // soit éclairée MAIS garde son terminateur et l'anneau crépusculaire au
     // limbe — le drame de Google Earth sans sa frustration.
-    _orbSun.copy(camera.position).normalize().applyAxisAngle(_upY, -0.73)
-    globe.setSunDir(_orbSun)
+    //
+    // ⚠️ **LE DRAPEAU DE LA TÂCHE R7 REVIENT SUR CE CHOIX, ET C'EST DÉLIBÉRÉ.**
+    // Corriger le seul fond de la vue surface aurait laissé le saut EXACTEMENT
+    // là où Adrien l'a filmé : au franchissement. Levé, la vue orbitale rend
+    // l'heure elle aussi — à 03h22 elle devient nocturne. Ce que ça coûte est
+    // écrit au drapeau (`flags.js`) : c'est un arbitrage produit, pas une
+    // correction silencieuse.
+    if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') {
+      _orbSun.copy(camera.position).normalize().applyAxisAngle(_upY, -0.73)
+      globe.setSunDir(_orbSun)
+    }
   }
 
   // (Ici vivait le second rattrapage de brume — celui qui repoussait Début/Fin
