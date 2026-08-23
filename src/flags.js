@@ -174,6 +174,47 @@ export const FLAGS = {
   //
   // `?terre=unique` l'essaie, `?terre=deux` (ou `?terre=0`) le coupe.
   terreUnique: false,
+
+  // L'HEURE DE LA PLANÈTE — Tâche R7 du chantier « une seule Terre ».
+  //
+  // ⛔ **LA PLANÈTE NE LIT PAS L'HEURE : ELLE LIT LA CAMÉRA.** `main.js` repose
+  // à chaque image `globe.setSunDir(camPosition.normalize().applyAxisAngle(Y,
+  // −0,73))`, dans les deux modes. **Mesuré au banc R7** (Chrome sans tête,
+  // caméra IMMOBILE, seule l'horloge bouge, huit heures) : `uSunDir` vaut
+  // `(0,23049 · −0,36868 · 0,90053)` **au bit près aux huit heures**, soit une
+  // élévation solaire de **+51,60° à minuit comme à midi**, pendant que le crop
+  // juste à côté suit l'heure (+15,1° à 6 h, +57,2° à midi). L'épreuve inverse
+  // — horloge figée, caméra tournée — la fait parcourir −66,5° à +38,8°.
+  //
+  // Ce que le drapeau fait, et rien de plus : le globe reçoit le soleil que le
+  // cycle horaire calcule (`daycycle.lightingFor` → `monde/soleil-monde.js`),
+  // replacé dans son repère, **au lieu** du vecteur caméra. Les deux côtés du
+  // seuil rendent alors la même heure.
+  //
+  // ⚠️ **OFF, ET CE N'EST PAS UNE PRÉCAUTION DE STYLE.** Le soleil de caméra est
+  // un CHOIX validé avec Adrien pour la vue orbitale — « un soleil fixe à la
+  // scène n'éclairait qu'un hémisphère : la moitié des continents restait à
+  // jamais dans la nuit ». Le lever rend à la planète son terminateur vrai :
+  // **à 03h22 la vue orbitale devient nocturne**, ce qui est juste, mais ce
+  // n'est plus la vue qu'Adrien a validée. C'est à lui de trancher, pas à cette
+  // tâche.
+  //
+  // ⚠️ **IL N'EXIGE RIEN** — ni `?frontiere=1` ni `?terre=unique`. Le défaut
+  // qu'il corrige vit dans la boucle d'image du globe, qui tourne dès qu'il y a
+  // un globe. Levé sans `terre unique`, il rend seulement la vue orbitale
+  // horaire.
+  //
+  // `?soleil=heure` l'essaie, `?soleil=camera` (ou `?soleil=0`) le coupe.
+  soleilHeureMonde: false,
+}
+
+// L'HEURE DE LA PLANÈTE — Tâche R7. Même patron d'échappatoire que les autres ;
+// isolé dans une fonction parce que `location` n'existe pas sous node.
+export function soleilHeureMondeActif() {
+  const v = paramAdresse('soleil')
+  if (v === '0' || v === 'camera') return false
+  if (v === '1' || v === 'heure') return true
+  return FLAGS.soleilHeureMonde
 }
 
 // UNE SEULE TERRE — Tâche I. ⚠️ **ELLE EXIGE LA FRONTIÈRE DE RENDU**, même
