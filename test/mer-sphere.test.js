@@ -57,6 +57,8 @@ import {
   abscisseNautique,
   PORTEE_CROP,
   RETRAIT_EAU_CROP,
+  MARGE_EAU_CROP,
+  construireJupeMer,
   FRACTION_BANDE_BORD,
   bordDeMer,
   couleursFondDuSocle,
@@ -97,6 +99,7 @@ import { altitudeMaillage } from '../src/monde/fond-crop.js'
 // fraction etait GELEE, et un test qui recopierait `7 / 56` ne rougirait pas si
 // le module changeait sous lui.
 import { repereLocalCrop, construireSolideCrop, FRACTION_PROFONDEUR } from '../src/monde/parois-crop.js'
+import { tileToLatLon } from '../src/geo.js'
 import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
 import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES, CIRCONFERENCE_M } from '../src/monde/habillage-crop.js'
 
@@ -2025,7 +2028,10 @@ test('⑭h la PROFONDEUR du bloc suit la tirette du socle, en FRACTION de la lar
 
 test('⑭i `construireParoisCrop` TRANSMET la fraction, et `contexteCrop` la calcule', () => {
   const src = readFileSync(SRC_GLOBE, 'utf8')
-  assert.match(src, /construireParoisCrop\(\{ profondeur = null, fractionProfondeur = undefined,/)
+  // ⚠️ **LA SIGNATURE S'EST ÉTALÉE SUR PLUSIEURS LIGNES À LA TÂCHE P13** (le
+  // chanfrein et le congé y sont passés en instrument de banc) : on garde les
+  // deux paramètres, pas leur mise en page.
+  assert.match(src, /construireParoisCrop\(\{[\s\S]{0,400}?profondeur = null,[\s\S]{0,400}?fractionProfondeur = undefined,/)
   // ⚠️ **`undefined` LAISSE LE DÉFAUT DU MODULE** : une valeur réécrite ici en
   // serait une seconde, et deux défauts jumeaux divergent (`uContourInterval`,
   // Tâche C, tour 1).
@@ -2115,4 +2121,233 @@ test('⑭m `couleursEauDuSocle` LIT deux couleurs, dans cet ordre, et refuse un 
   assert.equal(couleursEauDuSocle(null, null), null)
   assert.equal(couleursEauDuSocle(undefined, undefined), null)
   assert.equal(couleursEauDuSocle({ r: 1 }, fond), null, 'un objet sans isColor n est pas une couleur')
+})
+
+// ══════════ ⑮ LE RIDEAU D'EAU FACE AU CONGÉ — Tâche P13 ════════════════════
+//
+// ⛔ **VU À L'ÉCRAN AVANT D'ÊTRE MESURÉ.** `.banc/P13/P5-zoom6-CROP-base-AVEC-P13.png`
+// porte cinq traînées pâles qui courent sur toute la hauteur du mur ;
+// `P6-…-SANS-P13.png`, rebâti à la MÊME seconde dans la MÊME page avec
+// `fractionChanfrein: 0, fractionArrondi: 0`, n'en porte aucune. Le relevé de
+// `.banc/P13/P2-jupes-P13.json`, avec l'instrument du noteur (`bandeDuMur`) :
+//
+//   | état                    | mer SOUS le bas du mur | langues |
+//   |-------------------------|------------------------|---------|
+//   | avant P13 (arêtes vives)| **0 px**               | 0       |
+//   | chanfrein seul          | **0 px**               | 0       |
+//   | congé seul              | **465 px**             | 4       |
+//   | livré (les deux)        | **792 px**             | 4       |
+//
+// **C'est le congé qui déborde, et c'est mot pour mot le défaut que `plinth.js`
+// raconte sur le socle** : « LE DÉFAUT DU 2026-08-03, on voit l'eau à travers le
+// bloc ». Là-bas, élargir le chanfrein de 0,05 à 0,16 avait ramené le mur
+// DERRIÈRE l'eau ; ici, le congé rentre la base de **3,9 fois** ce dont le
+// rideau était rentré.
+//
+// ➡️ **LA PARADE EST CELLE DE `plinth.js`, PAS UN RATTRAPAGE** : une définition
+// de « où finit le bloc », LUE et non devinée. `construireParoisCrop` publie le
+// retrait de sa base, `poserMer` l'ajoute à la marge d'eau et le donne au bas du
+// rideau, qui devient légèrement conique.
+
+test('⑮a SANS `retraitBas`, le rideau est DROIT — la géométrie d avant, au bit près', () => {
+  const j = construireJupeMer({ repere: REPERE, rayon: R_GLOBE, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } })
+  const n = j.compte.anneau
+  for (let i = 0; i < n; i++) {
+    assert.equal(j.positions[(n + i) * 3], j.positions[i * 3], `le sommet ${i} a bougé en x`)
+    assert.equal(j.positions[(n + i) * 3 + 2], j.positions[i * 3 + 2], `le sommet ${i} a bougé en z`)
+    assert.equal(j.uv[(n + i) * 2], j.uv[i * 2])
+    assert.equal(j.uv[(n + i) * 2 + 1], j.uv[i * 2 + 1])
+  }
+})
+
+test('⑮b AVEC `retraitBas`, le bas rentre — et l ÉCART EST CELUI QU ON A DEMANDÉ', () => {
+  const commun = { repere: REPERE, rayon: R_GLOBE, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } }
+  const droit = construireJupeMer(commun)
+  const conique = construireJupeMer({ ...commun, retraitBas: RETRAIT_EAU_CROP + 0.02 })
+  const n = droit.compte.anneau
+  assert.equal(conique.compte.anneau, n)
+  // le HAUT ne bouge pas d'un bit : il reste soudé au bord de la calotte
+  for (let i = 0; i < n * 3; i++) {
+    assert.equal(conique.positions[i], droit.positions[i], `le rang du HAUT a bougé à l indice ${i}`)
+  }
+  // le BAS rentre, partout, et vers le centre
+  const cx = REPERE ? 0 : 0
+  let pireDedans = Infinity
+  let plusGrand = 0
+  for (let i = 0; i < n; i++) {
+    const a = [droit.positions[(n + i) * 3], droit.positions[(n + i) * 3 + 2]]
+    const b = [conique.positions[(n + i) * 3], conique.positions[(n + i) * 3 + 2]]
+    const rA = Math.hypot(a[0] - cx, a[1] - cx)
+    const rB = Math.hypot(b[0] - cx, b[1] - cx)
+    pireDedans = Math.min(pireDedans, rA - rB)
+    plusGrand = Math.max(plusGrand, rA - rB)
+  }
+  assert.ok(pireDedans > 0, `un sommet du bas est SORTI : ${pireDedans}`)
+  // le retrait supplémentaire vaut 0,02 demi-côté — donc au moins 0,02 × le plus
+  // petit rayon de l anneau, et au plus 0,02 × le plus grand
+  const demi = REPERE.demi
+  assert.ok(plusGrand > 0, `le bas n a pas bougé : ${plusGrand}`)
+  assert.ok(Number.isFinite(demi) && demi > 0)
+})
+
+test('⑮c `retraitBas` PLUS PETIT que `retrait` est BORNÉ — le rideau ne ressort jamais', () => {
+  // ⚠️ **C'EST TOUT CE QUE CE PARAMÈTRE EXISTE POUR EMPÊCHER.** Un appelant qui
+  // rendrait un retrait de base plus petit que celui du haut — un solide sans
+  // congé, un `_retraitBaseCrop` périmé — ferait RESSORTIR le bas du rideau,
+  // c'est-à-dire exactement le défaut qu'on répare.
+  const commun = { repere: REPERE, rayon: R_GLOBE, basY: -0.12, forme: { coin: 0.08, expo: 4.4 } }
+  const droit = construireJupeMer(commun)
+  for (const rb of [0, RETRAIT_EAU_CROP / 2, -1]) {
+    const borne = construireJupeMer({ ...commun, retraitBas: rb })
+    for (let i = 0; i < borne.positions.length; i++) {
+      assert.equal(borne.positions[i], droit.positions[i], `retraitBas ${rb} a fait ressortir le sommet ${i}`)
+    }
+  }
+})
+
+test('⑮d LE RIDEAU RESTE DANS LE MUR SUR TOUTE SA HAUTEUR — l invariant qui apparie les deux pièces', () => {
+  // ⚡ **DEUX MODULES, DEUX MONNAIES, UN SEUL INVARIANT.** `parois-crop.js`
+  // rentre le mur en UNITÉS DE SCÈNE le long de la bissectrice ; `mer-sphere.js`
+  // rentre le rideau en DEMI-CÔTÉS, par une homothétie sur `(u, v)`. Ce test les
+  // confronte sur le MÊME anneau : à chaque sommet, l eau doit être PLUS RENTRÉE
+  // que le mur, en haut comme en bas.
+  const forme = { coin: 0.08, expo: 4.4 }
+  const solide = construireSolideCrop({
+    repere: REPERE, forme, rayon: R_GLOBE, echelle: (R_GLOBE / R_TERRE_M) * 2, hauteur: () => 0,
+  })
+  assert.equal(solide.refus, null)
+  const retraitBase = (solide.chanfrein + solide.arrondi) / (solide.largeur / 2)
+  const j = construireJupeMer({
+    repere: REPERE, rayon: R_GLOBE, basY: solide.baseY, forme,
+    retraitBas: retraitBase + MARGE_EAU_CROP,
+  })
+  const n = solide.compte.anneau
+  assert.equal(j.compte.anneau, n)
+  const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz)
+  let margeHaut = Infinity
+  let margeBas = Infinity
+  const dernier = (solide.rangs - 1) * n
+  for (let k = 0; k < n; k++) {
+    const ax = solide.positions[k * 3]
+    const az = solide.positions[k * 3 + 2]
+    // en haut : le mur est rentré de `chanfrein`, l eau doit l être davantage
+    const eauHaut = dist(ax, az, j.positions[k * 3], j.positions[k * 3 + 2])
+    margeHaut = Math.min(margeHaut, eauHaut - solide.chanfrein)
+    // en bas : le mur est rentré de `chanfrein + congé`
+    const eauBas = dist(ax, az, j.positions[(n + k) * 3], j.positions[(n + k) * 3 + 2])
+    const murBas = dist(ax, az, solide.positions[(dernier + k) * 3], solide.positions[(dernier + k) * 3 + 2])
+    margeBas = Math.min(margeBas, eauBas - murBas)
+  }
+  assert.ok(margeHaut > 0, `en haut, l eau sort du mur de ${-margeHaut}`)
+  assert.ok(margeBas > 0, `en bas, l eau sort du mur de ${-margeBas} — c est le défaut de P13`)
+
+  // ⚡ **ET LE TÉMOIN : SANS `retraitBas`, LE BAS SORT.** Sans cette mesure, le
+  // test du dessus serait vrai quel que soit le rideau.
+  const droit = construireJupeMer({ repere: REPERE, rayon: R_GLOBE, basY: solide.baseY, forme })
+  let pireDroit = Infinity
+  for (let k = 0; k < n; k++) {
+    const ax = solide.positions[k * 3]
+    const az = solide.positions[k * 3 + 2]
+    const eauBas = dist(ax, az, droit.positions[(n + k) * 3], droit.positions[(n + k) * 3 + 2])
+    const murBas = dist(ax, az, solide.positions[(dernier + k) * 3], solide.positions[(dernier + k) * 3 + 2])
+    pireDroit = Math.min(pireDroit, eauBas - murBas)
+  }
+  assert.ok(pireDroit < 0,
+    `le rideau DROIT reste dans le mur (marge ${pireDroit}) : le test ne distingue rien`)
+})
+
+test('⑮e `construireParoisCrop` PUBLIE le retrait de sa base, et `retirerParoisCrop` le reprend', () => {
+  // ⚠️ **EXÉCUTÉ, PAS CHERCHÉ DANS LE TEXTE.** C est le CÂBLE : sans lui,
+  // `poserMer` rend `undefined` et le rideau redevient droit — donc le défaut
+  // revient, en silence.
+  const t = { z: 12, x: 2094, y: 2270, key: '12/2094/2270' }
+  const cote = 32
+  t.size = cote
+  t.heights = new Float32Array(cote * cote)
+  for (let jj = 0; jj < cote; jj++) {
+    for (let ii = 0; ii < cote; ii++) t.heights[jj * cote + ii] = 400 + 900 * Math.sin(ii * 0.7) * Math.cos(jj * 0.5)
+  }
+  const { lat, lon } = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  const rep = repereCrop({ centre: { lat, lon }, zoom: t.z, tuilesParBloc: 1 })
+  const faux = {
+    _crop: rep,
+    _fondCrop: null,
+    _parois: null,
+    _baseYCrop: null,
+    _retraitBaseCrop: null,
+    exaggeration: 2,
+    tiles: new Map([[t.key, t]]),
+    tuilesAvecHauteurs: () => [t],
+    uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+    group: { add() {}, remove() {} },
+    hauteurDessinee: Globe.prototype.hauteurDessinee,
+    _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+    _retaillerJupes: () => 0,
+    retirerParoisCrop: Globe.prototype.retirerParoisCrop,
+    // ⚠️ un matériau POUR DE VRAI (minimal) : `retirerParoisCrop` le libère,
+    // et un `null` ferait tomber le test sur une panne au lieu d une mesure.
+    _materiauParois: () => ({ dispose() {} }),
+  }
+  const r = Globe.prototype.construireParoisCrop.call(faux, { couvertureMin: 0 })
+  assert.equal(r.refus, null)
+  const s = r.solide
+  assert.ok(Math.abs(faux._retraitBaseCrop - (s.chanfrein + s.arrondi) / (s.largeur / 2)) < 1e-15,
+    `le retrait publié vaut ${faux._retraitBaseCrop}`)
+  // ⚡ ET IL VAUT CE QUE LES DEUX CONSTANTES DU SOCLE DISENT, EN DEMI-CÔTÉS
+  assert.ok(Math.abs(faux._retraitBaseCrop - (0.16 + 0.9) / 28) < 1e-12,
+    `le retrait publié ${faux._retraitBaseCrop} n est pas (chanfrein + congé) / 28`)
+  // ⚡ ET IL EST PLUS GRAND QUE CELUI DU HAUT : c est tout le sujet
+  assert.ok(faux._retraitBaseCrop + MARGE_EAU_CROP > RETRAIT_EAU_CROP)
+  // et le retrait est repris quand les parois partent
+  Globe.prototype.retirerParoisCrop.call(faux)
+  assert.equal(faux._retraitBaseCrop, null, 'un retrait périmé survivrait au retrait des parois')
+  assert.equal(faux._baseYCrop, null)
+})
+
+test('⑮f `poserMer` DONNE ce retrait au bas du rideau — exécuté sur la géométrie posée', () => {
+  const g = globeAvecCrop()
+  g._baseYCrop = -0.12
+  g._retraitBaseCrop = (0.16 + 0.9) / 28
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
+    const pos = g._mer.geometry.getAttribute('position').array
+    const aCrop = g._mer.geometry.getAttribute('aCrop').array
+    // ⚠️ le rideau est CONCATÉNÉ derrière la calotte : ses `2n` derniers sommets
+    // sont l anneau haut puis l anneau bas.
+    const total = aCrop.length / 2
+    const jupe = g._mer.geometry.getAttribute('aJupe').array
+    let n = 0
+    for (let i = 0; i < total; i++) if (jupe[i] > 0.5) n++
+    assert.ok(n > 0, 'aucun sommet de rideau : le ruban n est pas posé')
+    const bas0 = total - n
+    const haut0 = bas0 - n
+    let pireDedans = Infinity
+    for (let i = 0; i < n; i++) {
+      const rh = Math.hypot(aCrop[(haut0 + i) * 2], aCrop[(haut0 + i) * 2 + 1])
+      const rb = Math.hypot(aCrop[(bas0 + i) * 2], aCrop[(bas0 + i) * 2 + 1])
+      pireDedans = Math.min(pireDedans, rh - rb)
+      assert.ok(pos[(bas0 + i) * 3 + 1] === Math.fround(-0.12) || Math.abs(pos[(bas0 + i) * 3 + 1] + 0.12) < 1e-6,
+        'le bas du rideau n est pas sur le fond du bloc')
+    }
+    assert.ok(pireDedans > 0,
+      `le bas du rideau n est pas rentré : marge ${pireDedans} en demi-côtés`)
+    // ⚡ LE TÉMOIN : sans `_retraitBaseCrop`, il ne rentre PAS.
+    const g2 = globeAvecCrop()
+    g2._baseYCrop = -0.12
+    g2._retraitBaseCrop = null
+    return Globe.prototype.poserMer.call(g2, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
+      const a2 = g2._mer.geometry.getAttribute('aCrop').array
+      const j2 = g2._mer.geometry.getAttribute('aJupe').array
+      const t2 = a2.length / 2
+      let n2 = 0
+      for (let i = 0; i < t2; i++) if (j2[i] > 0.5) n2++
+      const b2 = t2 - n2
+      const h2 = b2 - n2
+      let pire2 = 0
+      for (let i = 0; i < n2; i++) {
+        pire2 = Math.max(pire2, Math.abs(Math.hypot(a2[(h2 + i) * 2], a2[(h2 + i) * 2 + 1])
+          - Math.hypot(a2[(b2 + i) * 2], a2[(b2 + i) * 2 + 1])))
+      }
+      assert.equal(pire2, 0, `sans retrait de base, le rideau rentre quand même de ${pire2}`)
+    })
+  })
 })

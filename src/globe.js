@@ -65,6 +65,7 @@ import {
   porteeHorizon,
   PORTEE_DEFAUT,
   construireJupeMer,
+  MARGE_EAU_CROP,
   GLSL_JUPE_MER,
   // ⚠️ **TÂCHE P5 — LES DEUX ENTRÉES DU FOND MARIN QUE PERSONNE NE POSAIT.**
   // `couleursFondDuSocle` LIT la palette vivante du socle (la calotte gelait le
@@ -2461,6 +2462,11 @@ export class Globe {
     // naisse pas `undefined` au détour d'une lecture. Écrit par `poserParoisCrop`,
     // REMIS À NUL par `retirerParoisCrop`.
     this._baseYCrop = null
+    // LE RETRAIT DE LA BASE DU BLOC — Tâche P13, pour le rideau d'eau. Même
+    // raison, même cycle de vie que `_baseYCrop`.
+    this._retraitBaseCrop = null
+    // LE PLANCHER DES JUPES — Tâche P13, le sommet du congé. Même cycle de vie.
+    this._plancherJupeCrop = null
     // LE CROP SEUL — Tâche N, « LE STUDIO SUR LE GLOBE ». `false` = le parcours
     // d'avant, au bit près, et c'est l'état de production. Écrit par
     // `poserCropSeul`, lu par `_traverse` et par lui seul.
@@ -3979,6 +3985,15 @@ export class Globe {
         forme: { coin: this.uniforms.uCropCoin.value, expo: this.uniforms.uCropCoinN.value },
         basY,
         hauteur: epsUnites,
+        // ⛔ **LE BAS RENTRE PLUS QUE LE HAUT — Tâche P13.** Le motif complet
+        // est à `_retraitBaseCrop` et dans l'en-tête de `construireJupeMer`.
+        // ⚠️ **ON AJOUTE LA MARGE, ON NE LA REFAIT PAS** : `MARGE_EAU_CROP` est
+        // `SOCLE_MARGE_EAU` en demi-côtés, la seule part commune aux deux
+        // retraits. Sans parois mesurées, `undefined` rend le rideau DROIT
+        // d'avant, au bit près.
+        retraitBas: Number.isFinite(this._retraitBaseCrop)
+          ? this._retraitBaseCrop + MARGE_EAU_CROP
+          : undefined,
       })
       : null
 
@@ -4801,9 +4816,27 @@ export class Globe {
    *   `plinth.depth = 7` — donc **concordant par coïncidence**, exactement comme
    *   les deux couleurs de la lame d'eau.
    * @param {number} [arg.baseYFloor] fond imposé, jamais plus haut
+   * @param {number} [arg.fractionChanfrein] le liseré d'arête haute, EN FRACTION
+   *   DE LA LARGEUR. ⚡ **C'EST UN INSTRUMENT DE BANC, PAS UN RÉGLAGE PRODUIT** :
+   *   la règle D13 retire le cérémonial du « défaut au bit près » mais lui garde
+   *   une vertu — *« un drapeau qui éteint un changement permet un A/B à témoin
+   *   nul, et c'est ce qui a produit les meilleures preuves du chantier »*. À
+   *   `0`, le bloc retrouve ses arêtes vives d'avant la Tâche P13, **dans la
+   *   même page, à la même seconde** ; c'est ainsi que le liseré a été mesuré.
+   * @param {number} [arg.fractionArrondi] le rayon du congé bas, même monnaie,
+   *   même usage.
+   * @param {number} [arg.arrondiSeg] les segments de l'arc du congé.
    * @returns {{mesh: object, couverture: number, solide: object}|null}
    */
-  construireParoisCrop({ profondeur = null, fractionProfondeur = undefined, baseYFloor = null, couvertureMin = 1 } = {}) {
+  construireParoisCrop({
+    profondeur = null,
+    fractionProfondeur = undefined,
+    baseYFloor = null,
+    couvertureMin = 1,
+    fractionChanfrein = undefined,
+    fractionArrondi = undefined,
+    arrondiSeg = undefined,
+  } = {}) {
     if (!this._crop) return null
     // ⚠️ LA LISTE EST PRÉ-FILTRÉE UNE FOIS : l'anneau fait plus de mille points,
     // et reparcourir `this.tiles` (jusqu'à 1 700 entrées) à chacun ferait deux
@@ -4823,6 +4856,11 @@ export class Globe {
       // valeur écrite ici en serait une seconde, et deux défauts jumeaux
       // divergent (le `uContourInterval` de la Tâche C, réparé au tour 1).
       fractionProfondeur,
+      // ⚠️ **`undefined` LAISSE LE DÉFAUT DU MODULE**, pour la même raison que
+      // `fractionProfondeur` juste au-dessus : deux défauts jumeaux divergent.
+      fractionChanfrein,
+      fractionArrondi,
+      arrondiSeg,
       // ⛔ **`hauteurDessinee`, PAS `hauteurSurface` — Tâche P11, ET C'EST LE
       // MANQUE N° 2 DU NOTEUR.** L'anneau haut doit se poser sur la surface que
       // le GPU DESSINE (le maillage de la tuile), pas sur la donnée qu'il n'a
@@ -4902,6 +4940,31 @@ export class Globe {
     // la lit ; si les parois ont refusé, elle est nulle et le rideau n'est pas
     // bâti (dit dans `_merEtat.jupe`) plutôt que posé sur un fond deviné.
     this._baseYCrop = solide.baseY
+    // ⛔ **ET LE RETRAIT DE SA BASE — Tâche P13, SANS QUOI LA MER DÉPASSE.**
+    // Le rideau d'eau rentre de `chanfrein + marge` (`RETRAIT_EAU_CROP`), ce
+    // qui suffisait tant que le mur était vertical de haut en bas. Le congé
+    // rentre la BASE de `chanfrein + congé`, **3,9 fois plus** : mesuré à
+    // l'écran avant réparation, **792 px de mer sous le bas du mur en 4
+    // langues**, contre **0** dans l'état d'avant P13 rebâti à la même seconde
+    // (`.banc/P13/P2-jupes-P13.json`). C'est le défaut que `plinth.js` raconte
+    // sur le socle — « on voit l'eau à travers le bloc » — et sa parade est la
+    // même : **une définition de « où finit le bloc », LUE et non devinée.**
+    //
+    // ⚠️ **EN DEMI-CÔTÉS DE CROP, LA MONNAIE DE `mer-sphere.js`** : le rideau
+    // rentre en fraction du demi-côté, pas en unités de scène.
+    this._retraitBaseCrop = solide.largeur > 0
+      ? (solide.chanfrein + solide.arrondi) / (solide.largeur / 2)
+      : 0
+    // ⛔ **ET LE PLANCHER DES JUPES MONTE AU SOMMET DU CONGÉ — même cause, autre
+    // conséquence.** La jupe d'une tuile pend à l'aplomb du bord de la tuile ;
+    // sous le sommet du congé, la silhouette du mur RENTRE, donc la jupe
+    // dépasse par le bas. Mesuré à l'écran : **82 px de tuile sous le bas du
+    // mur, en 4 langues**, contre **0** avant P13 — et **0 quand on éteint les
+    // jupes par `setDrawRange`**, ce qui les désigne sans les supposer
+    // (`.banc/P13/P4-trainees-P13.json`). ⚠️ **C'est la même dette que le
+    // rideau d'eau, et la même parade** : la jupe s'arrête là où le mur cesse
+    // d'être vertical.
+    this._plancherJupeCrop = solide.baseY + solide.arrondi
     // ⚠️ **ET LES JUPES DES TUILES SE RETAILLENT DESSUS — Tâche P7.** C'est ici
     // et pas dans `_buildMesh` parce que l'ordre l'impose : les parois exigent
     // des tuiles bâties (`couverture`), donc les tuiles du premier bloc sont
@@ -4926,6 +4989,8 @@ export class Globe {
     // plus. La garde de `poserMer` (`Number.isFinite(basY)`) devient donc vraie
     // pour la même raison qu'elle a été écrite.
     this._baseYCrop = null
+    this._retraitBaseCrop = null
+    this._plancherJupeCrop = null
     // et les jupes reprennent leur pleine longueur : sans bloc, plus de plancher
     this._retaillerJupes()
   }
@@ -4950,7 +5015,14 @@ export class Globe {
   _rayonPlancherCrop(t) {
     if (!this._parois || !this._crop || !Number.isFinite(this._baseYCrop)) return 0
     if (!tuileDansCrop(t.z, t.x, t.y, this._crop)) return 0
-    return R_GLOBE + this._baseYCrop
+    // ⚠️ **LE SOMMET DU CONGÉ, PAS LE FOND — Tâche P13.** Sous lui, la
+    // silhouette du mur rentre et la jupe dépasse par le bas ; le motif complet
+    // est à `_plancherJupeCrop`. ⚠️ **Le repli sur `_baseYCrop` n'est pas un
+    // confort** : sans congé (`fractionArrondi: 0`, l'instrument de banc), les
+    // deux valeurs coïncident au bit près, et la géométrie d'avant P13 est
+    // exactement récupérable.
+    const plancher = Number.isFinite(this._plancherJupeCrop) ? this._plancherJupeCrop : this._baseYCrop
+    return R_GLOBE + plancher
   }
 
   /**

@@ -1463,3 +1463,66 @@ test('⑬h `globe.js` POSE nos normales sur la géométrie — EXÉCUTÉ, pas ch
   assert.ok(sombres > attendu.indices.length * 0.05,
     `seuls ${sombres} sommets sur ${attendu.indices.length} portent une ombre de contact : l attribut est plat`)
 })
+
+test('⑬i `construireParoisCrop` TRANSMET les trois réglages — l instrument de banc est BRANCHÉ', () => {
+  // ⚡ **UN DRAPEAU D INSTRUMENT, PAS UN RÉGLAGE PRODUIT.** La règle D13 retire
+  // le cérémonial du « défaut au bit près » mais lui garde une vertu : *« un
+  // drapeau qui éteint un changement permet un A/B à témoin nul, et c est ce qui
+  // a produit les meilleures preuves du chantier »*. À `fractionChanfrein: 0` et
+  // `fractionArrondi: 0`, le bloc retrouve ses arêtes vives d avant la Tâche
+  // P13, DANS LA MÊME PAGE — c est ainsi que le liseré a été mesuré à l écran.
+  //
+  // ⚠️ **ET UN PARAMÈTRE QUI N ARRIVE PAS EST UNE MESURE QUI MENT.** Le §5 bis
+  // le rappelle : `FRACTION_PROFONDEUR` était GELÉE parce que `globe.js` ne
+  // transmettait pas la tirette, et ça avait l air juste parce que ça coïncidait
+  // avec le réglage d usine. On l EXÉCUTE donc, dans les deux sens.
+  const t = { z: 12, x: 2094, y: 2270, key: '12/2094/2270' }
+  const cote = 32
+  t.size = cote
+  t.heights = new Float32Array(cote * cote)
+  for (let j = 0; j < cote; j++) {
+    for (let i = 0; i < cote; i++) t.heights[j * cote + i] = 400 + 900 * Math.sin(i * 0.7) * Math.cos(j * 0.5)
+  }
+  const { lat, lon } = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  const repere = repereCrop({ centre: { lat, lon }, zoom: t.z, tuilesParBloc: 1 })
+  const bati = (arg) => {
+    const faux = {
+      _crop: repere,
+      _fondCrop: null,
+      _parois: null,
+      _baseYCrop: null,
+      exaggeration: 2,
+      tiles: new Map([[t.key, t]]),
+      tuilesAvecHauteurs: () => [t],
+      uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+      group: { add() {}, remove() {} },
+      hauteurDessinee: Globe.prototype.hauteurDessinee,
+      _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+      _retaillerJupes: () => 0,
+      retirerParoisCrop() { this._parois = null },
+      _materiauParois: () => null,
+    }
+    return Globe.prototype.construireParoisCrop.call(faux, { couvertureMin: 0, ...arg })
+  }
+  const defaut = bati({}).solide
+  assert.equal(defaut.rangs, 7)
+  assert.ok(Math.abs(defaut.chanfrein - FRACTION_CHANFREIN * defaut.largeur) < 1e-12,
+    'le défaut du module ne traverse pas `construireParoisCrop`')
+
+  // ⚡ DANS UN SENS : on ÉTEINT.
+  const vif = bati({ fractionChanfrein: 0, fractionArrondi: 0 }).solide
+  assert.equal(vif.chanfrein, 0)
+  assert.equal(vif.arrondi, 0)
+  assert.equal(vif.rangs, 3)
+
+  // ⚡ DANS L AUTRE : on DOUBLE, et les deux valeurs bougent séparément.
+  const gros = bati({ fractionChanfrein: FRACTION_CHANFREIN * 2 }).solide
+  assert.ok(Math.abs(gros.chanfrein / defaut.chanfrein - 2) < 1e-9,
+    `le chanfrein doublé rend ${gros.chanfrein / defaut.chanfrein}`)
+  assert.equal(gros.arrondi, defaut.arrondi, 'doubler le chanfrein a bougé le congé')
+  const rond = bati({ fractionArrondi: FRACTION_ARRONDI * 2 }).solide
+  assert.ok(Math.abs(rond.arrondi / defaut.arrondi - 2) < 1e-9)
+  assert.equal(rond.chanfrein, defaut.chanfrein, 'doubler le congé a bougé le chanfrein')
+  const fin = bati({ arrondiSeg: 6 }).solide
+  assert.equal(fin.rangs - fin.rangArc, 7, '`arrondiSeg` n atteint pas le module')
+})

@@ -594,7 +594,19 @@ export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas =
  * @param {{coin:number,expo:number}} [arg.forme] la MÊME que la découpe
  * @param {number} arg.basY le fond du bloc, en Y local — `construireSolideCrop`
  * @param {number} [arg.hauteur] décalage radial de la surface (epsilon)
- * @param {number} [arg.retrait] en demi-côtés de crop
+ * @param {number} [arg.retrait] en demi-côtés de crop — le retrait du HAUT
+ * @param {number} [arg.retraitBas] le retrait du BAS, en demi-côtés. ⛔ **SANS
+ *   LUI, LE RIDEAU DÉPASSE DU BLOC DEPUIS QUE LE MUR PORTE UN CONGÉ (P13).**
+ *   `retrait` met le rideau `chanfrein + marge` en dedans, ce qui suffit tant
+ *   que le mur est vertical sur toute sa hauteur ; le congé, lui, rentre la
+ *   base de `chanfrein + congé`, donc **de 3,9 fois plus**. Mesuré à l'écran
+ *   avant d'être réparé : **792 px de mer sous le bas du mur, en 4 langues**,
+ *   là où l'état d'avant P13 en rendait **0** (`.banc/P13/P2-jupes-P13.json`).
+ *   C'est mot pour mot le défaut que `plinth.js` raconte sur le socle — « LE
+ *   DÉFAUT DU 2026-08-03, on voit l'eau à travers le bloc » —, et sa parade est
+ *   la même : **une définition de « où finit le bloc », lue au lieu d'être
+ *   devinée.** Défaut : `retrait`, c'est-à-dire le rideau droit d'avant, au bit
+ *   près.
  * @param {number} [arg.pas] espacement de l'anneau
  * @returns {{positions:Float32Array, uv:Float32Array, jupe:Float32Array,
  *            indices:Uint32Array, compte:object}}
@@ -606,6 +618,7 @@ export function construireJupeMer({
   basY,
   hauteur = 0,
   retrait = RETRAIT_EAU_CROP,
+  retraitBas = undefined,
   pas = PAS_CONTOUR,
 } = {}) {
   if (!repere || !Number.isFinite(repere.demi)) {
@@ -617,6 +630,14 @@ export function construireJupeMer({
   const anneau = contourCrop(forme.coin ?? 0, forme.expo ?? 2, pas)
   const n = anneau.length
   const k = 1 - Math.min(1, Math.max(0, retrait))
+  // ⚠️ **LE BAS PEUT RENTRER PLUS QUE LE HAUT, ET C'EST TOUT L'OBJET.** Le
+  // rideau devient légèrement conique et épouse l'enveloppe du bloc : son haut
+  // reste soudé au bord de la calotte (`bordDeMer` lit le même `retrait`), son
+  // bas se glisse derrière le congé. ⚠️ **ET IL NE REMONTE JAMAIS** : un
+  // `retraitBas` plus petit que `retrait` ferait ressortir le rideau, ce que ce
+  // paramètre existe précisément pour empêcher.
+  const rb = Number.isFinite(retraitBas) ? Math.max(retrait, retraitBas) : retrait
+  const kBas = 1 - Math.min(1, Math.max(0, rb))
   const R = rayon + hauteur
 
   const positions = new Float32Array(n * 2 * 3)
@@ -635,9 +656,18 @@ export function construireJupeMer({
     const y = d[0] * haut[0] + d[1] * haut[1] + d[2] * haut[2]
     const z = d[0] * sud[0] + d[1] * sud[1] + d[2] * sud[2]
     positions[i * 3] = x; positions[i * 3 + 1] = y; positions[i * 3 + 2] = z
-    positions[(n + i) * 3] = x; positions[(n + i) * 3 + 1] = basY; positions[(n + i) * 3 + 2] = z
+    // le sommet du BAS, sur son propre retrait — identique au haut quand
+    // `retraitBas` n'est pas donné, au bit près (`kBas === k`)
+    const uB = anneau[i].u * kBas
+    const vB = anneau[i].v * kBas
+    const pB = latLonDeLocal(uB, vB, repere)
+    const Q = surSphere(pB.lat, pB.lon, R)
+    const dB = [Q[0] - O[0], Q[1] - O[1], Q[2] - O[2]]
+    positions[(n + i) * 3] = dB[0] * est[0] + dB[1] * est[1] + dB[2] * est[2]
+    positions[(n + i) * 3 + 1] = basY
+    positions[(n + i) * 3 + 2] = dB[0] * sud[0] + dB[1] * sud[1] + dB[2] * sud[2]
     uv[i * 2] = u; uv[i * 2 + 1] = v
-    uv[(n + i) * 2] = u; uv[(n + i) * 2 + 1] = v
+    uv[(n + i) * 2] = uB; uv[(n + i) * 2 + 1] = vB
     jupe[i] = 0
     jupe[n + i] = 1
   }
@@ -951,6 +981,16 @@ export const PORTEE_CROP = 3
  * `COTE_CROP_UNITES / 2 = 28`.
  */
 export const RETRAIT_EAU_CROP = (0.16 + 0.06) / (COTE_CROP_UNITES / 2)
+
+/**
+ * La MARGE seule — `SOCLE_MARGE_EAU` de `plinth.js`, en demi-côtés de crop.
+ *
+ * ⚠️ **ELLE EXISTE À PART DEPUIS LA TÂCHE P13**, parce que le bas du rideau ne
+ * rentre plus de la même chose que son haut : en haut c'est `chanfrein + marge`
+ * (le mur est vertical), en bas c'est `chanfrein + congé + marge`. La marge est
+ * la seule part commune, et l'écrire une fois évite le troisième 0,06 du dépôt.
+ */
+export const MARGE_EAU_CROP = 0.06 / (COTE_CROP_UNITES / 2)
 
 /**
  * La part de l'anneau extérieur sur laquelle le fondu court.

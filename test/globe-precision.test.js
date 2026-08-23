@@ -323,7 +323,7 @@ test('la jupe descend toujours vers le centre de la planète', () => {
 // borner dans `_buildMesh` seulement n'aurait rien changé au bloc d'ouverture.
 
 /** Un globe factice qui porte les VRAIES méthodes de jupe. */
-function globeFactice(crop = null, baseY = null, parois = null) {
+function globeFactice(crop = null, baseY = null, parois = null, plancherJupe = undefined) {
   return {
     exaggeration: EXAGERATION,
     group: new THREE.Group(),
@@ -331,6 +331,10 @@ function globeFactice(crop = null, baseY = null, parois = null) {
     _materialFor: () => new THREE.MeshBasicMaterial(),
     _crop: crop,
     _baseYCrop: baseY,
+    // ⚠️ **Tâche P13** : le plancher des jupes est le SOMMET DU CONGÉ, pas le
+    // fond du bloc. `undefined` rend le repli sur `_baseYCrop`, c'est-à-dire la
+    // géométrie d'avant P13, au bit près.
+    _plancherJupeCrop: plancherJupe,
     _parois: parois,
     _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
     _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
@@ -452,6 +456,31 @@ test('P7 · `_rayonPlancherCrop` a DEUX gardes, et chacune empêche une faute', 
   assert.equal(globeFactice(REPERE_P7, null, { faux: true })._rayonPlancherCrop(t), 0)
 })
 
+test('P13 · le plancher de jupe est le SOMMET DU CONGÉ, et sans congé c est le fond', () => {
+  // ⛔ **CE QUE CETTE LIGNE RÉPARE, MESURÉ À L'ÉCRAN.** La jupe d'une tuile pend
+  // à l'aplomb du bord de la tuile ; sous le sommet du congé, la silhouette du
+  // mur RENTRE, donc la jupe dépasse par le bas. Relevé avec l'instrument du
+  // noteur (`bandeDuMur`) : **82 px de tuile sous le bas du mur, en 4 langues**,
+  // contre **0** dans l'état d'avant P13 rebâti à la même seconde — et **0 dès
+  // qu'on éteint les jupes par `setDrawRange`**, ce qui les désigne sans les
+  // supposer (`.banc/P13/P4-trainees-P13.json`).
+  const t = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
+  const baseY = -0.05
+  const arrondi = 0.0026
+  const g = globeFactice(REPERE_P7, baseY, { faux: true }, baseY + arrondi)
+  assert.equal(g._rayonPlancherCrop(t), R_GLOBE + baseY + arrondi)
+  // ⚡ **ET LE REPLI EST EXACT** : sans congé, les deux valeurs coïncident, donc
+  // la géométrie d'avant P13 est récupérable au bit près.
+  assert.equal(globeFactice(REPERE_P7, baseY, { faux: true }, baseY)._rayonPlancherCrop(t),
+    globeFactice(REPERE_P7, baseY, { faux: true })._rayonPlancherCrop(t))
+  // et un plancher non fini ne remplace pas le fond par un zéro silencieux
+  assert.equal(globeFactice(REPERE_P7, baseY, { faux: true }, NaN)._rayonPlancherCrop(t), R_GLOBE + baseY)
+  assert.equal(globeFactice(REPERE_P7, baseY, { faux: true }, null)._rayonPlancherCrop(t), R_GLOBE + baseY)
+  // ⚡ ET LA JUPE EST BIEN PLUS COURTE — exécuté, pas déduit du rayon seul
+  assert.ok(g._rayonPlancherCrop(t) > globeFactice(REPERE_P7, baseY, { faux: true })._rayonPlancherCrop(t),
+    'le plancher du congé doit être PLUS HAUT que le fond du bloc')
+})
+
 test('P7 · `_retaillerJupe` est IDEMPOTENTE, et elle rend la jupe pleine quand le bloc part', () => {
   const t = tuileDeTest(11, CENTRE_P7.lat, CENTRE_P7.lon)
   const g = globeFactice()
@@ -509,8 +538,13 @@ test('P7 · `poserParoisCrop` retaille, `retirerParoisCrop` rend — lecture de 
   // lequel un `_baseYCrop` périmé revenait.
   const s = fs.readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
   const corps = s.replace(/\/\/[^\n]*/g, '')
-  assert.match(corps, /this\._baseYCrop = solide\.baseY\s*\n\s*this\._retaillerJupes\(\)/)
-  assert.match(corps, /this\._parois = null\s*\n\s*this\._baseYCrop = null\s*\n\s*this\._retaillerJupes\(\)/)
+  // ⚠️ **L'ORDRE, PAS L'ADJACENCE — corrigé à la Tâche P13.** La ligne
+  // `this._retraitBaseCrop = …` s'est intercalée entre les deux (le retrait de
+  // la base du bloc, que le rideau d'eau lit). Une assertion qui exigeait deux
+  // lignes COLLÉES aurait interdit toute écriture entre elles ; ce qu'elle
+  // garde, c'est que le fond soit posé AVANT que les jupes se retaillent.
+  assert.match(corps, /this\._baseYCrop = solide\.baseY[\s\S]{0,400}?this\._retaillerJupes\(\)/)
+  assert.match(corps, /this\._parois = null[\s\S]{0,600}?this\._baseYCrop = null[\s\S]{0,400}?this\._retaillerJupes\(\)/)
   assert.match(corps, /geo\.userData\.jupe = \{ nV, bord: border, rabattement: skirtDrop \}/)
   assert.match(corps, /this\._retaillerJupe\(t\)/)
 })
