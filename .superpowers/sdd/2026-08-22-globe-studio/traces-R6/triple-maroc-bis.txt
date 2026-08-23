@@ -1,0 +1,4 @@
+→ http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ
+   119997 m  crop=. n= 883  ecart nue= 16.829  normale seule= 18.327 (+8.9 %)  D15= 29.832 (+77.3 %)   plancher=5.470  ecart/pixel normale=6.64 D15=13.70
+    39854 m  crop=. n=1224  ecart nue= 17.708  normale seule= 18.241 (+3.0 %)  D15= 32.451 (+83.3 %)   plancher=0.000  ecart/pixel normale=1.34 D15=12.45
+→ C:\Dev\wt-nue\.superpowers\sdd\2026-08-22-globe-studio\traces-R6\triple-maroc-bis.json

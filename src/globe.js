@@ -124,6 +124,16 @@ import { GLSL_NATUREL, NATUREL_MONDE } from './monde/naturel-crop.js'
 // `terrain.js`, chacun avec un commentaire annonçant la divergence.
 import { FX_GLSL } from './fx-glsl.js'
 import { GLSL_MELANGE, APPARENCE_MONDE } from './monde/melange-crop.js'
+// ══════ LA PLANÈTE N'EST PLUS NUE — règle D15, Tâche R6 ════════════════════
+// L'ÉTAT DE REPOS DU MONDE, en un seul endroit. Il était écrit en dur à trois
+// sites de ce fichier (la table des uniformes, `retirerHabillage`,
+// `retirerRampe`), et il y valait zéro partout : c'est cette valeur que D15
+// abroge. Le module porte aussi le départage — ce qui peut devenir global et ce
+// qui ne le peut pas — et les trois postes où D15 se trompe.
+import {
+  MONDE_NU, MONDE_ECLAIRE, styleMonde,
+  RELIEF_MONDE, RELIEF_MONDE_NUL, GLSL_RELIEF_MONDE,
+} from './monde/planete-eclairee.js'
 // ══════════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═════════════════════════════════
 //
 // > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
@@ -904,6 +914,20 @@ varying vec3 vHautW;
 uniform float uNormaleFineOn;
 // unites de scene par METRE de relief : (R_GLOBE / EARTH_RADIUS_M) x exageration
 uniform float uUnitesParMetre;
+
+// ══════════ L'OMBRAGE DE RELIEF DE LA PLANETE — regle D15, Tache R6 ════════
+//
+// ⚠️ uReliefMondeGain VAUT ZERO PAR DEFAUT, exactement comme uCropOn, uHabOn et
+// uNormaleFineOn. A zero, ombrageReliefMonde n'est meme pas appele et
+// ombreRelief reste a 1.0 : colPlanete est celle du depot AU BIT PRES.
+//
+// L'azimut et l'elevation sont en RADIANS, deja convertis par le JS : le
+// nuanceur ne fait pas de conversion d'unite, c'est la faute qui a coute quatre
+// fois a ce chantier (uMerHoule 121,6x trop haute, skirtDrop 10x trop long).
+// La loi, son neutre sur sol plat et sa demonstration : monde/planete-eclairee.js.
+uniform float uReliefMondeGain;
+uniform float uReliefMondeAz;
+uniform float uReliefMondeEl;
 // ⚠️ LA FRACTION DU MONDE MERCATOR QUE COUVRE UNE UNITE D'UV : 1 / 2^z, DONC
 // PROPRE A LA TUILE, comme uTex et uTilePx. Elle donne les metres de sol par
 // unite d'uv (le tour de la sphere x cos(latitude) x elle), c'est-a-dire la
@@ -1265,6 +1289,12 @@ ${GLSL_ECLAIRAGE}
 // la parite des quads. La derivation, la mesure et le pourquoi sont ecrits dans
 // src/monde/eclairage-crop.js, §6 de l'en-tete.
 ${GLSL_NORMALE_FINE}
+
+// ⚠️ INJECTE, PAS RECOPIE — regle D15, Tache R6. La lampe de carte et la loi
+// d'ombrage neutre-sur-sol-plat vivent dans monde/planete-eclairee.js, et
+// test/planete-eclairee.test.js TRADUIT ce texte-ci pour l'executer contre les
+// deux fonctions JS du module. Une seconde ecriture aurait diverge.
+${GLSL_RELIEF_MONDE}
 
 // ══════ LA HAUTEUR DU BLOC, ECRITE UNE FOIS — Tache P10 ════════════════════
 //
@@ -1756,6 +1786,9 @@ void main() {
   // ⚠️ partBloc VAUT ZERO SANS ECLAIRAGE, et alors rien de tout ce qui suit ne
   // s'applique : la production est intouchee au bit pres.
   vec3 nMonde = normalize(vNormalW);
+  // ⚠️ 1.0 PAR DEFAUT, ET IL N'EST ECRIT QUE SOUS DEUX GARDES (Tache R6) : la
+  // planete nue multiplie donc sa couleur par un, c'est-a-dire par rien.
+  float ombreRelief = 1.0;
   // ══════ LA NORMALE PAR FRAGMENT — Tache P9 ═══════════════════════════════
   //
   // ⛔ CE QUI MANQUAIT N'ETAIT PAS DU DETAIL DE PEINTURE, C'ETAIT DE L'OMBRAGE.
@@ -1863,6 +1896,42 @@ void main() {
     // CENTREE, et uUnitesParMetre porte l'exageration -- pas uniteParUv.
     float k = uUnitesParMetre / (2.0 * pas * uniteParUv);
     nMonde = normaleParGradientSol(dhU * k, dhV * k, est, nord, haut);
+
+    // ══════ ⚡ L'OMBRAGE DE RELIEF DE LA PLANETE — regle D15, Tache R6 ══════
+    //
+    // ⛔ LA NORMALE FINE SEULE NE SE LIT PAS, ET C'EST MESURE EN APPARIE : elle
+    // apporte de -1,7 % a +5,6 % d'ecart-type de luminance la ou D15 entier en
+    // apporte de +36,5 % a +83,1 % — un rapport de dix a vingt. Le detail des
+    // quatre paliers, ses planchers de bruit et le protocole sont dans
+    // src/monde/planete-eclairee.js ; les traces dans traces-R6/triple-*.json.
+    // ⚠️ Le « 14,053 contre 14,089 » du premier tour est RETIRE : il renvoyait a
+    // un fichier inexistant et comparait deux sessions. La cause, elle, est
+    // ecrite plus bas, au bloc « LE BLOC EST UN MATERIAU ECLAIRE » : la loi de
+    // planete est col x (0,74 + 0,30 x diff), un rapport de 1,4:1, et uSunDir
+    // suit la CAMERA — donc au nadir il eclaire de face.
+    //
+    // ⚠️ LA LAMPE EST DANS LE REPERE LOCAL, ET c'est le seul choix qui ait un
+    // sens sur une sphere : une direction fixe en repere MONDE laisserait un
+    // hemisphere entier eclaire par-dessous. est / nord / haut sont deja la,
+    // orthonormalises, quatre lignes plus haut.
+    //
+    // ⚠️ ET LA LOI EST NEUTRE SUR SOL PLAT : 1 + gain x (n.L - haut.L) rend 1
+    // quand la normale fine vaut la sphere, donc la planete ne change ni de
+    // luminosite moyenne ni de teinte. Seule sa MODULATION apparait — et la
+    // couture avec le bloc reste invisible.
+    // ⚠️ « EXACTEMENT 1 » EST VRAI DE LA LOI, PAS D'ICI : sur sol plat
+    // normaleParGradientSol rend haut / length(haut), soit haut a ~1 ulp, donc
+    // le facteur s'ecarte de 1 d'environ 1e-7 x gain. Invisible sur huit bits,
+    // mais ce n'est pas « au bit pres » — c'est la garde ci-dessous qui l'est.
+    //
+    // ⚠️ uReliefMondeGain A 0 : RIEN NE CHANGE, ombreRelief vaut 1.0 et
+    // colPlanete est celle du depot au bit pres. C'est la meme garde que
+    // uCropOn / uHabOn / uMerZeroSousEau, et elle est DOUBLE : sans la normale
+    // fine ce bloc n'est meme pas atteint.
+    if (uReliefMondeGain > 0.0) {
+      vec3 lampe = lampeReliefMonde(est, nord, haut, uReliefMondeAz, uReliefMondeEl);
+      ombreRelief = ombrageReliefMonde(nMonde, haut, lampe, uReliefMondeGain);
+    }
   }
   float nduCrop = dot(nMonde, uHemiHaut);
   float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
@@ -1989,8 +2058,20 @@ void main() {
   col = mix(col, uInk, gl * uGraticuleOpacity);
 
   // soft sun shading — the map stays readable, light only models the sphere
+  //
+  // ⚠️ ombreRelief VAUT 1.0 HORS D15 (Tache R6) : cette ligne est alors celle du
+  // depot au bit pres. C'est LA MULTIPLICATION QUI RHABILLE LA PLANETE, et elle
+  // est ici et pas ailleurs pour trois raisons.
+  //   ① APRES la rampe, les courbes et le graticule, donc l'ombrage passe SUR
+  //      la carte comme une lumiere et non sous elle — c'est ce que fait le
+  //      socle, dont les traits sont peints sur un albedo puis eclaires.
+  //   ② SUR colPlanete SEULE : le bloc a son propre eclairage (irradianceCrop,
+  //      Tache P3), et l'ombrer une seconde fois le noircirait.
+  //   ③ AVANT le terminateur, qui MULTIPLIE lui aussi : l'ordre des deux ne
+  //      change rien au produit, mais le lire dans cet ordre dit lequel des deux
+  //      modele le RELIEF et lequel modele la SPHERE.
   float diff = max(dot(nMonde, uSunDir), 0.0);
-  vec3 colPlanete = col * (0.74 + 0.30 * diff);
+  vec3 colPlanete = col * (0.74 + 0.30 * diff) * ombreRelief;
 
   // terminateur jour/nuit (demande Adrien, façon Google Earth) : la face à
   // l'ombre FOND VERS LA COULEUR DU FOND (uShadowColor — poussée par
@@ -2484,6 +2565,27 @@ export class Globe {
     // `flags.js` — délibérément : le lecteur de `FLAGS.globeContinu` est
     // `src/main.js`, qui ne passe ici qu'un booléen.
     this.continu = params.globeContinu ?? false
+
+    // ══════════ LA PLANÈTE N'EST PLUS NUE — règle D15, Tâche R6 ═════════════
+    //
+    // > **Adrien, 2026-08-23** : « Non, la planète ne doit plus jamais être
+    // > nue. »
+    //
+    // ⚠️ **CE N'EST PAS UN RÉGLAGE DE PLUS : C'EST L'ÉTAT DE REPOS DU MONDE.**
+    // Les sept interrupteurs de style valaient zéro par défaut et n'étaient
+    // allumés que par la chaîne du crop, donc **treize secondes d'aplat olive**
+    // dans la descente qu'Adrien a filmée. Sous ce drapeau, les DEUX postes que
+    // la donnée par tuile permet — le zéro de la mer et la normale par fragment
+    // — deviennent le défaut. Le départage, et les trois endroits où D15 se
+    // trompe, sont démontrés dans `monde/planete-eclairee.js`.
+    //
+    // ⚠️ `globe.js` N'IMPORTE PAS `flags.js` — même règle que `globeContinu` et
+    // `exagContinue` : le lecteur du drapeau est `src/main.js`, qui ne passe
+    // ici qu'un booléen.
+    //
+    // ⚠️ **IL EST LU AVANT `this.uniforms`, ET IL LE FAUT** : la table des
+    // uniformes appelle `styleMonde(this.planeteEclairee)` deux fois.
+    this.planeteEclairee = params.planeteEclairee ?? false
     // ═══════════ UN CROP EST ATTENDU — Tâche R3 ════════════════════════════
     //
     // **Adrien, 2026-08-23** : « Tu charges beaucoup trop de dalles. […] On ne
@@ -2659,7 +2761,12 @@ export class Globe {
       // LE ZÉRO DE LA MER — Tâche K bis. ⚠️ **`uMerZeroSousEau: 0` : sans
       // `poserRampe({ zeroSousEau: true })`, RIEN NE CHANGE** — même garde et
       // même raison que `uCropOn`, `uHabOn`, `uMerRampeOn` et `uMppFacteur`.
-      uMerZeroSousEau: { value: 0 },
+      //
+      // ⚡ **SAUF SOUS D15 — Tâche R6.** `styleMonde(this.planeteEclairee)` rend
+      // 1 quand la planète ne doit plus être nue : le correctif du zéro devient
+      // l'ÉTAT DE REPOS du monde au lieu d'un cadeau du crop. Drapeau baissé, il
+      // rend 0 et cette ligne est celle du dépôt, au bit près.
+      uMerZeroSousEau: { value: styleMonde(this.planeteEclairee).merZeroSousEau },
       uOceanShallow: { value: new THREE.Color(RAMPE_NAUTIQUE.peu) },
       uOceanMid: { value: new THREE.Color(RAMPE_NAUTIQUE.moyen) },
       uOceanDeep: { value: new THREE.Color(RAMPE_NAUTIQUE.fond) },
@@ -2740,8 +2847,32 @@ export class Globe {
       // rend juste des pentes fausses, et c'est exactement la faute que
       // `uMerHoule` (121,6× trop haute) et `skirtDrop` (10× trop long) ont
       // coûtée à ce chantier.
-      uNormaleFineOn: { value: 0 },
+      //
+      // ⚡ **SAUF SOUS D15 — Tâche R6, ET C'EST LE POSTE QUI RHABILLE LA
+      // PLANÈTE.** Hors du crop, la seule lumière est
+      // `col × (0.74 + 0.30 × diff)` avec `diff = dot(nMonde, uSunDir)` : tant
+      // que `nMonde` est la normale des SOMMETS (24 quads par tuile), `diff` ne
+      // décrit que la courbure de la sphère, et la terre est un aplat. Mesuré à
+      // la sonde de descente (`.banc/R6/avant.json`) : l'écart-type de
+      // luminance tombe de 28,3 en orbite à **14,2 à 33 000 m**, puis remonte à
+      // **29,0 dès que le crop naît** — le style s'allumait AU SEUIL.
+      uNormaleFineOn: { value: styleMonde(this.planeteEclairee).normaleFine },
       uUnitesParMetre: { value: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration },
+
+      // L'OMBRAGE DE RELIEF DE LA PLANÈTE — règle D15, Tâche R6.
+      //
+      // ⚠️ **`uReliefMondeGain: 0` HORS DRAPEAU : `ombreRelief` reste à 1.0 et
+      // `colPlanete` est celle du dépôt AU BIT PRÈS.** C'est une garde DOUBLE —
+      // le bloc n'est même pas atteint sans `uNormaleFineOn` — et c'est
+      // délibéré : ce poste multiplie la couleur de TOUTE la planète, donc son
+      // neutre doit être vérifiable sans exécuter le GPU.
+      //
+      // ⚠️ **LES ANGLES SONT CONVERTIS ICI, EN RADIANS.** Le nuanceur ne fait
+      // aucune conversion d'unité : c'est la faute qui a coûté quatre fois à ce
+      // chantier (`uMerHoule` 121,6× trop haute, `skirtDrop` 10× trop long).
+      uReliefMondeGain: { value: this.planeteEclairee ? RELIEF_MONDE.gain : RELIEF_MONDE_NUL },
+      uReliefMondeAz: { value: (RELIEF_MONDE.azimutDeg * Math.PI) / 180 },
+      uReliefMondeEl: { value: (RELIEF_MONDE.elevationDeg * Math.PI) / 180 },
 
       // LE FOND DU CROP — Tâche J bis.
       //
@@ -3560,7 +3691,13 @@ export class Globe {
     // veille rejoue par image (`CHAMPS_HABILLAGE`). Posée à la naissance du
     // crop, la normale fine s'éteindrait au premier changement de palette qui
     // rejoue l'habillage sans la repasser.
-    u.uNormaleFineOn.value = normaleFine ? 1 : 0
+    //
+    // ⚡ **ET SOUS D15 ELLE NE PEUT PLUS S'ÉTEINDRE — Tâche R6.** Un appelant
+    // qui pose un habillage SANS `normaleFine` (une palette, un gabarit) aurait
+    // sinon déshabillé la planète entière au passage, alors que le drapeau dit
+    // exactement le contraire. Le `||` est donc l'état de repos du monde qui
+    // remonte : il ne peut qu'ALLUMER, jamais éteindre ce que l'appelant demande.
+    u.uNormaleFineOn.value = (normaleFine || this.planeteEclairee) ? 1 : 0
 
 
     // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
@@ -3732,7 +3869,15 @@ export class Globe {
     // ⚠️ **`uUnitesParMetre` N'EST PAS RENDU, ET C'EST DÉLIBÉRÉ** : ce n'est pas
     // un réglage d'habillage mais l'échelle verticale DU GLOBE, qui vaut pour
     // toute la planète et que `setExaggeration` tient à jour.
-    u.uNormaleFineOn.value = HABILLAGE_MONDE.normaleFine ? 1 : 0
+    //
+    // ⚡ **SAUF SOUS D15 — Tâche R6, ET C'EST ICI QUE LE DÉFAUT SE REFERMAIT.**
+    // `retirerHabillage` est appelé à CHAQUE MORT DU CROP, c'est-à-dire chaque
+    // fois qu'on remonte au-dessus de 32 274 m. Laisser cette ligne rendre 0
+    // aurait rendu la planète nue au moment précis où on la regarde — le
+    // drapeau aurait été sans effet sur la moitié du chantier.
+    u.uNormaleFineOn.value = this.planeteEclairee
+      ? MONDE_ECLAIRE.normaleFine
+      : (HABILLAGE_MONDE.normaleFine ? 1 : 0)
     // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
     //
     // ⚠️ **LES DEUX TEXTURES SONT LÂCHÉES, PAS SEULEMENT DÉBRANCHÉES** — même
@@ -3987,7 +4132,13 @@ export class Globe {
     // LA TÂCHE C APPLIQUÉ D'AVANCE** : là-bas `retirerHabillage` ne rendait que
     // quatre uniformes sur seize et la planète entière gardait l'intervalle du
     // crop. Ici l'uniforme est PARTAGÉ par toutes les tuiles.
-    u.uMerZeroSousEau.value = 0
+    //
+    // ⚡ **SAUF SOUS D15 — Tâche R6.** Il ne retombe plus à zéro, il retombe à
+    // l'ÉTAT DE REPOS DU MONDE : sous le drapeau, ce repos vaut 1. Même raison
+    // qu'à `retirerHabillage` — ce site est appelé à chaque mort de crop.
+    u.uMerZeroSousEau.value = this.planeteEclairee
+      ? MONDE_ECLAIRE.merZeroSousEau
+      : MONDE_NU.merZeroSousEau
     // ⚠️ **LES ANCRES TOMBENT AUSSI.** Sans cela, `majEchelleRampe` les
     // reposerait à l'image suivante et `retirerRampe` ne retirerait rien — une
     // méthode qui ment sur ce qu'elle fait. Le lieu, lui, est déjà parti : ce

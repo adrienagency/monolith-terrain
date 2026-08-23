@@ -745,7 +745,16 @@ test('⑤c la garde est un UNIFORME, et à zéro le bloc n’existe pas', () => 
   assert.match(FRAG_NU, /uFxOpacite > 0\.001 && partBloc > 0\.0/)
   assert.match(FRAG_NU, /col = mix\(colPlanete, colBloc, partBloc\);/)
   // et la loi de PLANÈTE est intacte, dans son ordre d'origine
-  assert.match(FRAG_NU, /vec3 colPlanete = col \* \(0\.74 \+ 0\.30 \* diff\);/)
+  //
+  // ⚡ **UN FACTEUR S'Y EST AJOUTÉ — règle D15, Tâche R6, ET SON NEUTRE EST 1.**
+  // `ombreRelief` est l'ombrage de relief de la planète nue
+  // (`monde/planete-eclairee.js`). Il est déclaré `1.0` et n'est écrit que sous
+  // DEUX gardes — `uNormaleFineOn > 0.5` puis `uReliefMondeGain > 0.0`, tous
+  // deux à zéro en production —, donc **cette ligne rend exactement ce qu'elle
+  // rendait**. L'assertion garde les deux constantes historiques ET exige que
+  // le facteur ajouté soit celui-là, déclaré neutre.
+  assert.match(FRAG_NU, /vec3 colPlanete = col \* \(0\.74 \+ 0\.30 \* diff\) \* ombreRelief;/)
+  assert.match(FRAG_NU, /float ombreRelief = 1\.0;/)
   assert.match(FRAG_NU, /colPlanete = mix\(uShadowColor, colPlanete, 0\.10 \+ 0\.90 \* day\);/)
 })
 

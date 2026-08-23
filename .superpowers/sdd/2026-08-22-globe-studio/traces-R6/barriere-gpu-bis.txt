@@ -1,0 +1,50 @@
+→ http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee
+matériel : ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)
+
+1999999 m — 256 tuiles, 53 appels, 170213 triangles
+  charge ×1
+    aller   finish  blocs=[0.450 0.370 7.110 0.600 0.620 0.613]  moy=1.627 min=0.370 max=7.110 max/min=19.22  mur=2.322  capture=70.1 %
+    aller   pixels  blocs=[0.540 0.510 0.545 0.552 0.547 0.445]  moy=0.523 min=0.445 max=0.552 max/min=1.24  mur=0.530  capture=98.7 %
+    aller   aucune  blocs=[0.517 0.520 0.515 0.525 0.497 0.507]  moy=0.514 min=0.497 max=0.525 max/min=1.05  mur=0.519  capture=99.0 %
+    retour  finish  blocs=[0.517 0.540 0.532 0.512 0.527 0.520]  moy=0.525 min=0.512 max=0.540 max/min=1.05  mur=0.534  capture=98.3 %
+    retour  pixels  blocs=[0.545 0.552 0.535 0.545 0.552 0.532]  moy=0.544 min=0.532 max=0.552 max/min=1.04  mur=0.551  capture=98.6 %
+    retour  aucune  blocs=[0.417 0.530 0.475 0.520 0.515 0.485]  moy=0.490 min=0.417 max=0.530 max/min=1.27  mur=0.498  capture=98.5 %
+  charge ×2
+    aller   finish  blocs=[1.015 1.065 1.042 1.012 1.035 1.083]  moy=1.042 min=1.012 max=1.083 max/min=1.07  mur=1.048  capture=99.4 %
+    aller   pixels  blocs=[1.065 1.058 1.063 1.065 1.045 0.945]  moy=1.040 min=0.945 max=1.065 max/min=1.13  mur=1.047  capture=99.3 %
+    aller   aucune  blocs=[1.083 1.052 1.025 1.020 1.015 1.030]  moy=1.038 min=1.015 max=1.083 max/min=1.07  mur=1.044  capture=99.4 %
+    retour  finish  blocs=[1.042 1.020 1.040 1.052 1.028 1.018]  moy=1.033 min=1.018 max=1.052 max/min=1.03  mur=1.040  capture=99.4 %
+    retour  pixels  blocs=[1.045 1.070 0.907 1.022 1.113 1.048]  moy=1.034 min=0.907 max=1.113 max/min=1.23  mur=1.042  capture=99.2 %
+    retour  aucune  blocs=[0.930 1.020 1.067 1.038 1.040 1.038]  moy=1.022 min=0.930 max=1.067 max/min=1.15  mur=1.027  capture=99.5 %
+  charge ×4
+    aller   finish  blocs=[1.935 2.018 1.998 2.060 2.060 1.837]  moy=1.985 min=1.837 max=2.060 max/min=1.12  mur=1.990  capture=99.7 %
+    aller   pixels  blocs=[2.098 1.792 2.132 2.055 2.053 2.090]  moy=2.037 min=1.792 max=2.132 max/min=1.19  mur=2.044  capture=99.6 %
+    aller   aucune  blocs=[2.067 2.033 2.045 2.058 2.045 1.960]  moy=2.035 min=1.960 max=2.067 max/min=1.05  mur=2.040  capture=99.7 %
+    retour  finish  blocs=[2.063 2.050 2.053 2.027 2.063 2.055]  moy=2.052 min=2.027 max=2.063 max/min=1.02  mur=2.058  capture=99.7 %
+    retour  pixels  blocs=[2.110 2.063 2.105 2.090 2.100 2.098]  moy=2.094 min=2.063 max=2.110 max/min=1.02  mur=2.102  capture=99.6 %
+    retour  aucune  blocs=[1.975 2.038 2.065 2.055 2.072 2.067]  moy=2.045 min=1.975 max=2.072 max/min=1.05  mur=2.050  capture=99.8 %
+
+39927 m — 593 tuiles, 76 appels, 160805 triangles
+  charge ×1
+    aller   finish  blocs=[1.030 0.943 0.930 0.830 0.752 0.782]  moy=0.878 min=0.752 max=1.030 max/min=1.37  mur=1.064  capture=82.5 %
+    aller   pixels  blocs=[0.790 0.807 0.777 0.813 0.818 0.800]  moy=0.801 min=0.777 max=0.818 max/min=1.05  mur=0.807  capture=99.2 %
+    aller   aucune  blocs=[0.757 0.718 0.740 0.802 0.772 0.762]  moy=0.759 min=0.718 max=0.802 max/min=1.12  mur=0.764  capture=99.3 %
+    retour  finish  blocs=[0.605 0.770 0.760 0.775 0.772 0.772]  moy=0.743 min=0.605 max=0.775 max/min=1.28  mur=0.748  capture=99.3 %
+    retour  pixels  blocs=[0.800 0.843 0.693 0.807 0.703 0.770]  moy=0.769 min=0.693 max=0.843 max/min=1.22  mur=0.776  capture=99.1 %
+    retour  aucune  blocs=[0.740 0.790 0.780 0.762 0.762 0.772]  moy=0.768 min=0.740 max=0.790 max/min=1.07  mur=0.772  capture=99.5 %
+  charge ×2
+    aller   finish  blocs=[1.520 1.565 1.580 1.525 1.460 1.545]  moy=1.532 min=1.460 max=1.580 max/min=1.08  mur=1.537  capture=99.7 %
+    aller   pixels  blocs=[1.532 1.442 1.567 1.530 1.570 1.528]  moy=1.528 min=1.442 max=1.570 max/min=1.09  mur=1.536  capture=99.5 %
+    aller   aucune  blocs=[1.522 1.565 1.542 1.560 1.518 1.520]  moy=1.538 min=1.518 max=1.565 max/min=1.03  mur=1.547  capture=99.4 %
+    retour  finish  blocs=[1.532 1.480 1.468 1.595 1.520 1.585]  moy=1.530 min=1.468 max=1.595 max/min=1.09  mur=1.535  capture=99.7 %
+    retour  pixels  blocs=[1.563 1.550 1.555 1.563 1.565 1.442]  moy=1.540 min=1.442 max=1.565 max/min=1.08  mur=1.548  capture=99.5 %
+    retour  aucune  blocs=[1.545 1.535 1.512 1.577 1.535 1.542]  moy=1.541 min=1.512 max=1.577 max/min=1.04  mur=1.547  capture=99.6 %
+  charge ×4
+    aller   finish  blocs=[3.130 3.078 3.087 3.110 3.035 3.027]  moy=3.078 min=3.027 max=3.130 max/min=1.03  mur=3.088  capture=99.7 %
+    aller   pixels  blocs=[2.967 3.112 3.078 3.167 3.150 3.123]  moy=3.100 min=2.967 max=3.167 max/min=1.07  mur=3.111  capture=99.6 %
+    aller   aucune  blocs=[3.125 3.042 3.123 3.053 3.050 3.072]  moy=3.078 min=3.042 max=3.125 max/min=1.03  mur=3.084  capture=99.8 %
+    retour  finish  blocs=[4.133 3.840 3.735 3.998 3.853 3.825]  moy=3.897 min=3.735 max=4.133 max/min=1.11  mur=3.910  capture=99.7 %
+    retour  pixels  blocs=[3.958 3.783 3.978 4.365 4.045 4.030]  moy=4.026 min=3.783 max=4.365 max/min=1.15  mur=4.041  capture=99.6 %
+    retour  aucune  blocs=[2.970 3.078 3.050 2.905 3.175 3.333]  moy=3.085 min=2.905 max=3.333 max/min=1.15  mur=3.095  capture=99.7 %
+
+→ C:\Dev\wt-nue\.superpowers\sdd\2026-08-22-globe-studio\traces-R6\barriere-gpu-bis.json

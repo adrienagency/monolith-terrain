@@ -1,0 +1,6 @@
+→ http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ
+  1999996 m  crop=. n= 930  params.grain=0  nuages=false  mer=false  plancher : anims ON = 0.015   anims OFF = 0.000
+   119794 m  crop=. n=1137  params.grain=0  nuages=false  mer=false  plancher : anims ON = 0.000   anims OFF = 0.000
+    39854 m  crop=. n=1296  params.grain=0  nuages=false  mer=false  plancher : anims ON = 0.000   anims OFF = 0.000
+     4410 m  crop=O n=1296  params.grain=0  nuages=false  mer=false  plancher : anims ON = 0.000   anims OFF = 0.000
+→ C:\Dev\wt-nue\.superpowers\sdd\2026-08-22-globe-studio\traces-R6\plancher-bruit.json

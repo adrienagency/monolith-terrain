@@ -1,0 +1,56 @@
+{
+  "url": "http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ",
+  "cadre": {
+    "x": 340,
+    "y": 130,
+    "width": 620,
+    "height": 340
+  },
+  "quand": "2026-08-23T22:08:15.580Z",
+  "releves": [
+    {
+      "altitude": 1999996,
+      "crop": false,
+      "tuiles": 930,
+      "paramsGrain": 0,
+      "animations": true,
+      "nuagesVisibles": false,
+      "merVisible": false,
+      "plancherAnimOn": 0.015,
+      "plancherAnimOff": 0
+    },
+    {
+      "altitude": 119794,
+      "crop": false,
+      "tuiles": 1137,
+      "paramsGrain": 0,
+      "animations": true,
+      "nuagesVisibles": false,
+      "merVisible": false,
+      "plancherAnimOn": 0,
+      "plancherAnimOff": 0
+    },
+    {
+      "altitude": 39854,
+      "crop": false,
+      "tuiles": 1296,
+      "paramsGrain": 0,
+      "animations": true,
+      "nuagesVisibles": false,
+      "merVisible": false,
+      "plancherAnimOn": 0,
+      "plancherAnimOff": 0
+    },
+    {
+      "altitude": 4410,
+      "crop": true,
+      "tuiles": 1296,
+      "paramsGrain": 0,
+      "animations": true,
+      "nuagesVisibles": false,
+      "merVisible": false,
+      "plancherAnimOn": 0,
+      "plancherAnimOff": 0
+    }
+  ]
+}

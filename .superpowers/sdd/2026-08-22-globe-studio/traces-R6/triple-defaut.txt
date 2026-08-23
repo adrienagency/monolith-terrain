@@ -1,0 +1,5 @@
+→ http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0
+   119997 m  crop=. n= 155  ecart nue= 22.653  normale seule= 22.554 (-0.4 %)  D15= 22.760 (+0.5 %)   plancher=0.298  ecart/pixel normale=3.44 D15=4.94
+    79934 m  crop=. n= 466  ecart nue= 18.187  normale seule= 18.516 (+1.8 %)  D15= 21.526 (+18.4 %)   plancher=1.259  ecart/pixel normale=2.18 D15=6.98
+    39902 m  crop=. n= 588  ecart nue= 15.971  normale seule= 15.700 (-1.7 %)  D15= 21.795 (+36.5 %)   plancher=0.000  ecart/pixel normale=1.58 D15=9.63
+→ C:\Dev\wt-nue\.superpowers\sdd\2026-08-22-globe-studio\traces-R6\triple-defaut.json
