@@ -60,7 +60,7 @@ import { GLSL_MELANGE, APPARENCE_MONDE } from '../src/monde/melange-crop.js'
 // ⚠️ **L'ORACLE DU REPÈRE DE SOL — Tâche P10.** `repereSolSphere` PRÉTEND être
 // la dérivée de `latLonToSphere` ; on la lui oppose plutôt que de croire son
 // commentaire. C'est la même discipline que ⑧c, qui lit `three`.
-import { latLonToSphere } from '../src/geo.js'
+import { latLonToSphere, tileToLatLon, R_GLOBE, EARTH_RADIUS_M } from '../src/geo.js'
 import { LUMA_709 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
@@ -1118,11 +1118,32 @@ test('⑧a la normale par gradient suit la DÉFINITION — oracle indépendant',
     }
   }
   assert.ok(compares >= 60, `banc vide : ${compares} comparaisons`)
-  // ④ ⚠️ **LE CAS DÉGÉNÉRÉ, ET IL RESTE ATTEIGNABLE** : un repère nul (une
-  // interpolation qui s'annule) doit rendre `haut`, jamais un vecteur nul qu'un
-  // `normalize` plus loin transformerait en NaN — et un NaN dans une normale
-  // peint un trou noir.
-  assert.deepEqual(normaleParGradientSol(0, 0, [0, 0, 0], [0, 0, 0], [0, 0, 0]), [0, 0, 0])
+  // ④ ⛔ **LE CAS DÉGÉNÉRÉ, ET LA PREMIÈRE ÉCRITURE DE CE TEST ÉTAIT UNE
+  // TAUTOLOGIE — c'est une MUTATION SURVIVANTE qui l'a dit.** Elle appelait la
+  // loi avec `haut = [0, 0, 0]` : les DEUX branches rendent alors le même
+  // vecteur nul, donc « rendre `haut` » et « rendre zéro » étaient
+  // indistinguables. Le vrai dégénéré demande un repère où la soustraction
+  // s'annule — `est` COLINÉAIRE à `haut`, avec une pente de 1.
+  const versLeHaut = [0, 1, 0]
+  assert.deepEqual(normaleParGradientSol(1, 0, versLeHaut, [0, 0, 1], versLeHaut), versLeHaut,
+    'le degenere rend un vecteur nul : un NaN plus loin, donc un trou noir')
+  // ⚡ **ET VOICI POURQUOI LE NUANCEUR NE PEUT PAS Y TOMBER, PAR L'ALGÈBRE** :
+  // le repère qu'il passe est ORTHONORMÉ (il ré-orthonormalise juste avant),
+  // donc `|v|² = 1 + gEst² + gNord² ≥ 1`. La branche protège le CONTRAT de la
+  // fonction pure, pas le GPU — et le jumeau GLSL la garde pour ne pas
+  // diverger de son jumeau JS, ce qui coûterait plus cher qu'une comparaison.
+  const r0 = repereSolSphere(-21.115, 55.536)
+  for (const t of balayage(9)) {
+    const gE = (t - 0.5) * 6
+    const gN = (0.5 - t) * 3
+    const v = [
+      r0.haut[0] - gE * r0.est[0] - gN * r0.nord[0],
+      r0.haut[1] - gE * r0.est[1] - gN * r0.nord[1],
+      r0.haut[2] - gE * r0.est[2] - gN * r0.nord[2],
+    ]
+    assert.ok(Math.abs(NORME(v) ** 2 - (1 + gE * gE + gN * gN)) < 1e-9,
+      'l identite |v|2 = 1 + g2 tombe : le repere n est plus orthonorme')
+  }
   // ⑤ ⛔ **ET LES DEUX PENTES NE SONT PAS INTERCHANGEABLES.** Une mutation qui
   // les échange fait tourner le gradient de quatre-vingt-dix degrés et éclaire
   // les flancs perpendiculaires ; elle a survécu au premier tour de P9.
@@ -1288,6 +1309,15 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et
   // `uv.y` croît vers le NORD (`1 - v` dans `_buildMesh`) quand le `y` de
   // Mercator croît vers le SUD. Le signe perdu, le fond marin serait lu de
   // l'autre côté du bloc — invisible sur un fond plat, faux sur un talus.
+  // ⛔ **LE NORD DU FRAGMENT — UNE MUTATION SURVIVANTE.** `cross(est, haut)`
+  // rendrait le SUD, et l'éclairage des versants nord-sud s'inverserait. ⑧d
+  // prouve que le trièdre est direct ; ici on vérifie que le nuanceur s'en sert
+  // dans le bon ordre.
+  assert.match(bloc, /vec3 nord = cross\(haut, est\);/)
+  // ⛔ **ET LE DEMI-CÔTÉ DU CROP DIVISE, IL NE MULTIPLIE PAS — deuxième
+  // survivante.** `qCrop` est en demi-côtés : `q = (mercator − centre) /
+  // uCropDemi`. Le test exécutable de la loi est juste en dessous (⑧e ter).
+  assert.match(bloc, /float qParUv = uUvParMonde \/ max\(uCropDemi, 1e-9\);/)
   assert.match(bloc, /vec2 dqU = vec2\(qParUv \* pas, 0\.0\);/)
   assert.match(bloc, /vec2 dqV = vec2\(0\.0, -qParUv \* pas\);/)
   // ⑦ les quatre lectures sont CENTRÉES : `+pas` contre `−pas`, sur les deux axes
@@ -1356,8 +1386,64 @@ test('⑧e bis ⛔ `uUvParMonde` EST PROPRE À LA TUILE, ET IL VAUT `1 / 2^z`', 
   // ⛔ **ET CE N'EST PAS `CIRCONFERENCE_M`** : la sphère du globe a le rayon
   // MOYEN, celui que `uUnitesParMetre` emploie. Prendre l'équateur WGS84 ferait
   // 0,11 % d'erreur — invisible, et faux.
-  assert.ok(Math.abs(tour - 2 * Math.PI * 6371000) < 1, `le tour vaut ${tour}`)
+  assert.ok(Math.abs(tour - 2 * Math.PI * EARTH_RADIUS_M) < 1, `le tour vaut ${tour}`)
   assert.ok(Math.abs(tour - 40075016.686) > 40000, 'le tour est celui de l\'equateur WGS84')
+  // ⑥ ⚡ **L'INVARIANT QUI APPARIE LES DEUX CONVERSIONS, ET C'EST UNE MUTATION
+  // SURVIVANTE QUI L'A DEMANDÉ.** Le tour est en MÈTRES, l'autre facteur est en
+  // unités de scène PAR mètre : leur produit est donc la circonférence de la
+  // sphère du globe EN UNITÉS DE SCÈNE, c'est-à-dire `2 π R_GLOBE`. Retourner
+  // l'un ou l'autre — la faute d'`uMerHoule`, quatre fois payée — fait exploser
+  // ce produit de neuf ordres de grandeur.
+  const unite = Number(FRAG_CUIT.match(/float uniteParUv = metresParUv \* ([\d.e+-]+);/)[1])
+  assert.ok(Math.abs(tour * unite - 2 * Math.PI * R_GLOBE) < 1e-6,
+    `le tour en unites de scene vaut ${tour * unite} au lieu de ${2 * Math.PI * R_GLOBE}`)
+})
+
+test('⑧e ter ⛔ LE DÉCALAGE DE `qCrop` SUIT VRAIMENT L’UV — exécuté, pas cherché', () => {
+  // ⚠️ **MUTATION SURVIVANTE** : `uUvParMonde * uCropDemi` au lieu de
+  // `/ uCropDemi`. Le fond marin serait alors lu à des demi-côtés de distance du
+  // point qu'on éclaire — invisible sur un fond plat, faux sur un talus.
+  //
+  // ⚠️ **ON N'ASSERTE PAS UNE CHAÎNE, ON REJOUE LA LOI** : `qCrop` est calculé
+  // par le nuanceur depuis `vLatLon`, qui vient de `tileToLatLon`. On refait le
+  // chemin sur la fonction DU DÉPÔT et on exige que la différence de `qCrop`
+  // entre deux points séparés de `pas` en `uv` soit exactement ce que le bloc
+  // pose — signe compris.
+  const bloc = FRAG_CUIT.replace(/\s+/g, ' ')
+  const bloc2 = bloc.slice(bloc.indexOf('if (uNormaleFineOn > 0.5)'), bloc.indexOf('float nduCrop'))
+  assert.match(bloc2, /float qParUv = uUvParMonde \/ max\(uCropDemi, 1e-9\);/)
+  // la transcription du nuanceur, ligne pour ligne (bloc « LA DÉCOUPE »)
+  const mx = (lon) => (lon + 180) / 360
+  const my = (lat) => 0.5 - Math.log(Math.tan(Math.PI / 4 + (lat * 0.017453292519943295) / 2)) / (2 * Math.PI)
+  const DEMI = 0.000366210937 // uCropDemi relevé : trois tuiles z12 en demi-côtés de Mercator
+  for (const z of [10, 12, 14]) {
+    const uvParMonde = 2 ** -z
+    const qParUv = uvParMonde / DEMI
+    // une tuile quelconque, loin du méridien et de l'équateur
+    const tx = Math.floor(2 ** z * mx(55.5))
+    const ty = Math.floor(2 ** z * 0.6)
+    for (const pas of [1 / 256, 1 / 64]) {
+      for (const [u, v] of [[0.25, 0.4], [0.6, 0.75], [0.5, 0.5]]) {
+        // uv.y = 1 − v (le « canvas row 0 = north » de `_buildMesh`)
+        const q = (uu, vv) => {
+          const p = tileToLatLon(tx + uu, ty + vv, z)
+          return { x: (mx(p.lon) - 0) / DEMI, y: (my(p.lat) - 0) / DEMI }
+        }
+        const a0 = q(u, 1 - 0.5)
+        // un pas de +`pas` en uv.x
+        const aU = q(u + pas, 1 - 0.5)
+        assert.ok(Math.abs(aU.x - a0.x - qParUv * pas) < 1e-9,
+          `z=${z} : dq/duv.x rend ${aU.x - a0.x} au lieu de ${qParUv * pas}`)
+        assert.ok(Math.abs(aU.y - a0.y) < 1e-12, 'un pas en uv.x bouge le q en y')
+        // un pas de +`pas` en uv.y, donc de −`pas` en v de tuile : le SIGNE
+        const aV = q(u, 1 - 0.5 - pas)
+        assert.ok(Math.abs(aV.y - a0.y + qParUv * pas) < 1e-6,
+          `z=${z} : dq/duv.y rend ${aV.y - a0.y} au lieu de ${-qParUv * pas}`)
+        assert.ok(aV.y - a0.y < 0, 'le retournement « 1 - v » est perdu : le nord part au sud')
+        assert.ok(v > 0, 'garde-fou de banc vide')
+      }
+    }
+  }
 })
 
 test('⑧f ⛔ LE BRANCHEMENT DANS LA CHAÎNE — pose, retrait, veille, contexte, échelle', () => {
