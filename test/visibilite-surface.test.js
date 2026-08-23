@@ -7,14 +7,18 @@
 //
 //   ① LA LOI — deux questions, deux réponses. Le bornage du drapeau tient sur
 //      le maillage du bloc plat, et **ne déborde pas** sur l'interface.
-//   ② LE COMPORTEMENT — un poseur de papier, câblé comme `main.js` l'est,
-//      rendu drapeau levé puis drapeau baissé. ⚠️ **Il MORD sur ce qui est
-//      posé aux calques et aux boutons, pas sur le texte source** : sur ce
-//      chantier, une mutation a survécu à 4 082 tests parce que la garde était
-//      une assertion d'expression régulière sur `main.js`.
+//   ② LE PATRON DE CÂBLAGE — un poseur de papier, monté comme `main.js` l'est,
+//      rendu drapeau levé puis drapeau baissé.
+//      ⚠️ **CE N'EST PAS UN TEST DE COMPORTEMENT DE `main.js`, ET L'EN-TÊTE L'A
+//      PROMIS À TORT AU PREMIER TOUR.** Le relecteur l'a montré en nommant les
+//      morts : sous la mutation qui reconfond les deux questions, ② tombe en
+//      même temps que ① et pour la même raison — il consomme la même loi et ne
+//      touche jamais `main.js`. Il documente donc la FORME attendue du câblage ;
+//      ce qui garde le câblage réel, c'est ③, et surtout son COMPTE.
 //   ③ LE CÂBLAGE DE `main.js` — lu, pas chargé (aucun test de ce dépôt ne
-//      charge `main.js`). Il ne prouve rien à lui seul ; il ferme la seule
-//      chose que ① et ② ne peuvent pas atteindre.
+//      charge `main.js`). ⚠️ **Le compte des lecteurs est la seule garde de
+//      CLASSE** : il ferme d'un coup les treize calques qu'on pouvait rebrancher
+//      sur la mauvaise grandeur sans qu'un test bronche.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -30,14 +34,24 @@ test('① DRAPEAU LEVÉ, en surface : le maillage plat est éteint, les boutons 
   const v = visibiliteSurface({ terreUnique: true, surface: true })
   assert.equal(v.socle, false, 'le bloc plat revient — il y aurait DEUX Terres')
   assert.equal(v.boutons, true, 'les boutons du bas ont disparu — le défaut d’Adrien')
+  // ⛔ **SAUF LE CINÉ, ET C'EST MESURÉ** — §3 de la loi : ni `shots.stop()` ni le
+  // huitième clic ne rendent la vue, la caméra reste dans la mer du crop.
+  assert.equal(v.cine, false, 'le bouton ciné est rallumé sous le drapeau : aller simple sous le sol')
+})
+
+test('① DRAPEAU LEVÉ : le ciné est le SEUL éteint — l’exception ne déborde pas', () => {
+  // ⚠️ **UNE EXCEPTION QUI S'ÉTENDRAIT SERAIT LE DÉFAUT D'ORIGINE PAR L'AUTRE
+  // BOUT** : Adrien demandait ces boutons, on n'en retire qu'un, et pour une
+  // raison mesurée.
+  assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: true }),
+    { socle: false, boutons: true, cine: false })
 })
 
 test('① DRAPEAU LEVÉ, hors surface : tout s’éteint, boutons compris', () => {
   // ⚠️ En orbite la planète EST le sujet : un raccourci isométrique « sur le
   // bloc » n'a plus de bloc, et le coin cartographie n'a plus de carte.
-  const v = visibiliteSurface({ terreUnique: true, surface: false })
-  assert.equal(v.socle, false)
-  assert.equal(v.boutons, false, 'les boutons de surface survivent à l’orbite')
+  assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: false }),
+    { socle: false, boutons: false, cine: false })
 })
 
 test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se confondent', () => {
@@ -45,9 +59,9 @@ test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se 
   // vaut dans les deux sens : sans drapeau, `socle` et `boutons` sont le même
   // booléen, celui d'avant la tâche, au bit près.
   for (const surface of [true, false]) {
-    const v = visibiliteSurface({ terreUnique: false, surface })
-    assert.equal(v.socle, surface)
-    assert.equal(v.boutons, surface)
+    assert.deepEqual(visibiliteSurface({ terreUnique: false, surface }),
+      { socle: surface, boutons: surface, cine: surface },
+      'sans drapeau, les TROIS réponses doivent être le même booléen')
   }
 })
 
@@ -56,12 +70,12 @@ test('① les entrées molles sont ramenées à des booléens, pas propagées te
   // erreurs, ce sont des faux SILENCIEUX — et `visible = 0` casse three.js plus
   // loin, pas ici. On borne au bord.
   for (const e of [undefined, null, 0, '', NaN]) {
-    const v = visibiliteSurface({ terreUnique: false, surface: e })
-    assert.equal(v.socle, false); assert.equal(v.boutons, false)
+    assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
+      { socle: false, boutons: false, cine: false })
   }
   for (const e of [1, 'oui', {}]) {
-    const v = visibiliteSurface({ terreUnique: false, surface: e })
-    assert.equal(v.socle, true); assert.equal(v.boutons, true)
+    assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
+      { socle: true, boutons: true, cine: true })
   }
 })
 
@@ -83,8 +97,9 @@ function poseurDePapier(terreUnique) {
       // un échantillon des quatorze calques qui APPARTIENNENT au bloc plat
       etat.calques = { labels: vue.socle, nuages: vue.socle, socleBas: vue.socle, mer: vue.socle }
       etat.isoBtn = vue.boutons
-      etat.cineBtn = vue.boutons
       etat.mapCorner = vue.boutons
+      // ⛔ le ciné a sa PROPRE réponse depuis le tour 2 — voir le §3 de la loi
+      etat.cineBtn = vue.cine
     },
   }
 }
@@ -97,13 +112,14 @@ test('② DRAPEAU LEVÉ : `terrain.mesh.visible` reste FAUX pendant que les troi
     assert.equal(v, false, `le calque \`${nom}\` du bloc plat est allumé sous le drapeau`)
   }
   assert.equal(p.etat.isoBtn, true, 'le bouton isométrie est resté caché')
-  assert.equal(p.etat.cineBtn, true, 'le bouton cinéma est resté caché')
   assert.equal(p.etat.mapCorner, true, 'le coin cartographie (aérien · base · shuffle) est resté caché')
+  assert.equal(p.etat.cineBtn, false, 'le bouton cinéma est rallumé sous le drapeau — aller simple sous le sol')
 })
 
 test('② DRAPEAU BAISSÉ : rien ne change, boutons et maillage suivent le MÊME booléen', () => {
   const p = poseurDePapier(false)
   p.poser(true)
+  // ⚠️ le ciné compris : l'exception du §3 est bornée au drapeau
   assert.deepEqual(
     { m: p.etat.maillage, i: p.etat.isoBtn, c: p.etat.cineBtn, k: p.etat.mapCorner },
     { m: true, i: true, c: true, k: true },
@@ -143,10 +159,13 @@ test('③ les trois boutons reçoivent `vue.boutons`, le maillage reçoit `vue.s
   const i = MAIN.indexOf('function poserVisibiliteSocle(')
   const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
   assert.ok(/terrain\.mesh\.visible = vue\.socle/.test(corps), 'le maillage ne suit pas `vue.socle`')
-  for (const b of ['isoBtn', 'cineBtn', 'mapCorner']) {
+  for (const b of ['isoBtn', 'mapCorner']) {
     assert.ok(new RegExp(b + '\\?\\.setVisible\\(vue\\.boutons\\)').test(corps),
       `\`${b}\` ne suit pas \`vue.boutons\` — il est encore accroché au maillage`)
   }
+  // ⛔ **ET LE CINÉ SUIT SA PROPRE RÉPONSE** — §3 de la loi, mesuré.
+  assert.ok(/cineBtn\?\.setVisible\(vue\.cine\)/.test(corps),
+    '`cineBtn` ne suit pas `vue.cine` : il est rallumé sous le drapeau')
   // et AUCUN des trois ne reçoit encore la grandeur du maillage
   for (const b of ['isoBtn', 'cineBtn', 'mapCorner']) {
     assert.ok(!new RegExp(b + '\\?\\.setVisible\\((v|vue\\.socle)\\)').test(corps),

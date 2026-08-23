@@ -36,6 +36,39 @@
 // tenue que par des assertions d'expression régulière sur le texte source — et
 // ce chantier a déjà vu une mutation survivre à 4 082 tests derrière exactement
 // cette protection-là.
+//
+// ══════════ 3. POURQUOI LES PLANS DE CINÉMA SONT LA SEULE EXCEPTION ═════════
+//
+// ⛔ **`cineBtn` EST ÉTEINT SOUS LE DRAPEAU, ET CE N'EST PAS UN ARBITRAGE DE
+// GOÛT — C'EST UNE RÉGRESSION MESURÉE, SANS RETOUR.** Relevé le 2026-08-23 dans
+// un Chrome sans tête à 284 appels de rendu par seconde
+// (`.banc/R1-tour2/cine.json`, captures `01`…`04`), drapeau levé, premier plan :
+//
+//   | moment | `camera.position.y` | altitude de cadrage | distance |
+//   |---|---|---|---|
+//   | vue posée sur le crop | 72,72 | 17 761 m | 145,50 |
+//   | pendant le plan | **−7,26** | **−1 773 m** | 12,55 |
+//   | après `shots.stop()` | **−2,27** | **−555 m** | 12,41 |
+//   | +6 s, +12 s après l'arrêt | **−2,27** | **−555 m** | 12,41 |
+//
+// **Ni `shots.stop()` ni le huitième clic ne rendent la vue.** Le huitième clic
+// laisse la caméra à `y = 20,51`, altitude 5 010 m, distance 29,95 — au lieu de
+// 145,50 (`.banc/R1-tour2/huit-clics.json`). La capture `04-apres-stop-12s.png`
+// montre l'écran douze secondes après l'arrêt : un mur d'eau, la caméra est
+// **dans la mer du crop**, et elle y reste.
+//
+// ⛔ **UNE PREMIÈRE VERSION DE CETTE TÂCHE A ÉCRIT « c'est réversible, la caméra
+// revient à `y = 77,1`, distance 145,5 ». CE RELEVÉ N'EST PAS REPRODUCTIBLE** —
+// deux exécutions, deux sorties différentes, aucune ne rendant la vue. Il a été
+// retiré partout. Un bouton visible qui envoie l'utilisateur sous le sol sans
+// retour est une régression livrée, pas une fonctionnalité manquante.
+//
+// **LA CAUSE, POUR CELUI QUI LE REBRANCHERA** : `shots` est construit dans
+// `main.js` avec `sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0` — le champ
+// de hauteurs du bloc **plat**, celui qui n'est plus dessiné. `camera-shots.js`
+// respecte scrupuleusement son plancher (`plancher()`, `altitudeDeSecurite()`) ;
+// c'est le plancher d'un autre monde. ➡️ **Donner aux plans un `sampleGround` de
+// GLOBE, puis retirer cette exception** — et pas l'inverse.
 
 /**
  * Qui est visible en surface, et à quel titre.
@@ -50,10 +83,12 @@
  *   planète. ⚠️ **Il ne gouverne QUE le maillage**, jamais l'interface.
  * @param {boolean} arg.surface sommes-nous en vue de surface, devant un bloc —
  *   ce que l'automate du seuil décide, avant tout bornage.
- * @returns {{socle: boolean, boutons: boolean}} `socle` pour le maillage du
- *   bloc plat et les quatorze calques qui lui appartiennent ; `boutons` pour ce
- *   qui ne dépend que d'être en vue de surface — le raccourci isométrique, les
- *   plans de cinéma, et le coin cartographie (aérien · base · shuffle).
+ * @returns {{socle: boolean, boutons: boolean, cine: boolean}} `socle` pour le
+ *   maillage du bloc plat et les quatorze calques qui lui appartiennent ;
+ *   `boutons` pour ce qui ne dépend que d'être en vue de surface — le raccourci
+ *   isométrique et le coin cartographie (aérien · base · shuffle) ; `cine` pour
+ *   les plans de cinéma, qui ont en plus besoin d'un plancher, et n'en ont pas
+ *   sous le drapeau (voir §3).
  */
 export function visibiliteSurface({ terreUnique, surface }) {
   const s = !!surface
@@ -64,5 +99,9 @@ export function visibiliteSurface({ terreUnique, surface }) {
     // ⚠️ **ET IL NE DÉBORDE PAS SUR L'INTERFACE.** Sous le drapeau, il y a un
     // bloc devant nous — c'est un crop, mais c'en est un.
     boutons: s,
+    // ⛔ **SAUF LES PLANS DE CINÉMA, ET C'EST UNE RÉGRESSION MESURÉE, PAS UN
+    // ARBITRAGE.** Voir le §3 ci-dessus : sous le drapeau, ce bouton est un
+    // aller simple sous le sol.
+    cine: terreUnique ? false : s,
   }
 }

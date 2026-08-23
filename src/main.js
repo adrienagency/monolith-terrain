@@ -4624,7 +4624,10 @@ function poserVisibiliteSocle(v) {
   realWater?.setVisible(vue.socle && params.seaEnabled !== false) // cf. setSeaEnabled
   mapLayers.setSurfaceVisible(vue.socle)
   isoBtn?.setVisible(vue.boutons) // le raccourci isométrique n'a besoin que d'un bloc, pas du bloc PLAT
-  cineBtn?.setVisible(vue.boutons)
+  // ⛔ **LE CINÉ SUIT SA PROPRE RÉPONSE, ET IL EST ÉTEINT SOUS LE DRAPEAU** —
+  // §3 de `monde/visibilite-surface.js`, qui porte la mesure : ni `shots.stop()`
+  // ni le huitième clic ne rendent la vue, la caméra reste dans la mer du crop.
+  cineBtn?.setVisible(vue.cine)
   mapCorner?.setVisible(vue.boutons) // coin cartographie : de la surface, pas du maillage
   // ⚠️ **ET `refreshOsmCredit` NE PREND PAS D'ARGUMENT, DONC RIEN À LUI FAIRE
   // SUIVRE.** Elle relit l'état, dont `socleAffiche()`, qui rend faux sous le
@@ -10729,27 +10732,16 @@ function molettePendantCadrageDamier(deltaY) {
 // basiques comme on a jusqu'à présent ». Les sept crans (poursuite au ras du
 // sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série
 // aléatoire) vivent dans camera-shots.js ; le huitième clic arrête tout.
-// ⛔ **SOUS `?terre=unique`, CE BOUTON PLONGE LA CAMÉRA SOUS LE SOL ET VIDE
-// L'ÉCRAN — mesuré, Tâche R1 ②.** Relevé le 2026-08-23, drapeau levé, premier
-// plan (poursuite au ras du sol) : `camera.position.y = −7,29`,
-// `altitudeCadrageM() = −1 780 m`, **stable sur 7,5 s** — ce n'est pas un
-// transitoire. Écran entièrement vide : on est sous le crop, et l'estompage
-// vaut 1, donc il n'y a rien d'autre à voir.
+// ⛔ **SOUS `?terre=unique`, CE BOUTON EST ÉTEINT — Tâche R1 ②, tour 2.** Il
+// plonge la caméra sous le sol du crop et **aucune des deux sorties ne rend la
+// vue** : la mesure, les captures et la cause sont au §3 de
+// `monde/visibilite-surface.js`, qui décide de sa visibilité. Ne le rallume pas
+// sans avoir d'abord donné aux plans un `sampleGround` de GLOBE — c'est
+// `terrain.sample`, le champ de hauteurs du bloc PLAT, qui les envoie là.
 //
-// **La cause est dans la construction de `shots`, pas dans le plan** :
-// `sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0` — le champ de hauteurs
-// du BLOC PLAT, celui qui n'est plus dessiné. Sous le drapeau, la surface à
-// l'écran est le crop du globe, qui ne porte ni la même échelle verticale ni le
-// même zéro ; le « plancher » que `camera-shots.js` respecte scrupuleusement
-// (`plancher()`, `altitudeDeSecurite()`) est donc le plancher d'un autre monde.
-//
-// ⚠️ **C'EST RÉVERSIBLE** : `shots.stop()` — le huitième clic — rend la vue
-// intacte (vérifié : la caméra revient à `y = 77,1`, distance 145,5). Le bouton
-// n'est donc pas un piège sans issue, mais il ne montre rien de bon.
-// **À trancher avec Adrien** : donner un `sampleGround` de globe aux plans, ou
-// masquer ce bouton-là sous le drapeau. Il est laissé VISIBLE parce que la
-// tâche demandait de rendre les boutons du bas, et ce défaut-ci est écrit ici
-// plutôt que corrigé à l'aveugle dans `camera-shots.js`.
+// ⛔ **ET NE RÉÉCRIS PAS QU'IL EST « RÉVERSIBLE »** : le premier tour de cette
+// tâche l'a écrit sur la foi d'un relevé qui ne s'est pas reproduit. Deux
+// exécutions, deux sorties, aucune ne rendant la vue.
 cineBtn = buildCineButton({
   next: () => {
     if (modes.mode !== 'surface' || modes.busy) return
