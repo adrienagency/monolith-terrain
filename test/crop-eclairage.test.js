@@ -784,12 +784,19 @@ test('⑤e l’albédo est fabriqué AVANT l’apparence et les traits de carte'
   assert.ok(iLumiere > iContour, 'la lumière multiplie en DERNIER')
 })
 
-test('⑤f le compte de samplers ne bouge pas — huit, pour un plafond de seize', () => {
-  // ⚠️ Cette tâche n'ajoute AUCUNE texture : que des uniformes scalaires et
-  // vectoriels. Le pavé de `globe.js` qui annonce huit doit rester vrai, et
-  // c'est la boucle qui compte, pas le commentaire.
+test('⑤f le compte de samplers — NEUF, pour un plafond de seize', () => {
+  // ⚠️ La Tâche P3 n'ajoutait AUCUNE texture — que des uniformes scalaires et
+  // vectoriels — et ce test disait HUIT. La Tâche R9 en ajoute **UNE**,
+  // `uAerial`, et le compte passe à NEUF. Le pavé de `globe.js` qui l'annonce
+  // doit rester vrai, et c'est la boucle qui compte, pas le commentaire.
+  //
+  // ⚠️ **ET LE PLAFOND EST BIEN SEIZE.** `plafond-unites-texture.test.js`
+  // raconte le jour où le socle a atteint 18 pour un plafond de 16 ; le nuanceur
+  // du globe est un `ShaderMaterial` NU — ni matériau de surface, ni
+  // environnement, ni carte d'ombre — donc les neuf sont les neuf, sans
+  // supplément caché. Sept unités restent libres.
   const n = (FRAG_NU.match(/uniform sampler2D /g) || []).length
-  assert.equal(n, 8)
+  assert.equal(n, 9)
 })
 
 test('⑤g les défauts MONDE sont ceux des modules, pas des nombres recopiés', () => {

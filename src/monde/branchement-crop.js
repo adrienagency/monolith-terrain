@@ -158,6 +158,30 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'sol',
   'solLut',
   'solOpacite',
+  // ══════ LA PHOTO AÉRIENNE — Tâche R9 ═══════════════════════════════════════
+  //
+  // ⚠️ **ELLE ARRIVE PLUS TARD QUE TOUT LE RESTE DE CETTE LISTE, ET C'EST
+  // POURQUOI ELLE DOIT Y ÊTRE.** L'analyse vient d'un travailleur local ; la
+  // mosaïque aérienne vient **du réseau**, après la composition de dix-sept
+  // tuiles au mieux — et l'utilisateur l'allume depuis la barre de carte, à un
+  // instant que rien ne prévoit. Sans cette ligne, `refreshAerial` poserait la
+  // photo sur le socle et le globe ne la verrait **qu'au prochain changement de
+  // LIEU** : le bouton resterait inerte à l'œil, exactement le défaut que cette
+  // tâche répare. C'est la course nommée par la Tâche K ter, aggravée d'un
+  // aller-retour réseau.
+  //
+  // ⚠️ **`aerialOffset` / `aerialScale` N'Y SONT PAS**, même exemption et même
+  // raison que `solOffset` / `solScale` : `terrain.setAerial` les MUTE EN PLACE
+  // (`.set(...)`), donc leur identité ne bouge jamais — mais ils ne changent
+  // qu'avec `aerial`, dont l'identité, elle, change à chaque composition.
+  'aerial',
+  'aerialOpacite',
+  // ⚠️ **ET LE FONDU CÔTIER AUSSI — TOUR DE CORRECTION DE R9.** C'est une
+  // TIRETTE (« Fondu à la côte », `ui/map-panel.js`), donc l'utilisateur la bouge
+  // à un instant que rien ne prévoit — exactement l'argument de `aerialOpacite`
+  // juste au-dessus. Et c'est un SCALAIRE : `Object.is` le voit changer, et il ne
+  // reposera pas l'habillage soixante fois par seconde.
+  'aerialCoastFade',
   'amplitudeM',
   'contourIntervalM',
   'contourOpacity',

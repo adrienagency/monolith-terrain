@@ -79,6 +79,20 @@ export const HABILLAGE_MONDE = Object.freeze({
   // peut pas s'en contenter — 5 625 sommets sur le bloc contre 594 434 au socle.
   normaleFine: false,
   solOpacite: 1,
+  // ⚠️ **LA TIRETTE DE LA PHOTO AÉRIENNE — Tâche R9, tour de correction.** Elle
+  // était écrite **DEUX FOIS en littéral** (`uAerialOpacity: { value: 1 }` dans
+  // le constructeur, `u.uAerialOpacity.value = 1` dans `retirerHabillage`), plus
+  // une troisième comme défaut de signature de `poserHabillage` : trois jumeaux,
+  // et l'aller-retour bit à bit d'`⑨h` ne tient que s'ils restent d'accord.
+  // C'est mot pour mot le défaut que ce fichier raconte quatorze lignes plus
+  // haut, et `solOpacite` juste au-dessus en est le précédent exact.
+  aerialOpacite: 1,
+  // ⚠️ **ZÉRO, ET C'EST LE « éteint » DU SOCLE, PAS UN OUBLI.** `params` porte
+  // `aerialCoastFade: 0.1` avec, en toutes lettres, « 0 = off » ; la tirette
+  // « Fondu à la côte » du panneau de carte descend jusqu'à 0. Le poseur qui ne
+  // dit rien ne doit donc pas inventer un fondu — c'est `contexteCrop` qui
+  // transmet la valeur VIVANTE du socle, et elle seule.
+  aerialCoastFade: 0,
   margeCoteM: 0,
 })
 

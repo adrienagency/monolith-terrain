@@ -241,21 +241,62 @@ test('③ LE CRÉDIT D’ORTHOPHOTO ne s’affiche pas sous une carte qui n’en
   // apparaissait quand même. `refreshOsmCredit` pose deux fois l'obligation
   // inverse dans ses propres commentaires (« only while it is »).
   //
-  // ⚠️ **LA GARDE EST BORNÉE AU DRAPEAU, ET C'EST MESURÉ** : le défaut existe
-  // aussi en production, en orbite, sans aucun drapeau
-  // (`.banc/R1-tour2/credit-prod.json`). Le corriger là-bas changerait le
-  // comportement sans drapeau — la seule garantie que ce chantier a tenue de
-  // bout en bout. Il est signalé, pas corrigé en passant.
+  // ⛔⛔ **CE TEST EXIGEAIT LE TEXTE DE LA GARDE — ET LE TEXTE EST DEVENU FAUX.**
+  // Il assertait `if (aerialAttribution && !terreUniqueBranchee) …` mot pour
+  // mot. La Tâche R9 a branché la photo aérienne SUR LA DÉCOUPE : la prémisse de
+  // cette garde (« sous `terre unique` l'orthophoto n'est jamais à l'écran ») est
+  // tombée, et l'assertion de texte s'est mise à **verrouiller la régression** —
+  // elle rougissait sur la correction juste. C'est la classe de défaut la plus
+  // coûteuse de ce chantier, prise par l'autre bout : d'ordinaire le grep laisse
+  // passer une mutation, ici il interdisait la réparation.
+  //
+  // ⚠️ **CE QUI SE VÉRIFIE ICI DÉSORMAIS, C'EST LE COMPORTEMENT** — « le crédit
+  // décrit-il ce qui est peint ? » — et il vit dans une loi EXÉCUTÉE,
+  // `monde/credit-orthophoto.js`, gardée par `test/credit-orthophoto.test.js`.
+  // Il ne reste ici que ce qu'aucune loi ne peut porter : que `main.js`
+  // l'APPELLE, et qu'il ne pousse pas l'attribution à côté.
   const i = MAIN.indexOf('function refreshOsmCredit()')
   assert.ok(i > 0, '`refreshOsmCredit` a disparu ou changé de nom')
   const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
-  assert.ok(/if \(aerialAttribution && !terreUniqueBranchee\) parts\.push\(aerialAttribution\)/.test(corps),
-    'le crédit d’orthophoto n’est plus borné : il s’affichera sous une carte qui n’en porte aucune')
+  assert.ok(/creditOrthophoto\(\{/.test(corps),
+    '`refreshOsmCredit` n’appelle plus la loi du crédit d’orthophoto')
+  // ⚠️ **ET IL LUI PASSE LES TROIS ENTRÉES VIVANTES**, pas des littéraux : un
+  // `peinte: true` en dur rendrait la loi verte et l'écran menteur.
+  assert.ok(/terreUnique: terreUniqueBranchee/.test(corps), 'le drapeau n’est plus passé à la loi')
+  assert.ok(/attribution: aerialAttribution/.test(corps), 'l’attribution n’est plus passée à la loi')
+  assert.ok(/peinte: orthophotoPeinteSurLeCrop\(globe\?\.uniforms\)/.test(corps),
+    'l’état PEINT n’est plus lu sur le globe vivant — le crédit ne décrirait plus l’écran')
   // ⚠️ **ET UN SEUL SITE LE POUSSE** — deux écritures d'une obligation de licence
   // dont une seule peut suivre un changement de source, c'est la faute que
   // `SOL_LICENCE` a déjà coûtée à ce fichier.
-  assert.equal((corps.match(/parts\.push\(aerialAttribution\)/g) || []).length, 1,
+  assert.equal((corps.match(/parts\.push\(creditAerien\)/g) || []).length, 1,
     'le crédit d’orthophoto est poussé depuis plusieurs endroits')
+  assert.equal((corps.match(/parts\.push\(aerialAttribution\)/g) || []).length, 0,
+    'l’attribution est poussée en direct, en court-circuitant la loi')
+})
+
+test('③ LE CRÉDIT EST RESYNCHRONISÉ QUAND LE CROP PREND LA PHOTO — sinon la correction ne s’affiche jamais', () => {
+  // ⛔ **LA COURSE DE LA TÂCHE K ter, SUR LE CRÉDIT.** `refreshAerialCore` pose
+  // la mosaïque sur le socle puis appelle `refreshOsmCredit` — à cet instant, le
+  // globe ne l'a PAS encore : `veilleCrop` la lui donne à l'image SUIVANTE. Sans
+  // cette resynchronisation, le crédit serait calculé sur un crop vierge et rien
+  // ne le redemanderait : la mention resterait absente pendant que la photo est à
+  // l'écran, c'est-à-dire le défaut même qu'on répare.
+  const i = MAIN.indexOf('function majSeuilSocle()')
+  assert.ok(i > 0, '`majSeuilSocle` a disparu ou changé de nom')
+  const corps = MAIN.slice(i, MAIN.indexOf('\nfunction ', i + 10)).replace(/\/\/[^\n]*/g, '')
+  const iVeille = corps.indexOf('veilleCrop.maj(alt, dist)')
+  const iSync = corps.indexOf('orthophotoPeinteSurLeCrop(globe?.uniforms)')
+  assert.ok(iVeille > 0, 'la veille du crop n’est plus nourrie ici')
+  assert.ok(iSync > iVeille, 'le crédit est relu AVANT que la veille pose l’habillage — il jugerait sur l’image d’avant')
+  // ⚠️ **ET IL NE SE REDEMANDE QUE SUR CHANGEMENT** : `refreshOsmCredit`
+  // reconstruit une chaîne et touche le DOM. Sans la garde, soixante fois par
+  // seconde — la faute que `CHAMPS_HABILLAGE` évite deux lignes plus loin.
+  assert.ok(/if \(peinte !== orthophotoPeinteDerniere\) \{/.test(corps),
+    'le crédit est relu à chaque image, sans garde de changement')
+  assert.ok(/orthophotoPeinteDerniere = peinte/.test(corps), 'la mémoire n’est pas remise à jour : la garde ne retomberait jamais')
+  assert.match(MAIN, /let orthophotoPeinteDerniere = null/,
+    'la mémoire ne part pas de `null` : la première image ne trancherait pas')
 })
 
 test('③ `main.js` importe la loi plutôt que de la réécrire', () => {

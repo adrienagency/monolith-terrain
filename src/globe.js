@@ -1223,6 +1223,52 @@ uniform float uHazeAlt;
 uniform float uHazeDist;
 uniform vec3 uHazeColor;
 
+// ══════ LA PHOTO AERIENNE — Tache R9 ═══════════════════════════════════════
+//
+// > Adrien, 2026-08-23 : « remettre en route l'imagerie satellite ».
+//
+// ⛔ LE BOUTON ETAIT VISIBLE ET INERTE. ui/bars.js:491 → main.js (toggleAerial)
+// → refreshAerial → aerialLayer.build → terrain.setAerial : la chaine entiere
+// tournait, allait au reseau, composait la mosaique, et la posait sur le
+// MAILLAGE PLAT, qui est invisible sous ?terre=unique. Le globe n'avait aucun
+// uniforme pour la recevoir.
+//
+// ⚠️ NEUVIEME SAMPLER, ET LE COMPTE EST REFAIT ICI. Le bloc du masque de cote
+// comptait CINQ liens (uTex, uRamp, uCoastMask, uSol, uSolLut) ; le fond du crop
+// a fait SIX ; uAnalysis et uRampCrop ont fait HUIT. uAerial fait NEUF, pour un
+// plafond de seize. Le raisonnement du bloc du masque de cote (ShaderMaterial
+// NU : ni materiau de surface, ni environnement, ni carte d'ombre) tient tel
+// quel, et test/crop-eclairage.test.js COMPTE les sampler2D de ce fragment
+// plutot que de croire ce commentaire.
+//
+// ⚠️ C'EST UNE SEULE TEXTURE POUR TOUTE L'EMPRISE, PAS UNE PAR TUILE. La
+// mosaique est composee une fois par aerial-layer.js sur les deux coins du champ
+// charge (demBounds), puis posee sur le crop par une affine (offset / echelle) —
+// exactement comme uSol. Rien ici ne connait le quadtree du globe.
+//
+// ⚠️ ET ELLE SE LIT EN UV DRAPE, PAS EN UV DE CHAMP CUIT — voir le bloc de
+// lecture, plus bas. Confondre les deux familles retourne la photo NORD-SUD, et
+// rien ne leve d'erreur.
+uniform sampler2D uAerial;
+uniform float uAerialOn;
+uniform float uAerialOpacity;
+uniform vec2 uAerialOffset;
+uniform vec2 uAerialScale;
+// ⚠️ LE FONDU COTIER — TOUR DE CORRECTION DE R9, ET CE N'EST PAS COSMETIQUE.
+// R9 l'avait declare non portable, faute d'uSeaY / uSeaRange / vWorldPos.y dans
+// ce nuanceur. La relecture a mesure l'ecart sur le socle (La Reunion z9,
+// fondu 0,1 contre 0) : 72,7 % des pixels, ecart moyen 93,6/255 — et sur le
+// crop, la photo couvre la mer EN PLAQUES a coutures de tuiles visibles.
+//
+// ⚠️ ET LA CORRESPONDANCE N'EST PAS NEUVE : elle est deja ecrite dans ce
+// fichier, au bloc du fond marin. « Le socle mesure sa profondeur en unites de
+// scene (uSeaY - y sur uSeaRange), le globe en METRES BRUTS (-h sur
+// uMerFondBudgetM) ». Le niveau de la mer du globe est h = 0 ; le budget de
+// profondeur du crop est uMerFondBudgetM, que poserMer cale sur profMaxCropM
+// comme le socle cale uSeaRange sur -dem.minM. Meme substitution, meme bloc.
+// Ce n'est donc PAS une seconde loi de niveau d'eau, c'est la premiere, relue.
+uniform float uAerialCoastFade;
+
 // ══════ L'ECLAIRAGE DU CROP — Tache P3 ═════════════════════════════════════
 //
 // ⚠️ uEclairageOn VAUT ZERO PAR DEFAUT, comme uCropOn, uHabOn, uMerRampeOn,
@@ -1981,6 +2027,96 @@ void main() {
   vec3 fondCrop = uAlbedoBase * natGris(hNormRelief, max(nduCrop, 0.0));
   if (partBloc > 0.0) {
     col = mix(col, albedoCrop(col, uAlbedoBase, natGris(hNormRelief, max(nduCrop, 0.0)), uAlbedoTeinte), partBloc);
+  }
+
+  // ══════ LA PHOTO AERIENNE — Tache R9 ══════════════════════════════════════
+  //
+  // ⚠️ ICI ET PAS AILLEURS, ET L'ORDRE EST LE MEME ARGUMENT QUE POUR
+  // L'APPARENCE. terrain.js pose la photo APRES la peinture hypsometrique et
+  // l'occupation du sol, et AVANT l'apparence, le trait de cote, les courbes et
+  // le graticule : « the drawn cartography still sits on top of the photograph
+  // rather than being buried by it. That ordering is most of what keeps this
+  // from becoming a plain satellite viewer ». Le globe a la meme suite —
+  // rampe → sol → albedo → [ICI] → apparence → cote → courbes → graticule →
+  // lumiere — et test/crop-eclairage.test.js (⑤e) la verrouille.
+  //
+  // ⚠️ ELLE MODULE LA LUMINANCE, ELLE N'ECRASE PAS. Le facteur 0.6 + 0.8 x shade
+  // est celui de terrain.js, sur la meme entree : la luminance Rec.601 de la
+  // couleur DEJA peinte. C'est ce qui laisse l'ombrage et la rampe se lire A
+  // TRAVERS la photo, et c'est la difference entre une carte en relief et un
+  // visualiseur satellite.
+  //
+  // ⚠️⚠️ LE RETOURNEMENT EN Y N'EST PAS UN DETAIL, C'EST LA TACHE. La mosaique
+  // aerienne est une CanvasTexture, dont flipY vaut TRUE (aerial-layer.js le dit
+  // en toutes lettres : « aucune des deux couches ne l'eteint, contrairement a
+  // tous les autres masques du projet qui posent tex.flipY = false »). En UV,
+  // v = 0 est donc la DERNIERE ligne du canevas, celle du SUD. C'est pour ca que
+  // uvSolDrape (terrain.js) finit par uv.y = 1.0 - uv.y, et pour ca que
+  // aerialUvTransform mesure son offset vertical depuis le bord SUD de la
+  // grille. Lire la photo en cmUv (l'UV des champs CUITS, flipY = false, comme
+  // uCoastMask et uAnalysis) la poserait A L'ENVERS NORD-SUD, et aucun test de
+  // cablage ne le verrait.
+  //
+  // ⚠️ ET CE N'EST PAS UNE LOI NEUVE : c'est uvDrapeCrop, la MEME que
+  // l'occupation du sol emploie quelques dizaines de lignes plus haut (sUv), et
+  // que test/crop-habillage.test.js (⑩h) evalue deja sur 441 points contre le
+  // module pur. La photo aerienne et l'occupation du sol sont toutes deux des
+  // mosaiques de tuiles Web Mercator drapees : meme famille, meme retournement.
+  //
+  // ⚠️ ET L'AFFINE PASSE APRES LE RETOURNEMENT, JAMAIS AVANT. Un retournement et
+  // une affine NE COMMUTENT PAS — c'est le dossier complet d'aerialUvTransform,
+  // ou l'inversion des deux valait jusqu'a 131 km sur les lumieres nocturnes.
+  //
+  // ⚠️ dedansCrop ET NON partBloc : la photo ne depend pas de l'eclairage. La
+  // borner a partBloc l'eteindrait avec uEclairageOn, alors que c'est une couche
+  // de CARTE. dedansCrop vaut zero hors decoupe, donc la planete est intouchee.
+  if (uAerialOn > 0.5 && uAerialOpacity > 0.001 && dedansCrop > 0.0) {
+    vec2 aUv = vec2(qCrop.x * 0.5 + 0.5, 1.0 - (qCrop.y * 0.5 + 0.5));
+    aUv = uAerialOffset + aUv * uAerialScale;
+    vec3 aerien = texture2D(uAerial, aUv).rgb;
+    float shadeA = dot(col, vec3(0.299, 0.587, 0.114));
+    // ══════ LE FONDU COTIER — TOUR DE CORRECTION DE R9 ══════════════════════
+    //
+    // ⛔ SANS LUI, LA PHOTO COUVRE LA MER EN PLAQUES. Mesure de la relecture (La
+    // Reunion z9, socle, fondu 0,1 contre 0) : 72,7 % des pixels different,
+    // ecart moyen 93,6/255, max 189. Avec le fondu, la mer redevient la rampe
+    // bathymetrique et les isobathes restent lisibles ; sans lui, tout vire au
+    // bleu marine opaque et les isobathes s'enfoncent dedans. Sur le crop, les
+    // coutures de tuiles se voient le long du rivage.
+    //
+    // ⚠️ TRANSCRIPTION DE terrain.js, A LA SEULE SUBSTITUTION D'UNITE QUE LE
+    // BLOC DU FOND MARIN FAIT DEJA, QUARANTE LIGNES PLUS HAUT :
+    //   uSeaY            → 0.0                (le niveau de la mer, en metres)
+    //   uSeaY - y        → -h                 (la profondeur sous ce niveau)
+    //   uSeaRange        → uMerFondBudgetM    (le budget de profondeur du crop)
+    // Le socle ecrit smoothstep(uSeaY - band, uSeaY, y) ; le globe ecrit donc
+    // smoothstep(-bandeM, 0.0, h). Un au rivage, zero au fond, dans les deux.
+    //
+    // ⚠️ ET LA GARDE EST uMerRampeOn, PAS UN SECOND uSeaY > -9000. Le socle
+    // demande « ce bloc a-t-il de vraies donnees de mer » ; ici la reponse est
+    // portee par poserMer, exactement comme au bloc du fond marin.
+    //
+    // ⛔⛔ ET IL FAUT UNE SECONDE GARDE, PARCE QUE LE NIVEAU DE LA MER DU GLOBE
+    // EST ECRIT EN DUR A ZERO, ET QUE CELUI DU SOCLE NE L'EST PAS. terrain.js
+    // pose uSeaY SOUS le terrain quand le bloc n'a pas de donnee sous-marine
+    // (« then uSeaY simply sits below the terrain ») : son fondu rend donc 1
+    // partout, par construction. Le globe, lui, mesure depuis h = 0 : dans une
+    // cuvette SOUS le niveau de la mer — la vallee de la Mort a -86 m, la mer
+    // Morte a -430 m, un polder a -7 m — il effacerait la photo d'une TERRE.
+    //
+    // ⚠️ LE TEMOIN EXISTE DEJA, ET C'EST LE BUDGET LUI-MEME. poserMer ecrit
+    // Math.max(champ.profMaxCropM || champ.profMaxM, 1) — le repli « un crop
+    // dont le champ n'aurait aucune eau a l'interieur rendrait sinon un budget
+    // nul ». Un budget POSE AU PLANCHER veut donc dire « aucune profondeur
+    // mesuree ici ». MESURE : Annecy z12, drapeau leve, uMerRampeOn = 1 et
+    // uMerFondBudgetM = 1 — le crop continental prend bien le repli, et sans
+    // cette garde sa bande de fondu vaudrait DIX CENTIMETRES.
+    float aFade = 1.0;
+    if (uAerialCoastFade > 0.0 && uMerRampeOn > 0.5 && uMerFondBudgetM > 1.0) {
+      float bandeM = max(uMerFondBudgetM * uAerialCoastFade, 1e-4);
+      aFade = smoothstep(-bandeM, 0.0, h); // 1 au rivage → 0 au fond
+    }
+    col = mix(col, aerien * (0.6 + 0.8 * shadeA), uAerialOpacity * dedansCrop * aFade);
   }
 
   // ══════ LA COUCHE APPARENCE — Tache P3, le gabarit d'ouverture l'ALLUME ════
@@ -2881,6 +3017,24 @@ export class Globe {
       uGrainForceM: { value: HABILLAGE_MONDE.grainForceM },
       uGrainEchelle: { value: HABILLAGE_MONDE.grainEchelle },
       uContourWeight: { value: HABILLAGE_MONDE.contourPoids },
+      // ══════ LA PHOTO AERIENNE — Tâche R9 ═══════════════════════════════════
+      //
+      // ⚠️ **`uAerialOn: 0` : sans `poserHabillage`, RIEN NE CHANGE** — même
+      // garde et même raison que `uCropOn`, `uHabOn` et `uSolOn`.
+      //
+      // ⚠️ **`null` AU REPOS, COMME `uCoastMask`, `uSol` ET `uAnalysis` — ET PAS
+      // COMME `terrain.js`.** Le socle pose une texture noire 1×1 (« never null:
+      // a null sampler fails to compile on some drivers ») parce que ses
+      // samplers vivent dans un `MeshStandardMaterial` étendu ; le globe, lui,
+      // porte déjà **trois** samplers d'habillage à `null` en production depuis
+      // les Tâches C et P2, sur le même `ShaderMaterial`. Poser ici une
+      // quatrième convention aurait fabriqué deux règles pour un seul nuanceur.
+      uAerial: { value: null },
+      uAerialOn: { value: 0 },
+      uAerialOpacity: { value: HABILLAGE_MONDE.aerialOpacite },
+      uAerialOffset: { value: new THREE.Vector2(0, 0) },
+      uAerialScale: { value: new THREE.Vector2(1, 1) },
+      uAerialCoastFade: { value: HABILLAGE_MONDE.aerialCoastFade },
       // LA NORMALE PAR FRAGMENT — Tâche P9. ⚠️ **`uNormaleFineOn: 0` : sans
       // `poserHabillage`, RIEN ne change** — même garde et même raison que
       // `uCropOn`, `uHabOn`, `uMerRampeOn`, `uEclairageOn` et `uMppFacteur`.
@@ -3604,6 +3758,32 @@ export class Globe {
    *   identité ne bouge jamais : partagé, il aurait fait de `this.uniforms` un
    *   porteur de poignée sur l'état du bloc, et `habillageDifferent` n'aurait
    *   jamais vu la couleur changer.
+   *
+   * ══════════ LA PHOTO AÉRIENNE — Tâche R9 ═══════════════════════════════════
+   *
+   * ⚠️ **ELLE ENTRE PAR L'HABILLAGE POUR LA RAISON DE L'ANALYSE, EN PIRE** : la
+   * mosaïque arrive **du réseau**, après une composition de dix-sept tuiles au
+   * mieux, et l'utilisateur peut l'allumer à n'importe quel instant depuis la
+   * barre de carte. Elle ne peut pas être là quand le crop naît, et rien d'autre
+   * que la veille par image ne la verrait arriver.
+   *
+   * @param {THREE.Texture|null} arg.aerial - `terrain.mapUniforms.uAerial`,
+   *   la mosaïque composée par `map/aerial-layer.js`. ⚠️ **`null` L'ÉTEINT** —
+   *   même patron que `coastMask` et `sol` : l'interrupteur est l'absence de
+   *   donnée, et l'appelant hérite de la garde `uAerialOn` du socle au lieu d'en
+   *   écrire une seconde.
+   * @param {number} arg.aerialOpacite - `uAerialOpacity` du socle, la tirette
+   *   « combien de la carte survit à la photo ».
+   * @param {{x:number,y:number}|null} arg.aerialOffset
+   * @param {{x:number,y:number}|null} arg.aerialScale - l'affine qui pose la
+   *   mosaïque sur l'emprise (`aerialUvTransform`). ⚠️ **MUTÉS EN PLACE par
+   *   `terrain.setAerial` (`.set(...)`), donc absents de `CHAMPS_HABILLAGE`** —
+   *   même exemption, et même raison, que `solOffset` / `solScale`.
+   * @param {number} arg.aerialCoastFade - `uAerialCoastFade` du socle, la
+   *   tirette « Fondu à la côte » du panneau de carte (0 = éteint). ⚠️ **ELLE
+   *   EST DANS `CHAMPS_HABILLAGE`** : c'est une tirette, l'utilisateur la bouge
+   *   quand il veut, et c'est un scalaire — donc surveillable par `Object.is`
+   *   sans reposer l'habillage à chaque image.
    */
   poserHabillage({
     coastMask = null,
@@ -3613,6 +3793,11 @@ export class Globe {
     solOffset = null,
     solScale = null,
     solTexel = null,
+    aerial = null,
+    aerialOpacite = HABILLAGE_MONDE.aerialOpacite,
+    aerialOffset = null,
+    aerialScale = null,
+    aerialCoastFade = HABILLAGE_MONDE.aerialCoastFade,
     amplitudeM = null,
     contourIntervalM = null,
     contourOpacity = null,
@@ -3714,6 +3899,21 @@ export class Globe {
     if (solOffset) u.uSolOffset.value.set(solOffset.x, solOffset.y)
     if (solScale) u.uSolScale.value.set(solScale.x, solScale.y)
     if (solTexel) u.uSolTexel.value.set(solTexel.x, solTexel.y)
+
+    // ══════ LA PHOTO AÉRIENNE — Tâche R9 ═════════════════════════════════════
+    //
+    // ⚠️ **MÊME PATRON QUE `sol` JUSTE AU-DESSUS, JUSQU'AUX DEUX VECTEURS POSÉS
+    // SOUS GARDE.** L'affine n'a pas de « neutre » utile : `(0,0)` / `(1,1)`
+    // étalerait la mosaïque sur l'emprise entière, ce qui est faux dès que la
+    // grille de tuiles déborde du champ — c'est-à-dire presque toujours. Un
+    // appelant qui ne les passe pas garde donc l'affine précédente, exactement
+    // comme pour `solOffset` / `solScale`, plutôt que d'en fabriquer une fausse.
+    u.uAerial.value = aerial
+    u.uAerialOn.value = aerial ? 1 : 0
+    u.uAerialOpacity.value = aerialOpacite
+    if (aerialOffset) u.uAerialOffset.value.set(aerialOffset.x, aerialOffset.y)
+    if (aerialScale) u.uAerialScale.value.set(aerialScale.x, aerialScale.y)
+    u.uAerialCoastFade.value = aerialCoastFade
 
     // ⚠️ **L'INTERVALLE SE CALE SUR LE RELIEF DU CROP.** Le globe posait 500 m
     // en dur, valables pour le monde entier : à l'île Maurice, qui culmine à
@@ -3901,6 +4101,24 @@ export class Globe {
     u.uSolOffset.value.set(0, 0)
     u.uSolScale.value.set(1, 1)
     u.uSolTexel.value.set(1 / 2048, 1 / 2048)
+    // ══════ LA PHOTO AÉRIENNE — Tâche R9 ═════════════════════════════════════
+    //
+    // ⚠️ **LÂCHÉE, PAS SEULEMENT DÉBRANCHÉE** — même raison que le masque de
+    // côte et l'analyse : une mosaïque aérienne est un canevas de plusieurs
+    // milliers de pixels de côté, retenu par un uniforme **PARTAGÉ** par tous
+    // les matériaux de tuile. La garder joignable après la mort du crop, c'est
+    // exactement la fuite que ce bloc répare déjà deux fois.
+    //
+    // ⚠️ **ET L'AFFINE REVIENT AU NEUTRE, comme `uSolOffset` / `uSolScale`** :
+    // c'est l'aller-retour bit-à-bit que `test/crop-habillage.test.js` (⑨) exige
+    // de l'habillage — un uniforme resté sur le cadrage d'un crop mort est un
+    // état qui traîne, et ce fichier en a déjà payé un.
+    u.uAerial.value = null
+    u.uAerialOn.value = 0
+    u.uAerialOpacity.value = HABILLAGE_MONDE.aerialOpacite
+    u.uAerialOffset.value.set(0, 0)
+    u.uAerialScale.value.set(1, 1)
+    u.uAerialCoastFade.value = HABILLAGE_MONDE.aerialCoastFade
     u.uContourInterval.value = HABILLAGE_MONDE.contourIntervalM
     u.uContourOpacity.value = HABILLAGE_MONDE.contourOpacite
     u.uContourWeight.value = HABILLAGE_MONDE.contourPoids

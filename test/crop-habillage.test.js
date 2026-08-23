@@ -141,15 +141,21 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // `rampWet` et `rampOklab` atteignent la sphère sans une seule couleur
   // recalculée. Le chiffre est REFAIT, pas cru : le commentaire de `globe.js`
   // qui l'annonce est vérifié juste en dessous.
+  // ⚠️ **NEUF DEPUIS LA TÂCHE R9** : `uAerial` porte la mosaïque de photo
+  // aérienne composée par `map/aerial-layer.js`. **UNE seule texture pour toute
+  // l'emprise**, posée par une affine — pas une par tuile de quadtree : le
+  // compte monte de un, et d'un seul, quel que soit le nombre de tuiles à
+  // l'écran. Sept unités restent libres.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 8, `le compte attendu est 8 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop), pas ${n}`)
+  assert.equal(n, 9, `le compte attendu est 9 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial), pas ${n}`)
   // ⚠️ **ET LE COMMENTAIRE QUI ANNONCE LE COMPTE DOIT DIRE LE MÊME NOMBRE.** Le
   // brief de la Tâche P2 le demandait nommément (« `globe.js:714` compte les
   // samplers — vérifie où en est ce compte avant d'ajouter ») : un pavé qui
   // annonce six pendant que le nuanceur en déclare huit est précisément le genre
   // de prose que le tour de mutation de la Tâche K ter a trouvée verte à tort.
   assert.match(GLOBE_SRC, /uAnalysis et uRampCrop font HUIT/)
+  assert.match(GLOBE_SRC, /uAerial fait NEUF/)
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════
@@ -181,9 +187,18 @@ test('② le dépôt confirme la dissymétrie : `uvSolDrape` retourne y, la lect
   assert.ok(!/cmUv\.y\s*=\s*1\.0\s*-/.test(TERRAIN_SRC.slice(cm - 400, cm)), 'le masque de côte s’est mis à retourner y')
 })
 
-test('② le nuanceur du globe applique le retournement à l’occupation du sol, et à elle seule', () => {
+test('② le nuanceur du globe retourne les DEUX couches drapées, et elles seules', () => {
+  // ⚠️ **DEUX DEPUIS LA TÂCHE R9, ET C'EST LA MÊME FAMILLE.** L'occupation du
+  // sol et la photo aérienne sont toutes deux des mosaïques de tuiles Web
+  // Mercator drapées, `flipY = true` — `aerial-layer.js` le dit en toutes
+  // lettres. Les champs CUITS (masque de côte, analyse), eux, sont posés
+  // `flipY = false` et ne se retournent pas. Un aérien lu en `cmUv` sortirait
+  // **inversé nord-sud** sans qu'aucune erreur ne se lève : c'est ce que cette
+  // assertion attrape.
   const sol = FRAG.slice(FRAG.indexOf('uSolOn > 0.5'), FRAG.indexOf('uSolOn > 0.5') + 400)
   assert.match(sol, /1\.0\s*-\s*\(\s*qCrop\.y\s*\*\s*0\.5\s*\+\s*0\.5\s*\)/, 'la couche drapée ne retourne pas y')
+  const aer = FRAG.slice(FRAG.indexOf('uAerialOn > 0.5'), FRAG.indexOf('uAerialOn > 0.5') + 400)
+  assert.match(aer, /1\.0\s*-\s*\(\s*qCrop\.y\s*\*\s*0\.5\s*\+\s*0\.5\s*\)/, 'la photo aérienne ne retourne pas y — elle sortira à l’envers')
   const cote = FRAG.slice(FRAG.indexOf('uCoastMaskOn > 0.5'), FRAG.indexOf('uCoastMaskOn > 0.5') + 300)
   assert.ok(!/1\.0\s*-\s*\(\s*qCrop\.y/.test(cote), 'le masque de côte retourne y alors que le socle ne le fait pas')
 })
@@ -615,6 +630,17 @@ function globeStub(crop = REPERE) {
       uSolOffset: val(vec2(0, 0)),
       uSolScale: val(vec2(1, 1)),
       uSolTexel: val(vec2(1 / 2048, 1 / 2048)),
+      // ⚠️ **LA PHOTO AÉRIENNE — Tâche R9, ET CE STUB EST UNE SECONDE COPIE DE
+      // LA LISTE.** Un uniforme ajouté à `globe.js` et oublié ici fait tomber
+      // ⑨a..⑨h sur un `TypeError`, pas sur une assertion : c'est le prix de
+      // pouvoir vérifier l'aller-retour bit à bit sans GPU, et il est payé
+      // sciemment. Les cinq valeurs sont celles du constructeur.
+      uAerial: val(null),
+      uAerialOn: val(0),
+      uAerialOpacity: val(HABILLAGE_MONDE.aerialOpacite),
+      uAerialOffset: val(vec2(0, 0)),
+      uAerialScale: val(vec2(1, 1)),
+      uAerialCoastFade: val(HABILLAGE_MONDE.aerialCoastFade),
       uContourInterval: val(HABILLAGE_MONDE.contourIntervalM),
       uContourOpacity: val(HABILLAGE_MONDE.contourOpacite),
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
@@ -778,6 +804,79 @@ test('⑨g le grain passe, et les vecteurs sont COPIÉS, pas partagés', () => {
   assert.equal(g.uniforms.uSolOffset.value.x, 0.25)
 })
 
+test('⑨j LA PHOTO AÉRIENNE EST POSÉE, PAS SEULEMENT ÉCRITE — Tâche R9, tour de correction', () => {
+  // ⛔⛔ **TROIS MUTANTS SURVIVAIENT À LA SUITE ENTIÈRE, ET C'ÉTAIT LE CONSTAT
+  // CRITIQUE N°3 DE LA RELECTURE DE R9.** Le corps de pose de la photo enfermé
+  // dans une branche morte — `if (1) { u.uAerialOn.value = 0 } else { …le texte
+  // intact… }` — laissait **188 tests sur 188 verts** ; la suppression conjointe
+  // de `u.uAerialOpacity.value = aerialOpacite` et des deux poses d'affine
+  // laissait **4 206 sur 4 206**. Rien ne vérifiait que la tirette d'opacité
+  // atteint le globe, ni que l'affine — le dossier des 131 km, cité trois fois
+  // dans le code de R9 — y est recopiée.
+  //
+  // ⚠️ **LA CAUSE EST NOMMÉE DANS CE FICHIER MÊME** : `crop-aerien` ⑥c
+  // GREPE le texte source (`assert.match(GLOBE_NU, …)`), alors que le harnais
+  // `poserHab` / `retirerHab` vit vingt lignes plus haut et EXERCE la fonction.
+  // Le §⑨ le dit déjà : « `poserHabillage` et `retirerHabillage` sont EXERCÉES,
+  // pas grepées ». Voici les trois lignes qui manquaient.
+  const g = globeStub()
+  assert.equal(g.uniforms.uAerialOn.value, 0, 'la photo part allumée')
+
+  // ① L'INTERRUPTEUR EST L'ABSENCE DE DONNÉE — le patron de `coastMask`.
+  poserHab(g, {})
+  assert.equal(g.uniforms.uAerialOn.value, 0, 'une pose SANS mosaïque allume la photo')
+  assert.equal(g.uniforms.uAerial.value, null)
+  poserHab(g, { aerial: TEX })
+  assert.equal(g.uniforms.uAerialOn.value, 1, 'la mosaïque n’allume pas la photo — le bouton reste inerte')
+  assert.equal(g.uniforms.uAerial.value, TEX, 'la mosaïque n’atteint pas le globe')
+  // et elle s'ÉTEINT : `terrain.setAerial(null)` ne touche que l'interrupteur du
+  // socle, donc le globe doit retomber par l'absence de donnée, pas y rester.
+  poserHab(g, { aerial: null })
+  assert.equal(g.uniforms.uAerialOn.value, 0, 'la photo ne s’éteint jamais')
+  assert.equal(g.uniforms.uAerial.value, null, 'la mosaïque reste liée après extinction — c’est la fuite que ⑨ répare deux fois')
+
+  // ② LA TIRETTE D'OPACITÉ ARRIVE — mutant « pose d'opacité retirée ».
+  poserHab(g, { aerial: TEX, aerialOpacite: 0.37 })
+  assert.equal(g.uniforms.uAerialOpacity.value, 0.37, 'la tirette d’opacité n’atteint pas le globe')
+  // ⚠️ **ET SON DÉFAUT VAUT UN, PAS ZÉRO** — mutant « défaut de signature à 0 » :
+  // il rendrait la photo invisible pour tout appelant qui ne passe pas la
+  // tirette, et le nuanceur saute son bloc sous `uAerialOpacity > 0.001`.
+  poserHab(g, { aerial: TEX })
+  assert.equal(g.uniforms.uAerialOpacity.value, HABILLAGE_MONDE.aerialOpacite,
+    'le défaut de la tirette n’est plus celui d’HABILLAGE_MONDE : une pose sans opacité éteindrait la photo')
+  assert.ok(g.uniforms.uAerialOpacity.value > 0.001, 'le défaut de la tirette passe sous le seuil du nuanceur')
+
+  // ③ L'AFFINE EST RECOPIÉE, COMPOSANTE PAR COMPOSANTE — mutant « les deux poses
+  // d'affine retirées ». ⚠️ **C'EST LE DOSSIER DES 131 km** : un offset perdu
+  // pose la mosaïque ailleurs que sur son emprise, sans qu'aucune erreur ne se
+  // lève et sans que le compte de samplers ne bouge.
+  const offset = { x: 0.125, y: 0.625 }
+  poserHab(g, { aerial: TEX, aerialOffset: offset, aerialScale: { x: 2.5, y: 3.5 } })
+  assert.deepEqual([g.uniforms.uAerialOffset.value.x, g.uniforms.uAerialOffset.value.y], [0.125, 0.625],
+    'l’offset de la mosaïque n’atteint pas le globe')
+  assert.deepEqual([g.uniforms.uAerialScale.value.x, g.uniforms.uAerialScale.value.y], [2.5, 3.5],
+    'l’échelle de la mosaïque n’atteint pas le globe')
+  // ⚠️ **COPIÉE, PAS PARTAGÉE** — même contrat que `solOffset` en ⑨g : un
+  // uniforme qui garderait l'objet de l'appelant changerait le rendu à distance.
+  offset.x = 99
+  assert.equal(g.uniforms.uAerialOffset.value.x, 0.125, 'l’uniforme partage l’objet de l’appelant')
+
+  // ④ LE FONDU CÔTIER ARRIVE, ET SON DÉFAUT EST L'ÉTEINT DU SOCLE — tour de
+  // correction. Sans cette pose, la tirette « Fondu à la côte » bougeait le bloc
+  // plat et laissait le crop couvrir la mer en plaques (72,7 % des pixels).
+  poserHab(g, { aerial: TEX, aerialCoastFade: 0.28 })
+  assert.equal(g.uniforms.uAerialCoastFade.value, 0.28, 'la tirette du fondu côtier n’atteint pas le globe')
+  poserHab(g, { aerial: TEX })
+  assert.equal(g.uniforms.uAerialCoastFade.value, HABILLAGE_MONDE.aerialCoastFade,
+    'le défaut du fondu n’est plus celui d’HABILLAGE_MONDE')
+  assert.equal(HABILLAGE_MONDE.aerialCoastFade, 0, 'un poseur muet ne doit pas inventer un fondu')
+
+  // ⑤ ET UNE POSE SANS AFFINE GARDE LA PRÉCÉDENTE — c'est écrit dans le code de
+  // R9 (« l'affine n'a pas de neutre utile »), donc ça se vérifie.
+  poserHab(g, { aerial: TEX })
+  assert.equal(g.uniforms.uAerialScale.value.x, 2.5, 'une pose sans affine remet un neutre faux')
+})
+
 test('⑨h L’ALLER-RETOUR EST BIT À BIT — c’est le défaut que ce tour a corrigé', () => {
   // ⚠️ **UN VRAI DÉFAUT, TROUVÉ PAR LA RELECTURE.** `uContourInterval` et
   // `uContourOpacity` sont PARTAGÉS par toutes les tuiles et le bloc des courbes
@@ -791,6 +890,14 @@ test('⑨h L’ALLER-RETOUR EST BIT À BIT — c’est le défaut que ce tour a 
     solOffset: { x: 0.3, y: 0.4 }, solScale: { x: 2, y: 2 }, solTexel: { x: 0.01, y: 0.02 },
     amplitudeM: 828, contourOpacity: 0.9, contourWeight: 1.3,
     grainForceM: 7, grainEchelle: 12,
+    // ⚠️ **LES CINQ DE LA PHOTO AÉRIENNE — Tâche R9, tour de correction.** Sans
+    // eux, l'aller-retour ne les traversait pas : `retirerHabillage` pouvait
+    // oublier de rendre l'opacité ou l'affine sans qu'une assertion tombe, et
+    // **un uniforme resté sur le cadrage d'un crop mort est un état qui traîne**
+    // — c'est ce que ⑨h existe pour attraper, et il le manquait sur cinq postes.
+    aerial: TEX, aerialOpacite: 0.42,
+    aerialOffset: { x: 0.7, y: 0.8 }, aerialScale: { x: 3, y: 4 },
+    aerialCoastFade: 0.13,
   })
   // la pose change bien QUELQUE CHOSE — sinon l'aller-retour serait vrai par
   // construction, et c'est le premier des sept pièges du plan
@@ -812,6 +919,11 @@ test('⑨i le constructeur PREND ses valeurs dans HABILLAGE_MONDE — une seule 
     ['uGrainForceM', 'grainForceM'],
     ['uGrainEchelle', 'grainEchelle'],
     ['uSolOpacite', 'solOpacite'],
+    // ⚠️ **LA PHOTO AÉRIENNE — Tâche R9, tour de correction.** Elle était écrite
+    // deux fois en littéral (constructeur + `retirerHabillage`) plus une
+    // troisième comme défaut de signature : exactement les « deux littéraux
+    // jumeaux » que ce test-ci existe pour interdire.
+    ['uAerialOpacity', 'aerialOpacite'],
     ['uMargeCoteM', 'margeCoteM'],
   ]) {
     assert.ok(
