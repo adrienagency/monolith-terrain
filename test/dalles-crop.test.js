@@ -34,6 +34,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
+import { readFileSync } from 'node:fs'
 
 // ══════════ LE HARNAIS — celui de `test/veille-repos.test.js` ⑦ ═════════════
 //
@@ -476,4 +477,47 @@ test('⑨ MNT en panne : le globe reste à ses racines, et c’est la décision 
   assert.equal(globe._drawn, globe.roots.length)
   assert.equal([...zoomsDemandes().keys()].filter((z) => z > 2).length, 0)
   assert.equal(globe.queue.length, 0, 'le globe demande encore des tuiles en boucle')
+})
+
+// ══════════ ⑩ LE BRANCHEMENT — et l'aveu qui va avec ═══════════════════════
+//
+// ⛔ **CE FICHIER DIT EN EN-TÊTE QU'AUCUNE ASSERTION NE LIT LE TEXTE SOURCE.
+// CELLE-CI LE FAIT, ET C'EST UNE EXCEPTION QUI S'ASSUME.** La relecture a montré
+// que `cropAttendu: false` ET `cropAttendu: true` posés en dur sur cette ligne
+// de `main.js` passaient **les 4 131 tests du dépôt** : le premier désarmait tout
+// le correctif en silence, le second privait la production entière de descente.
+// « Une concordance au défaut n'est pas un branchement » — et il n'y avait ici
+// aucun branchement gardé du tout.
+//
+// ⚠️ **POURQUOI PAS UN TEST DE COMPORTEMENT :** `main.js` n'est chargeable par
+// aucun test de ce dépôt (DOM, WebGL, imports aliasés par Vite). Le dépôt a déjà
+// tranché cette question **sur la ligne d'à côté du même appel** —
+// `test/crop-branche.test.js` garde `exagContinue: exagContinueActive() ||
+// terreUniqueBranchee` par `assert.match` sur la source. On s'aligne, faute de
+// mieux, plutôt que de laisser zéro garde.
+//
+// ⚠️ **CE QUE CETTE GARDE NE PROUVE PAS, ET IL FAUT LE SAVOIR :** que la valeur
+// ARRIVE au globe. Ça, c'est la mutation `_cropAttendu = false` au constructeur,
+// et elle est tuée par sept tests de comportement plus haut. Les deux ensemble
+// couvrent la chaîne ; ni l'une ni l'autre ne la couvre seule.
+
+const SRC_MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+
+test('⑩ `main.js` branche `cropAttendu` SUR LE DRAPEAU, et sur rien d’autre', () => {
+  const i = SRC_MAIN.indexOf('new Globe({')
+  assert.ok(i >= 0, '`main.js` ne construit plus de `Globe` — à revérifier entièrement')
+  const appel = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n', i))
+  assert.match(
+    appel, /cropAttendu: terreUniqueBranchee/,
+    `la construction du globe ne branche pas \`cropAttendu\` sur le drapeau : ${appel}`,
+  )
+  // les deux mutations qui ont survécu à la relecture, nommément interdites
+  assert.doesNotMatch(SRC_MAIN, /cropAttendu:\s*(true|false)\b/, '`cropAttendu` est posé EN DUR quelque part')
+  // un seul ÉCRIVAIN : deux branchements divergeraient au premier drapeau
+  // ajouté. On compte les LIAISONS (`cropAttendu:`), pas les mentions — le
+  // commentaire au-dessus de la ligne en contient deux, et c'est très bien.
+  assert.equal(
+    (SRC_MAIN.match(/cropAttendu\s*:/g) || []).length, 1,
+    '`cropAttendu` est lié en plusieurs endroits de `main.js` — il n’a qu’un site légitime',
+  )
 })
