@@ -1227,6 +1227,38 @@ test('⑩k `onBeforeRender` pose une matrice qui TOURNE VRAIMENT la normale de l
   assert.ok(nMonde.angleTo(nLocal) * 180 / Math.PI > 100)
 })
 
+test('⑩l `onBeforeRender` COPIE le tampon d image, à chaque image, sur la cible LIÉE', async () => {
+  // ⛔ **SANS CETTE COPIE LA RÉFRACTION LIT UNE TEXTURE JAMAIS RAFRAÎCHIE** — et
+  // rien dans le dépôt ne nommait `copyFramebufferToTexture` avant ce test.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  const r = rendeurBouchon(1014, 414)
+  const u = g._mer.material.uniforms
+
+  assert.equal(u.uMerScene.value, null, 'la cible ne doit pas exister avant la première image')
+  g._mer.onBeforeRender(r)
+  assert.equal(r.copies.length, 1, 'la première image doit copier le tampon')
+  assert.ok(u.uMerScene.value, 'la copie doit être LIÉE à l uniforme que le nuanceur lit')
+  assert.equal(r.copies[0], u.uMerScene.value, 'on copie dans la texture que le nuanceur échantillonne, pas dans une autre')
+  assert.equal(u.uMerResolution.value.x, 1014)
+  assert.equal(u.uMerResolution.value.y, 414)
+
+  // ⚠️ **ET À CHAQUE IMAGE, PAS UNE FOIS** : une copie prise à la naissance
+  // seulement rendrait une mer qui réfracte la première image pour toujours.
+  g._mer.onBeforeRender(r)
+  g._mer.onBeforeRender(r)
+  assert.equal(r.copies.length, 3)
+  assert.equal(new Set(r.copies).size, 1, 'la cible est réutilisée tant que la taille ne bouge pas')
+
+  // et quand le tampon change de taille, la cible suit — et reste liée
+  r.taille = { largeur: 640, hauteur: 480 }
+  g._mer.onBeforeRender(r)
+  assert.equal(u.uMerScene.value.image.width, 640)
+  assert.equal(u.uMerResolution.value.x, 640)
+  assert.equal(r.copies[3], u.uMerScene.value)
+})
+
 // ══════════ ⑪ LE BORD DE LA MER — Tâche J ═══════════════════════════════════
 //
 // ⚠️ **CE QUE CETTE SECTION DÉFEND EST UN DÉFAUT VU À L'ÉCRAN** : « la mer
