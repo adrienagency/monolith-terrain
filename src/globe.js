@@ -21,7 +21,7 @@ import { overzoomTile } from './bathy.js'
 import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
-import { construireSolideCrop, normalesParois, rabattementBorne } from './monde/parois-crop.js'
+import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, jupesEffacees } from './monde/parois-crop.js'
 import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
@@ -4965,6 +4965,17 @@ export class Globe {
     // rideau d'eau, et la même parade** : la jupe s'arrête là où le mur cesse
     // d'être vertical.
     this._plancherJupeCrop = solide.baseY + solide.arrondi
+    // ⛔ **ET LE RETRAIT LATÉRAL DU MUR — Tâche P14, LA MOITIÉ QUE P13 N'A PAS
+    // FAITE.** `_plancherJupeCrop` a corrigé la LONGUEUR de la jupe ; il ne
+    // pouvait rien contre son DÉCALAGE LATÉRAL, et P13 le dit elle-même
+    // (« aucun réglage de la LONGUEUR ne peut réparer un décalage LATÉRAL »).
+    // Sous le chanfrein le mur est à `d = ch` **à toute hauteur** ; la jupe pend
+    // à `d = 0`. **Le mur est passé derrière elle**, et le noteur compte
+    // **23 traînées pâles contre 4 au socle** (`notation-05.md` §7.2).
+    // ⚠️ **MÊME MONNAIE QUE `_retraitBaseCrop` ET QUE `mer-sphere.js`** : une
+    // FRACTION DU DEMI-CÔTÉ, parce que c'est celle où `jupeHorsDuMur` compare —
+    // les coordonnées locales du crop valent ±1 sur l'emprise.
+    this._retraitJupeCrop = solide.largeur > 0 ? solide.chanfrein / (solide.largeur / 2) : 0
     // ⚠️ **ET LES JUPES DES TUILES SE RETAILLENT DESSUS — Tâche P7.** C'est ici
     // et pas dans `_buildMesh` parce que l'ordre l'impose : les parois exigent
     // des tuiles bâties (`couverture`), donc les tuiles du premier bloc sont
@@ -4991,6 +5002,10 @@ export class Globe {
     this._baseYCrop = null
     this._retraitBaseCrop = null
     this._plancherJupeCrop = null
+    // ⚠️ **ET LE RETRAIT LATÉRAL AUSSI — Tâche P14, même motif que les trois
+    // au-dessus** : sans mur, il n'y a plus rien qui couvre une jupe, donc plus
+    // rien qui autorise à la couper.
+    this._retraitJupeCrop = null
     // et les jupes reprennent leur pleine longueur : sans bloc, plus de plancher
     this._retaillerJupes()
   }
@@ -5035,6 +5050,14 @@ export class Globe {
    * donc la jupe pleine) rend exactement le même tampon. Une version qui
    * rabattrait « encore un peu » à chaque passage creuserait à chaque image.
    *
+   * ⛔ **ET DEPUIS LA TÂCHE P14 ELLE BORNE DANS LES DEUX SENS.** La hauteur par
+   * `rabattementBorne` (P7 puis P13) ; **le côté par `jupeHorsDuMur`** — un
+   * sommet de bord posé sur la frontière du crop est un sommet que le mur ne
+   * couvre plus depuis qu'il est rentré de `ch`, et sa jupe **s'efface** (elle
+   * se replie sur son propre sommet de bord, donc en triangles d'aire nulle).
+   * ⚠️ **L'IDEMPOTENCE SURVIT** : l'effacement se calcule, lui aussi, depuis le
+   * sommet de BORD, et `_retraitJupeCrop` nul rend exactement le tampon d'avant.
+   *
    * @returns {boolean} vrai si une jupe a été retaillée
    */
   _retaillerJupe(t) {
@@ -5042,17 +5065,41 @@ export class Globe {
     const d = mesh?.geometry?.userData?.jupe
     if (!d) return false
     const rPlancher = this._rayonPlancherCrop(t)
+    // ⚠️ **LE MÊME TRI QUE LE PLANCHER, ET IL EST OBLIGATOIRE** : `rPlancher`
+    // vaut 0 hors du crop (pas de parois, ou `tuileDansCrop` faux), et une tuile
+    // à l'autre bout du monde n'a pas de mur pour couvrir sa jupe. Sans cette
+    // garde, les ancêtres grossiers (z2, z3) — dont la BOÎTE contient l'emprise
+    // du crop, donc dont `tuileDansCrop` est vrai — perdraient leur jupe.
+    const retrait = rPlancher > 0 && Number.isFinite(this._retraitJupeCrop) ? this._retraitJupeCrop : 0
     const attr = mesh.geometry.attributes.position
     const a = attr.array
     const o = mesh.position
+    // ⚠️ **L'ANNEAU EST LU EN ENTIER AVANT D'ÊTRE COUPÉ**, parce que la coupe
+    // est un VOISINAGE (`jupesEffacees` dilate d'un cran) et qu'un voisinage ne
+    // se décide pas sommet par sommet en avançant.
+    let efface = null
+    if (retrait > 0) {
+      const locaux = new Array(d.bord.length)
+      for (let bi = 0; bi < d.bord.length; bi++) {
+        const src = d.bord[bi]
+        locaux[bi] = localDeAbsolu(a[src * 3] + o.x, a[src * 3 + 1] + o.y, a[src * 3 + 2] + o.z, this._crop)
+      }
+      efface = jupesEffacees(locaux, retrait)
+    }
     for (let bi = 0; bi < d.bord.length; bi++) {
       const src = d.bord[bi]
+      const dst = d.nV + bi
+      if (efface && efface[bi]) {
+        a[dst * 3] = a[src * 3]
+        a[dst * 3 + 1] = a[src * 3 + 1]
+        a[dst * 3 + 2] = a[src * 3 + 2]
+        continue
+      }
       const X = a[src * 3] + o.x
       const Y = a[src * 3 + 1] + o.y
       const Z = a[src * 3 + 2] + o.z
       const rayon = Math.hypot(X, Y, Z)
       const inv = 1 - rabattementBorne(d.rabattement, rayon, rPlancher) / rayon
-      const dst = d.nV + bi
       a[dst * 3] = X * inv - o.x
       a[dst * 3 + 1] = Y * inv - o.y
       a[dst * 3 + 2] = Z * inv - o.z

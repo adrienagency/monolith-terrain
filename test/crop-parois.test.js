@@ -65,6 +65,9 @@ import {
   PART_MUR_MAX,
   PAS_CONTOUR,
   rabattementBorne,
+  localDeAbsolu,
+  jupeHorsDuMur,
+  jupesEffacees,
 } from '../src/monde/parois-crop.js'
 import { repereCrop, coinNormalise, latLonDeLocal, localCrop } from '../src/monde/crop-sphere.js'
 // ⚠️ ON APPELLE LES MÉTHODES DU GLOBE PAR `.call` SUR UN OBJET MINIMAL, patron
@@ -1019,7 +1022,9 @@ test('P7 · `globe.js` APPELLE la borne, et il ne la réécrit pas', () => {
   // un pavé de prose faisait compter une occurrence de trop.
   const corps = g.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
   assert.match(corps, /rabattementBorne\(d\.rabattement, rayon, rPlancher\)/)
-  assert.match(corps, /import \{ construireSolideCrop, normalesParois, rabattementBorne \}/)
+  // ⚠️ **LA LISTE D IMPORT A GRANDI AVEC LA TÂCHE P14** (`localDeAbsolu`,
+  // `jupesEffacees`) : on exige que la borne y soit, pas que la liste soit figée.
+  assert.match(corps, /import \{ construireSolideCrop, normalesParois, rabattementBorne,[^}]*\} from '\.\/monde\/parois-crop\.js'/)
   // une seconde écriture de la loi — un `Math.min` sur le rabattement ailleurs —
   // est exactement ce que ce chantier a payé quatre fois sur la mer.
   const occurrences = (corps.match(/rabattementBorne/g) || []).length
@@ -1525,4 +1530,309 @@ test('⑬i `construireParoisCrop` TRANSMET les trois réglages — l instrument 
   assert.equal(rond.chanfrein, defaut.chanfrein, 'doubler le congé a bougé le chanfrein')
   const fin = bati({ arrondiSeg: 6 }).solide
   assert.equal(fin.rangs - fin.rangArc, 7, '`arrondiSeg` n atteint pas le module')
+})
+
+// ══════════ P14 · LE RETRAIT LATÉRAL DE LA JUPE ═════════════════════════════
+//
+// ⛔ **CE QUE P13 A LAISSÉ OUVERT, ET LE NOTEUR L'A CHIFFRÉ.** P13 a rentré le
+// mur de `FRACTION_CHANFREIN` **à toute hauteur sous le chanfrein** ; la jupe
+// d'une tuile, elle, pend à l'aplomb du BORD de la tuile. Le mur est donc passé
+// DERRIÈRE elle, et les jupes de bord se lisent depuis comme des traînées pâles
+// verticales : **23 traînées / 68 colonnes / résidu 0,961** contre **4 / 10 /
+// 0,336** au socle dans la MÊME page (`notation-05.md` §7.2).
+//
+// ⚠️ **`_plancherJupeCrop` A CORRIGÉ LA LONGUEUR, PAS LE DÉCALAGE LATÉRAL** —
+// P13 l'écrit elle-même. Ce bloc-ci vérifie la borne latérale, et il la vérifie
+// **par le COMPORTEMENT** : on bâtit un vrai maillage de tuile, on appelle la
+// vraie `_retaillerJupe`, et on regarde le tampon de positions.
+
+const P14_ZOOM = 12
+const P14_X = 2679
+const P14_Y = 2293
+
+// le centre du crop = le CENTRE de la tuile (P14_X, P14_Y) : l'emprise 3×3 tombe
+// alors exactement sur les bords de tuiles, ce qui est le cas de l'application
+// (`assietteCrop` lit `terrain.fenetreBornee.emprise`, la fenêtre du socle).
+const P14_CENTRE = tileToLatLon(P14_X + 0.5, P14_Y + 0.5, P14_ZOOM)
+const P14_REPERE = repereCrop({ centre: P14_CENTRE, zoom: P14_ZOOM })
+
+function surSphereP14(lat, lon, rayon) {
+  const la = (lat * Math.PI) / 180
+  const lo = (lon * Math.PI) / 180
+  return [rayon * Math.cos(la) * Math.sin(lo), rayon * Math.sin(la), rayon * Math.cos(la) * Math.cos(lo)]
+}
+
+function tuileP14(z, x, y) {
+  const nw = tileToLatLon(x, y, z)
+  const se = tileToLatLon(x + 1, y + 1, z)
+  const vec = (lat, lon) => {
+    const p = surSphereP14(lat, lon, R_GLOBE)
+    return new THREE.Vector3(p[0], p[1], p[2])
+  }
+  return {
+    key: `${z}/${x}/${y}`, z, x, y, state: 'ready',
+    heights: new Float32Array(256 * 256), size: 256,
+    texture: null, mesh: null, lastUsed: 0,
+    center: vec((nw.lat + se.lat) / 2, (nw.lon + se.lon) / 2),
+    chord: vec(nw.lat, nw.lon).distanceTo(vec(se.lat, se.lon)),
+  }
+}
+
+// un globe de papier qui porte les VRAIES méthodes de jupe et un bloc posé
+function globeP14({ retrait = 0, profondeur = 0.06 } = {}) {
+  return {
+    exaggeration: 2,
+    group: new THREE.Group(),
+    tiles: new Map(),
+    _materialFor: () => new THREE.MeshBasicMaterial(),
+    _fondCrop: null,
+    _parois: {}, // truthy : le bloc est posé
+    _crop: P14_REPERE,
+    _baseYCrop: -profondeur,
+    _plancherJupeCrop: -profondeur,
+    _retraitJupeCrop: retrait,
+    _rayonPlancherCrop(t) { return Globe.prototype._rayonPlancherCrop.call(this, t) },
+    _retaillerJupe(t) { return Globe.prototype._retaillerJupe.call(this, t) },
+  }
+}
+
+function batirP14(g, t) {
+  Globe.prototype._buildMesh.call(g, t)
+  return t.mesh
+}
+
+// le sommet de jupe est-il EFFACÉ ? — il s'est replié sur son sommet de bord
+function jupeEffacee(mesh, d, bi) {
+  const a = mesh.geometry.attributes.position.array
+  const src = d.bord[bi]
+  const dst = d.nV + bi
+  return a[dst * 3] === a[src * 3] && a[dst * 3 + 1] === a[src * 3 + 1] && a[dst * 3 + 2] === a[src * 3 + 2]
+}
+
+// les coordonnées locales du crop d'un sommet de BORD
+function localBord(mesh, d, bi) {
+  const a = mesh.geometry.attributes.position.array
+  const o = mesh.position
+  const src = d.bord[bi]
+  return localDeAbsolu(a[src * 3] + o.x, a[src * 3 + 1] + o.y, a[src * 3 + 2] + o.z, P14_REPERE)
+}
+
+const qLocal = (l) => Math.max(Math.abs(l.u), Math.abs(l.v))
+
+test('P14 · `jupeHorsDuMur` coupe DANS LA BANDE de la frontière, et nulle part ailleurs', () => {
+  const r = 2 * FRACTION_CHANFREIN // le retrait du mur, en fraction du DEMI-côté
+  // sur la frontière : coupé
+  assert.equal(jupeHorsDuMur(1, 0, r), true)
+  assert.equal(jupeHorsDuMur(0, -1, r), true)
+  assert.equal(jupeHorsDuMur(1 - r / 2, 0.2, r), true)
+  // ⛔ ET LE DEHORS N EST PAS COUPÉ — c est la garde des ancêtres grossiers du
+  // quadtree, dont la BOÎTE contient l emprise du crop (`tuileDansCrop` vrai) :
+  // relevé dans la page, la tuile z2 a des sommets de bord à |u| = 519.
+  assert.equal(jupeHorsDuMur(519, 0, r), false)
+  assert.equal(jupeHorsDuMur(0, -261.7, r), false)
+  assert.equal(jupeHorsDuMur(1 + 2 * r, 0, r), false)
+  // au milieu du bloc : rien à couper
+  assert.equal(jupeHorsDuMur(0, 0, r), false)
+  assert.equal(jupeHorsDuMur(0.5, -0.5, r), false)
+  // ⚠️ LE NEUTRE EST EXACT : `retrait = 0` ne coupe RIEN, nulle part
+  for (const rien of [0, -1, NaN, null, undefined]) {
+    assert.equal(jupeHorsDuMur(1, 1, rien), false, `retrait ${rien}`)
+  }
+  // et un sommet illisible n invente pas une coupe
+  assert.equal(jupeHorsDuMur(NaN, 0, r), false)
+})
+
+test('P14 · `jupesEffacees` DILATE d un cran, et l anneau est CYCLIQUE', () => {
+  const r = 0.01
+  // un anneau de 8 sommets dont un seul est sur la frontière
+  const anneau = [
+    { u: 0, v: 0 }, { u: 0.2, v: 0 }, { u: 1, v: 0 }, { u: 0.2, v: 0.2 },
+    { u: 0, v: 0.2 }, { u: 0, v: 0 }, { u: 0, v: 0 }, { u: 0, v: 0 },
+  ]
+  assert.deepEqual([...jupesEffacees(anneau, r)], [0, 1, 1, 1, 0, 0, 0, 0],
+    'le quad de transition joint un sommet effacé à son voisin : il faut les deux')
+  // ⚠️ CYCLIQUE : le dernier quad joint le dernier sommet au premier
+  const bout = [{ u: 1, v: 0 }, { u: 0, v: 0 }, { u: 0, v: 0 }, { u: 0, v: 0 }]
+  assert.deepEqual([...jupesEffacees(bout, r)], [1, 1, 0, 1],
+    'la dilatation doit repasser par le début de l anneau')
+  // le neutre, et l anneau qui ne touche pas la frontière
+  assert.deepEqual([...jupesEffacees(anneau, 0)], [0, 0, 0, 0, 0, 0, 0, 0])
+  assert.deepEqual([...jupesEffacees([{ u: 0, v: 0 }, { u: 0.5, v: 0.5 }], r)], [0, 0])
+  assert.equal(jupesEffacees(null, r).length, 0)
+})
+
+test('P14 · `localDeAbsolu` est l INVERSE de la pose sphérique — au crop près', () => {
+  // ⚠️ On ne lit pas une formule : on repart d un point de la frontière connu,
+  // on le pose sur la sphère, et on exige de le retrouver.
+  for (const [u, v] of [[1, 0], [0, 1], [-1, 0], [0.5, -0.25], [0, 0]]) {
+    const { lat, lon } = latLonDeLocal(u, v, P14_REPERE)
+    const P = surSphereP14(lat, lon, R_GLOBE * 1.0004) // avec du relief : sans effet
+    const l = localDeAbsolu(P[0], P[1], P[2], P14_REPERE)
+    assert.ok(Math.abs(l.u - u) < 1e-9 && Math.abs(l.v - v) < 1e-9,
+      `(${u}, ${v}) rendu (${l.u}, ${l.v})`)
+  }
+  assert.equal(localDeAbsolu(0, 0, 0, P14_REPERE), null)
+  assert.equal(localDeAbsolu(1, 1, 1, null), null)
+})
+
+test('P14 · la jupe s efface SUR la frontière et RESTE ENTIÈRE en dedans', () => {
+  // la tuile de BORD EST du crop : son côté est tombe sur `u = +1`
+  const r = 2 * FRACTION_CHANFREIN
+  const g = globeP14({ retrait: r })
+  const t = tuileP14(P14_ZOOM, P14_X + 1, P14_Y)
+  const mesh = batirP14(g, t)
+  const d = mesh.geometry.userData.jupe
+  assert.ok(g._rayonPlancherCrop(t) > 0, 'la tuile doit être DANS le crop, sinon le test ne mesure rien')
+
+  let surFrontiere = 0
+  let dedans = 0
+  for (let bi = 0; bi < d.bord.length; bi++) {
+    const q = qLocal(localBord(mesh, d, bi))
+    if (q > 1 - r) {
+      surFrontiere++
+      assert.ok(jupeEffacee(mesh, d, bi), `sommet ${bi} sur la frontière (q=${q}) : jupe non effacée`)
+    } else if (q < 1 - 3 / 72) {
+      // un sommet à plus de DEUX pas de maillage de la frontière garde sa jupe
+      dedans++
+      assert.ok(!jupeEffacee(mesh, d, bi), `sommet ${bi} en plein dedans (q=${q}) : jupe effacée à tort`)
+    }
+  }
+  assert.ok(surFrontiere >= 24, `la tuile de bord doit poser un côté sur la frontière (${surFrontiere})`)
+  assert.ok(dedans >= 24, `il doit rester des sommets francs du dedans (${dedans})`)
+})
+
+test('P14 · le VOISIN d un sommet de frontière perd sa jupe AUSSI — le quad de transition', () => {
+  const r = 2 * FRACTION_CHANFREIN
+  const g = globeP14({ retrait: r })
+  const t = tuileP14(P14_ZOOM, P14_X + 1, P14_Y)
+  const mesh = batirP14(g, t)
+  const d = mesh.geometry.userData.jupe
+  const n = d.bord.length
+  let voisins = 0
+  for (let bi = 0; bi < n; bi++) {
+    if (qLocal(localBord(mesh, d, bi)) > 1 - r) continue
+    const colle = qLocal(localBord(mesh, d, (bi - 1 + n) % n)) > 1 - r ||
+      qLocal(localBord(mesh, d, (bi + 1) % n)) > 1 - r
+    if (!colle) continue
+    voisins++
+    assert.ok(jupeEffacee(mesh, d, bi),
+      `sommet ${bi} : voisin d un sommet de frontière, son quad enjambe la face interne du mur`)
+  }
+  assert.ok(voisins >= 2, `le balayage doit trouver des voisins de frontière (${voisins})`)
+})
+
+test('P14 · UNE TUILE DU MILIEU ne perd AUCUNE jupe', () => {
+  const r = 2 * FRACTION_CHANFREIN
+  const g = globeP14({ retrait: r })
+  const t = tuileP14(P14_ZOOM, P14_X, P14_Y)
+  const mesh = batirP14(g, t)
+  const d = mesh.geometry.userData.jupe
+  assert.ok(g._rayonPlancherCrop(t) > 0)
+  for (let bi = 0; bi < d.bord.length; bi++) {
+    assert.ok(!jupeEffacee(mesh, d, bi), `sommet ${bi} : la tuile du milieu garde son service anti-fente`)
+  }
+})
+
+test('P14 · ⛔ UN ANCÊTRE GROSSIER GARDE TOUTE SA JUPE, et `tuileDansCrop` le dit DEDANS', () => {
+  // ⚠️ C est la faute que la borne latérale pouvait introduire, et elle est
+  // GRANDE : `tuileDansCrop` est un test d INTERSECTION DE BOÎTES, donc la tuile
+  // z2 qui CONTIENT l emprise du crop le passe. Sans la borne du dehors, tout le
+  // quadtree grossier perdrait sa jupe pour un mur à cinq cents demi-côtés de là.
+  const r = 2 * FRACTION_CHANFREIN
+  const g = globeP14({ retrait: r })
+  const t = tuileP14(2, Math.floor((P14_X + 0.5) / 2 ** 10), Math.floor((P14_Y + 0.5) / 2 ** 10))
+  const mesh = batirP14(g, t)
+  const d = mesh.geometry.userData.jupe
+  assert.ok(g._rayonPlancherCrop(t) > 0,
+    'si l ancêtre ne passait PAS `tuileDansCrop`, ce test ne mesurerait rien')
+  let loin = 0
+  for (let bi = 0; bi < d.bord.length; bi++) {
+    if (qLocal(localBord(mesh, d, bi)) > 10) loin++
+    assert.ok(!jupeEffacee(mesh, d, bi), `sommet ${bi} d un ancêtre z2 : jupe effacée à tort`)
+  }
+  assert.ok(loin > 50, `les sommets de l ancêtre doivent être TRÈS loin du crop (${loin})`)
+})
+
+test('P14 · le retrait NUL reproduit le dépôt AU BIT PRÈS, et l aller-retour aussi', () => {
+  // ⚡ L instrument de banc de la règle D13 : c est lui qui permet l A/B à témoin
+  // nul dans une seule page, et c est par lui que le balayage a été fait.
+  const g0 = globeP14({ retrait: 0 })
+  const t0 = tuileP14(P14_ZOOM, P14_X + 1, P14_Y)
+  const a = Float32Array.from(batirP14(g0, t0).geometry.attributes.position.array)
+
+  const g1 = globeP14({ retrait: 2 * FRACTION_CHANFREIN })
+  const t1 = tuileP14(P14_ZOOM, P14_X + 1, P14_Y)
+  const mesh1 = batirP14(g1, t1)
+  const b = mesh1.geometry.attributes.position.array
+  let bouges = 0
+  for (let k = 0; k < a.length; k++) if (!Object.is(a[k], b[k])) bouges++
+  assert.ok(bouges > 60, `le retrait doit DÉPLACER des sommets, il en bouge ${bouges}`)
+
+  // ⚠️ **DANS LES DEUX SENS** : on éteint la borne sur le MÊME maillage et on
+  // exige le tampon de départ, au bit près. C est ce qui prouve que la borne
+  // est bien branchée sur `_retraitJupeCrop` et sur rien d autre.
+  g1._retraitJupeCrop = 0
+  g1._retaillerJupe(t1)
+  const c = mesh1.geometry.attributes.position.array
+  for (let k = 0; k < a.length; k++) {
+    assert.ok(Object.is(a[k], c[k]), `sommet ${k} : l aller-retour ne rend pas le dépôt`)
+  }
+
+  // ⚠️ ET L IDEMPOTENCE SURVIT À L EFFACEMENT : deux passages, même tampon.
+  g1._retraitJupeCrop = 2 * FRACTION_CHANFREIN
+  g1._retaillerJupe(t1)
+  const d1 = Float32Array.from(mesh1.geometry.attributes.position.array)
+  g1._retaillerJupe(t1)
+  const d2 = mesh1.geometry.attributes.position.array
+  for (let k = 0; k < d1.length; k++) {
+    assert.ok(Object.is(d1[k], d2[k]), `sommet ${k} : la retaille n est plus idempotente`)
+  }
+})
+
+test('P14 · `construireParoisCrop` POSE le retrait, et dans la MONNAIE du demi-côté', () => {
+  // ⚠️ Une concordance au défaut n est pas un branchement : on BOUGE le
+  // chanfrein, dans les deux sens, et on exige que le retrait suive.
+  const tp = { z: 12, x: 2094, y: 2270, key: '12/2094/2270', size: 32 }
+  tp.heights = new Float32Array(32 * 32)
+  for (let j = 0; j < 32; j++) {
+    for (let i = 0; i < 32; i++) tp.heights[j * 32 + i] = 400 + 900 * Math.sin(i * 0.7) * Math.cos(j * 0.5)
+  }
+  const c = tileToLatLon(tp.x + 0.5, tp.y + 0.5, tp.z)
+  const rp = repereCrop({ centre: c, zoom: tp.z, tuilesParBloc: 1 })
+  const bati = (arg) => {
+    const faux = {
+      _crop: rp,
+      _fondCrop: null,
+      _parois: null,
+      _baseYCrop: null,
+      exaggeration: 2,
+      tiles: new Map([[tp.key, tp]]),
+      tuilesAvecHauteurs: () => [tp],
+      uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+      group: { add() {}, remove() {} },
+      hauteurDessinee: Globe.prototype.hauteurDessinee,
+      _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+      _retaillerJupes: () => 0,
+      retirerParoisCrop() { this._parois = null },
+      _materiauParois: () => null,
+    }
+    const r = Globe.prototype.construireParoisCrop.call(faux, { couvertureMin: 0, ...arg })
+    return { solide: r.solide, retrait: faux._retraitJupeCrop }
+  }
+  const d = bati({})
+  assert.ok(Math.abs(d.retrait - d.solide.chanfrein / (d.solide.largeur / 2)) < 1e-15,
+    'le retrait doit être le chanfrein, EN FRACTION DU DEMI-CÔTÉ')
+  assert.ok(Math.abs(d.retrait - 2 * FRACTION_CHANFREIN) < 1e-9,
+    `le retrait livré doit valoir 2 × ${FRACTION_CHANFREIN}, il vaut ${d.retrait}`)
+  // ⚡ ON BOUGE, DANS LES DEUX SENS
+  const gros = bati({ fractionChanfrein: FRACTION_CHANFREIN * 2 })
+  assert.ok(Math.abs(gros.retrait / d.retrait - 2) < 1e-9, `doublé : ${gros.retrait / d.retrait}`)
+  const vif = bati({ fractionChanfrein: 0 })
+  assert.equal(vif.retrait, 0, 'sans chanfrein, le mur ne rentre pas : rien à couper')
+  // et le retrait DISPARAÎT avec les parois
+  const faux2 = { _parois: {}, _retraitJupeCrop: 0.5, _retaillerJupes: () => 0, group: new THREE.Group() }
+  faux2._parois = { geometry: { dispose() {} }, material: { dispose() {} } }
+  faux2.group.remove = () => {}
+  Globe.prototype.retirerParoisCrop.call(faux2)
+  assert.equal(faux2._retraitJupeCrop, null, 'sans mur, plus rien n autorise à couper une jupe')
 })

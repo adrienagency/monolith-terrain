@@ -258,7 +258,7 @@
 // soit jamais une surprise.
 
 import { arcCoin } from '../fenetre-clip.js' // pur : aucune importation
-import { latLonDeLocal } from './crop-sphere.js'
+import { latLonDeLocal, localCrop } from './crop-sphere.js'
 
 /** Le pas de l'anneau, ramené au demi-côté 1. `plinth.js` : TERRAIN_SIZE / 256. */
 export const PAS_CONTOUR = 2 / 256
@@ -376,6 +376,142 @@ export function occlusionContact(y, baseY, bande, force = FORCE_AO) {
 export function rabattementBorne(rabattement, rayonSommet, rayonPlancher) {
   if (!(rayonPlancher > 0) || !(rayonSommet > 0)) return rabattement
   return Math.min(rabattement, Math.max(0, rayonSommet - rayonPlancher))
+}
+
+/**
+ * (x, y, z) ABSOLUS → coordonnées LOCALES du crop (±1 sur son emprise).
+ * Tâche P14. **L'inverse exact de `surSphere` composé avec `localCrop`** — c'est
+ * la seule façon de savoir où tombe un sommet de JUPE, qui n'est indexé nulle
+ * part sur l'emprise du crop : il est bâti dans le repère RTC de SA tuile.
+ *
+ * ⚠️ **ON PASSE PAR LA SPHÈRE NUE, ET C'EST VOULU.** La latitude est lue sur le
+ * rayon du point (relief compris) : un sommet à 3 000 m d'altitude a la même
+ * (lat, lon) que son pied, et c'est bien cette (lat, lon)-là que la frontière du
+ * crop compare — `uCropCentre` / `uCropDemi` sont en mercator, sans altitude.
+ *
+ * @returns {{u:number,v:number}|null} `null` si le point est au centre du globe
+ */
+export function localDeAbsolu(x, y, z, repere) {
+  const r = Math.hypot(x, y, z)
+  if (!(r > 0) || !repere) return null
+  const lat = Math.asin(Math.max(-1, Math.min(1, y / r))) / D2R
+  const lon = Math.atan2(x, z) / D2R
+  return localCrop(lat, lon, repere)
+}
+
+/**
+ * Le sommet de jupe tombe-t-il **HORS DU MUR** ? — Tâche P14.
+ *
+ * ⛔ **LE DÉFAUT, MESURÉ AVANT D'ÊTRE RÉPARÉ, ET IL EST LATÉRAL.** La Tâche P13
+ * a rentré le mur de `FRACTION_CHANFREIN` **à toute hauteur sous le chanfrein**
+ * (rang ① et au-delà, `d = ch`). La jupe d'une tuile, elle, pend **à l'aplomb du
+ * bord de la tuile**, donc au rayon de l'anneau, `d = 0`. **Le mur est passé
+ * DERRIÈRE la jupe**, et les jupes des tuiles de bord se lisent depuis comme des
+ * traînées pâles verticales sur l'aplat du mur : **23 traînées sur 68 colonnes
+ * contre 4 sur 10 au socle et 7 sur 10 avant P13**, résidu de colonne 0,961
+ * contre 0,336 au socle (relevé du noteur, `notation-05.md` §7.2, reproduit au
+ * bit près par cette tâche).
+ *
+ * ⚡ **ET LA CAUSE EST DÉSIGNÉE PAR EXTINCTION, TUILE PAR TUILE** — c'est ce qui
+ * distingue cette borne-ci de celle que P13 et le noteur proposaient. Les deux
+ * écrivaient « supprimer la jupe des tuiles que la frontière du crop TRAVERSE » :
+ * ⛔ **cette route est VIDE, et elle est mesurée vide.** L'emprise du crop est
+ * celle du socle (`assietteCrop` → `terrain.fenetreBornee.emprise`), donc
+ * **alignée sur la grille de tuiles par construction** : au relevé de La Réunion
+ * z12, la boîte du crop tombe exactement sur les tuiles z13 5356…5361 × 4584…4589,
+ * **aucune tuile n'est traversée**, et éteindre les jupes des 14 tuiles que mon
+ * test de traversée désigne (des ancêtres grossiers, z2/z3/z12) laisse
+ * **23 traînées sur 23** (`.banc/P14/D1-jupes-qui-P14.json`). Ce qui raye le mur,
+ * ce sont les jupes des tuiles **entièrement dedans dont le BORD est la
+ * frontière** : les éteindre rend 10 traînées, exactement le compte de
+ * l'extinction totale.
+ *
+ * ➡️ **ON COUPE DONC PAR SOMMET, PAS PAR TUILE.** Un sommet de bord à moins de
+ * `retrait` de la frontière est un sommet que le mur ne couvre plus : sa jupe
+ * n'a plus de service anti-fente à rendre (le mur, lui, part de la surface
+ * DESSINÉE — `hauteurDessinee`, Tâche P11 — donc il n'y a aucun jour à combler
+ * sous l'arête), et elle ne peut plus que dépasser. Tous les autres sommets
+ * gardent leur jupe entière, **donc son service à l'intérieur du bloc**, exactement
+ * comme `rabattementBorne` la garde en hauteur.
+ *
+ * ⛔ **C'EST UNE BANDE, PAS UN DEMI-PLAN, ET LA BORNE DU DEHORS N'EST PAS UN
+ * ORNEMENT.** `tuileDansCrop` est un test d'INTERSECTION DE BOÎTES : les
+ * ancêtres grossiers du quadtree le passent tous, puisque leur boîte CONTIENT
+ * l'emprise du crop. Relevé dans ma page (`.banc/P14/D3-uv-bord-P14.json`) : la
+ * tuile z2 (2, 2) a des sommets de bord à **|u| = 519**, la z3 à **261**, la z8
+ * à **7**. Un test « `|u| ≥ 1 − retrait` » seul leur effacerait **toute** leur
+ * jupe, sur tout le globe, pour un mur qui est à cinq cents demi-côtés de là.
+ * ➡️ **On coupe donc dans la bande `1 ± retrait`, et nulle part ailleurs.**
+ *
+ * ⚠️ **`retrait = 0` NE COUPE RIEN, AU BIT PRÈS**, et c'est l'instrument de banc
+ * de la règle D13 : il permet l'A/B à témoin nul dans une seule page.
+ *
+ * @param {number} u coordonnée locale du crop, ±1 sur l'emprise
+ * @param {number} v idem
+ * @param {number} retrait le retrait du mur, **en fraction du demi-côté** —
+ *   la monnaie de `_retraitBaseCrop` et de `mer-sphere.js`
+ * @returns {boolean} vrai si la jupe de ce sommet doit être supprimée
+ */
+export function jupeHorsDuMur(u, v, retrait) {
+  if (!(retrait > 0) || !Number.isFinite(u) || !Number.isFinite(v)) return false
+  const q = Math.max(Math.abs(u), Math.abs(v))
+  return q >= 1 - retrait && q <= 1 + retrait
+}
+
+/**
+ * Les sommets de jupe à EFFACER le long de l'anneau de bord — Tâche P14.
+ *
+ * ⛔ **LA DILATATION D'UN CRAN N'EST PAS UNE PRÉCAUTION, ELLE EST LA MOITIÉ DU
+ * GAIN, ET LE BALAYAGE LA DÉSIGNE.** Effacer les seuls sommets de la frontière
+ * laisse en place le **QUAD DE TRANSITION** : celui qui joint un sommet effacé
+ * (jupe de longueur nulle, sur la frontière) à son voisin resté entier (jupe
+ * pleine, un pas de maillage en dedans). Ce quad est un triangle qui descend en
+ * biais **à cheval sur la face interne du mur**, et il se lit exactement comme
+ * la traînée qu'on retire.
+ *
+ * ⚡ **MESURÉ, DANS UNE SEULE PAGE, PAR BALAYAGE DU RETRAIT**
+ * (`.banc/P14/D2-balayage-retrait-P14.json`, dix valeurs, retour 0 canal) : le
+ * compte de traînées est un ESCALIER à deux marches, et les marches tombent
+ * exactement sur les anneaux de sommets du maillage de tuile
+ * (`1`, puis `1 − 1/72` au relevé de La Réunion, soit un pas de
+ * `segmentsTuile = 24` sur un crop de 3 tuiles de demi-côté) :
+ *
+ * | retrait | traînées | colonnes | résidu |
+ * |---|---|---|---|
+ * | `0` *(le dépôt)* | **23** | 68 | 0,961 |
+ * | `0,25·ch` … `2·ch` — la frontière seule | **17** | 23 | 0,641 |
+ * | `3·ch` … `8·ch` — la frontière **et son voisin** | ⚡ **9** | **13** | **0,604** |
+ *
+ * ➡️ **La seconde marche vaut autant que la première**, et elle passe SOUS le
+ * plancher de l'extinction totale des jupes (10 / 14 / 0,665). ⚡ **C'est donc
+ * le voisinage d'anneau qu'il faut couper, pas une distance** : dilater d'un
+ * cran atteint la seconde marche **sans dépendre de la finesse du maillage**,
+ * là où un `3 × ch` en dur ne la tiendrait qu'à `segmentsTuile = 24`.
+ *
+ * ⚠️ **ET LA DILATATION EST CYCLIQUE** : l'anneau de bord de `_buildMesh` se
+ * referme (nord, est, sud, ouest, puis retour au premier), et le dernier quad
+ * joint le dernier sommet au premier.
+ *
+ * @param {Array<{u:number,v:number}|null>} locaux les sommets de BORD en
+ *   coordonnées locales du crop, **dans l'ordre de l'anneau**
+ * @param {number} retrait en fraction du demi-côté
+ * @returns {Uint8Array} 1 = jupe à effacer
+ */
+export function jupesEffacees(locaux, retrait) {
+  const n = locaux ? locaux.length : 0
+  const brut = new Uint8Array(n)
+  if (!(retrait > 0) || n === 0) return brut
+  let aucun = true
+  for (let i = 0; i < n; i++) {
+    const l = locaux[i]
+    if (l && jupeHorsDuMur(l.u, l.v, retrait)) { brut[i] = 1; aucun = false }
+  }
+  if (aucun) return brut
+  const dilate = new Uint8Array(n)
+  for (let i = 0; i < n; i++) {
+    if (brut[i] || brut[(i + 1) % n] || brut[(i - 1 + n) % n]) dilate[i] = 1
+  }
+  return dilate
 }
 
 /**
