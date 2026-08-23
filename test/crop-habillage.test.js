@@ -629,6 +629,7 @@ function globeStub(crop = REPERE) {
       uAerialOpacity: val(HABILLAGE_MONDE.aerialOpacite),
       uAerialOffset: val(vec2(0, 0)),
       uAerialScale: val(vec2(1, 1)),
+      uAerialCoastFade: val(HABILLAGE_MONDE.aerialCoastFade),
       uContourInterval: val(HABILLAGE_MONDE.contourIntervalM),
       uContourOpacity: val(HABILLAGE_MONDE.contourOpacite),
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
@@ -849,7 +850,17 @@ test('⑨j LA PHOTO AÉRIENNE EST POSÉE, PAS SEULEMENT ÉCRITE — Tâche R9, t
   offset.x = 99
   assert.equal(g.uniforms.uAerialOffset.value.x, 0.125, 'l’uniforme partage l’objet de l’appelant')
 
-  // ④ ET UNE POSE SANS AFFINE GARDE LA PRÉCÉDENTE — c'est écrit dans le code de
+  // ④ LE FONDU CÔTIER ARRIVE, ET SON DÉFAUT EST L'ÉTEINT DU SOCLE — tour de
+  // correction. Sans cette pose, la tirette « Fondu à la côte » bougeait le bloc
+  // plat et laissait le crop couvrir la mer en plaques (72,7 % des pixels).
+  poserHab(g, { aerial: TEX, aerialCoastFade: 0.28 })
+  assert.equal(g.uniforms.uAerialCoastFade.value, 0.28, 'la tirette du fondu côtier n’atteint pas le globe')
+  poserHab(g, { aerial: TEX })
+  assert.equal(g.uniforms.uAerialCoastFade.value, HABILLAGE_MONDE.aerialCoastFade,
+    'le défaut du fondu n’est plus celui d’HABILLAGE_MONDE')
+  assert.equal(HABILLAGE_MONDE.aerialCoastFade, 0, 'un poseur muet ne doit pas inventer un fondu')
+
+  // ⑤ ET UNE POSE SANS AFFINE GARDE LA PRÉCÉDENTE — c'est écrit dans le code de
   // R9 (« l'affine n'a pas de neutre utile »), donc ça se vérifie.
   poserHab(g, { aerial: TEX })
   assert.equal(g.uniforms.uAerialScale.value.x, 2.5, 'une pose sans affine remet un neutre faux')
@@ -875,6 +886,7 @@ test('⑨h L’ALLER-RETOUR EST BIT À BIT — c’est le défaut que ce tour a 
     // — c'est ce que ⑨h existe pour attraper, et il le manquait sur cinq postes.
     aerial: TEX, aerialOpacite: 0.42,
     aerialOffset: { x: 0.7, y: 0.8 }, aerialScale: { x: 3, y: 4 },
+    aerialCoastFade: 0.13,
   })
   // la pose change bien QUELQUE CHOSE — sinon l'aller-retour serait vrai par
   // construction, et c'est le premier des sept pièges du plan

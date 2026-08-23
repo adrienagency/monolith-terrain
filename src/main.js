@@ -5156,6 +5156,13 @@ function contexteCrop() {
       aerialOpacite: terrain.mapUniforms.uAerialOpacity.value,
       aerialOffset: terrain.mapUniforms.uAerialOffset.value,
       aerialScale: terrain.mapUniforms.uAerialScale.value,
+      // ⚠️ **LE FONDU CÔTIER — TOUR DE CORRECTION DE R9.** La tirette « Fondu à
+      // la côte » du panneau de carte (`ui/map-panel.js`) appelle
+      // `terrain.setAerialCoastFade` : sans cette ligne, elle bougeait le socle et
+      // laissait le crop couvrir la mer en plaques. Relevé par la relecture sur le
+      // socle, La Réunion z9, fondu 0,1 contre 0 : **72,7 % des pixels, écart
+      // moyen 93,6/255**.
+      aerialCoastFade: terrain.mapUniforms.uAerialCoastFade.value,
       amplitudeM: amplitudeM > 0 ? amplitudeM : null,
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,

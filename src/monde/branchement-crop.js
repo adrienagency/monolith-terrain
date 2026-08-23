@@ -176,6 +176,12 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   // qu'avec `aerial`, dont l'identité, elle, change à chaque composition.
   'aerial',
   'aerialOpacite',
+  // ⚠️ **ET LE FONDU CÔTIER AUSSI — TOUR DE CORRECTION DE R9.** C'est une
+  // TIRETTE (« Fondu à la côte », `ui/map-panel.js`), donc l'utilisateur la bouge
+  // à un instant que rien ne prévoit — exactement l'argument de `aerialOpacite`
+  // juste au-dessus. Et c'est un SCALAIRE : `Object.is` le voit changer, et il ne
+  // reposera pas l'habillage soixante fois par seconde.
+  'aerialCoastFade',
   'amplitudeM',
   'contourIntervalM',
   'contourOpacity',

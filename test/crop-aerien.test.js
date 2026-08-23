@@ -96,7 +96,7 @@ const affine = (uv, offset, scale) => [offset[0] + uv[0] * scale[0], offset[1] +
 
 // ══════════ ① LES UNIFORMES EXISTENT, ET AU REPOS ILS NE FONT RIEN ═════════
 
-test('① les cinq uniformes sont déclarés dans le fragment ET dans this.uniforms', () => {
+test('① les SIX uniformes sont déclarés dans le fragment ET dans this.uniforms', () => {
   // ⚠️ **DEUX LISTES, ET ELLES DOIVENT S'ACCORDER.** Un uniforme déclaré dans le
   // GLSL mais absent de `this.uniforms` n'est jamais posé (three ne le lie même
   // pas) ; l'inverse est un objet mort. Aucune erreur ne se lève dans les deux
@@ -107,6 +107,9 @@ test('① les cinq uniformes sont déclarés dans le fragment ET dans this.unifo
     ['uniform float uAerialOpacity;', 'uAerialOpacity'],
     ['uniform vec2 uAerialOffset;', 'uAerialOffset'],
     ['uniform vec2 uAerialScale;', 'uAerialScale'],
+    // ⚠️ **LE SIXIÈME EST LE FONDU CÔTIER — tour de correction.** R9 l'avait
+    // déclaré non portable ; la relecture a chiffré l'écart (72,7 % des pixels).
+    ['uniform float uAerialCoastFade;', 'uAerialCoastFade'],
   ]) {
     assert.ok(FRAG_NU.includes(decl), `le fragment ne déclare pas ${nom}`)
     assert.match(GLOBE_NU, new RegExp(`\\n\\s+${nom}: \\{ value:`), `this.uniforms ne porte pas ${nom}`)
@@ -188,7 +191,11 @@ test('④ la photo ne peint QUE la découpe, et pas seulement quand l’éclaira
   // `dedansCrop` vaut zéro hors découpe, donc la planète reste intouchée.
   assert.match(BLOC_AERIEN, /uAerialOn > 0\.5 && uAerialOpacity > 0\.001 && dedansCrop > 0\.0/)
   assert.ok(!/partBloc/.test(BLOC_AERIEN), 'la photo est bornée à partBloc — elle s’éteindra avec l’éclairage')
-  assert.match(BLOC_AERIEN, /uAerialOpacity \* dedansCrop\)/)
+  // ⚠️ **`aFade` EST LE TROISIÈME FACTEUR — tour de correction.** Le socle
+  // multiplie lui aussi les trois (`uAerialOpacity * aFade * aIn`) : la borne de
+  // découpe, la tirette et le fondu côtier. Un fondu calculé et jamais appliqué
+  // serait la mutation la plus discrète de tout ce bloc.
+  assert.match(BLOC_AERIEN, /uAerialOpacity \* dedansCrop \* aFade\)/)
 })
 
 // ══════════ ⑤ ⚡ LE SENS DE LA PHOTO — LE SOCLE SERT D'ORACLE ═══════════════
@@ -330,4 +337,140 @@ test('⑥c `poserHabillage` allume par l’ABSENCE DE DONNÉE, et `retirerHabill
   assert.match(GLOBE_NU, /u\.uAerial\.value = null\n\s+u\.uAerialOn\.value = 0/)
   assert.match(GLOBE_NU, /u\.uAerialOffset\.value\.set\(0, 0\)/)
   assert.match(GLOBE_NU, /u\.uAerialScale\.value\.set\(1, 1\)/)
+})
+
+// ══════════ ⑦ LE FONDU CÔTIER — TOUR DE CORRECTION, LE SOCLE SERT D'ORACLE ═
+
+// ⛔ **R9 AVAIT DÉCLARÉ CE PORTAGE IMPOSSIBLE, ET LA RAISON NE TENAIT PAS.** Le
+// rapport écrivait : « il dépend de `uSeaY`, `uSeaRange` et `vWorldPos.y`, qui
+// n'existent pas sous cette forme dans le nuanceur du globe ». C'est vrai des
+// NOMS et faux de la NOTION : le globe a une mer, donc un niveau d'eau — et la
+// correspondance était **déjà écrite dans `globe.js`**, au bloc du fond marin :
+// « le socle mesure sa profondeur en unités de scène (`uSeaY - y` sur
+// `uSeaRange`), le globe en MÈTRES BRUTS (`-h` sur `uMerFondBudgetM`) ».
+//
+// ⚠️ **ET L'ÉCART N'ÉTAIT PAS « NON MESURABLE »** : la relecture l'a chiffré sur
+// le socle (La Réunion z9, fondu 0,1 contre 0) — **72,7 % des pixels, écart
+// moyen 93,6/255, max 189** — et vu sur le crop : la photo couvrait la mer en
+// plaques rectangulaires à coutures de tuiles visibles.
+
+/** `smoothstep` de GLSL, à la lettre de la spécification. */
+const smoothstep = (a, b, x) => {
+  const t = Math.min(Math.max((x - a) / (b - a), 0), 1)
+  return t * t * (3.0 - 2.0 * t)
+}
+
+/** Le bloc du fondu côtier, dans les deux nuanceurs. */
+const FONDU_GLOBE = (() => {
+  const i = FRAG_NU.indexOf('uAerialCoastFade > 0.0')
+  assert.ok(i > 0, 'le fragment du globe ne lit pas uAerialCoastFade')
+  return FRAG_NU.slice(i, FRAG_NU.indexOf('\n    }', i))
+})()
+const FONDU_SOCLE = (() => {
+  const i = TERRAIN_NU.indexOf('uAerialCoastFade > 0.0')
+  assert.ok(i > 0, 'le socle ne lit plus uAerialCoastFade — l’oracle a disparu')
+  return TERRAIN_NU.slice(i, TERRAIN_NU.indexOf('\n    }', i))
+})()
+
+/** Traduit une expression GLSL scalaire à `max` / `smoothstep` près. */
+function loiFondu(expr, noms) {
+  const js = expr
+    .replace(/\bmax\s*\(/g, 'Math.max(')
+    // ⚠️ `vWorldPos.y` n'est pas un identifiant JS : c'est la SEULE variable
+    // composée de ces quatre lignes, et la nommer ici vaut mieux qu'un
+    // traducteur GLSL générique — une seconde implémentation à tenir juste.
+    .replace(/\bvWorldPos\.y\b/g, 'vWorldPos_y')
+  // eslint-disable-next-line no-new-func
+  const f = new Function('smoothstep', ...noms, `return ${js};`)
+  return (...a) => f(smoothstep, ...a)
+}
+
+test('⑦a ⚡ le fondu du globe ÉGALE celui du socle, à la substitution d’unité du bloc du fond marin', () => {
+  // ⚠️⚠️ **LES DEUX CHAÎNES SONT TRADUITES ET EXÉCUTÉES L'UNE CONTRE L'AUTRE.**
+  // Aucune formule n'est recopiée : on prend le GLSL du socle — à l'écran depuis
+  // des mois — et celui du globe, et on les compare sur toute la colonne d'eau.
+  const bg = capture(FONDU_GLOBE, /float bandeM = ([^;]+);/, 'la bande de fondu du globe')
+  const ag = capture(FONDU_GLOBE, /aFade = (smoothstep\([^;]+\));/, 'le fondu du globe')
+  const bs = capture(FONDU_SOCLE, /float band = ([^;]+);/, 'la bande de fondu du socle')
+  const as = capture(FONDU_SOCLE, /aFade = (smoothstep\([^;]+\));/, 'le fondu du socle')
+
+  const bandeGlobe = loiFondu(bg[1], ['uMerFondBudgetM', 'uAerialCoastFade'])
+  const fadeGlobe = loiFondu(ag[1], ['bandeM', 'h'])
+  const bandeSocle = loiFondu(bs[1], ['uSeaRange', 'uAerialCoastFade'])
+  const fadeSocle = loiFondu(as[1], ['band', 'uSeaY', 'vWorldPos_y'])
+
+  // ⚠️ **LA SUBSTITUTION EST CELLE DU BLOC DU FOND MARIN, ET RIEN D'AUTRE** :
+  //   uSeaY → 0 (niveau de la mer) · uSeaY − y → −h · uSeaRange → uMerFondBudgetM
+  // Un niveau de mer NON NUL est pris exprès côté socle : si les deux chaînes ne
+  // se correspondaient que pour `uSeaY = 0`, l'égalité ne prouverait rien.
+  const uSeaY = -3.75
+  for (const budget of [1, 130.36, 2116.27, 4415.2, 6000]) {
+    for (const fade of [0.01, 0.1, 0.25, 0.4]) {
+      const bandeM = bandeGlobe(budget, fade)
+      const band = bandeSocle(budget, fade)
+      assert.ok(Math.abs(bandeM - band) < 1e-12, `la bande diffère du socle (budget ${budget}, fondu ${fade})`)
+      // toute la colonne d'eau, du sommet au fond, plus la terre au-dessus
+      for (let k = -20; k <= 20; k++) {
+        const h = (k / 10) * budget // en mètres, négatif = sous la mer
+        const g = fadeGlobe(bandeM, h)
+        const s = fadeSocle(band, uSeaY, uSeaY + h) // « uSeaY − y = −h », au bit près
+        assert.ok(Math.abs(g - s) < 1e-12,
+          `le fondu diffère du socle à h = ${h} m (budget ${budget}, fondu ${fade}) : ${g} ≠ ${s}`)
+      }
+    }
+  }
+
+  // ⚠️ **ET LA CONTRE-ÉPREUVE EST DANS LE TEST** : sans elle, deux chaînes
+  // constantes seraient « égales » et l'assertion ne prouverait rien.
+  const bandeM = bandeGlobe(2116.27, 0.1)
+  assert.equal(fadeGlobe(bandeM, 100), 1, 'la terre n’est plus à photo pleine')
+  assert.equal(fadeGlobe(bandeM, -2116.27), 0, 'le fond n’est plus débarrassé de la photo')
+  assert.ok(fadeGlobe(bandeM, -bandeM / 2) > 0 && fadeGlobe(bandeM, -bandeM / 2) < 1,
+    'le fondu ne fond pas : c’est une marche, pas une transition')
+  // ⚠️ **ET LE SENS EST LE BON** : 1 au rivage, 0 au fond. Inversé, la photo ne
+  // couvrirait QUE la mer — le défaut retourné, et il serait invisible en test
+  // de câblage.
+  assert.ok(fadeGlobe(bandeM, -1) > fadeGlobe(bandeM, -bandeM),
+    'le fondu est inversé : la photo s’en irait de la terre et resterait sur la mer')
+})
+
+test('⑦b le fondu est GARDÉ par la mer du crop — pas par un second niveau d’eau inventé', () => {
+  // ⚠️ **LE SOCLE DEMANDE `uSeaY > -9000` (« ce bloc a-t-il de vraies données de
+  // mer »), LE GLOBE DEMANDE `uMerRampeOn`** — c'est la même question, posée à
+  // celui qui la porte ici : `poserMer`. Un crop continental n'a pas de budget
+  // mesuré ; sans mer, pas de fondu, et la photo reste pleine.
+  assert.match(FONDU_GLOBE, /uAerialCoastFade > 0\.0 && uMerRampeOn > 0\.5/)
+  assert.match(FONDU_SOCLE, /uAerialCoastFade > 0\.0 && uSeaY > -9000\.0/)
+  // ⛔⛔ **ET LA SECONDE GARDE, QUI N'A PAS D'ÉQUIVALENT LITTÉRAL AU SOCLE ET QUI
+  // EST POURTANT OBLIGATOIRE.** Le socle pose `uSeaY` SOUS le terrain quand le
+  // bloc n'a pas de donnée sous-marine (« then uSeaY simply sits below the
+  // terrain ») : son fondu rend 1 partout, par construction. Le globe, lui,
+  // mesure depuis `h = 0` écrit en dur — dans une cuvette sous le niveau de la
+  // mer (vallée de la Mort −86 m, mer Morte −430 m, polder −7 m) il effacerait
+  // la photo d'une TERRE. ⚠️ **Le témoin est le budget au PLANCHER**, le repli
+  // que `poserMer` écrit lui-même.
+  assert.match(FONDU_GLOBE, /uMerFondBudgetM > 1\.0/)
+  // ⚠️ **ET LE PLANCHER N'EST PAS UN NOMBRE INVENTÉ ICI** : c'est celui que
+  // `poserMer` applique, lu dans la source. Deux littéraux jumeaux auraient
+  // divergé en silence.
+  assert.match(GLOBE_NU, /Math\.max\(champ\.profMaxCropM \|\| champ\.profMaxM, 1\)/)
+  assert.match(GLOBE_NU, /Math\.max\(_v\.fondBudget, 1\)/)
+  // ⛔ **ET AUCUN SECOND NIVEAU D'EAU N'EST FABRIQUÉ.** Le zéro du globe est le
+  // niveau de la mer en mètres, et `uMerFondBudgetM` est le budget que le bloc
+  // du fond marin emploie DÉJÀ, quarante lignes plus haut. Deux lois de niveau
+  // d'eau qui divergent, c'est la faute que ce fichier a déjà payée trois fois.
+  assert.ok(!/uSeaY|uSeaRange|vWorldPos/.test(FONDU_GLOBE),
+    'le fondu du globe invente un niveau d’eau au lieu de reprendre celui du bloc du fond marin')
+  assert.match(FRAG_NU, /uMerRampeOn > 0\.5 && sousEau/) // le bloc du fond marin, l'original de la substitution
+  assert.match(FRAG_NU, /-h \/ max\(uMerFondBudgetM, uPlancherRampeM\)/)
+})
+
+test('⑦c le fondu ARRIVE du socle et il est SURVEILLÉ — sinon la tirette ne bouge que le bloc plat', () => {
+  // ⛔ **C'EST UNE TIRETTE** (« Fondu à la côte », `ui/map-panel.js`) : elle
+  // appelle `terrain.setAerialCoastFade` à chaque cran. Sans la surveillance,
+  // elle bougerait le socle et laisserait le crop couvrir la mer.
+  assert.match(MAIN_NU, /aerialCoastFade: terrain\.mapUniforms\.uAerialCoastFade\.value,/)
+  assert.ok(CHAMPS_HABILLAGE.includes('aerialCoastFade'), 'le fondu côtier n’est pas surveillé')
+  // et le globe le rend au retrait, comme tout l'habillage (⑨h l'exige)
+  assert.match(GLOBE_NU, /u\.uAerialCoastFade\.value = HABILLAGE_MONDE\.aerialCoastFade/)
 })

@@ -1187,6 +1187,20 @@ uniform float uAerialOn;
 uniform float uAerialOpacity;
 uniform vec2 uAerialOffset;
 uniform vec2 uAerialScale;
+// ⚠️ LE FONDU COTIER — TOUR DE CORRECTION DE R9, ET CE N'EST PAS COSMETIQUE.
+// R9 l'avait declare non portable, faute d'uSeaY / uSeaRange / vWorldPos.y dans
+// ce nuanceur. La relecture a mesure l'ecart sur le socle (La Reunion z9,
+// fondu 0,1 contre 0) : 72,7 % des pixels, ecart moyen 93,6/255 — et sur le
+// crop, la photo couvre la mer EN PLAQUES a coutures de tuiles visibles.
+//
+// ⚠️ ET LA CORRESPONDANCE N'EST PAS NEUVE : elle est deja ecrite dans ce
+// fichier, au bloc du fond marin. « Le socle mesure sa profondeur en unites de
+// scene (uSeaY - y sur uSeaRange), le globe en METRES BRUTS (-h sur
+// uMerFondBudgetM) ». Le niveau de la mer du globe est h = 0 ; le budget de
+// profondeur du crop est uMerFondBudgetM, que poserMer cale sur profMaxCropM
+// comme le socle cale uSeaRange sur -dem.minM. Meme substitution, meme bloc.
+// Ce n'est donc PAS une seconde loi de niveau d'eau, c'est la premiere, relue.
+uniform float uAerialCoastFade;
 
 // ══════ L'ECLAIRAGE DU CROP — Tache P3 ═════════════════════════════════════
 //
@@ -1949,7 +1963,48 @@ void main() {
     aUv = uAerialOffset + aUv * uAerialScale;
     vec3 aerien = texture2D(uAerial, aUv).rgb;
     float shadeA = dot(col, vec3(0.299, 0.587, 0.114));
-    col = mix(col, aerien * (0.6 + 0.8 * shadeA), uAerialOpacity * dedansCrop);
+    // ══════ LE FONDU COTIER — TOUR DE CORRECTION DE R9 ══════════════════════
+    //
+    // ⛔ SANS LUI, LA PHOTO COUVRE LA MER EN PLAQUES. Mesure de la relecture (La
+    // Reunion z9, socle, fondu 0,1 contre 0) : 72,7 % des pixels different,
+    // ecart moyen 93,6/255, max 189. Avec le fondu, la mer redevient la rampe
+    // bathymetrique et les isobathes restent lisibles ; sans lui, tout vire au
+    // bleu marine opaque et les isobathes s'enfoncent dedans. Sur le crop, les
+    // coutures de tuiles se voient le long du rivage.
+    //
+    // ⚠️ TRANSCRIPTION DE terrain.js, A LA SEULE SUBSTITUTION D'UNITE QUE LE
+    // BLOC DU FOND MARIN FAIT DEJA, QUARANTE LIGNES PLUS HAUT :
+    //   uSeaY            → 0.0                (le niveau de la mer, en metres)
+    //   uSeaY - y        → -h                 (la profondeur sous ce niveau)
+    //   uSeaRange        → uMerFondBudgetM    (le budget de profondeur du crop)
+    // Le socle ecrit smoothstep(uSeaY - band, uSeaY, y) ; le globe ecrit donc
+    // smoothstep(-bandeM, 0.0, h). Un au rivage, zero au fond, dans les deux.
+    //
+    // ⚠️ ET LA GARDE EST uMerRampeOn, PAS UN SECOND uSeaY > -9000. Le socle
+    // demande « ce bloc a-t-il de vraies donnees de mer » ; ici la reponse est
+    // portee par poserMer, exactement comme au bloc du fond marin.
+    //
+    // ⛔⛔ ET IL FAUT UNE SECONDE GARDE, PARCE QUE LE NIVEAU DE LA MER DU GLOBE
+    // EST ECRIT EN DUR A ZERO, ET QUE CELUI DU SOCLE NE L'EST PAS. terrain.js
+    // pose uSeaY SOUS le terrain quand le bloc n'a pas de donnee sous-marine
+    // (« then uSeaY simply sits below the terrain ») : son fondu rend donc 1
+    // partout, par construction. Le globe, lui, mesure depuis h = 0 : dans une
+    // cuvette SOUS le niveau de la mer — la vallee de la Mort a -86 m, la mer
+    // Morte a -430 m, un polder a -7 m — il effacerait la photo d'une TERRE.
+    //
+    // ⚠️ LE TEMOIN EXISTE DEJA, ET C'EST LE BUDGET LUI-MEME. poserMer ecrit
+    // Math.max(champ.profMaxCropM || champ.profMaxM, 1) — le repli « un crop
+    // dont le champ n'aurait aucune eau a l'interieur rendrait sinon un budget
+    // nul ». Un budget POSE AU PLANCHER veut donc dire « aucune profondeur
+    // mesuree ici ». MESURE : Annecy z12, drapeau leve, uMerRampeOn = 1 et
+    // uMerFondBudgetM = 1 — le crop continental prend bien le repli, et sans
+    // cette garde sa bande de fondu vaudrait DIX CENTIMETRES.
+    float aFade = 1.0;
+    if (uAerialCoastFade > 0.0 && uMerRampeOn > 0.5 && uMerFondBudgetM > 1.0) {
+      float bandeM = max(uMerFondBudgetM * uAerialCoastFade, 1e-4);
+      aFade = smoothstep(-bandeM, 0.0, h); // 1 au rivage → 0 au fond
+    }
+    col = mix(col, aerien * (0.6 + 0.8 * shadeA), uAerialOpacity * dedansCrop * aFade);
   }
 
   // ══════ LA COUCHE APPARENCE — Tache P3, le gabarit d'ouverture l'ALLUME ════
@@ -2829,6 +2884,7 @@ export class Globe {
       uAerialOpacity: { value: HABILLAGE_MONDE.aerialOpacite },
       uAerialOffset: { value: new THREE.Vector2(0, 0) },
       uAerialScale: { value: new THREE.Vector2(1, 1) },
+      uAerialCoastFade: { value: HABILLAGE_MONDE.aerialCoastFade },
       // LA NORMALE PAR FRAGMENT — Tâche P9. ⚠️ **`uNormaleFineOn: 0` : sans
       // `poserHabillage`, RIEN ne change** — même garde et même raison que
       // `uCropOn`, `uHabOn`, `uMerRampeOn`, `uEclairageOn` et `uMppFacteur`.
@@ -3549,6 +3605,11 @@ export class Globe {
    *   mosaïque sur l'emprise (`aerialUvTransform`). ⚠️ **MUTÉS EN PLACE par
    *   `terrain.setAerial` (`.set(...)`), donc absents de `CHAMPS_HABILLAGE`** —
    *   même exemption, et même raison, que `solOffset` / `solScale`.
+   * @param {number} arg.aerialCoastFade - `uAerialCoastFade` du socle, la
+   *   tirette « Fondu à la côte » du panneau de carte (0 = éteint). ⚠️ **ELLE
+   *   EST DANS `CHAMPS_HABILLAGE`** : c'est une tirette, l'utilisateur la bouge
+   *   quand il veut, et c'est un scalaire — donc surveillable par `Object.is`
+   *   sans reposer l'habillage à chaque image.
    */
   poserHabillage({
     coastMask = null,
@@ -3562,6 +3623,7 @@ export class Globe {
     aerialOpacite = HABILLAGE_MONDE.aerialOpacite,
     aerialOffset = null,
     aerialScale = null,
+    aerialCoastFade = HABILLAGE_MONDE.aerialCoastFade,
     amplitudeM = null,
     contourIntervalM = null,
     contourOpacity = null,
@@ -3677,6 +3739,7 @@ export class Globe {
     u.uAerialOpacity.value = aerialOpacite
     if (aerialOffset) u.uAerialOffset.value.set(aerialOffset.x, aerialOffset.y)
     if (aerialScale) u.uAerialScale.value.set(aerialScale.x, aerialScale.y)
+    u.uAerialCoastFade.value = aerialCoastFade
 
     // ⚠️ **L'INTERVALLE SE CALE SUR LE RELIEF DU CROP.** Le globe posait 500 m
     // en dur, valables pour le monde entier : à l'île Maurice, qui culmine à
@@ -3875,6 +3938,7 @@ export class Globe {
     u.uAerialOpacity.value = HABILLAGE_MONDE.aerialOpacite
     u.uAerialOffset.value.set(0, 0)
     u.uAerialScale.value.set(1, 1)
+    u.uAerialCoastFade.value = HABILLAGE_MONDE.aerialCoastFade
     u.uContourInterval.value = HABILLAGE_MONDE.contourIntervalM
     u.uContourOpacity.value = HABILLAGE_MONDE.contourOpacite
     u.uContourWeight.value = HABILLAGE_MONDE.contourPoids

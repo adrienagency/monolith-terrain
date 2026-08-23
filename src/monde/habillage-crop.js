@@ -87,6 +87,12 @@ export const HABILLAGE_MONDE = Object.freeze({
   // C'est mot pour mot le défaut que ce fichier raconte quatorze lignes plus
   // haut, et `solOpacite` juste au-dessus en est le précédent exact.
   aerialOpacite: 1,
+  // ⚠️ **ZÉRO, ET C'EST LE « éteint » DU SOCLE, PAS UN OUBLI.** `params` porte
+  // `aerialCoastFade: 0.1` avec, en toutes lettres, « 0 = off » ; la tirette
+  // « Fondu à la côte » du panneau de carte descend jusqu'à 0. Le poseur qui ne
+  // dit rien ne doit donc pas inventer un fondu — c'est `contexteCrop` qui
+  // transmet la valeur VIVANTE du socle, et elle seule.
+  aerialCoastFade: 0,
   margeCoteM: 0,
 })
 
