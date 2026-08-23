@@ -1511,6 +1511,14 @@ function applyTimeOfDay(hour) {
   })
   params.sunAzimuth = s.azimuth
   params.sunElevation = s.elevation
+  // ⚠️ **LES DEUX MONNAIES SONT ICI, CÔTE À CÔTE, ET C'EST VOULU — Tâche R7.**
+  // La ligne au-dessus porte la LAMPE (`s.elevation`, relevée à +40° la nuit
+  // « so the moon shines from above ») : c'est la bonne pour MODELER le relief.
+  // La ligne ci-dessous porte l'ASTRE (`s.sunElevation`, −26,12° à 03h22 au lieu
+  // filmé) : c'est la seule qui dise de quel côté du terminateur la planète est.
+  // ⛔ Échanger les deux rendrait le plein jour à 3 h du matin. C'est le défaut
+  // « une grandeur juste dans la mauvaise monnaie », et il se referme ICI.
+  soleilMonde = soleilMondeDeLHeure(s, { lat: params.demLat, lon: params.demLon })
   params.sunIntensity = s.sunIntensity // ← dérivée : heure × sunGain
   params.hemiIntensity = s.hemiIntensity // ← dérivée : heure × hemiGain
   params.envLight = s.envIntensity // ← dérivée : heure × envGain
@@ -1582,17 +1590,30 @@ function applyTimeOfDay(hour) {
 // repère du SOCLE (est / haut / nord au lieu du bloc), porté à un rayon de 34.
 // Le globe a son propre repère. La conversion est celle de la Tâche P3
 // (`monde/eclairage-crop.js`), et `monde/soleil-monde.js` dit POURQUOI elle doit
-// partir de `skyState.sunElevation` et surtout pas de `params.sunElevation`.
+// partir de l'élévation ASTRONOMIQUE (`s.sunElevation`, celle que `lightingFor`
+// vient de rendre) et surtout pas de `params.sunElevation`, qui porte la lampe.
 const soleilHeureMonde = soleilHeureMondeActif()
 const _soleilMonde = new THREE.Vector3()
+
+// ⛔ **LA DIRECTION EST CALCULÉE DANS `applyTimeOfDay`, PAS ICI, ET C'EST UNE
+// MUTATION SURVIVANTE QUI L'A EXIGÉ.** Le tour 1 lisait `skyState` au moment de
+// poser : il suffisait alors d'une ligne à 70 lignes de là —
+// `skyState = { ...s, sunElevation: s.elevation }` — pour rendre le PLEIN JOUR À
+// 3 h DU MATIN sans qu'un seul des 4 204 tests bouge. Le piège de la monnaie
+// était NOMMÉ, il n'était pas FERMÉ. Il l'est maintenant par construction : la
+// seule lecture de l'élévation astronomique se fait sur le `s` FRAIS que
+// `lightingFor` vient de rendre, à deux lignes de `params.sunElevation = s.elevation`,
+// là où les deux monnaies sont côte à côte et où un lecteur les compare.
+let soleilMonde = null
+
 /**
  * La direction à pousser dans `globe.setSunDir` — repli sur le comportement
- * d'avant dès qu'une donnée manque (démarrage : `skyState` est encore nul).
+ * d'avant dès qu'une donnée manque (démarrage : `applyTimeOfDay` n'a pas encore
+ * tourné, `soleilMonde` est encore nul).
  */
 function soleilDuGlobe() {
-  if (!soleilHeureMonde) return sun.position
-  const v = soleilMondeDeLHeure(skyState, { lat: params.demLat, lon: params.demLon })
-  return v ? _soleilMonde.fromArray(v) : sun.position
+  if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') return sun.position
+  return soleilMonde ? _soleilMonde.fromArray(soleilMonde) : sun.position
 }
 
 function placeSun() {

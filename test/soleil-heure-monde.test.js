@@ -75,6 +75,63 @@ const R2D = 180 / Math.PI
 const scal = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 /** L'élévation, en degrés, d'une direction du repère du globe au-dessus de l'horizon LOCAL. */
 const elevationVue = (dir, lat, lon) => Math.asin(Math.max(-1, Math.min(1, scal(dir, hautLocal(lat, lon))))) * R2D
+/**
+ * L'AZIMUT, en degrés, d'une direction du repère du globe, lu dans le repère
+ * local. C'est la réciproque exacte de `directionSoleilLocale`, qui pose
+ * `cEst = cos(az)·cos(el)` et `cNord = −sin(az)·cos(el)`.
+ */
+const azimutVu = (dir, lat, lon) => {
+  const { est, nord } = repereSolSphere(lat, lon)
+  const a = Math.atan2(-scal(dir, nord), scal(dir, est)) * R2D
+  return ((a % 360) + 360) % 360
+}
+const ecartAngulaire = (a, b) => {
+  const d = Math.abs((((a - b) % 360) + 360) % 360)
+  return Math.min(d, 360 - d)
+}
+
+// ══════════ LE DÉCOUPAGE DE `main.js` — POUR L'EXÉCUTER, PAS LE LIRE ════════
+//
+// ⚠️ **AUCUN TEST NE CHARGE `main.js`** (il apporte le DOM, three et le réseau) —
+// c'est la règle du dossier, et onze autres fichiers de `test/` la suivent. Mais
+// « ne pas charger le module » n'oblige pas à se contenter d'`assert.match` : on
+// peut DÉCOUPER le morceau qui porte la décision et l'ÉVALUER avec des
+// doublures. C'est ce que font les deux fonctions ci-dessous, et c'est toute la
+// différence entre « le texte est là » et « le branchement marche ».
+
+/** Le texte d'une fonction de `main.js`, accolades équilibrées. */
+function sourceDeFonction(nom) {
+  const tete = `function ${nom}(`
+  const i = SRC_MAIN.indexOf(tete)
+  assert.ok(i >= 0, `${nom}() introuvable dans main.js`)
+  const j = SRC_MAIN.indexOf('{', i)
+  let prof = 0
+  for (let k = j; k < SRC_MAIN.length; k++) {
+    if (SRC_MAIN[k] === '{') prof++
+    else if (SRC_MAIN[k] === '}') {
+      prof--
+      if (prof === 0) return SRC_MAIN.slice(i, k + 1)
+    }
+  }
+  throw new Error(`${nom}() : accolades non refermées`)
+}
+
+/** Les lignes de CODE (commentaires exclus) qui contiennent un motif. */
+function lignesDeCode(motif, source = SRC_MAIN) {
+  return source.split('\n')
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => motif.test(l) && !/^\s*\/\//.test(l) && !/^\s*\*/.test(l))
+}
+
+test('le découpage de main.js mord — sinon tout ce fichier serait muet', () => {
+  // ⚠️ un `return` muet rend un test vert et indistinguable d'un test qui a lu.
+  // Ce témoin-ci échoue si l'extraction rend du vide ou attrape autre chose.
+  const src = sourceDeFonction('soleilDuGlobe')
+  assert.ok(src.startsWith('function soleilDuGlobe()'), src.slice(0, 40))
+  assert.ok(src.endsWith('}'))
+  assert.ok(src.split('\n').length >= 3, 'un corps, pas une ligne vide')
+  assert.equal(sourceDeFonction('placeSun').match(/sun\.position\.set/g)?.length, 1)
+})
 
 // ══════════ ① LA LOI — ET C'EST LA MONNAIE QUI EST GARDÉE ═══════════════════
 
@@ -176,17 +233,61 @@ test('③ ⛔ LE SOLEIL DE CAMÉRA N EST PLUS REPOSÉ SANS CONDITION', () => {
   }
 })
 
-test('③ la planète reçoit le soleil de l heure là où l heure est appliquée', () => {
-  // `placeSun()` est le SEUL endroit qui pousse le soleil vers le globe hors
-  // boucle d'image ; c'est là que le soleil du monde doit partir.
-  const i = SRC_MAIN.indexOf('function placeSun()')
-  assert.ok(i > 0, 'placeSun introuvable')
-  const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n}\nplaceSun()', i))
-  assert.match(corps, /globe\.setSunDir\(soleilDuGlobe\(\)\)/,
-    'placeSun doit passer par l aiguilleur, pas par sun.position')
-  // et l'aiguilleur, lui, lit la loi du module pur — pas une seconde écriture.
-  const j = SRC_MAIN.indexOf('function soleilDuGlobe()')
-  assert.ok(j > 0 && j < i, 'soleilDuGlobe doit être déclaré avant placeSun')
-  assert.match(SRC_MAIN.slice(j, i), /soleilMondeDeLHeure\(skyState,/,
-    'il doit partir de skyState (sunElevation), jamais de params.sunElevation')
+test('④ ⚡ LA MONNAIE EST CHOISIE DANS `applyTimeOfDay`, ET LA LIGNE EST EXÉCUTÉE', () => {
+  // ⛔ **`skyState = { ...s, sunElevation: s.elevation }` A SURVÉCU.** Le tour 1
+  // lisait `skyState` au moment de POSER le soleil : une ligne à 70 lignes de là
+  // suffisait à rendre le plein jour à 3 h du matin, 4 204 tests au vert. Le
+  // piège de la monnaie était nommé, il n'était pas fermé. Il l'est par
+  // construction — la direction se calcule sur le `s` FRAIS que `lightingFor`
+  // vient de rendre — et la ligne qui le fait est ici DÉCOUPÉE ET APPELÉE.
+  // ⚡ ET LA PREUVE QUE LE PIÈGE EST FERMÉ **PAR CONSTRUCTION** : plus une seule
+  // lecture de `skyState.sunElevation` dans tout `main.js`. La mutation du tour 1
+  // (`skyState = { ...s, sunElevation: s.elevation }`) est désormais INERTE pour
+  // la planète — ce n'est plus un test qui la rattrape, c'est le câblage.
+  assert.equal(/skyState[?.]*\.sunElevation/.test(SRC_MAIN), false,
+    'plus personne ne doit lire l élévation astronomique dans skyState')
+  assert.equal(/skyState/.test(sourceDeFonction('soleilDuGlobe')), false,
+    'l aiguilleur ne lit plus skyState du tout')
+
+  const corps = sourceDeFonction('applyTimeOfDay')
+  const lignes = corps.split('\n').filter((l) => /soleilMondeDeLHeure\(/.test(l) && !/^\s*\/\//.test(l))
+  assert.equal(lignes.length, 1, 'une seule écriture de la direction, dans applyTimeOfDay')
+  const ligne = lignes[0]
+  // elle doit courir AVANT placeSun(), sinon la pose lit la direction précédente
+  assert.ok(corps.indexOf(ligne) < corps.indexOf('placeSun()'), 'la direction se calcule avant placeSun()')
+
+  const lancer = (s, params, loi) => new Function(
+    's', 'params', 'soleilMondeDeLHeure', `let soleilMonde = null\n${ligne}\nreturn soleilMonde`,
+  )(s, params, loi)
+
+  // ① ce que la ligne PASSE : l'objet `s` lui-même, et le lieu du bloc.
+  const recu = []
+  const s = lightingFor(H_VIDEO, LAT, LON, JOUR_VIDEO)
+  const params = { demLat: LAT, demLon: LON, sunElevation: s.elevation, timeOfDay: H_VIDEO }
+  lancer(s, params, (cycle, lieu) => { recu.push({ cycle, lieu }); return 'JETON' })
+  assert.equal(recu.length, 1)
+  assert.equal(recu[0].cycle, s, 'le cycle FRAIS lui-même — pas une copie, pas skyState')
+  assert.deepEqual(recu[0].lieu, { lat: LAT, lon: LON }, 'lat et lon, dans cet ordre')
+
+  // ② et ce que la ligne REND, avec la vraie loi : la nuit d'Adrien.
+  const dir = lancer(s, params, soleilMondeDeLHeure)
+  assert.ok(Array.isArray(dir), 'une direction, pas un jeton')
+  const el = elevationVue(dir, LAT, LON)
+  assert.ok(Math.abs(el - s.sunElevation) < 1e-9,
+    `la planète doit voir ${s.sunElevation}° à 03h22, la ligne livrée lui donne ${el}°`)
+  assert.ok(el < -20, `⛔ PLEIN JOUR À 3 h DU MATIN : la ligne livrée rend ${el}°`)
+})
+
+test('④ ⛔ `placeSun` POUSSE LE SOLEIL SANS CONDITION — aucune garde ne s y glisse', () => {
+  // ⛔ **« `placeSun` ne pousse plus rien sous le drapeau » A SURVÉCU** — le test
+  // d'avant cherchait la sous-chaîne `globe.setSunDir(soleilDuGlobe())`, qu'un
+  // `if` ajouté devant laisse intacte. On compare donc la LIGNE ENTIÈRE.
+  const corps = sourceDeFonction('placeSun')
+  const poses = lignesDeCode(/setSunDir\(soleilDuGlobe\(\)\)/, corps)
+  assert.equal(poses.length, 1, 'une seule pose du soleil du globe dans placeSun')
+  const code = poses[0].l.split('//')[0].trim()
+  assert.equal(code, 'if (globe) globe.setSunDir(soleilDuGlobe())',
+    'la seule condition tolérée est l EXISTENCE du globe')
+  assert.equal(/soleilHeureMonde/.test(corps), false,
+    'placeSun ne connaît pas le drapeau : c est l aiguilleur qui décide')
 })
