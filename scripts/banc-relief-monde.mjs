@@ -13,14 +13,28 @@
 //      producteurs d'images, pas le coût d'un nuanceur.
 //      ⚠️ **ET `globe.update()` NE TOURNE PLUS** — c'est voulu : on chronomètre
 //      le DESSIN, pas le streaming du quadtree, qui est du réseau.
-//   ② **UN POINT DE SYNCHRONISATION AUX DEUX BOUTS.** WebGL est asynchrone ;
-//      sans lui on chronomètre la mise en file, pas l'exécution.
-//      ⛔ **ET CE N'EST PAS `gl.finish()`, C'EST `gl.readPixels`.** Mesuré sur
-//      cette machine (`.banc/R6/diag.mjs`, trois blocs de 40 images sur la même
-//      scène) : `gl.finish()` a rendu **2,197 / 3,490 / 0,505 ms** par image —
-//      un facteur SEPT entre deux blocs identiques — quand `readPixels(1×1)` a
-//      rendu **0,657 / 0,640 / 0,700**. Sous ANGLE/D3D11, `finish` ne barre pas
-//      la route ; une lecture de pixel, si.
+//   ② **UN POINT DE SYNCHRONISATION AUX DEUX BOUTS**, et c'est
+//      `gl.readPixels(1×1)`.
+//      ⛔ **ATTENTION À CE QU'ON EN CONCLUT — LE PREMIER TOUR DE R6 A CONCLU
+//      TROP VITE.** Il annonçait que `gl.finish()` « ne barre pas la route »
+//      sous ANGLE/D3D11, sur six chiffres qui ne vivaient que dans un
+//      commentaire. Le banc qui les mesure existe maintenant
+//      (`scripts/diag-barriere-gpu.mjs`), et **il dit autre chose** — deux
+//      sessions, deux altitudes, trois charges, traces dans
+//      `.superpowers/sdd/2026-08-22-globe-studio/traces-R6/barriere-gpu*.json` :
+//        · les trois barrières — `finish`, `readPixels(1×1)` et **aucune** —
+//          rendent le même temps à quelques pour cent près ;
+//        · **sans aucune barrière, la somme des blocs capture déjà 98 à 99 %**
+//          du temps de pendule du train entier : dans une boucle serrée de
+//          `composer.render()`, la contre-pression du pilote synchronise seule,
+//          et il n'y a pas de travail caché à révéler ;
+//        · la dispersion attribuée à `finish` est **un artefact d'ORDRE** : sur
+//          les deux sessions, les cinq blocs aberrants sont tombés sur le
+//          PREMIER train mesuré, quelle que soit la barrière (`finish` mesuré en
+//          troisième est la série la plus stable du relevé, max/min = 1,02).
+//      ➡️ `readPixels` est gardé — il est stable et, quand il diffère, il
+//      SURESTIME : une borne haute de coût reste une borne haute. Mais on ne
+//      requalifie **rien** au motif qu'un chiffre a été pris à `finish`.
 //   ③ **DES RENDUS DE CHAUFFE JETÉS** au début de chaque bloc.
 //   ④ **ORDRE DES VARIANTES TOURNANT** (ABBA), pour que la dérive thermique
 //      et le gouverneur de fréquence ne tombent pas toujours sur la même.
@@ -36,6 +50,14 @@
 // EMPLOI
 //   node scripts/banc-relief-monde.mjs --port 5519 --altitude 2000000
 //   node scripts/banc-relief-monde.mjs --paires 24 --images 20
+//
+// ⚠️ **APRÈS UN `npm ci`, CE BANC NE DÉMARRE PAS TOUT SEUL — RÉSERVE I3.**
+// `puppeteer-core` n'est PAS dans `package.json` : c'est un outil de
+// diagnostic, pas une dépendance produit. **La phrase à rejouer est :**
+//     npm i --no-save puppeteer-core@25.8.0
+// Les relevés, eux, sont commités sous
+// `.superpowers/sdd/2026-08-22-globe-studio/traces-R6/` — PAS sous `.banc/`,
+// qui est gitignoré (`.gitignore:44`) et ne survit pas à la fusion.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -72,7 +94,7 @@ function trouverChrome() {
 }
 const puppeteer = await (async () => {
   try { return (await import('puppeteer-core')).default } catch {
-    console.error('puppeteer-core absent : npm i --no-save puppeteer-core'); process.exit(2)
+    console.error('puppeteer-core absent : npm i --no-save puppeteer-core@25.8.0'); process.exit(2)
   }
 })()
 
