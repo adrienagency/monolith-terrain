@@ -2298,6 +2298,12 @@ test('⑮e `construireParoisCrop` PUBLIE le retrait de sa base, et `retirerParoi
     `le retrait publié ${faux._retraitBaseCrop} n est pas (chanfrein + congé) / 28`)
   // ⚡ ET IL EST PLUS GRAND QUE CELUI DU HAUT : c est tout le sujet
   assert.ok(faux._retraitBaseCrop + MARGE_EAU_CROP > RETRAIT_EAU_CROP)
+  // ⛔ **ET LE PLANCHER DES JUPES EST LE SOMMET DU CONGÉ — UNE SURVIVANTE L A
+  // MONTRÉ.** `_plancherJupeCrop = solide.baseY` (sans le congé) passait au
+  // travers : rien ne lisait ce champ. C est pourtant lui qui empêche les jupes
+  // de dépasser sous le mur (82 px, 4 langues, mesurés à l écran).
+  assert.equal(faux._plancherJupeCrop, s.baseY + s.arrondi)
+  assert.ok(faux._plancherJupeCrop > s.baseY, 'le plancher des jupes ne monte pas au-dessus du fond')
   // et le retrait est repris quand les parois partent
   Globe.prototype.retirerParoisCrop.call(faux)
   assert.equal(faux._retraitBaseCrop, null, 'un retrait périmé survivrait au retrait des parois')
@@ -2330,6 +2336,21 @@ test('⑮f `poserMer` DONNE ce retrait au bas du rideau — exécuté sur la gé
     }
     assert.ok(pireDedans > 0,
       `le bas du rideau n est pas rentré : marge ${pireDedans} en demi-côtés`)
+    // ⛔ **ET IL RENTRE DE LA BONNE CHOSE — UNE SURVIVANTE L A MONTRÉ.** Oublier
+    // `MARGE_EAU_CROP` laissait le test vert : le bas rentrait quand même (le
+    // congé pèse 3,9 fois la marge), mais il venait se poser EXACTEMENT sur le
+    // mur au lieu de rester dedans. La marge est ce qui garde l eau DANS le
+    // bloc, et c est celle du socle. On exige donc le RAPPORT exact des deux
+    // homothéties, pas seulement son signe.
+    const kHaut = 1 - RETRAIT_EAU_CROP
+    const kBas = 1 - (g._retraitBaseCrop + MARGE_EAU_CROP)
+    for (let i = 0; i < n; i += 41) {
+      const rh = Math.hypot(aCrop[(haut0 + i) * 2], aCrop[(haut0 + i) * 2 + 1])
+      const rb = Math.hypot(aCrop[(bas0 + i) * 2], aCrop[(bas0 + i) * 2 + 1])
+      if (rh < 1e-6) continue
+      assert.ok(Math.abs(rb / rh - kBas / kHaut) < 1e-6,
+        `sommet ${i} : rapport ${rb / rh} pour ${kBas / kHaut} — la marge d eau du socle a disparu`)
+    }
     // ⚡ LE TÉMOIN : sans `_retraitBaseCrop`, il ne rentre PAS.
     const g2 = globeAvecCrop()
     g2._baseYCrop = -0.12
