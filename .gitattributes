@@ -1,0 +1,42 @@
+# Fins de ligne — normalisation du depot
+#
+# CONSTAT (mesure le 2026-08-23, tache P13) : le depot stocke DEJA tout son
+# texte en LF, mais 421 fichiers sur 1067 etaient sortis en CRLF dans la copie
+# de travail. Verifie fichier par fichier : les 421 ne differaient de leur blob
+# QUE par des CR de fin de ligne (147 708 octets), zero difference de contenu.
+#
+# CE QUE CA COUTAIT : `git status` ne les voyait pas — l'index portait la taille
+# CRLF enregistree a la sortie, donc le cache de stat les donnait propres tant
+# que personne n'y touchait. Au premier `touch`, README.md rendait un diff de
+# 102 / 102 lignes pour zero ligne modifiee. Cinq agents ont paye ce piege ; une
+# campagne de mutation a rendu de faux survivants a cause de lui.
+#
+# CE QUE CETTE LIGNE FAIT : `text=auto` normalise en LF a l'ajout ; `eol=lf`
+# impose LF a la sortie sur TOUTES les plateformes, quel que soit
+# `core.autocrlf`. C'est `eol=lf` qui compte ici : c'est lui qui empeche un
+# `git clone` ou un `git worktree add` fait avec `core.autocrlf=true` de
+# refabriquer la dette. Le depot n'a aucun fichier qui exige CRLF (ni .bat, ni
+# .cmd, ni .ps1).
+* text=auto eol=lf
+
+# Binaires — declares plutot que laisses a la detection automatique.
+# La detection lit les premiers octets : un binaire qui commence par du texte
+# passerait pour du texte et se ferait convertir.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.glb  binary
+*.gz   binary
+*.zip  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.mp4  binary
+*.webm binary
+*.ktx2 binary
+*.hdr  binary
+*.exr  binary
