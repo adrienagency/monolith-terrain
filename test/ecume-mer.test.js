@@ -1010,7 +1010,13 @@ test('⑧h la calotte du globe APPELLE les mêmes lois, avec les uniformes branc
   for (const appel of [
     /vec3 col = corpsEau\(uMerPeu, uMerFond, dLagon, poidsLagonEau\(uMerTransp\), uMerJour\);/,
     /float opac = opaciteEau\(dLagon, uMerTransp, fres\);/,
-    /vec3 N = clapotNormale\(normalize\(vNormMer\), uMerDetail, uMerCalmeVue, r1, r2\);/,
+    // ⚠️ **LE CLAPOT REND MAINTENANT `nLocal`, PAS `N` — Tâche R2.** Le mélange
+    // est le MÊME (même fonction, mêmes quatre entrées) ; ce qui change est que
+    // `N` est désormais cette normale TOURNÉE DANS LE MONDE, parce que le
+    // Fresnel la dote avec `V`, qui est en monde — et les deux vivaient dans
+    // deux repères différents (111,25° mesurés, voir monde/eau-refraction.js).
+    /vec3 nLocal = clapotNormale\(normalize\(vNormMer\), uMerDetail, uMerCalmeVue, r1, r2\);/,
+    /vec3 N = normalize\(uMerVersMonde \* nLocal\);/,
     /col = blanchirEcume\(col, ecume, uMerJour\);/,
     /\* uMerSoleilFx \* vRichesse;/,
   ]) assert.match(g, appel)

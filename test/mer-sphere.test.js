@@ -74,6 +74,7 @@ import {
   LAME_EAU_NEUTRE, lameEauDuSocle,
 } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
+import { REFRACTION_NEUTRE, refractionDuSocle } from '../src/monde/eau-refraction.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
 // lignes suffisent. Sans ce hook, `Globe.prototype.poserMer` ne peut être
@@ -1502,6 +1503,10 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
   }
   assert.deepEqual(d.get.call(socle), {
     vue: 0.4039, surface: 0.08, givre: 0.56, ciel,
+    // ⚠️ **Tâche R2** : pas d'`uRefract` sur le faux socle, donc le neutre
+    // d'`eau-refraction.js`. Il est À PART du groupe `eau` — son neutre ne peut
+    // pas vivre dans `ecume-mer.js`, qui doit rester sans importation (③c).
+    refraction: REFRACTION_NEUTRE,
     // ⚠️ **Tâche P5** : le faux socle ci-dessus ne porte AUCUN des six uniformes
     // d'état de mer, donc l'accesseur doit rendre le neutre — champ par champ.
     etat: ETAT_MER_NEUTRE,
@@ -1516,9 +1521,15 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
   })
   // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
   assert.deepEqual(d.get.call({ materials: [] }), {
-    vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE,
+    vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE, refraction: REFRACTION_NEUTRE,
     eau: LAME_EAU_NEUTRE, couleurs: null, soleilCouleur: null, spectre: null, echelleSpectre: null,
   })
+  // ⚠️ **ET LA RÉFRACTION REMONTE VRAIMENT — Tâche R2, DANS LES DEUX SENS.**
+  // Une concordance au défaut ne prouverait rien : on la déplace.
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: 0.34 } } }] }).refraction, 0.34)
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: 0.91 } } }] }).refraction, 0.91)
+  assert.equal(d.get.call({ materials: [{ uniforms: { uRefract: { value: NaN } } }] }).refraction, REFRACTION_NEUTRE)
+  assert.equal(refractionDuSocle(null), REFRACTION_NEUTRE)
   // un givre non fini ne remonte pas
   assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
   // ⛔ **ET L'ÉTAT DE MER REMONTE VRAIMENT — la réserve n° 1 de P4, exécutée.**
