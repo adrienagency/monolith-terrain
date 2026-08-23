@@ -1259,6 +1259,55 @@ test('⑩l `onBeforeRender` COPIE le tampon d image, à chaque image, sur la cib
   assert.equal(r.copies[3], u.uMerScene.value)
 })
 
+test('⑩m `retirerMer` REND la cible de copie — le CYCLE, pas l état initial', async () => {
+  // ⛔ **FUITE MESURÉE PAR LA RELECTURE DE R2**, à chaud, après un cycle
+  // lever/baisser du drapeau dans la MÊME session : la `FramebufferTexture`
+  // restait allouée, texture GPU comprise (~3,4 Mo à 1014 × 414, ~29 Mo en
+  // plein écran 2560 × 1440). ⚠️ **Un test posé sur la page fraîche serait vert
+  // sans rien prouver** — `_merRefractRT` naît nul. On mesure donc le cycle.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(rendeurBouchon())
+
+  const cible = g._merRefractRT
+  assert.ok(cible, 'le cycle doit commencer avec une cible VIVANTE, sinon il ne mesure rien')
+  let rendue = 0
+  cible.addEventListener('dispose', () => { rendue++ })
+
+  Globe.prototype.retirerMer.call(g)
+  assert.equal(rendue, 1, 'la cible de copie doit être rendue au GPU, pas seulement oubliée')
+  assert.equal(g._merRefractRT, null, '`_merRefractRT` doit être nul après un cycle lever/baisser')
+  // et deux baisses de suite ne jettent pas et ne redemandent rien
+  Globe.prototype.retirerMer.call(g)
+  assert.equal(rendue, 1)
+  assert.equal(g._merRefractRT, null)
+})
+
+test('⑩n une SECONDE pose garde la réfraction vivante — la liaison est hors du `if`', async () => {
+  // ⛔ **DÉFAUT TROUVÉ EN ÉCRIVANT ⑩l, ET IL EST DE PRODUCTION.** `poserMer`
+  // refait un matériau neuf à chaque repose (changement de crop, de portée) et
+  // ce matériau naît avec `uMerScene: { value: null }`. La liaison vivait DANS
+  // le `if` de création de la cible : à taille de tampon inchangée le `if` ne
+  // courait pas, et le matériau neuf gardait `uMerScene` à `null` — la
+  // réfraction du crop morte, en silence, dès la deuxième pose.
+  const g = globeAvecCrop()
+  const r = rendeurBouchon()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(r)
+  assert.ok(g._mer.material.uniforms.uMerScene.value, 'première pose : la cible est liée')
+
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(r)
+  const u = g._mer.material.uniforms
+  assert.ok(u.uMerScene.value, 'seconde pose : le matériau NEUF doit être lié à la cible, sinon il échantillonne du vide')
+  assert.equal(u.uMerScene.value, g._merRefractRT)
+  assert.equal(r.copies.at(-1), u.uMerScene.value)
+  assert.equal(u.uMerResolution.value.x, 861)
+})
+
 test('⑩o `majReglagesMer` PORTE la réfraction du socle, déplacée dans les deux sens', async () => {
   // ⛔ **MUTATION SURVIVANTE I3** : `uMerRefract` forcée à `0` quand le socle en
   // fournit une tue la réfraction du crop en pratique (le socle en fournit

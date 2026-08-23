@@ -2546,6 +2546,12 @@ export class Globe {
     // `uCropOn = 0` (Tâche A), `uHabOn = 0` (Tâche C) et `RAMPE_MONDE` (Tâche D).
     this._mer = null
     this._merEtat = null
+    // ⚠️ **DÉCLARÉE ICI, ET PAS SEULEMENT ÉCRITE AU VOL** — Tour de correction
+    // R2. La cible du grab pass naissait `undefined` : la clôture du rapport
+    // annonçait `_merRefractRT: null` alors que la propriété n'existait pas
+    // encore. Un champ qui n'existe pas et un champ rendu se lisent pareil
+    // depuis la console, et c'est exactement ce qui a masqué la fuite.
+    this._merRefractRT = null
     // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
     this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
@@ -4297,9 +4303,18 @@ export class Globe {
         this._merRefractRT?.dispose()
         this._merRefractRT = new THREE.FramebufferTexture(taille.x, taille.y)
         this._merRefractRT.type = THREE.HalfFloatType
-        u2.uMerScene.value = this._merRefractRT
-        u2.uMerResolution.value.set(taille.x, taille.y)
       }
+      // ⛔ **LA LIAISON EST SORTIE DU `if`, ET C'EST UN DÉFAUT MESURÉ, PAS UNE
+      // PRÉCAUTION** — Tour de correction R2. La cible de copie appartient au
+      // GLOBE, les uniformes au MATÉRIAU, et `poserMer` refait un matériau neuf
+      // (`uMerScene: { value: null }`) à CHAQUE repose. Quand la cible existait
+      // déjà à la bonne taille, le `if` ne courait pas : le matériau neuf
+      // gardait `uMerScene` à `null`, donc la réfraction du crop lisait une
+      // texture absente dès la deuxième pose. `⑩n` de
+      // `test/mer-sphere.test.js` exerce ce cycle (pose · image · repose ·
+      // image) et rougit sur le code d'avant cette ligne.
+      u2.uMerScene.value = this._merRefractRT
+      u2.uMerResolution.value.set(taille.x, taille.y)
       renderer.copyFramebufferToTexture(this._merRefractRT)
     }
     const M = new THREE.Matrix4().makeBasis(
@@ -4780,6 +4795,24 @@ export class Globe {
     u.uOceanShallow.value.set(RAMPE_NAUTIQUE.peu)
     u.uOceanMid.value.set(RAMPE_NAUTIQUE.moyen)
     u.uOceanDeep.value.set(RAMPE_NAUTIQUE.fond)
+    // ⛔ **LA CIBLE DE COPIE SE REND AVANT LE GARDE-FOU `!this._mer`, ET C'EST
+    // UNE FUITE MESURÉE** — Tour de correction R2. La `FramebufferTexture` du
+    // grab pass appartient au GLOBE, pas au maillage : elle survivait donc à
+    // `retirerMer`, texture GPU comprise. Relevé par le relecteur, à chaud,
+    // après un cycle lever/baisser du drapeau dans la MÊME session : 1014 × 414
+    // en `HalfFloatType` encore allouée, et `renderer.info.memory.textures` qui
+    // ne rendait qu'une texture sur deux. C'est borné (une seule cible,
+    // réutilisée), donc ce n'est pas une croissance — mais c'est une ressource
+    // que `retirerMer` doit rendre, et la ligne de clôture « drapeau baissé,
+    // `_merRefractRT: null` » était FAUSSE après ce cycle.
+    //
+    // ⚠️ **ET ELLE EST AVANT LE `return`, DÉLIBÉRÉMENT** : le maillage peut
+    // avoir déjà disparu (une repose est un `retirerMer` de plus) sans que la
+    // cible, elle, ait été rendue. `⑩m` de `test/mer-sphere.test.js` mesure le
+    // CYCLE, pas l'état initial — un `_merRefractRT` qui naît nul rendrait vert
+    // n'importe quel test posé sur la page fraîche.
+    this._merRefractRT?.dispose()
+    this._merRefractRT = null
     if (!this._mer) return
     this.group.remove(this._mer)
     this._mer.geometry.dispose()
