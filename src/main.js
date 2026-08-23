@@ -7897,7 +7897,28 @@ function refreshOsmCredit() {
   // IGN's Licence Ouverte requires visible attribution while its imagery is on
   // screen — and only while it is: aerialAttribution is null the moment the
   // layer is off OR the patch leaves the covered area.
-  if (aerialAttribution) parts.push(aerialAttribution)
+  // ⛔ **SOUS `terre unique`, L'ORTHOPHOTO N'EST JAMAIS À L'ÉCRAN — Tâche R1 ②,
+  // tour 2.** Le clic sur le bouton aérien posait `terrain.mapUniforms.uAerialOn`
+  // à 1 — c'est-à-dire sur le bloc PLAT, que ce drapeau ne dessine jamais — et le
+  // crédit s'affichait quand même. Une mention de licence qui décrit autre chose
+  // que l'écran est un problème de conformité, pas une coquetterie : les deux
+  // lignes juste au-dessus posent l'obligation inverse, mot pour mot.
+  //
+  // ⚠️ **ET LE BOUTON RESTE VISIBLE, C'EST DÉLIBÉRÉ** : Adrien a nommé
+  // « affichage photographie aérienne » parmi les boutons qui lui manquaient. Il
+  // est inerte sur le crop tant que le globe n'a pas de couche aérienne — voir le
+  // commentaire de `buildMapCorner` — mais il ne ment plus sur ce qu'on regarde.
+  //
+  // ⚠️ **CE DÉFAUT N'EST PAS NÉ DE CE CHANTIER, ET LA GARDE EST BORNÉE EXPRÈS.**
+  // Mesuré le 2026-08-23 en Chrome sans tête, `http://localhost:5503/` SANS AUCUN
+  // DRAPEAU (`.banc/R1-tour2/credit-prod.json`) : en orbite, `terrain.mesh.visible`
+  // est faux — l'orthophoto n'est donc pas à l'écran — et le crédit s'affiche
+  // quand même. `?terre=unique` ne CRÉE pas le défaut, il le rend PERMANENT au
+  // lieu de transitoire. **Le cas de la production est laissé INTACT** : le
+  // corriger changerait le comportement sans drapeau, c'est-à-dire la seule
+  // garantie que ce chantier a tenue de bout en bout. Il est signalé dans le
+  // rapport R1 pour qu'Adrien tranche, pas corrigé en passant.
+  if (aerialAttribution && !terreUniqueBranchee) parts.push(aerialAttribution)
   // CC-BY 4.0 impose la mention tant que la donnée est à l'écran, et seulement
   // tant qu'elle y est — même contrat que la Licence Ouverte de l'IGN juste
   // au-dessus. `solAttribution` retombe à null dès que la couche s'éteint ou

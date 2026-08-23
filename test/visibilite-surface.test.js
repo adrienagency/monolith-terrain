@@ -234,6 +234,30 @@ test('③ LE RELAIS DE MODE — sans lui les boutons survivent à l’orbite (mu
     'le relais de mode reçoit un littéral au lieu de la transition `v`')
 })
 
+test('③ LE CRÉDIT D’ORTHOPHOTO ne s’affiche pas sous une carte qui n’en porte pas', () => {
+  // ⛔ **UNE MENTION DE LICENCE QUI DÉCRIT AUTRE CHOSE QUE L'ÉCRAN.** Sous le
+  // drapeau, le clic sur l'aérien posait `terrain.mapUniforms.uAerialOn` à 1 —
+  // sur le bloc PLAT, jamais dessiné — et « Orthophotos © IGN · NASA GIBS »
+  // apparaissait quand même. `refreshOsmCredit` pose deux fois l'obligation
+  // inverse dans ses propres commentaires (« only while it is »).
+  //
+  // ⚠️ **LA GARDE EST BORNÉE AU DRAPEAU, ET C'EST MESURÉ** : le défaut existe
+  // aussi en production, en orbite, sans aucun drapeau
+  // (`.banc/R1-tour2/credit-prod.json`). Le corriger là-bas changerait le
+  // comportement sans drapeau — la seule garantie que ce chantier a tenue de
+  // bout en bout. Il est signalé, pas corrigé en passant.
+  const i = MAIN.indexOf('function refreshOsmCredit()')
+  assert.ok(i > 0, '`refreshOsmCredit` a disparu ou changé de nom')
+  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
+  assert.ok(/if \(aerialAttribution && !terreUniqueBranchee\) parts\.push\(aerialAttribution\)/.test(corps),
+    'le crédit d’orthophoto n’est plus borné : il s’affichera sous une carte qui n’en porte aucune')
+  // ⚠️ **ET UN SEUL SITE LE POUSSE** — deux écritures d'une obligation de licence
+  // dont une seule peut suivre un changement de source, c'est la faute que
+  // `SOL_LICENCE` a déjà coûtée à ce fichier.
+  assert.equal((corps.match(/parts\.push\(aerialAttribution\)/g) || []).length, 1,
+    'le crédit d’orthophoto est poussé depuis plusieurs endroits')
+})
+
 test('③ `main.js` importe la loi plutôt que de la réécrire', () => {
   assert.ok(/import \{ visibiliteSurface \} from '\.\/monde\/visibilite-surface\.js'/.test(MAIN),
     'la loi n’est pas importée')
