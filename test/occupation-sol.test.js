@@ -431,9 +431,15 @@ test('le PNG cuit se relit à l’octet près — aucune classe n’est altéré
 
 // ── La donnée réellement cuite dans ce dépôt ────────────────────────────────
 
-test('l’index cuit existe et n’annonce que des zones plausibles', () => {
+test('l’index cuit existe et n’annonce que des zones plausibles', (t) => {
   const p = 'public/data/sol/index.json'
-  if (!existsSync(p)) return // les tuiles vivent hors dépôt (voir shibumap-deploiement)
+  // ⚠️ les tuiles vivent hors dépôt (voir shibumap-deploiement) — et le saut se
+  // DÉCLARE : un `return` muet rendait ce test VERT sur un checkout propre,
+  // c'est-à-dire indistinguable d'un test qui a vraiment lu le manifeste.
+  if (!existsSync(p)) {
+    t.skip(`${p} absent (ignore par git) - cuire avec npm run build:solmonde`)
+    return
+  }
   const doc = normaliseIndexSol(JSON.parse(readFileSync(p, 'utf-8')))
   assert.ok(doc.zones.length > 0)
   for (const z of doc.zones) {
@@ -470,10 +476,33 @@ test('normaliseIndexSol : le zmin d une ZONE est lu et borné, pas seulement cel
   assert.ok(par('trop-haut').zmin <= par('trop-haut').zmax, 'un zmin ne peut pas dépasser le zmax de sa zone')
 })
 
-test('le manifeste RÉEL du sol porte un zmin, et il vaut 8', () => {
+test('le manifeste RÉEL du sol porte un zmin, et il vaut 8', (t) => {
   // Ce test lit le fichier livré : si une recuisson descend plus bas, il
   // rougit, et le passage de témoin vers la couche doit être revérifié.
-  const doc = normaliseIndexSol(JSON.parse(readFileSync('public/data/sol/index.json', 'utf-8')))
+  //
+  // ⛔ **ET IL A ÉTÉ LE SEUL TEST DU DÉPÔT QUI NE SE REJOUAIT PAS DEPUIS GIT
+  // SEUL** — réparé au tour de correction P8→P12, constat ⑤.
+  // `public/data/sol/index.json` est couvert par `.gitignore:24` (`data/`) :
+  // sur un checkout propre il n'existe pas, `readFileSync` levait ENOENT, et
+  // `npm test` rendait **1 échec sur 4 082**. Trois relecteurs ont dû
+  // EXPLIQUER cet échec au lieu de le compter comme un défaut, et un
+  // quatrième a failli en tirer un décompte faux.
+  //
+  // ⚠️ **POURQUOI ON SAUTE PLUTÔT QUE DE RECONSTRUIRE.** La donnée ne se
+  // refabrique pas par une commande de dépôt : `npm run build:solmonde`
+  // télécharge les COG d'ESA WorldCover v200 depuis `s3://esa-worldcover` et
+  // cuit des heures de tuiles (voir l'en-tête de
+  // `scripts/build-occupation-sol.mjs`). Une suite de tests ne peut pas en
+  // dépendre. On saute donc — mais on saute **EN LE DISANT** : `t.skip()`
+  // compte le test dans la colonne `skipped`, là où un `return` muet le
+  // compterait comme RÉUSSI.
+  // ➡️ **Un test qui se tait est indistinguable d'un test qui passe.**
+  const p = 'public/data/sol/index.json'
+  if (!existsSync(p)) {
+    t.skip(`${p} absent (ignore par git) - cuire avec npm run build:solmonde`)
+    return
+  }
+  const doc = normaliseIndexSol(JSON.parse(readFileSync(p, 'utf-8')))
   assert.equal(doc.zmin, 8)
   for (const z of doc.zones) assert.ok(z.zmin >= 8, `${z.nom} : zmin ${z.zmin}`)
 })

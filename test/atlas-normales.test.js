@@ -17,6 +17,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import * as THREE from 'three'
 
 import {
   ZENITH,
@@ -30,6 +31,10 @@ import {
   irradianceBande,
   dispersionBande,
 } from '../src/monde/atlas-normales.js'
+// ⚠️ **LA SONDE EST IMPORTÉE POUR ÊTRE EXÉCUTÉE, PAS SEULEMENT LUE** — voir la
+// section ⑤ : les assertions de chaîne des sections ④ ne prouvaient rien sur ce
+// que `coefAmbiante` FAIT, et une survivante de la relecture P8→P12 l'a montré.
+import { coefAmbiante, AMBIANTE_NULLE, _sondeInterne } from '../src/sonde-ambiante.js'
 
 const SONDE = readFileSync(new URL('../src/sonde-ambiante.js', import.meta.url), 'utf8')
 const SRC = readFileSync(new URL('../src/monde/atlas-normales.js', import.meta.url), 'utf8')
@@ -368,4 +373,209 @@ test('④e le module reste PUR : ni three, ni DOM, ni fetch', () => {
   assert.doesNotMatch(code, /THREE|document|window|fetch|require\(/)
   // et le témoin, sans lequel le retrait des commentaires ne prouverait rien
   assert.match(SRC, /fetch/)
+})
+
+// ══════════ ⑤ LE COMPORTEMENT DE LA SONDE, EXÉCUTÉE ═════════════════════════
+//
+// ⛔ **POURQUOI CETTE SECTION EXISTE — ET ELLE EXISTE PARCE QU'UNE SURVIVANTE
+// L'A EXIGÉE, POUR LA SECONDE FOIS SUR CE CHANTIER.**
+//
+// La relecture groupée P8→P12 (constat I-3) a posé une mutation qui laisse
+// INTACTES les deux lignes que ④b cherche dans le texte source —
+// `const sol = irradianceBande(…, BANDES[0])` et `const ciel = … BANDES[1]` —
+// et qui échange `ciel` et `sol` **dans l'objet gelé que `coefAmbiante`
+// RETOURNE** :
+//
+//     ciel: Object.freeze(sol.map((v) => Math.max(0, v))),
+//     sol:  Object.freeze(ciel.map((v) => Math.max(0, v))),
+//
+// ⛔ **`npm test` complet : 4 082 / 4 082, VERT.** Le bloc se serait éclairé par
+// en dessous et rien n'aurait rougi.
+//
+// ⚠️ **C'EST EXACTEMENT LA FAUTE QUE LA SURVIVANTE `10f` DE LA TÂCHE P11 AVAIT
+// DÉMASQUÉE UNE TÂCHE PLUS TÔT** (`test/mer-sphere.test.js` ⑫h exigeait une
+// assertion de CHAÎNE, et la mutation passait à travers), **et que le §4 du
+// rapport de P12 RACONTE** — avant de la réintroduire dans son propre fichier
+// de test neuf.
+//
+// ➡️ **UNE ASSERTION QUI LIT LE TEXTE SOURCE NE PROUVE RIEN SUR CE QUE LE CODE
+// FAIT.** Les tests ci-dessous EXÉCUTENT `coefAmbiante` contre un renderer de
+// paille qui rend deux bandes de valeurs distinctes et connues d'avance. Ils
+// ferment ④b (quelle bande est le ciel), et aussi les parties de ④d qui ne
+// vivaient que dans des `assert.match` : le cache, la restitution de l'état du
+// renderer, l'intensité d'environnement à 1 et la garde sans environnement.
+//
+// ⚠️ **ILS NE REMPLACENT PAS ④a–④d, ILS LES DOUBLENT.** Une assertion de chaîne
+// garde une vertu — elle NOMME la ligne fautive — mais elle n'est plus SEULE
+// sur le branchement.
+
+const { COTE: COTE_SONDE } = _sondeInterne()
+
+// float32 positif → demi-flottant IEEE 754, l'inverse exact de
+// `demiFlottantVersFlottant` dans la sonde. Les trois valeurs employées ici
+// (0,0625 · 0,25 · 1) sont des puissances de deux : l'aller-retour est EXACT,
+// et aucune assertion ci-dessous ne repose sur un arrondi.
+const versDemiFlottant = (v) => {
+  if (v === 0) return 0
+  const e = Math.floor(Math.log2(v))
+  return ((e + 15) << 10) | (Math.round((v / Math.pow(2, e) - 1) * 1024) & 0x3ff)
+}
+
+const NOIR_SONDE = 0.0625 // le spéculaire que la soustraction doit retirer
+const BAS_SONDE = 0.25 // moitié basse du tampon — le NADIR, donc `sol`
+const HAUT_SONDE = 1 // moitié haute du tampon — le ZÉNITH, donc `ciel`
+
+/**
+ * Un renderer de paille qui peint la moitié BASSE du tampon à une valeur et la
+ * moitié HAUTE à une autre, et qui journalise tout ce que la sonde lui emprunte.
+ *
+ * ⚠️ **LA COUPURE EST À `COTE / 2`, PAS AUX BORNES DES BANDES** : les deux
+ * plages de lecture tombent chacune entièrement dans une moitié (0–28 et 35–63
+ * à `COTE = 64`), donc chaque bande est UNIFORME et la dispersion doit valoir
+ * zéro. Un banc qui peindrait exactement les plages ne prouverait rien sur la
+ * marge — il rendrait la bonne réponse quelle que soit la marge.
+ */
+function rendererDePaille() {
+  const journal = { autoClears: [], albedos: [], intensites: [], environnements: [] }
+  return {
+    journal,
+    autoClear: false, // ⚠️ la valeur PIÈGE du §0 du plan : elle doit revenir
+    shadowMap: { needsUpdate: true },
+    _cible: { marque: 'la cible de la page' },
+    _clear: new THREE.Color(0x123456),
+    _alpha: 0.25,
+    getRenderTarget() {
+      return this._cible
+    },
+    setRenderTarget(t) {
+      this._cible = t
+    },
+    getClearColor(c) {
+      return c.copy(this._clear)
+    },
+    getClearAlpha() {
+      return this._alpha
+    },
+    setClearColor(c, a) {
+      this._clear = new THREE.Color(c)
+      this._alpha = a
+    },
+    clear() {},
+    render(scene) {
+      const mesh = scene.children.find((o) => o.isMesh)
+      journal.autoClears.push(this.autoClear)
+      journal.albedos.push(mesh.material.color.r)
+      journal.intensites.push(scene.environmentIntensity)
+      journal.environnements.push(scene.environment)
+    },
+    readRenderTargetPixels(_cible, _x, _y, w, h, buf) {
+      const albedo = journal.albedos[journal.albedos.length - 1]
+      for (let ligne = 0; ligne < h; ligne++) {
+        const v = albedo === 0 ? NOIR_SONDE : ligne < h / 2 ? BAS_SONDE : HAUT_SONDE
+        const demi = versDemiFlottant(v)
+        for (let col = 0; col < w; col++) {
+          const i = (ligne * w + col) * 4
+          buf[i] = demi
+          buf[i + 1] = demi
+          buf[i + 2] = demi
+          buf[i + 3] = versDemiFlottant(1)
+        }
+      }
+    },
+  }
+}
+
+test('⑤a ⛔ EXÉCUTÉE, LA SONDE REND LE CIEL EN HAUT ET LE SOL EN BAS — la survivante I-3', () => {
+  // ⛔ **C'EST LE TEST QUI TUE L'ÉCHANGE AU POINT D'USAGE.** Il ne lit pas une
+  // ligne de source : il APPELLE `coefAmbiante` et regarde les deux nombres qui
+  // en sortent. Un échange n'importe où entre la lecture du tampon et l'objet
+  // gelé le fait rougir.
+  const r = rendererDePaille()
+  const a = coefAmbiante(r, new THREE.Texture())
+
+  // l'oracle, écrit à la main : `E = π · (blanc − noir)` sur une bande uniforme
+  const attSol = Math.PI * (BAS_SONDE - NOIR_SONDE)
+  const attCiel = Math.PI * (HAUT_SONDE - NOIR_SONDE)
+  assert.ok(attCiel > attSol)
+
+  for (let k = 0; k < 3; k++) {
+    assert.ok(
+      a.ciel[k] > a.sol[k],
+      `canal ${k} : le ciel (${a.ciel[k]}) doit depasser le sol (${a.sol[k]}) — le bloc s eclairerait par en dessous`
+    )
+    assert.ok(Math.abs(a.ciel[k] - attCiel) < 1e-6, `ciel canal ${k} : ${a.ciel[k]} au lieu de ${attCiel}`)
+    assert.ok(Math.abs(a.sol[k] - attSol) < 1e-6, `sol canal ${k} : ${a.sol[k]} au lieu de ${attSol}`)
+  }
+  // le rapport est connu d'avance et il ne dépend d'aucun arrondi :
+  // (1 − 0,0625) / (0,25 − 0,0625) = 5
+  assert.ok(Math.abs(a.ciel[1] / a.sol[1] - 5) < 1e-9)
+
+  // ⚠️ **ET LA SOUSTRACTION DU SPÉCULAIRE EST BIEN UNE SOUSTRACTION** : sans
+  // elle le sol vaudrait π × 0,25 et le rapport tomberait à 4.
+  assert.ok(Math.abs(a.sol[0] - Math.PI * BAS_SONDE) > 0.1, 'le rendu a albedo noir n est pas soustrait')
+})
+
+test('⑤b EXÉCUTÉE, le témoin de la mesure vaut ZÉRO et le compte de pixels est celui des plages', () => {
+  const r = rendererDePaille()
+  const a = coefAmbiante(r, new THREE.Texture())
+  // tous les pixels d'une bande portent la même normale, donc le même nombre
+  assert.equal(a.dispersion, 0, 'un pixel de couture ou de fond est entre dans la moyenne')
+  const b = bandesLecture(NORMALES_ATLAS.length, COTE_SONDE)
+  const attendu = (b[0].fin - b[0].debut + 1 + b[1].fin - b[1].debut + 1) * COTE_SONDE
+  assert.equal(a.pixels, attendu)
+  // et les deux plages tombent bien chacune dans UNE moitié du tampon : c'est
+  // ce qui rend le témoin ci-dessus significatif
+  assert.ok(b[0].fin < COTE_SONDE / 2, 'la bande du bas deborde dans la moitie haute')
+  assert.ok(b[1].debut >= COTE_SONDE / 2, 'la bande du haut deborde dans la moitie basse')
+})
+
+test('⑤c EXÉCUTÉE, la sonde REND au renderer tout ce qu’elle lui a emprunté', () => {
+  // ⛔ ④d ne vérifiait ça que par `assert.match` sur le texte. Le §0 du plan
+  // liste `autoClear === false` comme la PREMIÈRE façon dont un banc a menti
+  // ici, et `PasseFond` a déjà avalé `shadowMap.needsUpdate` une fois.
+  const r = rendererDePaille()
+  const cibleAvant = r._cible
+  const clearAvant = r._clear.getHex()
+  coefAmbiante(r, new THREE.Texture())
+  assert.equal(r._cible, cibleAvant, 'la cible de rendu de la page n est pas reposee')
+  assert.equal(r.autoClear, false, 'autoClear reste a ce que la sonde a mis')
+  assert.equal(r.shadowMap.needsUpdate, true, 'la carte d ombres ne se remettra jamais a jour')
+  assert.equal(r._clear.getHex(), clearAvant, 'la couleur d effacement n est pas reposee')
+  assert.equal(r._alpha, 0.25, 'l alpha d effacement n est pas repose')
+
+  // et PENDANT la mesure : deux rendus, blanc puis noir, à intensité 1,
+  // `autoClear` forcé à `true`, avec l'environnement demandé
+  assert.equal(r.journal.albedos.length, 2)
+  assert.deepEqual(r.journal.albedos, [1, 0], 'blanc PUIS noir')
+  assert.deepEqual(r.journal.autoClears, [true, true], 'autoClear doit valoir true PENDANT la mesure')
+  assert.deepEqual(r.journal.intensites, [1, 1], 'la sonde mesure a environmentIntensity = 1')
+  assert.ok(r.journal.environnements.every((e) => e !== null))
+  // et la scène de la sonde ne garde pas la texture de la page
+  assert.equal(_sondeInterne().scene.environment, null)
+})
+
+test('⑤d EXÉCUTÉE, le cache rend le MÊME objet et ne rend pas une seconde fois', () => {
+  // ⚠️ `habillageDifferent` compare par `Object.is` : un objet neuf à chaque
+  // image reposerait l'habillage entier à chaque image.
+  const r = rendererDePaille()
+  const env = new THREE.Texture()
+  const a = coefAmbiante(r, env)
+  const b = coefAmbiante(r, env)
+  assert.ok(Object.is(a, b), 'deux appels sur la meme texture doivent rendre le MEME objet')
+  assert.equal(r.journal.albedos.length, 2, 'le second appel a re-rendu : le cache ne mord pas')
+  assert.ok(Object.isFrozen(a) && Object.isFrozen(a.ciel) && Object.isFrozen(a.sol))
+  // une AUTRE texture, elle, se mesure
+  coefAmbiante(r, new THREE.Texture())
+  assert.equal(r.journal.albedos.length, 4)
+})
+
+test('⑤e EXÉCUTÉE, sans environnement la sonde ne rend RIEN et l’ambiante est nulle', () => {
+  // ⛔ la garde qui tient le chemin de démarrage : une sonde qui rendrait ici
+  // peindrait un coefficient de zéro, ou lancerait.
+  const r = rendererDePaille()
+  assert.ok(Object.is(coefAmbiante(r, null), AMBIANTE_NULLE))
+  assert.ok(Object.is(coefAmbiante(null, new THREE.Texture()), AMBIANTE_NULLE))
+  assert.equal(r.journal.albedos.length, 0, 'la sonde a rendu alors qu il n y a pas d environnement')
+  assert.deepEqual([...AMBIANTE_NULLE.ciel], [0, 0, 0])
+  assert.deepEqual([...AMBIANTE_NULLE.sol], [0, 0, 0])
 })
