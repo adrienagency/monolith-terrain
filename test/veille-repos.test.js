@@ -886,19 +886,31 @@ test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la vue', () =>
   assert.equal(est.etat.repos, false, 'l’estompage n’a pas su que la vue bouge')
 })
 
-test('⑨ la molette ne demande PAS de changer `SEUIL_BOUGE_LOG` — c’est mesuré', () => {
-  // ⚠️ Le seuil a été calibré sur l'écart logarithmique d'ALTITUDE d'un cran de
-  // molette. Relevé le 2026-08-23 sur six crans réels, cible immobile
-  // (`.banc/R1/mesure-R1.json`, C) : l'altitude culmine à `6,593 × 10⁻³`, la
-  // distance à `7,112 × 10⁻³` — un rapport de **1,079** — et les deux captent
-  // EXACTEMENT les mêmes images, 54 sur 54. Le même seuil sert donc les deux.
-  const PIC_ALT = 6.592700138422678e-3
-  const PIC_DIST = 7.112215240894834e-3
-  assert.ok(PIC_DIST / PIC_ALT < 1.1, 'la distance ne rend plus le même ordre de grandeur que l’altitude')
-  // et le geste passe le seuil des deux côtés — un seuil qui le manquerait ne
-  // servirait à rien
-  assert.ok(PIC_ALT > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en altitude')
-  assert.ok(PIC_DIST > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en distance')
+test('⑨ `SEUIL_BOUGE_LOG` capte encore la molette — le geste qui l’a calibré', () => {
+  // ⛔ **CE TEST ÉTAIT À MOITIÉ TAUTOLOGIQUE, ET LA RELECTURE L'A VU.** Il
+  // comparait `PIC_DIST / PIC_ALT < 1.1` — deux littéraux écrits deux lignes
+  // plus haut, dans ce fichier. Aucune modification du code ne pouvait faire
+  // rougir cette ligne : elle ne gardait rien, elle décorait. Elle est retirée,
+  // et son contenu remis là où il a sa place — le §3 du module, qui PORTE la
+  // mesure et n'a pas à la faire semblant de la vérifier.
+  //
+  // ⚠️ **CE QUI RESTE MORD, ET C'EST CE QUI A TUÉ LA MUTATION `10⁻⁴ → 10⁻³`** :
+  // le seuil est lu dans le module, et confronté aux deux pics RELEVÉS le
+  // 2026-08-23 sur six crans de molette réels, cible immobile
+  // (`.banc/R1/mesure-R1.json`, C). Un seuil au-dessus de l'un ou l'autre
+  // manquerait le geste en entier — c'est un PLAFOND, pas un plancher.
+  const PIC_ALT_MESURE = 6.592700138422678e-3
+  const PIC_DIST_MESURE = 7.112215240894834e-3
+  assert.ok(SEUIL_BOUGE_LOG < PIC_ALT_MESURE,
+    `le seuil (${SEUIL_BOUGE_LOG}) est passé au-dessus du pic d’altitude de la molette : le geste serait manqué`)
+  assert.ok(SEUIL_BOUGE_LOG < PIC_DIST_MESURE,
+    `le seuil (${SEUIL_BOUGE_LOG}) est passé au-dessus du pic de distance de la molette : le geste serait manqué`)
+  // ⚠️ **ET IL RESTE SOUS LE PIC AVEC DE LA MARGE** — la mesure du tour 1 a été
+  // prise à cadence réduite (~25 img/s) ; à 60 Hz chaque écart par image est
+  // plus petit, donc le seuil doit être pris franchement en dessous, pas de
+  // justesse. Marge mesurée par la relecture à 57 img/s : 66 ×.
+  assert.ok(PIC_ALT_MESURE / SEUIL_BOUGE_LOG > 10,
+    'le seuil est trop près du pic mesuré : une cadence plus haute lui ferait manquer la molette')
 })
 
 test('⑨ `main.js` nourrit le repos avec la DISTANCE, sur la même image que l’altitude', () => {
