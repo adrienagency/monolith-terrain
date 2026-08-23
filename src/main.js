@@ -86,6 +86,14 @@ import { creerVeilleCrop } from './monde/branchement-crop.js'
 // questions, un seul booléen. La loi vit dans un module pour la raison écrite
 // trois lignes plus haut : aucun test ne charge `main.js`.
 import { visibiliteSurface } from './monde/visibilite-surface.js'
+// ══════ LE CRÉDIT D'ORTHOPHOTO — Tâche R9, tour de correction ═════════
+//
+// ⛔ **LA GARDE PRÉCÉDENTE DISAIT « sous `terre unique`, l'orthophoto n'est
+// JAMAIS à l'écran », ET R9 A RENDU CETTE PRÉMISSE FAUSSE.** Le crédit suit
+// désormais la PHOTO, plus le drapeau. Même raison qu'au-dessus pour le module :
+// aucun test ne charge `main.js`, et l'ancienne garde était tenue par une
+// expression régulière qui rougissait sur sa propre correction.
+import { creditOrthophoto, orthophotoPeinteSurLeCrop } from './monde/credit-orthophoto.js'
 // ══════ LA GRANDEUR DU REPOS — Tâche R1, tour 2 ═══════════════════════
 //
 // ⛔ **ELLE VIVAIT ICI, EN CLAIR, ET C'ÉTAIT UN TROU DE MUTATION.** Remplacer le
@@ -4708,6 +4716,11 @@ function socleAffiche() {
 // chaque retour en surface. Les deux drapeaux décrivent la même bascule, l'un en
 // retirant le bloc plat, l'autre en le remplaçant.
 const seuilSocleBranche = seuilSocleActif() || terreUniqueBranchee
+// ⚠️ **CE QU'ON A DIT AU CRÉDIT LA DERNIÈRE FOIS — Tâche R9, tour de
+// correction.** `null` au départ, donc la première image tranche toujours. Voir
+// le pavé dans `majSeuilSocle` : sans cette mémoire, `refreshOsmCredit`
+// tournerait à chaque image et toucherait le DOM soixante fois par seconde.
+let orthophotoPeinteDerniere = null
 function majSeuilSocle() {
   if (!seuilSocleBranche) return
   // ══════ ⚠️ ON NE DÉCIDE PAS PENDANT UN CRAN, ET C'EST MESURÉ ══════════════
@@ -4764,6 +4777,28 @@ function majSeuilSocle() {
     // ensemble, en un seul appel.
     const dist = distanceCadrageM()
     veilleCrop.maj(alt, dist)
+    // ══════ LE CRÉDIT SUIT LA PHOTO, ET IL FAUT LE LUI DIRE — Tâche R9 ═══
+    //
+    // ⛔ **SANS CETTE RESYNCHRONISATION, LA CORRECTION DU CRÉDIT NE S'AFFICHE
+    // JAMAIS.** `refreshOsmCredit` est appelée sur ÉVÉNEMENT — au clic, à la fin
+    // de `refreshAerialCore`, au changement de mode. Or à l'instant où
+    // `refreshAerialCore` pose la mosaïque sur le socle et appelle le crédit, le
+    // globe ne l'a PAS encore : c'est `veilleCrop` qui la lui donne, **à l'image
+    // suivante** (`CHAMPS_HABILLAGE`, la course de la Tâche K ter). Le crédit
+    // serait donc calculé sur un crop encore vierge, et plus rien ne le
+    // redemanderait — la mention resterait absente pendant que la photo est à
+    // l'écran, c'est-à-dire exactement le défaut qu'on répare.
+    //
+    // ⚠️ **ET ELLE NE COÛTE QU'UNE COMPARAISON DE BOOLÉENS PAR IMAGE** : la
+    // même garde que `veilleEstompage` et que `rafraichirHabillage` — on
+    // n'appelle QUE lorsque l'état posé change. `refreshOsmCredit` reconstruit
+    // une chaîne et touche le DOM ; l'appeler soixante fois par seconde serait
+    // la faute que `CHAMPS_HABILLAGE` évite deux lignes plus loin.
+    const peinte = orthophotoPeinteSurLeCrop(globe?.uniforms)
+    if (peinte !== orthophotoPeinteDerniere) {
+      orthophotoPeinteDerniere = peinte
+      refreshOsmCredit()
+    }
     // ⚠️ **L'ÉCHELLE GLISSE ICI, ET NULLE PART AILLEURS.** `poserRampe` ANCRE
     // (à l'arrêt, `pas²` points) ; cet appel-ci ÉVALUE la courbe (quatre
     // cubiques) et pose les uniformes. Sans ancre il ne fait rien, donc rien
@@ -7940,28 +7975,32 @@ function refreshOsmCredit() {
   // IGN's Licence Ouverte requires visible attribution while its imagery is on
   // screen — and only while it is: aerialAttribution is null the moment the
   // layer is off OR the patch leaves the covered area.
-  // ⛔ **SOUS `terre unique`, L'ORTHOPHOTO N'EST JAMAIS À L'ÉCRAN — Tâche R1 ②,
-  // tour 2.** Le clic sur le bouton aérien posait `terrain.mapUniforms.uAerialOn`
-  // à 1 — c'est-à-dire sur le bloc PLAT, que ce drapeau ne dessine jamais — et le
-  // crédit s'affichait quand même. Une mention de licence qui décrit autre chose
-  // que l'écran est un problème de conformité, pas une coquetterie : les deux
-  // lignes juste au-dessus posent l'obligation inverse, mot pour mot.
   //
-  // ⚠️ **ET LE BOUTON RESTE VISIBLE, C'EST DÉLIBÉRÉ** : Adrien a nommé
-  // « affichage photographie aérienne » parmi les boutons qui lui manquaient. Il
-  // est inerte sur le crop tant que le globe n'a pas de couche aérienne — voir le
-  // commentaire de `buildMapCorner` — mais il ne ment plus sur ce qu'on regarde.
+  // ⛔ **LE CRÉDIT SUIT LA PHOTO, PAS LE DRAPEAU — Tâche R9, tour de
+  // correction.** La Tâche R1 ② avait écrit ici `&& !terreUniqueBranchee` sur
+  // l'argument « sous `terre unique`, l'orthophoto n'est JAMAIS à l'écran ».
+  // **R9 a rendu cette prémisse fausse** : la photo est désormais peinte sur la
+  // découpe. Mesuré à l'écran sous `?terre=unique&frontiere=1`, photo allumée :
+  // l'imagerie IGN était peinte sur la sphère et **son attribution était
+  // absente**. Une garde bâtie sur « il n'y a pas de photo » devient un défaut
+  // le jour où il y en a une — et c'est une obligation de licence, pas une
+  // coquetterie : les trois lignes au-dessus la posent, mot pour mot.
   //
-  // ⚠️ **CE DÉFAUT N'EST PAS NÉ DE CE CHANTIER, ET LA GARDE EST BORNÉE EXPRÈS.**
-  // Mesuré le 2026-08-23 en Chrome sans tête, `http://localhost:5503/` SANS AUCUN
-  // DRAPEAU (`.banc/R1-tour2/credit-prod.json`) : en orbite, `terrain.mesh.visible`
-  // est faux — l'orthophoto n'est donc pas à l'écran — et le crédit s'affiche
-  // quand même. `?terre=unique` ne CRÉE pas le défaut, il le rend PERMANENT au
-  // lieu de transitoire. **Le cas de la production est laissé INTACT** : le
-  // corriger changerait le comportement sans drapeau, c'est-à-dire la seule
-  // garantie que ce chantier a tenue de bout en bout. Il est signalé dans le
-  // rapport R1 pour qu'Adrien tranche, pas corrigé en passant.
-  if (aerialAttribution && !terreUniqueBranchee) parts.push(aerialAttribution)
+  // ⚠️ **ET LE CAS DE LA PRODUCTION RESTE INTACT** — le défaut d'orbite mesuré
+  // le 2026-08-23 (`.banc/R1-tour2/credit-prod.json`) n'est PAS corrigé en
+  // passant : il est laissé à l'arbitrage d'Adrien. La loi le dit en toutes
+  // lettres, et un test l'exige.
+  //
+  // ⚠️ **LA DÉCISION VIT DANS `monde/credit-orthophoto.js`, ET C'EST LE POINT
+  // DU TOUR** : la garde précédente n'était tenue que par une expression
+  // régulière sur ce texte-ci (`test/visibilite-surface.test.js` ③), laquelle
+  // **rougissait sur sa propre correction**. Une loi exportée s'exécute.
+  const creditAerien = creditOrthophoto({
+    terreUnique: terreUniqueBranchee,
+    attribution: aerialAttribution,
+    peinte: orthophotoPeinteSurLeCrop(globe?.uniforms),
+  })
+  if (creditAerien) parts.push(creditAerien)
   // CC-BY 4.0 impose la mention tant que la donnée est à l'écran, et seulement
   // tant qu'elle y est — même contrat que la Licence Ouverte de l'IGN juste
   // au-dessus. `solAttribution` retombe à null dès que la couche s'éteint ou
