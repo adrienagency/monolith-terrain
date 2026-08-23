@@ -1304,7 +1304,16 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et
   // plus grande, et sans `uMppFacteur` on retombe sur le texel — jamais sur
   // `fwidth`, qui ramènerait la parité par la fenêtre.
   assert.match(bloc, /float pasEmpreinte = uMppFacteur > 0\.0 \? vProfCam \* uMppFacteur \/ metresParUv : 0\.0;/)
-  assert.match(bloc, /float pas = max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
+  // ⛔ **ET L'EMPREINTE NE S'APPLIQUE PAS AU FOND MARIN — Tâche P12.** Sous
+  // l'eau la hauteur ne vient pas du MNT mais du champ cuit, six fois plus
+  // grossier : il n'y a rien à filtrer, et l'empreinte ne fait que perdre de la
+  // pente (grain du fond marin 72,5 % du socle au pas livré, 85,1 % à un texel,
+  // `.banc/P12/e1-pas-mer.js`). Le plancher d'un texel, lui, reste des DEUX
+  // côtés — c'est le seul qui protège d'une différence prise plus fin que la
+  // donnée. ⚠️ La loi elle-même est EXÉCUTÉE par `test/fond-crop.test.js` ⑩d.
+  assert.match(bloc, /float pas = fondMarin \? \(1\.0 \/ uTilePx\) : max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
+  assert.equal((bloc.match(/1\.0 \/ uTilePx/g) || []).length, 2,
+    'le plancher du texel doit rester sur les DEUX branches')
   // ⑥ ⛔ LE DÉCALAGE DE `qCrop` SUIT L'UV, ET LE SIGNE DU NORD EST RETOURNÉ.
   // `uv.y` croît vers le NORD (`1 - v` dans `_buildMesh`) quand le `y` de
   // Mercator croît vers le SUD. Le signe perdu, le fond marin serait lu de

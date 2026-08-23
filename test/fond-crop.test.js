@@ -601,28 +601,39 @@ test('⑧ septies la texture du fond relit EXACTEMENT ce que le champ portait', 
 // échantillonneur de papier. Ce qui change dans la source change donc dans la
 // fonction, et le test rougit sur le COMPORTEMENT.
 
+// ⚠️ **LE BLOC EXTRAIT COMMENCE À `surLeFond` DEPUIS LA TÂCHE P12** : la
+// condition qui décidait de la hauteur a un SECOND lecteur — le PAS du gradient
+// de la normale fine — et elle est donc nommée. Extraire `hauteurFond` seule
+// laisserait la condition, c'est-à-dire toute la loi, hors du test.
 const BLOC_FOND_GLSL = (() => {
-  const debut = FRAG_GLOBE.indexOf('  if (uFondOn > 0.5')
+  const debut = FRAG_GLOBE.indexOf('bool surLeFond(vec2 qCrop, float h)')
   if (debut < 0) throw new Error('le bloc du fond a disparu du nuanceur')
-  const fin = FRAG_GLOBE.indexOf('\n  }', debut)
-  return FRAG_GLOBE.slice(debut, fin + 4)
+  const ancre = FRAG_GLOBE.indexOf('float hauteurFond(vec2 qCrop, float h)', debut)
+  if (ancre < 0) throw new Error('hauteurFond a disparu du nuanceur')
+  const fin = FRAG_GLOBE.indexOf('\n}', ancre)
+  return FRAG_GLOBE.slice(debut, fin + 2)
 })()
 
 // GLSL → JS, mécaniquement.
-const fondDuNuanceur = (() => {
-  const js = BLOC_FOND_GLSL
-    .replace(/\bfloat\s+/g, 'let ')
-    .replace(/\bmin\(/g, 'Math.min(')
-    .replace(/\bmax\(/g, 'Math.max(')
-    .replace(/\babs\(/g, 'Math.abs(')
-    // ⚠️ **NON GOURMAND, ET LA PARENTHÈSE INTERNE EST LA RAISON** : l'argument
-    // porte `(2.0 * uFondPortee)`, donc un `[^)]*` s'arrêterait au MAUVAIS `)`.
-    .replace(/texture2D\(uFondChamp,[\s\S]*?\)\.r/g, 'echantillon')
-    .replace(/0\.5;/g, '0.5;')
-  // eslint-disable-next-line no-new-func
-  return new Function('uFondOn', 'uCropOn', 'uFondPortee', 'uFondMetres', 'qCrop', 'h', 'echantillon',
-    js + '\n  return h;')
-})()
+const traduire = (glsl) => glsl
+  .replace(/\bbool surLeFond\(vec2 qCrop, float h\)/, 'function surLeFond(qCrop, h)')
+  .replace(/\bfloat hauteurFond\(vec2 qCrop, float h\)/, 'function hauteurFond(qCrop, h)')
+  .replace(/\bfloat\s+/g, 'let ')
+  .replace(/\bmin\(/g, 'Math.min(')
+  .replace(/\bmax\(/g, 'Math.max(')
+  .replace(/\babs\(/g, 'Math.abs(')
+  // ⚠️ **NON GOURMAND, ET LA PARENTHÈSE INTERNE EST LA RAISON** : l'argument
+  // porte `(2.0 * uFondPortee)`, donc un `[^)]*` s'arrêterait au MAUVAIS `)`.
+  .replace(/texture2D\(uFondChamp,[\s\S]*?\)\.r/g, 'echantillon')
+
+const ARGS_FOND = ['uFondOn', 'uCropOn', 'uFondPortee', 'uFondMetres', 'qCrop', 'h', 'echantillon']
+// eslint-disable-next-line no-new-func
+const fondDuNuanceur = new Function(...ARGS_FOND, traduire(BLOC_FOND_GLSL) + '\n  return hauteurFond(qCrop, h);')
+// ⚡ **ET LA CONDITION ELLE-MÊME, EXÉCUTABLE** : c'est elle que le pas du
+// gradient relit dans `main()`, et son contrat — être STABLE par la composition
+// avec `hauteurFond` — n'est vérifiable qu'en la faisant tourner.
+// eslint-disable-next-line no-new-func
+const surLeFondDuNuanceur = new Function(...ARGS_FOND, traduire(BLOC_FOND_GLSL) + '\n  return surLeFond(qCrop, h);')
 
 test('⑨ le bloc du nuanceur EST `altitudeSonde` — translittéré, puis exécuté', () => {
   const portee = 3
@@ -763,4 +774,122 @@ test('⑪ bis `retirerCrop` retire AUSSI le fond — sinon la mer reste creusée
   assert.equal(g.uniforms.uFondChamp.value, null)
   assert.ok(Math.abs(rayonDuSommet(t.mesh, 312) - R_GLOBE) < 1e-4,
     'le crop retiré, la surface doit être revenue SUR la sphère')
+})
+
+// ══════════ ⑩ LE PAS DU GRADIENT SUIT LA SOURCE — Tâche P12 ═════════════════
+//
+// ⛔ CE QUE CES TESTS EXISTENT POUR EMPÊCHER. `hauteurFond` ÉCRASE la hauteur du
+// MNT par le champ cuit dès qu'on est sous l'eau. Le pas du gradient de la
+// normale fine, lui, était borné par l'EMPREINTE DU PIXEL — une borne dont
+// l'argument (P10 §2.4) porte sur la MINIFICATION du MNT, et qui ne veut rien
+// dire pour un champ six fois plus grossier que le MNT. Le prix mesuré :
+// **24,6 % du grain du fond marin** (notation 04 §5-④), et **+22 % sur la
+// frange côtière en marches**.
+//
+// La condition est donc NOMMÉE (`surLeFond`) et LUE DEUX FOIS. Ce qui suit
+// vérifie qu'elle ne peut pas diverger d'un lecteur à l'autre.
+
+test('⑩a ⚡ `surLeFond` est STABLE PAR LA COMPOSITION — c’est ce qui permet de la relire APRÈS `hauteurFond`', () => {
+  // ⛔ `main()` appelle `surLeFond(qCrop, h)` sur un `h` qui a DÉJÀ traversé
+  // `hauteurFond`. Si la condition changeait de valeur au passage, le pas
+  // basculerait sur la mauvaise loi une bande de fragments sur deux — sans
+  // qu'aucune erreur ne soit levée.
+  const echelleInverse = 22753.57142857143
+  let vus = { vrai: 0, faux: 0 }
+  for (const uFondOn of [0, 1]) {
+    for (const uCropOn of [0, 1]) {
+      for (const h of [-2000, -288.36, -0.7, 0, 1e-7, 12.5, 2975.25]) {
+        for (const fondM of [-2116.3, -920.7, -0.5, 0, 37.5]) {
+          for (const q of [{ x: 0, y: 0 }, { x: 2.9, y: -1 }, { x: 3, y: 0 }, { x: -3.01, y: 3 }, { x: 5, y: 5 }]) {
+            const ech = fondM / echelleInverse
+            const avant = surLeFondDuNuanceur(uFondOn, uCropOn, 3, echelleInverse, q, h, ech)
+            const hh = fondDuNuanceur(uFondOn, uCropOn, 3, echelleInverse, q, h, ech)
+            const apres = surLeFondDuNuanceur(uFondOn, uCropOn, 3, echelleInverse, q, hh, ech)
+            assert.equal(apres, avant,
+              `surLeFond change de valeur au passage de hauteurFond : uFondOn=${uFondOn} uCropOn=${uCropOn} h=${h} fond=${fondM} q=(${q.x},${q.y})`)
+            vus[avant ? 'vrai' : 'faux']++
+          }
+        }
+      }
+    }
+  }
+  // ⚠️ **ET LE BALAYAGE VOIT LES DEUX CÔTÉS** : un test qui ne rencontrerait
+  // jamais `vrai` passerait aussi sur un `surLeFond` qui rend toujours faux.
+  assert.ok(vus.vrai > 50, `la condition n'est jamais vraie dans ce balayage (${vus.vrai})`)
+  assert.ok(vus.faux > 50, `la condition n'est jamais fausse dans ce balayage (${vus.faux})`)
+})
+
+test('⑩b `surLeFond` EST la condition qui décide de la hauteur — exécutée, pas lue', () => {
+  // ⛔ Une mutation qui relâche la condition d'un seul côté (par exemple
+  // `h < 0.0` ici et `h <= 0.0` là) ferait basculer le pas sur des fragments
+  // dont la hauteur vient encore du MNT. On l'oppose au COMPORTEMENT de
+  // `hauteurFond` : quand la condition est fausse, la hauteur ne bouge PAS ;
+  // quand elle est vraie, elle vaut `min(champ, 0)`.
+  const echelleInverse = 22753.57142857143
+  for (const h of [-288.36, -0.7, 0, 12.5, 2975.25]) {
+    for (const fondM of [-2116.3, -0.5, 0, 37.5]) {
+      for (const q of [{ x: 0, y: 0 }, { x: 3, y: 3 }, { x: 3.0001, y: 0 }]) {
+        const ech = fondM / echelleInverse
+        const cond = surLeFondDuNuanceur(1, 1, 3, echelleInverse, q, h, ech)
+        const rendu = fondDuNuanceur(1, 1, 3, echelleInverse, q, h, ech)
+        if (cond) assert.ok(Math.abs(rendu - Math.min(fondM, 0)) < 1e-6, `h=${h} fond=${fondM} q=(${q.x},${q.y})`)
+        else assert.equal(rendu, h, `h=${h} fond=${fondM} q=(${q.x},${q.y}) : la hauteur a bougé hors condition`)
+      }
+    }
+  }
+})
+
+test('⑩c la condition n’est écrite QU’UNE FOIS, et `hauteurFond` la lit', () => {
+  // ⚠️ « Deux écritures jumelles finiraient par diverger » (`terrain.js`). La
+  // condition a deux lecteurs depuis P12 : elle doit avoir UN seul auteur.
+  assert.equal((FRAG_GLOBE.match(/uFondOn > 0\.5 && uCropOn > 0\.5/g) || []).length, 1,
+    'la condition du fond marin est écrite deux fois dans le nuanceur')
+  const nu = FRAG_GLOBE.replace(/\s+/g, ' ')
+  assert.match(nu, /float hauteurFond\(vec2 qCrop, float h\) \{ if \(surLeFond\(qCrop, h\)\) \{/)
+  assert.match(nu, /bool fondMarin = surLeFond\(qCrop, h\);/)
+})
+
+test('⑩d ⛔ `fondMarin` EST RELEVÉ AVANT LE GRAIN — le grain change le SIGNE de h', () => {
+  // ⛔ `hauteurGrain` ajoute un bruit SIGNÉ (`(g1 − 0,5) × 2 + (g2 − 0,5) × 0,7`)
+  // multiplié par `uGrainForceM`. Une butte de terre à un mètre au-dessus de
+  // l'eau peut donc en ressortir NÉGATIVE — et le pas basculerait sur la loi du
+  // fond marin en pleine terre. Relever `fondMarin` après le grain est une
+  // mutation qui ne se voit sur AUCUNE capture sans grain (`uGrainForceM = 0`
+  // au cadrage de la notation) : on la tue par l'ordre.
+  const nu = FRAG_GLOBE.replace(/\s+/g, ' ')
+  const iFond = nu.indexOf('bool fondMarin = surLeFond(qCrop, h);')
+  const iHauteur = nu.indexOf('float h = hauteurFond(qCrop, decodeMetersAA(vUv));')
+  const iGrain = nu.indexOf('h = hauteurGrain(qCrop, h);')
+  assert.ok(iHauteur > 0 && iFond > iHauteur, '`fondMarin` doit être relevé APRÈS la composition de la hauteur')
+  assert.ok(iGrain > iFond, '`fondMarin` doit être relevé AVANT le grain')
+  // et le grain PEUT bien retourner le signe : ce n'est pas une précaution
+  // théorique — on l'exécute sur la loi du dépôt
+  const g = (a, b) => a + 12 * ((b - 0.5) * 2 + (0.3 - 0.5) * 0.7)
+  assert.ok(g(1, 0) < 0, 'le grain doit pouvoir faire passer une hauteur positive sous zéro')
+})
+
+test('⑩e le PAS du gradient, EXÉCUTÉ : la mer prend le texel, la terre l’empreinte', () => {
+  // ⚡ **PAS UNE ASSERTION DE CHAÎNE : ON ÉVALUE LA LOI.** On extrait la ligne du
+  // nuanceur et on la fait tourner — c'est la seule façon de tuer une mutation
+  // qui échangerait les deux branches, ou qui retirerait le plancher du texel de
+  // l'une des deux.
+  const ligne = FRAG_GLOBE.match(/float pas = (.+);/)
+  assert.ok(ligne, 'la ligne du pas a disparu du nuanceur')
+  const js = ligne[1].replace(/\bmax\(/g, 'Math.max(')
+  // eslint-disable-next-line no-new-func
+  const pas = new Function('fondMarin', 'uTilePx', 'pasEmpreinte', `return ${js};`)
+  for (const uTilePx of [256, 512]) {
+    const texel = 1 / uTilePx
+    // ⛔ sous l'eau : le texel, quelle que soit l'empreinte
+    for (const e of [0, texel / 2, texel, 4 * texel, 40 * texel]) {
+      assert.equal(pas(true, uTilePx, e), texel, `mer, uTilePx=${uTilePx}, empreinte=${e}`)
+    }
+    // ⛔ sur terre : le PLUS GRAND des deux, jamais moins que le texel
+    assert.equal(pas(false, uTilePx, 0), texel, 'sans uMppFacteur, la terre retombe sur le texel')
+    assert.equal(pas(false, uTilePx, texel / 2), texel, 'le texel est un PLANCHER')
+    assert.equal(pas(false, uTilePx, 4 * texel), 4 * texel, 'l’empreinte l’emporte quand elle est plus grande')
+    // ⚡ et les deux branches DIFFÈRENT là où ça compte — sinon la loi serait morte
+    assert.ok(pas(true, uTilePx, 4 * texel) < pas(false, uTilePx, 4 * texel),
+      'les deux branches rendent le même pas : la bascule ne sert à rien')
+  }
 })

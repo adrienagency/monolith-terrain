@@ -1220,9 +1220,23 @@ ${GLSL_NORMALE_FINE}
 // C'EST DELIBERE : test/fond-crop.test.js EXTRAIT ce bloc de la source pour
 // l'EXECUTER contre altitudeSonde. Les renommer ne casserait pas le nuanceur —
 // il casserait la seule chose qui LIT ce nuanceur.
+// ⚠️ LA CONDITION EST NOMMEE, ET ELLE L'EST PARCE QU'ELLE A DEUX LECTEURS
+// DEPUIS LA TACHE P12 : la hauteur (juste dessous) et le PAS du gradient de la
+// normale fine, qui ne peut pas avoir la meme largeur de bande selon que le
+// fragment lit le MNT ou le champ cuit. La recopier aurait fait « deux
+// ecritures jumelles qui divergent », la cicatrice que terrain.js documente.
+//
+// ⚡ ET ELLE EST STABLE PAR LA COMPOSITION, CE QUI PERMET DE L'APPELER APRES :
+// quand elle est vraie, hauteurFond rend min(champ, 0), donc h <= 0, donc elle
+// reste vraie ; quand elle est fausse parce que h > 0, hauteurFond ne touche
+// pas h, donc elle reste fausse. test/fond-crop.test.js le rejoue EN
+// L'EXECUTANT sur le bloc extrait de cette source.
+bool surLeFond(vec2 qCrop, float h) {
+  return uFondOn > 0.5 && uCropOn > 0.5
+      && max(abs(qCrop.x), abs(qCrop.y)) <= uFondPortee && h <= 0.0;
+}
 float hauteurFond(vec2 qCrop, float h) {
-  if (uFondOn > 0.5 && uCropOn > 0.5
-      && max(abs(qCrop.x), abs(qCrop.y)) <= uFondPortee && h <= 0.0) {
+  if (surLeFond(qCrop, h)) {
     h = min(texture2D(uFondChamp, qCrop / (2.0 * uFondPortee) + 0.5).r * uFondMetres, 0.0);
   }
   return h;
@@ -1426,6 +1440,11 @@ void main() {
   // ⚠️ L'APPEL EST hauteurFond, PAS LE CORPS : la MEME loi sert au gradient de
   // la normale fine, quatre fragments plus bas (Tache P10).
   float h = hauteurFond(qCrop, decodeMetersAA(vUv));
+  // ⚠️ RELEVE ICI, ET PAS PLUS BAS : le grain (quelques lignes plus loin) ajoute
+  // un bruit SIGNE a la hauteur, donc une butte de terre a un metre au-dessus de
+  // l'eau peut en ressortir NEGATIVE. Le pas du gradient basculerait alors sur
+  // la loi du fond marin en pleine terre, une tuile sur deux et sans rien dire.
+  bool fondMarin = surLeFond(qCrop, h);
 
   // ══════ LE FOND DU CROP — Tache J bis ══════════════════════════════════════
   //
@@ -1725,7 +1744,41 @@ void main() {
     float pasEmpreinte = uMppFacteur > 0.0
       ? vProfCam * uMppFacteur / metresParUv
       : 0.0;
-    float pas = max(1.0 / uTilePx, pasEmpreinte);
+
+    // ══════ ⛔ ET L'EMPREINTE NE S'APPLIQUE PAS AU FOND MARIN — Tache P12 ═══
+    //
+    // L'ARGUMENT DE P10 EST UN ARGUMENT SUR LE MNT, ET RIEN D'AUTRE : « la
+    // texture de hauteur est MINIFIEE au cadrage de la notation, une difference
+    // centree a un texel echantillonnerait plus fin que ce que l'ecran peut
+    // porter ». Vrai — pour une hauteur lue dans le MNT.
+    //
+    // ⛔ SOUS L'EAU, LA HAUTEUR NE VIENT PAS DU MNT. hauteurFond l'ECRASE par le
+    // champ cuit, qui porte 385 noeuds sur 2 x uFondPortee demi-cotes de crop :
+    // a La Reunion z12, une maille de 213 m, soit SIX texels de MNT. Ce champ-la
+    // est MAGNIFIE, pas minifie : il n'a aucun detail sous le pixel, donc il n'y
+    // a rien a filtrer, et l'empreinte ne fait que perdre de la pente.
+    //
+    // ⚡ MESURE, EN BOUGEANT LE PAS DANS LES DEUX SENS (.banc/P12/e1-pas-mer.js
+    // et e2-pas-mer-pavage.js, aller-retour a 0 canal, temoin a 218 000 -
+    // 295 000 canaux), grain du fond marin en % du socle au cadrage cote :
+    //   pas x2      66,5 %   pas livre  72,5 %   pas x0,5  77,7 %   un texel  85,1 %
+    // et la frange cotiere en marches, part des suites de 4 px et plus :
+    //   pas livre  13,61 %   un texel  9,22 %   (socle 7,00 %)
+    //
+    // ⚠️ ET LE PRIX EST DECLARE : le pavage rectangulaire de la nappe, que le
+    // noteur mesure pour la premiere fois, DOUBLE (pic normalise 0,0685 ->
+    // 0,1345 ; socle 0,0339). Ce que le pas resserre rend n'est pas du relief :
+    // c'est la FACETTE de la bilineaire du champ. Le vrai correctif de ce
+    // poste-la est la RESOLUTION du champ (CHAMP_FOND), et il coute neuf fois
+    // remplirHauteurs — le rapport P12 le chiffre et ne le paie pas.
+    //
+    // ⚠️ LE RELIEF, LUI, NE BOUGE PAS D'UN PIXEL : la bascule ne prend que sur
+    // les fragments dont la hauteur vient du champ. Et le scintillement que P10
+    // a ferme ne revient a AUCUN pas — mesure au balayage complet, residu a
+    // dx = 1 entre 0,793 et 0,841 pour un pas de x0 a x2 (socle 0,030), aucune
+    // signature de parite : la loi de P10 est invariante par construction, ce
+    // n'est pas son pas qui la tenait.
+    float pas = fondMarin ? (1.0 / uTilePx) : max(1.0 / uTilePx, pasEmpreinte);
 
     // ⚠️ ET qCrop SUIT L'UV, PARCE QUE hauteurEchant LIT LES DEUX. uv.x va vers
     // l'EST (mercator x croissant) ; uv.y va vers le NORD, donc vers un mercator
