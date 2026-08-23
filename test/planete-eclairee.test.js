@@ -271,13 +271,61 @@ test('③ l’état de repos du monde n’est écrit qu’UNE fois', () => {
 
 // ═══════════ ④ LE BRANCHEMENT — LA FAIBLESSE RÉCURRENTE DU CHANTIER ═════════
 
-test('④ le drapeau existe, il est OFF, et il exige `terre unique`', () => {
-  assert.match(FLAGS_SRC, /planeteEclairee: false/, 'le défaut de production doit rester OFF')
-  assert.match(FLAGS_SRC, /export function planeteEclaireeActive\(\)/)
-  // ⚠️ La garde, ÉVALUÉE : sans `terreUniqueActive()`, `uMppFacteur` vaut 0 et
-  // le pas du gradient retombe au texel — le scintillement que K a fermé.
-  const corps = FLAGS_SRC.slice(FLAGS_SRC.indexOf('export function planeteEclaireeActive'))
-  assert.match(corps.slice(0, 400), /if \(!terreUniqueActive\(\)\) return false/)
+test('④ le drapeau existe, il est OFF, et il exige `terre unique` — ÉVALUÉ', async () => {
+  // ⛔ **CE QUI A CRÉÉ CE TEST.** Sa version précédente ne faisait que du
+  // `assert.match` sur le TEXTE de `flags.js`, sous un commentaire qui annonçait
+  // « La garde, ÉVALUÉE ». La campagne de mutation de la relecture a montré que
+  // `planeteEclaireeActive()` **n'était jamais exécutée** : quatre mutations
+  // survivaient, dont le passage du DÉFAUT DE PRODUCTION à `true`.
+  // ⚠️ Le dépôt portait pourtant le patron exact trente lignes plus loin —
+  // `crop-branche` ⑦ bis — et il est recopié ici, échappatoire comprise.
+  const { planeteEclaireeActive, FLAGS } = await import('../src/flags.js')
+  const avant = globalThis.location
+  const defaut = FLAGS.planeteEclairee
+  const q = (s) => { globalThis.location = { search: s } }
+  try {
+    // ① LE DÉFAUT DE PRODUCTION EST OFF — et ça se lit sur la VALEUR RENDUE.
+    q('?terre=unique&frontiere=1')
+    assert.equal(planeteEclaireeActive(), false, 'le défaut de production doit rester OFF')
+
+    // ② `?planete=eclairee` (et `=1`) l'allume — la branche existe et le nom du
+    //    paramètre d'adresse est le bon.
+    q('?terre=unique&frontiere=1&planete=eclairee')
+    assert.equal(planeteEclaireeActive(), true, '`?planete=eclairee` doit allumer')
+    q('?terre=unique&frontiere=1&planete=1')
+    assert.equal(planeteEclaireeActive(), true, '`?planete=1` doit allumer')
+
+    // ③ ⚠️ **LA GARDE `terre unique`, ÉVALUÉE POUR DE BON.** Sans
+    //    `poserLoiMonde`, `uMppFacteur` vaut 0 et le pas du gradient retombe au
+    //    TEXEL — le scintillement que la Tâche K a fermé.
+    q('?planete=eclairee&frontiere=1')
+    assert.equal(planeteEclaireeActive(), false, 'sans `terre unique`, rien ne s’allume')
+    q('?planete=eclairee&terre=unique')
+    assert.equal(planeteEclaireeActive(), false, 'sans la frontière de rendu non plus')
+
+    // ④ ⚠️ **L'ÉCHAPPATOIRE NE SE TESTE QUE CONTRE UN DÉFAUT VRAI**, et c'est la
+    //    leçon que `crop-branche` ⑦ bis a déjà payée sur ce chantier : avec
+    //    `FLAGS.planeteEclairee === false`, supprimer la ligne `?planete=nue` ne
+    //    change RIEN — la valeur retombe sur un défaut faux de toute façon.
+    //    C'est pourtant la ligne qui comptera **le jour où le drapeau sera levé**,
+    //    et c'est exactement ce jour-là qu'on voudra pouvoir couper depuis
+    //    l'adresse : le noteur demande cette levée dans le même mouvement que
+    //    `terreUnique`.
+    FLAGS.planeteEclairee = true
+    q('?terre=unique&frontiere=1')
+    assert.equal(planeteEclaireeActive(), true, 'défaut à true : `terre unique` suffit')
+    q('?terre=unique&frontiere=1&planete=nue')
+    assert.equal(planeteEclaireeActive(), false, '`?planete=nue` doit COUPER un défaut allumé')
+    q('?terre=unique&frontiere=1&planete=0')
+    assert.equal(planeteEclaireeActive(), false, '`?planete=0` aussi')
+    // et la garde `terre unique` tient même défaut levé
+    q('?frontiere=1')
+    assert.equal(planeteEclaireeActive(), false, 'la garde `terre unique` prime sur le défaut')
+  } finally {
+    FLAGS.planeteEclairee = defaut
+    if (avant === undefined) delete globalThis.location
+    else globalThis.location = avant
+  }
 })
 
 test('④ main.js LIT le drapeau et le passe au globe', () => {
