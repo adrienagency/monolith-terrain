@@ -151,9 +151,14 @@ test("①b bis LE CREUX EST ANCRÉ AVEC LA TERRE, ET ZÉRO EST UNE MESURE — T�
 test('①d sans ancre, l’échelle est EXACTEMENT `RAMPE_MONDE` — la garde de production', () => {
   const p = creerEchelleContinue(RAMPE_MONDE)
   const v = majEchelle(p, 12345)
-  for (const c of ['terreBas', 'terreHaut', 'profondeur']) {
+  // ⚠️ **`creux` EN FAIT PARTIE DEPUIS LA TÂCHE P11**, et l'omettre laissait
+  // survivre une mutation qui vidait son repli : l'ancre basse du relief
+  // retombait à zéro sur toute la planète, sans qu'aucun test ne rougisse.
+  for (const c of ['terreBas', 'terreHaut', 'profondeur', 'creux']) {
     assert.ok(Object.is(v[c], RAMPE_MONDE[c]), c + ' = ' + v[c])
   }
+  assert.ok(Object.is(v.terreBas - v.creux, -RAMPE_MONDE.profondeur),
+    "l'ancre basse mondiale n'est plus celle d'avant la Tâche P11")
   assert.ok(Object.is(v.fondBudget, RAMPE_MONDE.profondeur))
   assert.ok(Object.is(v.plancherM, RAMPE_MONDE.plancherM))
   // et sur 2 001 hauteurs, la rampe rend le bit près de la rampe mondiale

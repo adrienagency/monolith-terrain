@@ -21,7 +21,9 @@ import { segmentsTuile, interpolerMaille } from '../src/monde/maillage-tuile.js'
 import { Globe, sampleHeights } from '../src/globe.js'
 import { altitudeMaillage } from '../src/monde/fond-crop.js'
 import { tileToLatLon, latLonToSphere, R_GLOBE, EARTH_RADIUS_M } from '../src/geo.js'
-import { repereCrop } from '../src/monde/crop-sphere.js'
+import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
+import { contourCrop, PAS_CONTOUR } from '../src/monde/parois-crop.js'
+import { echantillonnerFond } from '../src/monde/fond-crop.js'
 import { creerEchelleContinue } from '../src/monde/echelle-continue.js'
 import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 
@@ -119,6 +121,15 @@ test('②d un `G` non entier ou nul ne fabrique pas de NaN', () => {
   for (const q of [-1, 0, 1, 2]) {
     assert.ok(Number.isFinite(interpolerMaille(q, q, 24, h)), 'q=' + q)
   }
+  // ⛔ **ET LE PLANCHER `Math.max(1, …)` A UN EFFET, UNE SURVIVANTE L'A DIT.**
+  // Sans lui, `G = 0` rend `i = -1` : la loi lit un nœud QUI N'EXISTE PAS, à
+  // l'extérieur de la tuile. Le rendu reste fini — donc « pas de NaN » ne
+  // prouvait rien — mais ce n'est plus la surface. Avec le plancher, un `G`
+  // dégénéré rend la MÊME chose qu'une grille à une seule cellule.
+  for (const G of [0, -3, 0.4]) {
+    assert.equal(interpolerMaille(0.37, 0.62, G, h), interpolerMaille(0.37, 0.62, 1, h), 'G=' + G)
+  }
+  assert.notEqual(interpolerMaille(0.37, 0.62, 1, h), h(-1, -1), 'le témoin est vide')
 })
 
 // ══════════ ③ LE DÉPÔT, EXÉCUTÉ — `_buildMesh` CONTRE LA LOI ═══════════════
@@ -354,4 +365,160 @@ test('⑤b `poserRampe`, LUI, RESTE SUR `hauteurSurface` — la couleur lit la D
   assert.equal(r.refus, null, JSON.stringify(r))
   assert.ok(nSurface > 500, `la rampe n'a lu la texture que ${nSurface} fois`)
   assert.equal(nDessinee, 0, `⛔ la rampe a basculé sur le maillage : ${nDessinee} appels`)
+})
+
+// ══════════ ⑥ CE QUE CINQ SURVIVANTES ONT DEMANDÉ ══════════════════════════
+
+test('⑥a la sonde du maillage ÉCRÊTE la mer comme le maillage, pas comme la sonde', () => {
+  // ⛔ **UNE SURVIVANTE A TROUVÉ CE TROU.** `altitudeMaillage` rend
+  // `Math.max(h, 0)` quand aucun fond n'est posé (« oceans stay on the sphere »),
+  // `altitudeSonde` rend la valeur BRUTE, négatifs du terrarium compris. Une
+  // paroi posée sur la seconde passerait SOUS sa propre surface tout le long
+  // d'un littoral — c'est le §4 de `parois-crop.js`, dans l'autre sens.
+  const g = globePourSondes({ f: () => -500 })
+  const t = g.tuile
+  const { lat, lon } = tileToLatLon(t.x + 0.4, t.y + 0.6, t.z)
+  const liste = g.tuilesAvecHauteurs()
+  assert.equal(g.hauteurDessinee(lat, lon, liste), 0, 'le maillage écrête la mer à zéro')
+  assert.ok(g.hauteurSurface(lat, lon, liste) < -400, 'la sonde, elle, rend le brut')
+})
+
+test('⑥b le FOND MARIN est lu AU NŒUD, pas au point demandé', () => {
+  // ⛔ **UNE SURVIVANTE ENCORE.** `_buildMesh` interroge le champ du fond à la
+  // position de CHAQUE SOMMET ; lire le fond au point demandé rendrait un fond
+  // CONSTANT sur toute la cellule — une seconde loi, qui diverge de la première
+  // dès que le fond a du relief. La tuile est toute en mer, donc c'est le champ
+  // qui décide, et lui seul.
+  // ⚠️ **LE CHAMP DOIT ÊTRE PLUS FIN QUE LE MAILLAGE, SINON LES DEUX LOIS SONT
+  // LA MÊME.** `echantillonnerFond` est bilinéaire : sur une cellule de maillage
+  // qui tient DANS une cellule de champ, l'interpolation des nœuds rend le point
+  // exactement (mesuré : 2·10⁻⁹ d'écart). Le champ fait donc 129 nœuds pour les
+  // 24 quads de la tuile, et il ondule.
+  const cote = 129
+  const g = globePourSondes({ f: () => -1 })
+  const t = g.tuile
+  const centre = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  const repere = repereCrop({ centre, zoom: t.z, tuilesParBloc: 1 })
+  const valeurs = new Float32Array(cote * cote)
+  for (let j = 0; j < cote; j++) for (let i = 0; i < cote; i++) valeurs[j * cote + i] = -900 - 800 * Math.sin(i * 1.9) * Math.cos(j * 2.3)
+  g._fondCrop = { valeurs, cote, repere, portee: 0.5, bathy: true, profMaxM: 3400 }
+  const G = segmentsTuile(t.z)
+  const liste = g.tuilesAvecHauteurs()
+  // un point au MILIEU d'une cellule : la loi doit rendre l'interpolation des
+  // NŒUDS, jamais le fond du point lui-même.
+  const { lat, lon } = tileToLatLon(t.x + 6.5 / G, t.y + 6.5 / G, t.z)
+  const rendu = g.hauteurDessinee(lat, lon, liste)
+  const auNoeud = (i, j) => {
+    const p = tileToLatLon(t.x + i / G, t.y + j / G, t.z)
+    return g.hauteurDessinee(p.lat, p.lon, liste)
+  }
+  const attendu = interpolerMaille(6.5 / G, 6.5 / G, G, auNoeud)
+  assert.ok(Math.abs(rendu - attendu) < 1e-6, rendu + ' contre ' + attendu)
+  // ⚠️ **ET LE TÉMOIN : LE FOND DU POINT LUI-MÊME EST DIFFÉRENT.** Sans lui, ce
+  // test serait vert sur les deux lois.
+  const auPoint = Math.min(echantillonnerFond(g._fondCrop, lat, lon), 0)
+  assert.ok(Math.abs(auPoint - rendu) > 5, 'les deux lois ne se distinguent pas (' + auPoint + ' contre ' + rendu + ')')
+})
+
+test('⑥c la surface que `_buildMesh` POSE est EXACTEMENT celle que `hauteurDessinee` REND', () => {
+  // ⚡ **C'EST L'INVARIANT SUR LEQUEL TOUTE LA TÂCHE REPOSE, ET IL APPARIE LES
+  // DEUX CÔTÉS.** ③a comparait la géométrie à `interpolerMaille` avec un `G`
+  // choisi par le TEST : une mutation qui changeait la grille d'UN SEUL des deux
+  // côtés y survivait. Ici les deux lectures viennent du dépôt, et la moindre
+  // divergence de grille, de loi de nœud ou de diagonale tue.
+  const z = 12, tx = 2094, ty = 2270
+  const { heights, size } = tuileFactice()
+  const t = { z, x: tx, y: ty, heights, size, texture: null, chord: 0.15, key: z + '/' + tx + '/' + ty }
+  const faux = {
+    exaggeration: 2,
+    _fondCrop: null,
+    group: { add() {} },
+    _materialFor: () => ({}),
+    _retaillerJupe: () => false,
+    tiles: new Map([[t.key, t]]),
+    // ⚠️ **UNE COPIE, PARCE QUE `_buildMesh` RELÂCHE `t.heights`** (256 Kio par
+    // tuile, 105 Mo à 420 tuiles en cache — son commentaire le dit). La sonde,
+    // elle, les relit : dans l'application elle tourne AVANT la libération.
+    tuilesAvecHauteurs: () => [{ ...t, heights }],
+    hauteurDessinee: Globe.prototype.hauteurDessinee,
+    _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+  }
+  Globe.prototype._buildMesh.call(faux, t)
+  const pos = t.mesh.geometry.attributes.position.array
+  const G = segmentsTuile(z)
+  const dispScale = (R_GLOBE / EARTH_RADIUS_M) * faux.exaggeration
+  const liste = faux.tuilesAvecHauteurs()
+  const P = (s) => [pos[s * 3] + t.mesh.position.x, pos[s * 3 + 1] + t.mesh.position.y, pos[s * 3 + 2] + t.mesh.position.z]
+  let pire = 0
+  // ⚠️ **LES NŒUDS DE BORD `i = G` OU `j = G` NE SONT PAS TESTÉS, ET C'EST UNE
+  // CONVENTION DU DÉPÔT, PAS UN OUBLI** : ils tombent exactement sur `tx + 1`,
+  // c'est-à-dire dans la tuile VOISINE, et `_tuileLaPlusFine` la leur attribue
+  // (l'intervalle est semi-ouvert, `tx < 1`). Les deux tuiles y lisent leur
+  // propre texel de bord — la couture de niveau que la Tâche K documente déjà.
+  for (const [i, j] of [[0, 0], [5, 7], [11, 3], [G - 1, G - 1], [17, 20], [G - 1, 0]]) {
+    const { lat, lon } = tileToLatLon(tx + i / G, ty + j / G, z)
+    const a = P(j * (G + 1) + i)
+    const hGpu = (Math.hypot(a[0], a[1], a[2]) - R_GLOBE) / dispScale
+    pire = Math.max(pire, Math.abs(hGpu - faux.hauteurDessinee(lat, lon, liste)))
+  }
+  assert.ok(pire < 0.02, "la sonde s'écarte des SOMMETS de " + pire + ' m')
+  // et au MILIEU des cellules, où l'interpolation travaille
+  for (const [i, j] of [[5, 7], [11, 3], [17, 20]]) {
+    for (const [su, sv] of [[0.25, 0.25], [0.5, 0.5], [0.9, 0.9]]) {
+      const { lat, lon } = tileToLatLon(tx + (i + su) / G, ty + (j + sv) / G, z)
+      const a = P(j * (G + 1) + i), b = P(j * (G + 1) + i + 1)
+      const c = P((j + 1) * (G + 1) + i), d = P((j + 1) * (G + 1) + i + 1)
+      const gpu = su + sv <= 1
+        ? [0, 1, 2].map((k) => a[k] + su * (b[k] - a[k]) + sv * (c[k] - a[k]))
+        : [0, 1, 2].map((k) => d[k] + (1 - su) * (c[k] - d[k]) + (1 - sv) * (b[k] - d[k]))
+      const hGpu = (Math.hypot(gpu[0], gpu[1], gpu[2]) - R_GLOBE) / dispScale
+      pire = Math.max(pire, Math.abs(hGpu - faux.hauteurDessinee(lat, lon, liste)))
+    }
+  }
+  assert.ok(pire < 0.02, "la sonde s'écarte de la SURFACE de " + pire + ' m')
+})
+
+test('⑤c la paroi appelle la sonde AVEC LA LATITUDE EN PREMIER, et ne refait pas la liste', () => {
+  // ⛔ **DEUX SURVIVANTES DANS UN SEUL TEST.** ⑤a comptait les appels ; il ne
+  // regardait ni leurs ARGUMENTS (lat et lon échangés survivaient) ni le nombre
+  // de fois que la LISTE de tuiles était rebâtie (l'anneau fait plus de mille
+  // points, et `this.tiles` peut porter 1 700 entrées : deux millions
+  // d'itérations pour une géométrie bâtie à l'arrêt).
+  const { heights, size } = tuileFactice()
+  const z = 12, tx = 2094, ty = 2270
+  const t = { z, x: tx, y: ty, heights, size, key: z + '/' + tx + '/' + ty }
+  const { lat, lon } = tileToLatLon(tx + 0.5, ty + 0.5, z)
+  const repere = repereCrop({ centre: { lat, lon }, zoom: z, tuilesParBloc: 1 })
+  const vus = []
+  let nListe = 0
+  const faux = {
+    _crop: repere,
+    _fondCrop: null,
+    _parois: null,
+    _baseYCrop: null,
+    exaggeration: 2,
+    tiles: new Map([[t.key, t]]),
+    tuilesAvecHauteurs: () => { nListe++; return [t] },
+    uniforms: { uCropCoin: { value: 0.08 }, uCropCoinN: { value: 4.4 } },
+    group: { add() {}, remove() {} },
+    hauteurDessinee(la, lo, liste) { vus.push([la, lo]); return Globe.prototype.hauteurDessinee.call(this, la, lo, liste) },
+    _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine,
+    _retaillerJupes: () => 0,
+  }
+  try {
+    Globe.prototype.construireParoisCrop.call(faux, {})
+  } catch {
+    // la géométrie three peut ne pas se monter dans ce stub ; ce qui compte est
+    // ce qui a été APPELÉ avant, et l'anneau est bâti en tout premier
+  }
+  assert.ok(vus.length > 500, 'la sonde a été appelée ' + vus.length + ' fois')
+  // ⚡ **L'ORDRE DES ARGUMENTS, PROUVÉ CONTRE `latLonDeLocal` DU DÉPÔT.**
+  const anneau = contourCrop(0.08, 4.4, PAS_CONTOUR)
+  const attendu = latLonDeLocal(anneau[0].u, anneau[0].v, repere)
+  assert.ok(Math.abs(vus[0][0] - attendu.lat) < 1e-9, 'premier argument ' + vus[0][0] + ', latitude attendue ' + attendu.lat)
+  assert.ok(Math.abs(vus[0][1] - attendu.lon) < 1e-9, 'second argument ' + vus[0][1] + ', longitude attendue ' + attendu.lon)
+  // ⚠️ **ET LE TÉMOIN : LES DEUX NE SONT PAS INTERCHANGEABLES ICI.**
+  assert.ok(Math.abs(attendu.lat - attendu.lon) > 1, 'lat et lon trop proches — le test ne prouverait rien')
+  // ⚠️ **LA LISTE EST PRÉ-FILTRÉE UNE FOIS, ET C'EST ÉCRIT DANS LE DÉPÔT.**
+  assert.equal(nListe, 1, 'la liste de tuiles a été rebâtie ' + nListe + ' fois')
 })

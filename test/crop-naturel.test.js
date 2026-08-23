@@ -627,7 +627,12 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
     if (m > 0 && m < 2000) assert.ok(Math.abs(faux - cible) > 0.05, `${m} m : les deux conventions ne se distinguent pas — le test ne prouve rien`)
   }
   // le plancher du pivot suit la MÊME conversion : la mer est à h = 0
-  assert.match(FRAG_GLOBE, /natPlancherPivot\(\(0\.0 - uReliefBas\) \/ max\(uLandMax - uReliefBas, uPlancherRampeM\)\)/)
+  // ⚠️ **LE `max(uHeightPivot, …)` FAIT PARTIE DE L'ASSERTION, ET UNE SURVIVANTE
+  // L'A EXIGÉ** : sans lui, le plancher ÉCRASE le réglage de l'utilisateur, et
+  // `heightPivot` cesse d'être une tirette. Le socle écrit exactement la même
+  // ligne (`float pivot = max(uHeightPivot, pivotFloor);`).
+  assert.match(FRAG_GLOBE, /float pivot = max\(uHeightPivot, natPlancherPivot\(\(0\.0 - uReliefBas\) \/ max\(uLandMax - uReliefBas, uPlancherRampeM\)\)\);/)
+  assert.match(TERRAIN_SRC, /float pivot = max\(uHeightPivot, pivotFloor\);/)
   assert.ok(Math.abs(plancherPivot((0 - reliefBas) / (G.landMax - reliefBas)) - plancherPivot(hSocle(0))) < 0.01)
   // et un pivot d'utilisateur plus haut que le plancher gagne — c'est un réglage
   assert.equal(Math.max(0.65, plancherPivot(hSocle(0))), 0.65)

@@ -256,6 +256,35 @@ test("①i le CREUX dit de combien le relief descend SOUS SA TERRE — Tâche P1
   assert.ok(Math.abs(-eAlpin.profondeur - 402) > 400)
 })
 
+test("①i bis le creux ne peut JAMAIS être négatif — et l’algèbre dit pourquoi", () => {
+  // ⚠️ **UNE SURVIVANTE A DEMANDÉ CE TEST.** La mutation qui retire le `max(0, …)`
+  // survivait, et la première réaction — « donc c'est du code mort » — n'est
+  // vraie que d'un côté, et il faut dire lequel.
+  //
+  // ⚡ **CÔTÉ `mesurerRelief`, LA BRANCHE EST INATTEIGNABLE PAR L'ALGÈBRE** :
+  // `minTerreM` est le minimum sur le sous-ensemble `h >= 0`, `minM` le minimum
+  // sur TOUS les points, donc `minM <= minTerreM = terreBas`. On le REJOUE au
+  // lieu de le supposer, sur un relief qui plonge et un relief qui ne plonge pas.
+  for (const zone of [(u, v) => u < 0, (u, v) => false]) {
+    const m = mesurerRelief({
+      repere: REPERE, forme: FORME, pas: 24,
+      hauteur: (lat, lon) => { const q = localCrop(lat, lon, REPERE); return zone(q.u, q.v) ? -700 : 300 },
+    })
+    assert.ok(m.minM <= m.minTerreM, `${m.minM} > ${m.minTerreM}`)
+    assert.ok(echelleRampe(m, { plancherM: PLANCHER }).creux >= 0)
+  }
+  // ⛔ **MAIS `echelleRampe` EST EXPORTÉE, ET SON ENTRÉE N'EST PAS TOUJOURS UNE
+  // MESURE DU DÉPÔT** — ce fichier lui en passe trois écrites à la main, et
+  // `poserRampe({ echelle })` est le point d'entrée des bancs. La garde n'est
+  // donc PAS morte : elle défend un appelant qui existe, et voici ce qu'elle
+  // empêche — un creux négatif, que `log1p(max(0, v))` écraserait à zéro sans
+  // un mot, et qui remonterait l'ancre basse AU-DESSUS de la terre.
+  const incoherente = { minM: 900, maxM: 2000, minTerreM: 100, maxTerreM: 2000 }
+  const e = echelleRampe(incoherente, { plancherM: PLANCHER })
+  assert.equal(e.creux, 0, 'une mesure incohérente doit rendre un creux NUL, pas négatif')
+  assert.ok(e.terreBas - e.creux <= e.terreHaut, "l'ancre basse ne peut pas dépasser le sommet")
+})
+
 test("①j `echelleRampe` rend TOUJOURS un creux fini — il n'y a pas de repli à écrire", () => {
   // ⚠️ **C'EST CE QUI AUTORISE `_poserUniformesRampe` À LE LIRE SANS GARDE.** Un
   // `undefined` y poserait un `NaN` dans un uniforme, c'est-à-dire une
@@ -374,6 +403,30 @@ const CHAMPS = [
 // `terreBas − creux`. Il est donc vérifié à part, ci-dessous, avec la même
 // exigence — lu depuis `RAMPE_MONDE`, jamais écrit en dur.
 const EXPR_RELIEF_BAS = 'RAMPE_MONDE.terreBas - RAMPE_MONDE.creux'
+
+test('②d ter TOUT uniforme LU par le fragment y est DÉCLARÉ — le nuanceur compile', () => {
+  // ⛔ **UNE SURVIVANTE A DEMANDÉ CE TEST, ET IL EST GÉNÉRIQUE.** Retirer la
+  // ligne `uniform float uReliefBas;` du nuanceur ne faisait rougir personne :
+  // aucun test ne LISAIT le texte du fragment pour y chercher ses déclarations,
+  // et le défaut ne se serait vu qu'au chargement de la page — « un agent a
+  // livré du code qui plantait au démarrage AVEC 3 098 tests verts » (§0 du
+  // plan). L'assertion vaut pour TOUS les uniformes, pas seulement le mien.
+  const i = globeSrc.indexOf('const FRAG =')
+  const frag = globeSrc.slice(i, globeSrc.indexOf('\nconst ', i + 10))
+  const declares = new Set([...frag.matchAll(/^uniform\s+\w+\s+(u[A-Za-z0-9]+)\s*;/gm)].map((m) => m[1]))
+  // le corps SEUL — on retire les lignes de déclaration et les commentaires
+  const corps = frag
+    .split('\n')
+    .filter((l) => !/^uniform\s/.test(l.trim()) && !/^\s*\/\//.test(l))
+    .join('\n')
+  const lus = new Set([...corps.matchAll(/\bu[A-Z][A-Za-z0-9]*/g)].map((m) => m[0]))
+  const orphelins = [...lus].filter((n) => !declares.has(n))
+  assert.deepEqual(orphelins, [], 'uniformes lus mais jamais déclarés : ' + orphelins.join(', '))
+  // ⚠️ **ET LE TÉMOIN : LE TEST DOIT VOIR QUELQUE CHOSE.** Sans lui, un jour où
+  // l'extraction rendrait une chaîne vide, ce test serait vert pour rien.
+  assert.ok(declares.size > 40, 'seulement ' + declares.size + ' uniformes déclarés')
+  assert.ok(lus.has('uReliefBas') && declares.has('uReliefBas'))
+})
 
 test('②d bis `uReliefBas` naît de `RAMPE_MONDE` et `retirerRampe` l’y ramène — Tâche P11', () => {
   assert.ok(blocUniformes().includes(`uReliefBas: { value: ${EXPR_RELIEF_BAS} }`),
