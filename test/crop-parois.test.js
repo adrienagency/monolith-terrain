@@ -1305,6 +1305,26 @@ test('⑬f LE GARDE-FOU DU QUART DE MUR — sa marge est MESURÉE, et il mord qu
   assert.equal(auditer(ecrase).sain, true, auditer(ecrase).raison)
 })
 
+test('⑬f ter LE GARDE-FOU MORD AUSSI SUR LE CHANFREIN — SÉPARÉMENT DU CONGÉ', () => {
+  // ⚠️ **⑬f NE MORDAIT QUE POUR LE CONGÉ.** Ses deux seules assertions sur le
+  // bloc écrasé portent sur `ecrase.arrondi` ; rien n y lit `ecrase.chanfrein`.
+  // Une relecture a retiré le `Math.min(frCh * largeur, mur * PART_MUR_MAX)` du
+  // calcul de `ch` SEUL (`parois-crop.js:803`, en laissant celui de `rd` intact)
+  // et ⑬f est resté vert — les deux garde-fous partagent la même formule mais
+  // rien ne prouvait que celui du chanfrein est vraiment branché. Ce test répète
+  // le même bloc écrasé, autonome de ⑬f, et vérifie CHACUNE des deux rentrées
+  // séparément : casser l une seule fait rougir CE test.
+  const ecrase = construireSolideCrop({ ...commun, hauteur: plat, fractionProfondeur: FRACTION_PROFONDEUR / 100 })
+  const murEcrase = ecrase.hautMax - ecrase.baseY
+  // le congé mord (répété ici pour que ce test n ait pas besoin de ⑬f pour être lu)
+  assert.ok(ecrase.arrondi < FRACTION_ARRONDI * ecrase.largeur, 'le garde-fou du congé ne rogne rien')
+  assert.equal(ecrase.arrondi, murEcrase * PART_MUR_MAX)
+  // ⚡ ET LE CHANFREIN MORD AUSSI — c est la morsure qui manquait dans ⑬f
+  assert.ok(ecrase.chanfrein < FRACTION_CHANFREIN * ecrase.largeur, 'le garde-fou du chanfrein ne rogne rien')
+  assert.equal(ecrase.chanfrein, murEcrase * PART_MUR_MAX)
+  assert.equal(auditer(ecrase).sain, true, auditer(ecrase).raison)
+})
+
 test('⑬f bis LE COUVERCLE-TÉMOIN S APPUIE SUR LA SURFACE, pas sur le fond', () => {
   // ⛔ **UNE SURVIVANTE A DÉMASQUÉ CE TROU.** Le couvercle-témoin n est pas
   // livré (§6) : il ne sert qu à refermer la coque pour `auditerSolide`. Mais
@@ -1858,4 +1878,63 @@ test('P14 · `construireParoisCrop` POSE le retrait, et dans la MONNAIE du demi-
   faux2.group.remove = () => {}
   Globe.prototype.retirerParoisCrop.call(faux2)
   assert.equal(faux2._retraitJupeCrop, null, 'sans mur, plus rien n autorise à couper une jupe')
+})
+
+test('P14 · ⛔ LE DERNIER SOMMET DE L ANNEAU DE BORD S EFFACE AUSSI — lecture COMPLÈTE de `d.bord`', () => {
+  // ⚠️ **UNE MUTATION SUR CETTE LECTURE-LÀ A SURVÉCU À TOUTE LA CAMPAGNE.** La
+  // première boucle de `_retaillerJupe` (`globe.js:5082-5083`) construit
+  // `locaux` en lisant CHAQUE indice de `d.bord`. Un décalage d'un cran sur sa
+  // borne (`d.bord.length - 1`) laisse `locaux[dernier]` à `undefined` —
+  // `jupesEffacees` ignore silencieusement un trou (`if (l && …)`,
+  // `parois-crop.js:511`) : le marquage BRUT du dernier sommet de l'anneau
+  // n'est jamais calculé. La dilatation d'un cran (`parois-crop.js:515-519`)
+  // peut le rattraper si un VOISIN est marqué — c'est pourquoi les tests P14
+  // ci-dessus, qui trouvent des RUNS entiers de sommets de frontière, ne le
+  // voient jamais : il y a toujours un voisin marqué pour dilater dessus. On
+  // construit donc un anneau synthétique où SEUL le dernier indice tombe dans
+  // la bande, ses voisins cycliques bien au sec — et on appelle la VRAIE
+  // `_retaillerJupe`, sur une VRAIE `THREE.BufferGeometry`, jamais une
+  // assertion sur le texte source.
+  const r = 0.05
+  const N = 8
+  const locaux = Array.from({ length: N }, () => ({ u: 0, v: 0 })) // tout le monde au sec…
+  locaux[N - 1] = { u: 1 - r / 2, v: 0 } // … sauf le DERNIER indice de l anneau
+
+  // témoin : le dernier tombe bien dans la bande, ses deux voisins cycliques non
+  assert.equal(jupeHorsDuMur(locaux[N - 1].u, locaux[N - 1].v, r), true,
+    'le dernier sommet doit lui-même tomber dans la bande, sinon ce test ne mesure rien')
+  assert.equal(jupeHorsDuMur(locaux[N - 2].u, locaux[N - 2].v, r), false)
+  assert.equal(jupeHorsDuMur(locaux[0].u, locaux[0].v, r), false)
+
+  const pos = new Float32Array(2 * N * 3)
+  for (let i = 0; i < N; i++) {
+    const { lat, lon } = latLonDeLocal(locaux[i].u, locaux[i].v, REPERE)
+    const [x, y, z] = surSphereP14(lat, lon, R_GLOBE)
+    pos[i * 3] = x
+    pos[i * 3 + 1] = y
+    pos[i * 3 + 2] = z
+    // le sommet de jupe, avant retaille : n importe où — `_retaillerJupe` le
+    // recalcule intégralement, effacé ou non, à chaque appel (§ idempotence)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial())
+  const d = { nV: N, bord: [...Array(N).keys()], rabattement: 0.05 }
+  mesh.geometry.userData.jupe = d
+  const g = { _crop: REPERE, _retraitJupeCrop: r, _rayonPlancherCrop: () => 50 }
+
+  const ok = Globe.prototype._retaillerJupe.call(g, { mesh })
+  assert.equal(ok, true)
+
+  // ⚡ LA PREUVE : le dernier sommet de l anneau efface sa jupe, comme un sommet
+  // de frontière ordinaire — et la dilatation d un cran emporte ses deux voisins
+  // cycliques (`bi = 0` et `bi = N - 2`) avec lui, exactement comme au milieu
+  // d un run de sommets de bord.
+  assert.ok(jupeEffacee(mesh, d, N - 1),
+    `le DERNIER sommet de l anneau (bi = d.bord.length - 1 = ${N - 1}), seul sur la frontière : sa jupe doit s effacer`)
+  assert.ok(jupeEffacee(mesh, d, N - 2), 'son voisin cyclique bi = N - 2 doit être dilaté avec lui')
+  assert.ok(jupeEffacee(mesh, d, 0), 'son voisin cyclique bi = 0 (le repli de l anneau) doit être dilaté avec lui')
+  // témoin négatif : un sommet loin du dernier, jamais marqué, jamais dilaté
+  assert.ok(!jupeEffacee(mesh, d, 3), 'un sommet du milieu de l anneau, loin de la frontière, ne doit rien perdre')
+  assert.ok(!jupeEffacee(mesh, d, 4), 'un sommet du milieu de l anneau, loin de la frontière, ne doit rien perdre')
 })
