@@ -4312,7 +4312,15 @@ export class Globe {
       // gardait `uMerScene` à `null`, donc la réfraction du crop lisait une
       // texture absente dès la deuxième pose. `⑩n` de
       // `test/mer-sphere.test.js` exerce ce cycle (pose · image · repose ·
-      // image) et rougit sur le code d'avant cette ligne.
+      // image) et rougit sur le code d'avant le tour de correction.
+      //
+      // ⚠️ **ET IL FAUT DIRE CE QUE CETTE LIGNE NE PROUVE PLUS** : depuis que
+      // `retirerMer` REND la cible (voir plus bas), une repose la recrée de
+      // toute façon, donc remettre ces deux lignes DANS le `if` ne se voit plus
+      // — la mutation M14 du tour de correction **survit, et c'est déclaré**.
+      // On les garde dehors quand même : la durée de vie du matériau et celle
+      // de la cible sont deux affaires distinctes, et les coupler a déjà coûté
+      // une réfraction morte en silence.
       u2.uMerScene.value = this._merRefractRT
       u2.uMerResolution.value.set(taille.x, taille.y)
       renderer.copyFramebufferToTexture(this._merRefractRT)
