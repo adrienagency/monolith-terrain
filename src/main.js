@@ -4112,10 +4112,12 @@ function altitudeCadrageM() {
 // ⚠️ **`cropAttendu` EST LE QUINZIÈME PASSAGER, ET IL DIT UNE PROMESSE — Tâche
 // R3.** Sous `?terre=unique`, ce globe ne servira JAMAIS qu'un crop : la veille
 // finira par appeler `poserCrop`, et rien d'autre ne sera montré. Le lui dire
-// à la naissance est la seule façon de couvrir les **onze premières images**,
-// pendant lesquelles `majSeuilSocle` attend encore le MNT (`largeurBlocM() > 0`)
-// et où le quadtree, laissé libre, descend sur la planète entière : **114 des
-// 191 demandes de tuiles d'un chargement**, mesurées. Voir `_cropAttendu` dans
+// à la naissance est la seule façon de couvrir la **dizaine de premières
+// images** (dernière demande sans crop relevée aux images 3 à 12 selon le
+// tirage), pendant lesquelles `majSeuilSocle` attend encore le MNT
+// (`largeurBlocM() > 0`) et où le quadtree, laissé libre, descend sur la
+// planète entière : **114 demandes de tuiles par chargement**, soit **59,7 %
+// des 191 avec `?globe=continu`** et **71,7 % des 159 sans**. Voir `_cropAttendu` dans
 // `globe.js` pour le relevé et pour ce que ça coûte quand le MNT ne vient pas.
 globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee, cropAttendu: terreUniqueBranchee })
 

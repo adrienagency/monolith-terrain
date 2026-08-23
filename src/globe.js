@@ -2458,9 +2458,18 @@ export class Globe {
     // AVANT QUE LE CROP SOIT POSÉ, ET QUE C'EST LÀ QUE TOUT SE PERD.** Relevé
     // au navigateur (La Réunion, `?terre=unique&frontiere=1&seuil=1&socle=quadtree`,
     // trois chargements, `_request` instrumenté depuis `window.__exp` —
-    // `scripts/sonde-dalles.mjs`) : **114 des 191 demandes de tuiles partent
-    // AVANT que `poserCrop` ait été appelé** — dernière demande sans crop à
-    // l'image 11, premier crop à l'image 41. Dont **les 64 tuiles z3,
+    // `scripts/sonde-dalles.mjs`) : **114 demandes de tuiles partent AVANT que
+    // `poserCrop` ait été appelé**. Le même 114 des deux côtés, mais pas la même
+    // part : **114 sur 191 (59,7 %) avec `?globe=continu`** — 4 tirages,
+    // `.banc/R3/avant-jalons-A2.json` — et **114 sur 159 (71,7 %) sans**, le
+    // régime par défaut — 3 tirages, `.banc/R3/avant-jalons-B.json`. La dernière
+    // demande sans crop tombe à l'image **3 à 12** selon le tirage, la première
+    // avec crop à l'image **39 à 63**.
+    // ⚠️ **CES BORNES SONT DES INTERVALLES PARCE QUE LA TRACE LE DIT.** Une
+    // première version de ce commentaire écrivait « image 11 / image 41 », les
+    // valeurs d'un tirage, sans qu'aucun fichier ne les porte : la sonde
+    // n'enregistrait pas le numéro d'image. Elle l'enregistre.
+    // Dont **les 64 tuiles z3,
     // c'est-à-dire la planète entière**, parce que la caméra est déjà à
     // l'altitude du bloc et que le quadtree, lui, ne sait pas encore qu'on ne
     // lui demandera qu'un carré de trois tuiles. Sans `?globe=continu` ces 64

@@ -442,7 +442,12 @@ async function unTirage(chrome, n) {
           derniereImageSansCrop: Math.max(-1, ...d.filter((q) => !q.crop).map((q) => q.image)),
           premiereImageAvecCrop: Math.min(Infinity, ...d.filter((q) => q.crop).map((q) => q.image)),
           parChemin: par,
-          liste: d.map((q, i) => ({ z: q.z, x: q.x, y: q.y, prio: q.prio, crop: q.crop, dedans: dedans ? !!dedans[i] : null })),
+          // ⚠️ **`image` EST DANS LA LISTE, ET IL N'Y ÉTAIT PAS — correction C2.**
+          // Le rapport citait « dernière demande sans crop à l'image 11, première
+          // avec crop à l'image 41 » ; aucune trace du disque ne portait de numéro
+          // d'image. Un chiffre qu'on ne peut pas recalculer depuis sa source
+          // n'est pas une mesure.
+          liste: d.map((q, i) => ({ z: q.z, x: q.x, y: q.y, prio: q.prio, crop: q.crop, image: q.image, dedans: dedans ? !!dedans[i] : null })),
         }
       })(),
       jalons: etat?.jalons ?? null,

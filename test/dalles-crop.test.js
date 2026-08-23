@@ -11,10 +11,11 @@
 //
 //   ① `cropAttendu` — la descente du quadtree est RETENUE tant que le crop n'a
 //      pas été posé. C'est le trou que l'enquête de la tâche a mesuré : sur un
-//      chargement réel, **114 des 191 demandes de tuiles partent avant que
-//      `poserCrop` ait été appelé**, dont les 64 tuiles z3, c'est-à-dire la
-//      planète entière. `_horsCropSeul` ne pouvait rien y faire : sa première
-//      ligne rendait `false` tant que `_crop` était `null`.
+//      chargement réel, **114 demandes de tuiles partent avant que `poserCrop`
+//      ait été appelé** — **114 sur 191 (59,7 %)** avec `?globe=continu`,
+//      **114 sur 159 (71,7 %)** sans, le régime par défaut. Dont les 64 tuiles
+//      z3, c'est-à-dire la planète entière. `_horsCropSeul` ne pouvait rien y
+//      faire : sa première ligne rendait `false` tant que `_crop` était `null`.
 //
 //   ② la CONTRE-PRESSION de file, jusqu'ici enfermée derrière `this.continu`.
 //      ⚠️ **Ces trois mécanismes n'avaient JAMAIS été exercés sous
