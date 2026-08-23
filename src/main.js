@@ -86,6 +86,16 @@ import { creerVeilleCrop } from './monde/branchement-crop.js'
 // questions, un seul booléen. La loi vit dans un module pour la raison écrite
 // trois lignes plus haut : aucun test ne charge `main.js`.
 import { visibiliteSurface } from './monde/visibilite-surface.js'
+// ══════ LA GRANDEUR DU REPOS — Tâche R1, tour 2 ═══════════════════════
+//
+// ⛔ **ELLE VIVAIT ICI, EN CLAIR, ET C'ÉTAIT UN TROU DE MUTATION.** Remplacer le
+// corps de `distanceCadrageM()` par `return altitudeCadrageM()` annulait le
+// correctif R1 ① EN ENTIER — l'orbite réveillait de nouveau la planète autour du
+// crop — et **passait les 4 131 tests**, parce qu'aucun test de ce dépôt ne
+// charge `main.js` et que le seul garde-fou était une expression régulière sur
+// le texte source. Le calcul vit donc dans un module pur, exercé par un banc qui
+// pose de vraies orbites et de vrais zooms ; ici il n'y a plus qu'un câblage.
+import { grandeurRepos } from './monde/grandeur-repos.js'
 // ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3 ════════════════════════════════
 //
 // > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
@@ -4086,22 +4096,18 @@ function altitudeCadrageM() {
 
 // LA DISTANCE DE LA CAMÉRA À SA CIBLE — la grandeur du REPOS, Tâche R1.
 //
-// ⚠️ **CE N'EST PAS UNE SECONDE ALTITUDE, ET IL NE FAUT PAS LA CONVERTIR.** Le
-// §1 de `veille-repos.js` porte la mesure ; le §2 dit pourquoi l'unité est
-// indifférente : la veille du repos ne compare que des RAPPORTS (`|Δ ln|`).
-// Diviser par l'échelle du bloc ne changerait aucun de ses verdicts et
-// rebrancherait la grandeur sur `largeurBlocM()`, c'est-à-dire sur l'emprise du
-// bloc CHARGÉ — exactement ce dont on vient de la débrancher : mesuré le
-// 2026-08-23, une arrivée de MNT fait bouger l'altitude de `4,98 × 10⁻⁵` sans
-// qu'aucun geste ait eu lieu, et la distance de `0`.
+// ⚠️ **UN CÂBLAGE, ET RIEN D'AUTRE.** Le calcul, ce qu'il répond, ce qu'il ne
+// répond pas, pourquoi son unité est indifférente et pourquoi il ne faut PAS le
+// convertir : `monde/grandeur-repos.js`, qui porte aussi la mutation M9 dont il
+// est né. ⛔ **Ne remets pas le calcul ici** — il y a vécu une journée, et une
+// mutation d'une ligne y a annulé le correctif ① en entier sans faire rougir un
+// seul des 4 131 tests.
 //
-// ⚠️ **ET C'EST LA CIBLE D'`OrbitControls`, PAS UN POINT AU SOL RECALCULÉ** :
-// c'est autour d'elle que tourne le cliquer-glisser, donc c'est d'elle que la
-// rotation garde la distance rigoureusement constante — `4,4 × 10⁻¹⁶` mesurés
-// sur quinze images de geste réel. Un autre point de référence rendrait la
-// grandeur sensible à l'orientation, et le défaut reviendrait par la fenêtre.
+// ⚠️ **CE N'EST PAS UNE SECONDE ALTITUDE**, et les deux lectures partent
+// ensemble d'une seule image (voir `majSeuilSocle`) : elles répondent à deux
+// questions, pas à la même — §1 de `veille-repos.js`.
 function distanceCadrageM() {
-  return camera.position.distanceTo(controls.target)
+  return grandeurRepos({ camera: camera.position, cible: controls.target })
 }
 
 // ⚠️ LE SEUL LECTEUR DE `FLAGS.globeContinu` EST ICI (plan « globe continu »,
