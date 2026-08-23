@@ -33,6 +33,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
+// ⚠️ **three ENTRE ICI AU TOUR DE CORRECTION R2** : la section ⑩ter exerce le
+// grab pass de `poserMer` pour de vrai (matrice de repère, cible de copie), et
+// aucune de ces classes n'a besoin d'un contexte WebGL pour être CONSTRUITE —
+// c'est déjà ce qui permet à ⑩e…⑩j d'exister.
+import * as THREE from 'three'
 
 import {
   fleche,
@@ -1138,6 +1143,88 @@ test('⑩j retirer une mer POSÉE la fait vraiment disparaître du groupe', () =
     assert.equal(g.uniforms.uMerRampeOn.value, 0)
     assert.equal(g.uniforms.uMerFondBudgetM.value, 6000)
   })
+})
+
+// ══════════ ⑩ter LE GRAB PASS, EXERCÉ — Tour de correction R2 ══════════════
+//
+// ⛔ **CINQ MUTATIONS SURVIVAIENT À 4 138 TESTS, ET TOUTES LES CINQ ÉTAIENT DES
+// BRANCHEMENTS.** La relecture de la Tâche R2 les a comptées : la loi pure
+// était bien gardée (`test/eau-refraction.test.js` ①②), les CÂBLES ne l'étaient
+// que par des expressions régulières sur le source. La plus grave —
+// `uMerVersMonde` posée depuis une matrice IDENTITÉ — **annule le correctif
+// central de la tâche** (la normale de la mer redevient locale, le Fresnel
+// resature à son plafond de 0,5, la mer redevient « quasiment transparente »)
+// et la seule garde était `/uMerVersMonde\.value\.setFromMatrix4\(/`, qui ne
+// regarde pas ce qu'on lui PASSE.
+//
+// ⚠️ **CES QUATRE-LÀ EXERCENT `onBeforeRender`, `retirerMer` ET
+// `majReglagesMer` POUR DE VRAI**, avec un rendeur bouchon qui compte ce qu'on
+// lui demande. Ce ne sont pas des greps : chacun calcule un nombre et le
+// compare à un nombre obtenu autrement. **Un `return` muet dans le code testé
+// les fait rougir, pas verdir.**
+
+/**
+ * Un rendeur qui ne rend rien mais qui DIT ce qu'on lui a demandé.
+ *
+ * ⚠️ Il porte la vraie signature des deux méthodes que le grab pass appelle :
+ * `getDrawingBufferSize(cible)` REMPLIT sa cible et la rend (c'est ce que fait
+ * `WebGLRenderer`), `copyFramebufferToTexture(texture)` note la texture reçue.
+ */
+function rendeurBouchon(largeur = 861, hauteur = 351) {
+  const r = {
+    copies: [],
+    taille: { largeur, hauteur },
+    getDrawingBufferSize(cible) {
+      cible.set(r.taille.largeur, r.taille.hauteur)
+      return cible
+    },
+    copyFramebufferToTexture(texture) {
+      r.copies.push(texture)
+    },
+  }
+  return r
+}
+
+test('⑩k `onBeforeRender` pose une matrice qui TOURNE VRAIMENT la normale de la mer', async () => {
+  // ⛔ **C'EST LA GARDE DU CORRECTIF CENTRAL DE R2, ET ELLE EST DU COMPORTEMENT.**
+  // On ne cherche pas `setFromMatrix4` dans le source : on POSE une mer, on
+  // rend une image, on prend la matrice POSÉE, on lui donne la normale d'une
+  // mer au repos — `(0, 1, 0)` en repère de nappe — et on regarde où elle
+  // tombe dans le monde. Une matrice identité la laisse sur place ; la vraie
+  // rotation du crop l'envoie sur le HAUT LOCAL de La Réunion.
+  const g = globeAvecCrop()
+  await Globe.prototype.poserMer.call(g, { remplir: remplirBouchon })
+  g._mer.updateMatrixWorld(true)
+  g._mer.onBeforeRender(rendeurBouchon())
+
+  const M = g._mer.material.uniforms.uMerVersMonde.value
+  const nLocal = new THREE.Vector3(0, 1, 0) // la nappe au repos, en repère de nappe
+  const nMonde = nLocal.clone().applyMatrix3(M).normalize()
+
+  // ① où DOIT-ELLE tomber ? Sur le haut local du crop, calculé ICI, sans
+  //    `poserMer` : le rayon de la sphère au centre du crop.
+  const { origine, haut } = repereLocalCrop(REPERE, R_GLOBE)
+  const hautV = new THREE.Vector3(...haut)
+  assert.ok(nMonde.distanceTo(hautV) < 1e-9, `la normale tournée ${nMonde.toArray()} n est pas le haut du crop ${haut}`)
+  // et ce haut EST la géométrie du lieu : sa composante verticale vaut le sinus
+  // de la latitude du centre (−21,115° → −0,3602). Un témoin indépendant du
+  // module, qui dit que la matrice n'est pas « une rotation quelconque ».
+  assert.ok(Math.abs(hautV.y - Math.sin(CENTRE.lat * Math.PI / 180)) < 1e-6)
+
+  // ② et ce que ça change au FRESNEL, qui est tout l'objet de la correction.
+  //    Caméra plongeante au-dessus de la nappe, tout en repère MONDE.
+  const P = new THREE.Vector3(...origine)
+  const V = hautV.clone() // la caméra est droit au-dessus : V = le haut du crop
+  const fresnel = (N) => Math.min(Math.pow(1 - Math.max(N.dot(V), 0), 5), 0.5)
+  assert.ok(P.length() > 0, 'le crop doit être posé quelque part sur la sphère')
+  assert.ok(fresnel(nMonde) < 1e-9, `en vue plongeante le Fresnel doit être quasi nul, pas ${fresnel(nMonde)}`)
+  // ⛔ **LE DÉFAUT D'AVANT R2, CHIFFRÉ ICI MÊME** : la même normale laissée en
+  // repère de nappe est dotée avec un `V` du monde, le produit tombe sous zéro,
+  // il est écrêté, et le Fresnel SATURE à son plafond. C'est ce que rend la
+  // mutation « matrice identité », et c'est ce que ce test refuse.
+  assert.equal(fresnel(nLocal), 0.5, 'la normale NON tournée doit saturer le Fresnel — sinon ce test ne prouve rien')
+  // les deux repères sont à plus de 100° l'un de l'autre à cette latitude
+  assert.ok(nMonde.angleTo(nLocal) * 180 / Math.PI > 100)
 })
 
 // ══════════ ⑪ LE BORD DE LA MER — Tâche J ═══════════════════════════════════
