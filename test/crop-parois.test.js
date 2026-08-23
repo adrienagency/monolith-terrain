@@ -1174,30 +1174,69 @@ test('⑬d LES NORMALES — le congé est LISSE, le reste est de FACE, et three 
       else pireHorsArc = Math.max(pireHorsArc, ecart)
     }
     // ⚠️ **LA DÉFINITION MÊME DE « FACETTE » : les trois coins d un triangle
-    // portent la MÊME normale.** Sur le congé, une bonne part des triangles doit
-    // en porter des différentes, sinon les trois segments se liront comme trois
-    // facettes — « l inverse exact de l intention » (`plinth.js`).
-    if (surArc && angleEntre(lus[0], lus[1]) < 1e-6 && angleEntre(lus[0], lus[2]) < 1e-6) arcsFacettes++
+    // portent la MÊME normale.** Sur le congé, AUCUN triangle ne doit être dans
+    // ce cas, sinon les trois segments se liront comme trois facettes —
+    // « l inverse exact de l intention » (`plinth.js`).
+    //
+    // ⛔ **L ÉGALITÉ SE TESTE SUR LES OCTETS, PAS SUR UN ANGLE, ET UNE
+    // SURVIVANTE L A MONTRÉ.** Un seuil de 1·10⁻⁶ degré ne tient pas : les
+    // normales sont des `Float32`, et `acos` du produit scalaire d un vecteur
+    // par LUI-MÊME rend jusqu à 0,015° d écart. La mutation « prendre la
+    // normale du premier sommet pour les trois » ne rendait que **1 944 des
+    // 6 120 triangles** sous ce seuil, et SURVIVAIT.
+    const memeNormale = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
+    if (surArc && memeNormale(lus[0], lus[1]) && memeNormale(lus[0], lus[2])) arcsFacettes++
   }
   assert.ok(pireHorsArc < 0.05,
     `hors du congé, nos normales s écartent de celles de three de ${pireHorsArc}°`)
   assert.ok(pireSurArc > 5,
     `sur le congé, nos normales valent celles de face à ${pireSurArc}° près : le congé est facetté`)
   const arcs = s.compte.parois - s.triArc
-  assert.ok(arcsFacettes < arcs * 0.51,
-    `${arcsFacettes} triangles de congé sur ${arcs} portent trois normales égales`)
+  assert.ok(arcs > 0, 'le congé ne porte aucun triangle')
+  assert.equal(arcsFacettes, 0,
+    `${arcsFacettes} triangles de congé sur ${arcs} portent trois normales identiques : c est une facette`)
+
+  // ⚠️ **`triArc` BORNE EXACTEMENT LE CONGÉ, ET ON LE VÉRIFIE PLUTÔT QUE DE LE
+  // CROIRE.** Le reste de ce test lit `s.triArc` ; si cette borne était fausse,
+  // le test découperait « le congé » ailleurs qu où il est et resterait vert.
+  // **Une mutation qui pose `triArc: 0` a survécu pour exactement cette
+  // raison.** Le critère indépendant : un triangle est sur le congé si et
+  // seulement si ses TROIS sommets sont sur un rang d arc.
+  const n = s.compte.anneau
+  const premierArc = s.rangArc * n
+  for (let t = 0; t < s.compte.parois * 3; t += 3) {
+    const surArcGeo = s.indices[t] >= premierArc && s.indices[t + 1] >= premierArc && s.indices[t + 2] >= premierArc
+    assert.equal(t / 3 >= s.triArc, surArcGeo,
+      `le triangle ${t / 3} : \`triArc\` dit ${t / 3 >= s.triArc}, la géométrie dit ${surArcGeo}`)
+  }
 
   // ⚡ **LES DEUX SOUDURES, MESURÉES.** À θ = 0 la normale du congé vaut celle
-  // du mur (raccord invisible) ; à θ = 90° elle vaut celle du fond, (0, −1, 0).
-  const n = s.compte.anneau
+  // du MUR (raccord invisible) ; à θ = 90° elle vaut celle du FOND, (0, −1, 0).
+  // ⚠️ **ET « HORIZONTALE » NE SUFFIT PAS — UNE SURVIVANTE L A MONTRÉ.** Retourner
+  // le SIGNE de l horizontale laisse la normale horizontale ; elle regarde
+  // simplement DEDANS. On la confronte donc à la normale de face du mur, pas à
+  // un axe.
   const N = s.normales
   const bas = (s.rangs - 1) * n
+  // la normale de face du dernier bandeau de MUR, par sommet d anneau
+  const murFace = new Map()
+  for (let t = (s.triArc - n * 2) * 3; t < s.triArc * 3; t += 3) {
+    if (t < 0) continue
+    const i = t * 3
+    murFace.set(s.indices[t] % n, [face[i], face[i + 1], face[i + 2]])
+  }
+  let pireRaccord = 0
   for (let k = 0; k < n; k += 97) {
-    const debut = [N[(s.rangArc * n + k) * 3], N[(s.rangArc * n + k) * 3 + 1], N[(s.rangArc * n + k) * 3 + 2]]
+    const debut = [N[(premierArc + k) * 3], N[(premierArc + k) * 3 + 1], N[(premierArc + k) * 3 + 2]]
     assert.ok(Math.abs(debut[1]) < 1e-6, `à θ = 0 la normale du congé n est pas horizontale : ${debut}`)
+    const mf = murFace.get(k)
+    if (mf) pireRaccord = Math.max(pireRaccord, angleEntre(debut, mf))
     const fin = [N[(bas + k) * 3], N[(bas + k) * 3 + 1], N[(bas + k) * 3 + 2]]
     assert.ok(angleEntre(fin, [0, -1, 0]) < 1e-3, `à θ = 90° la normale du congé vaut ${fin}`)
   }
+  assert.ok(murFace.size > n / 2, `le témoin du mur ne couvre que ${murFace.size} sommets sur ${n}`)
+  assert.ok(pireRaccord < 1.5,
+    `à θ = 0 le congé s écarte de ${pireRaccord}° de la normale du mur : le raccord se verrait`)
   // ⚠️ **ET LE SENS EST VÉRIFIÉ, PAS SUPPOSÉ.** `plinth.js` raconte la version où
   // seule la moitié de la normale était retournée : « la base du socle est
   // traitée comme un objet séparé », a lu Adrien. La normale du fond du crop est
@@ -1259,6 +1298,39 @@ test('⑬f LE GARDE-FOU DU QUART DE MUR — sa marge est MESURÉE, et il mord qu
   assert.ok(ecrase.arrondi < FRACTION_ARRONDI * ecrase.largeur, 'le garde-fou ne rogne rien')
   assert.equal(ecrase.arrondi, murEcrase * PART_MUR_MAX)
   assert.equal(auditer(ecrase).sain, true, auditer(ecrase).raison)
+})
+
+test('⑬f bis LE COUVERCLE-TÉMOIN S APPUIE SUR LA SURFACE, pas sur le fond', () => {
+  // ⛔ **UNE SURVIVANTE A DÉMASQUÉ CE TROU.** Le couvercle-témoin n est pas
+  // livré (§6) : il ne sert qu à refermer la coque pour `auditerSolide`. Mais
+  // son sommet est le point de SURFACE au centre du crop, et **`Ā` ne le voit
+  // pas** — la fermeture ne dépend que du bord, pas de la position de l apex.
+  // Déplacer l apex sur le centre du FOND laissait donc l audit vert, avec un
+  // solide qui se traverse lui-même et un VOLUME faux.
+  const s = SOLIDE
+  const n = s.compte.anneau
+  const apex = s.rangs * n + 1
+  const centreFond = s.rangs * n
+  // l apex est au-dessus du fond, et haut d au moins un quart du mur
+  const mur = s.hautMax - s.baseY
+  assert.ok(s.positions[apex * 3 + 1] > s.baseY + mur * 0.25,
+    `l apex du couvercle est à ${s.positions[apex * 3 + 1]} pour un fond à ${s.baseY}`)
+  assert.equal(s.positions[centreFond * 3 + 1], Math.fround(s.baseY))
+  // et le couvercle s appuie SUR LUI, pas sur le centre du fond
+  for (let c = 0; c < s.indicesCouvercle.length; c += 3) {
+    assert.equal(s.indicesCouvercle[c], apex, `le couvercle part du sommet ${s.indicesCouvercle[c]}`)
+  }
+  // ⚡ **ET LE VOLUME LE MESURE** : posé au fond, l apex ferait perdre au bloc
+  // tout le volume de son chapeau. On le rejoue pour le montrer.
+  const idxBon = new Uint32Array(s.indices.length + s.indicesCouvercle.length)
+  idxBon.set(s.indices)
+  idxBon.set(s.indicesCouvercle, s.indices.length)
+  const idxFaux = idxBon.slice()
+  for (let c = s.indices.length; c < idxFaux.length; c += 3) idxFaux[c] = centreFond
+  const vBon = auditerSolide({ geometrie: s.positions, indices: idxBon, axeHauteur: 'y' })
+  const vFaux = auditerSolide({ geometrie: s.positions, indices: idxFaux, axeHauteur: 'y' })
+  assert.ok(Math.abs(vFaux.volume - vBon.volume) / vBon.volume > 0.05,
+    `l apex déplacé ne change le volume que de ${((vFaux.volume - vBon.volume) / vBon.volume) * 100} %`)
 })
 
 test('⑬g LE SOLIDE RESTE SAIN AVEC LE CHANFREIN ET LE CONGÉ — aucun triangle dégénéré', () => {
@@ -1369,4 +1441,25 @@ test('⑬h `globe.js` POSE nos normales sur la géométrie — EXÉCUTÉ, pas ch
   for (let i = 0; i < face.length; i++) ecartTemoin = Math.max(ecartTemoin, Math.abs(face[i] - voulu[i]))
   assert.ok(ecartTemoin > 0.05,
     `\`computeVertexNormals\` rend la même chose à ${ecartTemoin} près : le test ne distingue rien`)
+
+  // ⛔ **ET L OCCLUSION DE CONTACT AUSSI, PARCE QU UNE SURVIVANTE A MONTRÉ QUE
+  // PERSONNE NE LA SUIVAIT JUSQU À LA GÉOMÉTRIE.** Remplacer `solide.couleurs`
+  // par un tableau plein de 255 dans `globe.js` — c est-à-dire éteindre l ombre
+  // de contact, « ce qui fait lire objet posé plutôt que carte flottante » —
+  // passait au travers des 4 095 tests. L attribut porte un NOM PROPRE (`aoCrop`,
+  // pas `color`) : c est le nuanceur des parois qui le lit.
+  const ao = pose.geometry.getAttribute('aoCrop')
+  assert.ok(ao, 'la géométrie posée ne porte pas l attribut `aoCrop`')
+  assert.equal(ao.normalized, true, '`aoCrop` doit être normalisé : le nuanceur lit des réels')
+  assert.equal(ao.count, obtenu.length / 3)
+  let pireAo = 0
+  let sombres = 0
+  for (let t = 0; t < attendu.indices.length; t++) {
+    const src = attendu.indices[t] * 3
+    for (let c = 0; c < 3; c++) pireAo = Math.max(pireAo, Math.abs(ao.array[t * 3 + c] - attendu.couleurs[src + c]))
+    if (ao.array[t * 3] < 235) sombres++
+  }
+  assert.equal(pireAo, 0, `l occlusion posée s écarte de ${pireAo} de celle du solide`)
+  assert.ok(sombres > attendu.indices.length * 0.05,
+    `seuls ${sombres} sommets sur ${attendu.indices.length} portent une ombre de contact : l attribut est plat`)
 })
