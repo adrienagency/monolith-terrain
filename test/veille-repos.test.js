@@ -349,7 +349,7 @@ test('⑥ le repos atteint SES DEUX destinataires, et sur la même image', () =>
   const g = globeDePapier()
   const est = veilleEstompageFactice()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
-  veille.maj(ALT_BLOC)
+  veille.maj(ALT_BLOC, 145.5)
   assert.equal(veille.pose, true, 'le crop n’est pas posé à l’altitude de test')
   assert.equal(veille.repos, true, 'le repos n’est pas relayé')
   assert.equal(g.cropSeul, true, '`poserCropSeul` n’a pas été appelée')
@@ -363,7 +363,7 @@ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
   const est = veilleEstompageFactice()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
   // très au-dessus du seuil de mort : le socle, donc le crop, n'existe pas
-  veille.maj(SEUIL_MORT_M * 4)
+  veille.maj(SEUIL_MORT_M * 4, 145.5)
   assert.equal(veille.pose, false)
   assert.equal(veille.repos, false, 'le repos est relayé sans crop')
   assert.equal(g.cropSeul, null, '`poserCropSeul` appelée sans crop')
@@ -374,14 +374,17 @@ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () 
   const g = globeDePapier()
   const est = veilleEstompageFactice()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
-  veille.maj(ALT_BLOC)
+  // ⚠️ **LE GESTE SE JOUE SUR LA DISTANCE DEPUIS LA TÂCHE R1**, pas sur
+  // l'altitude : c'est elle que la veille du repos surveille (§1 du module).
+  const D = 145.5
+  veille.maj(ALT_BLOC, D)
   assert.equal(g.cropSeul, true)
   // un geste : une seule image suffit
-  veille.maj(ALT_BLOC * Math.exp(SEUIL_BOUGE_LOG * 3))
+  const D2 = D * Math.exp(SEUIL_BOUGE_LOG * 3)
+  veille.maj(ALT_BLOC, D2)
   assert.equal(g.cropSeul, false, 'le geste ne rallume pas les alentours')
   assert.equal(veille.basculesRepos, 2)
-  const alt = ALT_BLOC * Math.exp(SEUIL_BOUGE_LOG * 3)
-  for (let i = 0; i < IMAGES_CALME; i++) veille.maj(alt)
+  for (let i = 0; i < IMAGES_CALME; i++) veille.maj(ALT_BLOC, D2)
   assert.equal(g.cropSeul, true, 'la vue posée ne recroppe pas')
   assert.equal(veille.basculesRepos, 3)
 })
@@ -389,7 +392,7 @@ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () 
 test('⑥ le relais ne réécrit RIEN tant que l’état ne change pas', () => {
   const g = globeDePapier()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
-  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC)
+  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC, 145.5)
   assert.equal(g.posesCropSeul, 1, `${g.posesCropSeul} appels de \`poserCropSeul\` pour un seul état`)
 })
 
@@ -399,7 +402,7 @@ test('⑥ l’ORBITE éteint le crop seul et fait OUBLIER l’altitude de réfé
   const repos = creerVeilleRepos()
   const espion = { maj: (a) => repos.maj(a), oublier: () => { oublis.push(1); repos.oublier() } }
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: espion })
-  veille.maj(ALT_BLOC)
+  veille.maj(ALT_BLOC, 145.5)
   assert.equal(g.cropSeul, true)
   veille.poserMode(false)
   assert.equal(g.cropSeul, false, 'le crop seul survit à l’orbite')
@@ -418,11 +421,14 @@ test('⑥ l’ORBITE ne POLLUE PAS les compteurs de la veille du repos', () => {
   const g = globeDePapier()
   const repos = creerVeilleRepos()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos })
-  veille.maj(ALT_BLOC)
+  veille.maj(ALT_BLOC, 145.5)
   const avant = repos.bascules
   veille.poserMode(false)
-  // le résidu orbital : `altitudeCadrageM()` y rend n'importe quoi, et il varie
-  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC * (100 + i))
+  // ⚠️ **LE RÉSIDU ORBITAL SE JOUE SUR LA DISTANCE DEPUIS LA TÂCHE R1** : en
+  // orbite `controls.target` est le centre de la planète, la distance devient un
+  // rayon orbital et elle VARIE à chaque image. Nourrir une distance constante
+  // — ou pas de distance du tout — rendrait ce test vert sans rien lire.
+  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC * (100 + i), 145.5 * (100 + i))
   assert.equal(repos.bascules, avant, `la veille du repos a compté ${repos.bascules - avant} bascules en orbite`)
   assert.equal(repos.dernierEcart, 0, 'la veille du repos a mesuré un écart sur un résidu orbital')
 })
@@ -433,7 +439,7 @@ test('⑥ SANS veille de repos, le comportement est celui d’AVANT la tâche', 
   const g = globeDePapier()
   const est = veilleEstompageFactice()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est })
-  for (let i = 0; i < 100; i++) veille.maj(ALT_BLOC)
+  for (let i = 0; i < 100; i++) veille.maj(ALT_BLOC, 145.5)
   assert.equal(veille.repos, false)
   assert.equal(g.cropSeul, null, '`poserCropSeul` appelée sans veille de repos')
   assert.equal(est.etat.poses, 0, '`poserRepos` appelée sans veille de repos')
@@ -459,7 +465,7 @@ test('⑥ le globe est LU à chaque image, jamais figé à la construction', () 
   // le seul rempart : n'importe lequel des neuf peut désormais mordre.
   let vivant = globeDePapier()
   const veille = creerVeilleCrop({ globe: () => vivant, contexte: ctxFactice, repos: creerVeilleRepos() })
-  veille.maj(ALT_BLOC)
+  veille.maj(ALT_BLOC, 145.5)
   assert.equal(vivant.cropSeul, true, 'le relais ne lit pas le globe à travers sa fonction')
   // la perte de contexte : le globe est remplacé, et c'est le NOUVEAU qui doit
   // recevoir la suite
@@ -467,7 +473,7 @@ test('⑥ le globe est LU à chaque image, jamais figé à la construction', () 
   vivant = globeDePapier()
   veille.poserMode(false)
   veille.poserMode(true)
-  veille.maj(ALT_BLOC)
+  veille.maj(ALT_BLOC, 145.5)
   assert.equal(vivant.cropSeul, true, 'le relais parle encore au globe d’avant')
   assert.equal(mort.posesCropSeul, 1, 'le globe mort a reçu un ordre après sa mort')
 })
@@ -506,7 +512,7 @@ test('⑥ un globe SANS `poserCropSeul` n’est pas une panne', () => {
   const g = globeDePapier()
   delete g.poserCropSeul
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
-  assert.doesNotThrow(() => veille.maj(ALT_BLOC))
+  assert.doesNotThrow(() => veille.maj(ALT_BLOC, 145.5))
   assert.equal(veille.repos, true)
 })
 
@@ -823,4 +829,83 @@ test('⑧ `main.js` ne lit PAS l’altitude une seconde fois pour le repos', () 
   // ⚠️ **UNE SEULE LECTURE D'ALTITUDE, TROIS CONSOMMATEURS** — l'argument est
   // déjà écrit deux fois dans `main.js`, et le chantier l'a payé trois fois.
   assert.ok(!/veilleRepos\.maj\(/.test(MAIN), '`main.js` nourrit la veille du repos en direct : deux chemins pour un geste')
+})
+
+// ══════════════════════ ⑨ LA GRANDEUR SURVEILLÉE — Tâche R1 ═════════════════
+//
+// **Adrien, 2026-08-23 :** « si je modifie la hauteur de la caméra SANS
+// SCROLLER et en me déplaçant, il ne faut pas que le reste de ce qui est autour
+// du socle réapparaisse. Si je dézoome EN SCROLLANT, alors là tu peux faire
+// réapparaître le reste. »
+//
+// La Tâche N avait choisi l'altitude au-dessus de l'ellipsoïde. Mesuré le
+// 2026-08-23 dans l'application vivante (`.banc/R1/mesure-R1.json`) : un vrai
+// cliquer-glisser d'inclinaison, cible immobile et distance rigoureusement
+// constante, fait tomber cette altitude de 17 624 m à 2 861 m — écart
+// logarithmique de pic `3,86 × 10⁻¹`, **15 images sur 15 au-dessus du seuil**,
+// et `auRepos` bascule réellement de vrai à faux. La distance caméra↔cible, à
+// la même image, bouge de `4,4 × 10⁻¹⁶` : le zéro de la machine.
+//
+// ⚠️ **CES DEUX TESTS MORDENT SUR LE COMPORTEMENT, PAS SUR LE TEXTE SOURCE.**
+// Une expression régulière sur `main.js` a déjà laissé survivre une mutation à
+// 4 082 tests sur ce chantier.
+
+test('⑨ une ALTITUDE qui s’effondre à DISTANCE CONSTANTE ne réveille pas la vue', () => {
+  // C'est l'orbite : l'inclinaison écrase `camera.position.y`, donc l'altitude,
+  // sans rien changer à l'échelle. Le crop doit rester seul.
+  const g = globeDePapier()
+  const est = veilleEstompageFactice()
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const D = 145.5 // la distance relevée à l'écran, tenue constante par l'orbite
+  veille.maj(ALT_BLOC, D)
+  assert.equal(g.cropSeul, true, 'le crop seul n’est pas posé au départ')
+  const basculesAvant = veille.basculesRepos
+  // le profil MESURÉ : l'altitude divisée par 6,16 en quinze images
+  let alt = ALT_BLOC
+  for (let i = 0; i < 15; i++) {
+    alt *= Math.exp(-0.12) // bien au-delà du seuil, à chaque image
+    veille.maj(alt, D)
+  }
+  assert.equal(g.cropSeul, true, 'une orbite a rallumé les alentours — le défaut d’Adrien')
+  assert.equal(veille.basculesRepos, basculesAvant, `l’orbite a fait ${veille.basculesRepos - basculesAvant} bascules`)
+  assert.equal(est.etat.repos, true, 'l’estompage a reçu « la vue bouge » sur une orbite')
+})
+
+test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la vue', () => {
+  // C'est la molette : l'échelle change, les alentours doivent revenir DÈS la
+  // première image, sinon la transition commence par un trou.
+  const g = globeDePapier()
+  const est = veilleEstompageFactice()
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  veille.maj(ALT_BLOC, 145.5)
+  assert.equal(g.cropSeul, true)
+  // une seule image suffit — l'hystérésis est asymétrique À DESSEIN (§3)
+  veille.maj(ALT_BLOC, 145.5 * Math.exp(SEUIL_BOUGE_LOG * 3))
+  assert.equal(g.cropSeul, false, 'un dézoom n’a pas rendu la main aux alentours')
+  assert.equal(veille.basculesRepos, 2)
+  assert.equal(est.etat.repos, false, 'l’estompage n’a pas su que la vue bouge')
+})
+
+test('⑨ la molette ne demande PAS de changer `SEUIL_BOUGE_LOG` — c’est mesuré', () => {
+  // ⚠️ Le seuil a été calibré sur l'écart logarithmique d'ALTITUDE d'un cran de
+  // molette. Relevé le 2026-08-23 sur six crans réels, cible immobile
+  // (`.banc/R1/mesure-R1.json`, C) : l'altitude culmine à `6,593 × 10⁻³`, la
+  // distance à `7,112 × 10⁻³` — un rapport de **1,079** — et les deux captent
+  // EXACTEMENT les mêmes images, 54 sur 54. Le même seuil sert donc les deux.
+  const PIC_ALT = 6.592700138422678e-3
+  const PIC_DIST = 7.112215240894834e-3
+  assert.ok(PIC_DIST / PIC_ALT < 1.1, 'la distance ne rend plus le même ordre de grandeur que l’altitude')
+  // et le geste passe le seuil des deux côtés — un seuil qui le manquerait ne
+  // servirait à rien
+  assert.ok(PIC_ALT > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en altitude')
+  assert.ok(PIC_DIST > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en distance')
+})
+
+test('⑨ `main.js` nourrit le repos avec la DISTANCE, sur la même image que l’altitude', () => {
+  // ⚠️ **UNE SEULE LECTURE DE CHAQUE GRANDEUR, ET LES DEUX À LA MÊME IMAGE** —
+  // même argument que la Tâche K bis, deux lignes plus haut dans `main.js`.
+  assert.ok(/function distanceCadrageM\(\)/.test(MAIN), '`distanceCadrageM` n’existe pas')
+  assert.ok(/veilleCrop\.maj\(alt, dist\)/.test(MAIN), 'la distance n’atteint pas la chaîne du crop')
+  assert.ok(/\n  veilleSocle, seuilSocleBranche, altitudeCadrageM, distanceCadrageM,/.test(MAIN),
+    '`distanceCadrageM` n’est pas exposée : rien ne se vérifie à l’écran')
 })

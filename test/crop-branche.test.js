@@ -644,10 +644,18 @@ test('⑧ bis la veille du crop ET l’échelle de couleur lisent LA MÊME altit
   const m = corps.match(/const (\w+) = altitudeCadrageM\(\)/)
   assert.ok(m, 'l’altitude doit être lue UNE fois, dans une variable')
   const v = m[1]
-  assert.match(corps, new RegExp('veilleCrop\\.maj\\(' + v + '\\)'),
-    'la veille du crop doit recevoir la variable, pas une seconde lecture')
+  // ⚠️ **ET DEPUIS LA TÂCHE R1, LA VEILLE DU CROP REÇOIT DEUX GRANDEURS** —
+  // l'altitude pour la naissance du crop et l'estompage, la DISTANCE pour le
+  // repos (voir le §1 de `veille-repos.js`, qui porte la mesure qui a réfuté le
+  // principe inverse). Ce qu'elles doivent partager n'est plus le NOMBRE mais
+  // l'IMAGE : les deux sont lues UNE fois dans cette branche, chacune dans sa
+  // variable, et partent ensemble en un seul appel.
+  const md = corps.match(/const (\w+) = distanceCadrageM\(\)/)
+  assert.ok(md, 'la distance doit être lue UNE fois, dans une variable')
+  assert.match(corps, new RegExp('veilleCrop\\.maj\\(' + v + ', ' + md[1] + '\\)'),
+    'la veille du crop doit recevoir les DEUX variables, pas une seconde lecture')
   assert.match(corps, new RegExp('majEchelleRampe\\(' + v + '\\)'),
-    'l’échelle de couleur doit recevoir LA MÊME variable')
+    'l’échelle de couleur doit recevoir LA MÊME variable d’altitude')
   // un seul point d'alimentation pour chacun, sinon deux lois
   assert.equal((SRC_MAIN.match(/veilleCrop\.maj\(/g) || []).length, 1)
   assert.equal((SRC_MAIN.match(/majEchelleRampe\(/g) || []).length, 1)
@@ -660,6 +668,8 @@ test('⑧ bis la veille du crop ET l’échelle de couleur lisent LA MÊME altit
   const branche = code.slice(code.indexOf('if (terreUniqueBranchee)'), code.indexOf('veilleSocle.maj('))
   assert.equal((branche.match(/altitudeCadrageM\(\)/g) || []).length, 1,
     'la branche `terre unique` doit lire l’altitude UNE seule fois')
+  assert.equal((branche.match(/distanceCadrageM\(\)/g) || []).length, 1,
+    'la branche `terre unique` doit lire la distance UNE seule fois')
 })
 
 test('⑧ ter le crop se décide APRÈS `modes.update` et AVANT le dessin', () => {

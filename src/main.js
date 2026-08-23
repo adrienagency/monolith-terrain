@@ -4073,6 +4073,26 @@ function altitudeCadrageM() {
   return terrain.heightToFeet(camera.position.y) / 3.28084
 }
 
+// LA DISTANCE DE LA CAMÉRA À SA CIBLE — la grandeur du REPOS, Tâche R1.
+//
+// ⚠️ **CE N'EST PAS UNE SECONDE ALTITUDE, ET IL NE FAUT PAS LA CONVERTIR.** Le
+// §1 de `veille-repos.js` porte la mesure ; le §2 dit pourquoi l'unité est
+// indifférente : la veille du repos ne compare que des RAPPORTS (`|Δ ln|`).
+// Diviser par l'échelle du bloc ne changerait aucun de ses verdicts et
+// rebrancherait la grandeur sur `largeurBlocM()`, c'est-à-dire sur l'emprise du
+// bloc CHARGÉ — exactement ce dont on vient de la débrancher : mesuré le
+// 2026-08-23, une arrivée de MNT fait bouger l'altitude de `4,98 × 10⁻⁵` sans
+// qu'aucun geste ait eu lieu, et la distance de `0`.
+//
+// ⚠️ **ET C'EST LA CIBLE D'`OrbitControls`, PAS UN POINT AU SOL RECALCULÉ** :
+// c'est autour d'elle que tourne le cliquer-glisser, donc c'est d'elle que la
+// rotation garde la distance rigoureusement constante — `4,4 × 10⁻¹⁶` mesurés
+// sur quinze images de geste réel. Un autre point de référence rendrait la
+// grandeur sensible à l'orientation, et le défaut reviendrait par la fenêtre.
+function distanceCadrageM() {
+  return camera.position.distanceTo(controls.target)
+}
+
 // ⚠️ LE SEUL LECTEUR DE `FLAGS.globeContinu` EST ICI (plan « globe continu »,
 // Tâche 4 Étape 0). `src/globe.js` n'importe pas `flags.js` : il ne connaît
 // qu'un booléen, passé par le constructeur. Sans cette ligne, le drapeau ne
@@ -4690,7 +4710,16 @@ function majSeuilSocle() {
     // — mais le patron se recopie, et c'est ainsi que naissent les désaccords
     // que ce chantier a payés trois fois). Une variable, deux lecteurs.
     const alt = altitudeCadrageM()
-    veilleCrop.maj(alt)
+    // ⚠️ **ET LA DISTANCE À CÔTÉ, LUE À LA MÊME IMAGE — Tâche R1.** Ce ne sont
+    // PAS deux lectures de la même grandeur : la naissance du crop et
+    // l'estompage demandent « à quelle distance du sol suis-je » (l'altitude),
+    // la veille du repos demande « l'utilisateur change-t-il d'échelle » (la
+    // distance). Deux questions, deux grandeurs — le §1 de `veille-repos.js`
+    // porte la mesure qui a réfuté le principe inverse. Ce qu'elles doivent
+    // partager, c'est l'IMAGE, et c'est pour cela qu'elles partent d'ici
+    // ensemble, en un seul appel.
+    const dist = distanceCadrageM()
+    veilleCrop.maj(alt, dist)
     // ⚠️ **L'ÉCHELLE GLISSE ICI, ET NULLE PART AILLEURS.** `poserRampe` ANCRE
     // (à l'arrêt, `pas²` points) ; cet appel-ci ÉVALUE la courbe (quatre
     // cubiques) et pose les uniformes. Sans ancre il ne fait rien, donc rien
@@ -11523,7 +11552,7 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // LE SEUIL DU SOCLE — Tâche 3 branchée, même raison : `main.js` n'est chargé
   // par aucun test, et `veilleSocle.auSeuil` / `.bascules` sont ce qui se lit à
   // l'écran pour vérifier qu'une descente ne fait QU'UNE bascule.
-  veilleSocle, seuilSocleBranche, altitudeCadrageM,
+  veilleSocle, seuilSocleBranche, altitudeCadrageM, distanceCadrageM,
   // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, exposé pour la même raison que
   // les deux lignes ci-dessus : `main.js` n'est chargé par aucun test, et
   // `veilleEstompage.valeur` est ce qui se lit à l'écran pour vérifier qu'une

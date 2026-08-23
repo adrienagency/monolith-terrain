@@ -528,10 +528,12 @@ export function poserChaineCrop(arg = {}) {
  *   image : la liste des calques qu'il touche en compte quatorze.
  * @param {{maj:Function, oublier:Function}|null} [arg.repos] la veille du repos
  *   (Tâche N, `veille-repos.js`). ⚠️ **ELLE EST NOURRIE ICI ET NULLE PART
- *   AILLEURS, POUR LA MÊME RAISON QUE L'ESTOMPAGE** : trois automates qui
- *   décident à la même image doivent décider sur la MÊME altitude. Absente, le
- *   comportement est celui d'avant la Tâche N, au bit près — les alentours
- *   restent dessinés au repos.
+ *   AILLEURS** : les automates qui décident à la même image doivent décider sur
+ *   la même IMAGE — pas, comme ce commentaire l'a soutenu jusqu'à la Tâche R1,
+ *   sur le même NOMBRE. Elle reçoit le second argument de `maj`, la DISTANCE
+ *   caméra↔cible, et non l'altitude : voir le §1 de `veille-repos.js`, qui
+ *   porte la mesure. Absente, le comportement est celui d'avant la Tâche N, au
+ *   bit près — les alentours restent dessinés au repos.
  * @param {number} [arg.periodeReprise] en IMAGES — voir le §3
  * @param {boolean} [arg.cropAuDepart] l'état de l'application au chargement
  * @param {boolean} [arg.modeSurfaceAuDepart]
@@ -755,7 +757,7 @@ export function creerVeilleCrop({
   // absent, pose, régime établi), et le repos doit être relayé sur TOUS : un
   // `appliquerRepos` recopié six fois serait six branchements à tenir d'accord,
   // c'est-à-dire la classe d'erreur que ce fichier existe pour fermer.
-  function decider(altitudeEllipsoideM) {
+  function decider(altitudeEllipsoideM, distanceCibleM) {
       // ⚠️ **L'ESTOMPAGE EST NOURRI MÊME EN ORBITE**, et le §6 de
       // `estompage-terre.js` dit pourquoi : sa veille FORCE zéro hors surface,
       // là où celle du socle GÈLE. La priver de l'image la laisserait sur la
@@ -763,13 +765,26 @@ export function creerVeilleCrop({
       // elle redevient le sujet.
       estompage?.maj(altitudeEllipsoideM)
       if (!modeSurface) return pose
+      // ⚠️ **LA VEILLE DU REPOS NE REÇOIT PAS L'ALTITUDE, ELLE REÇOIT LA
+      // DISTANCE — Tâche R1, ET C'EST MESURÉ.** Elle a reçu l'altitude jusqu'au
+      // 2026-08-23, et un simple cliquer-glisser d'inclinaison la faisait
+      // tomber de 17 624 m à 2 861 m à distance rigoureusement constante :
+      // `auRepos` basculait, et la planète entière se rallumait autour du crop
+      // sur un geste qui ne change aucune échelle. Le §1 de `veille-repos.js`
+      // porte la mesure et le raisonnement.
+      //
+      // ⚠️ **LES DEUX GRANDEURS ARRIVENT ENSEMBLE, ET CE N'EST PAS UN CONFORT** :
+      // l'estompage ci-dessus et le repos ici décident sur la MÊME image. Deux
+      // appels séparés depuis `main.js` seraient deux images pour un geste, et
+      // c'est la classe d'erreur que ce fichier existe pour fermer.
+      //
       // ⚠️ **LA VEILLE DU REPOS N'EST NOURRIE QU'EN SURFACE, ET C'EST MESURÉ.**
-      // En orbite, `altitudeCadrageM()` divise un `camera.position.y` orbital
-      // par l'échelle du DERNIER bloc chargé : ce n'est pas une altitude, c'est
-      // un résidu (`veille-socle.js`, §2). Lui donner cette image ferait un
-      // écart énorme entre deux régimes, donc un « mouvement » à chaque
-      // aller-retour d'orbite. `poserMode` lui fait oublier sa référence.
-      auRepos = repos ? repos.maj(altitudeEllipsoideM) : false
+      // En orbite la caméra n'a plus de cible au sol : `controls.target` y est
+      // le centre de la planète et la distance devient un rayon orbital, d'une
+      // toute autre échelle. Lui donner cette image ferait un écart énorme
+      // entre deux régimes, donc un « mouvement » à chaque aller-retour
+      // d'orbite. `poserMode` lui fait oublier sa référence, dans les deux sens.
+      auRepos = repos ? repos.maj(distanceCibleM) : false
       // ⚠️ **LE BLOC PLAT PART AVANT TOUTE DÉCISION D'ALTITUDE, ET C'EST VOULU.**
       // Sous ce drapeau il n'a plus lieu d'exister à aucune altitude : le
       // laisser vivre au-dessus du seuil remettrait un socle devant la planète
@@ -811,13 +826,24 @@ export function creerVeilleCrop({
 
   return {
     /**
-     * Une image. `altitudeEllipsoideM` est l'altitude géométrique de la caméra
-     * au-dessus de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte
-     * SANS `meanM`. Une altitude non finie conserve l'état, même contrat que
-     * `socleVisible`.
+     * Une image, et DEUX grandeurs — voir le §1 de `veille-repos.js`.
+     *
+     * `altitudeEllipsoideM` est l'altitude géométrique de la caméra au-dessus
+     * de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte SANS
+     * `meanM`. Elle décide de la NAISSANCE du crop et nourrit l'estompage : ces
+     * deux-là demandent « à quelle distance du sol suis-je ». Une altitude non
+     * finie conserve l'état, même contrat que `socleVisible`.
+     *
+     * `distanceCibleM` est la distance de la caméra à `controls.target`. Elle
+     * nourrit la veille du REPOS, et elle seule : celle-ci demande
+     * « l'utilisateur change-t-il d'ÉCHELLE », ce qui n'est pas la même
+     * question. ⚠️ **Son unité est indifférente** — l'écart y est un rapport
+     * (`|Δ ln|`), donc unités du monde ou mètres au sol donnent le même nombre.
+     * Absente ou non finie, la veille du repos CONSERVE son état : le crop
+     * reste seul, ce qui est la panne la moins mauvaise (voir `veille-repos.js`).
      */
-    maj(altitudeEllipsoideM) {
-      const r = decider(altitudeEllipsoideM)
+    maj(altitudeEllipsoideM, distanceCibleM) {
+      const r = decider(altitudeEllipsoideM, distanceCibleM)
       // ⚠️ **APRÈS LA DÉCISION, JAMAIS AVANT.** `appliquerRepos` lit `pose` :
       // évalué en tête, il jugerait sur l'image d'avant et le crop naîtrait
       // toujours avec une image d'alentours dessinés.
