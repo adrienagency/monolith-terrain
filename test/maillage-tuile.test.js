@@ -341,13 +341,14 @@ test('⑤b `poserRampe`, LUI, RESTE SUR `hauteurSurface` — la couleur lit la D
   const { lat, lon } = tileToLatLon(tx + 0.5, ty + 0.5, z)
   let nSurface = 0
   let nDessinee = 0
+  let nListe = 0
   const faux = {
     _crop: repereCrop({ centre: { lat, lon }, zoom: z, tuilesParBloc: 1 }),
     _fondCrop: null,
     _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
     _rampe: null,
     tiles: new Map([[t.key, t]]),
-    tuilesAvecHauteurs: () => [t],
+    tuilesAvecHauteurs: () => { nListe++; return [t] },
     uniforms: {
       uCropCoin: { value: 0.08 },
       uCropCoinN: { value: 4.4 },
@@ -365,6 +366,10 @@ test('⑤b `poserRampe`, LUI, RESTE SUR `hauteurSurface` — la couleur lit la D
   assert.equal(r.refus, null, JSON.stringify(r))
   assert.ok(nSurface > 500, `la rampe n'a lu la texture que ${nSurface} fois`)
   assert.equal(nDessinee, 0, `⛔ la rampe a basculé sur le maillage : ${nDessinee} appels`)
+  // ⚠️ **ET LA LISTE EST PRÉ-FILTRÉE UNE FOIS ICI AUSSI** — une survivante l’a
+  // demandé : `hauteurSurface` qui jette le `candidates` qu’on lui passe reste
+  // correcte et reparcourt `this.tiles` à chacun des `pas²` points.
+  assert.equal(nListe, 1, 'la liste de tuiles a été rebâtie ' + nListe + ' fois')
 })
 
 // ══════════ ⑥ CE QUE CINQ SURVIVANTES ONT DEMANDÉ ══════════════════════════
@@ -521,4 +526,23 @@ test('⑤c la paroi appelle la sonde AVEC LA LATITUDE EN PREMIER, et ne refait p
   assert.ok(Math.abs(attendu.lat - attendu.lon) > 1, 'lat et lon trop proches — le test ne prouverait rien')
   // ⚠️ **LA LISTE EST PRÉ-FILTRÉE UNE FOIS, ET C'EST ÉCRIT DANS LE DÉPÔT.**
   assert.equal(nListe, 1, 'la liste de tuiles a été rebâtie ' + nListe + ' fois')
+})
+
+test('⑥d le FOND MARIN entre bien dans la sonde du maillage — la mer, pas la sphère', () => {
+  // ⛔ **UNE SURVIVANTE ENCORE, ET ⑥b NE POUVAIT PAS LA VOIR** : il comparait la
+  // sonde À ELLE-MÊME (l'attendu était construit avec `hauteurDessinee` aux
+  // nœuds), donc débrancher le fond des DEUX côtés le laissait vert. Ici
+  // l'attendu est un NOMBRE, et il vient du champ.
+  const cote = 5
+  const g = globePourSondes({ f: () => -1 })
+  const t = g.tuile
+  const centre = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  const repere = repereCrop({ centre, zoom: t.z, tuilesParBloc: 1 })
+  const liste = g.tuilesAvecHauteurs()
+  const { lat, lon } = tileToLatLon(t.x + 0.5, t.y + 0.5, t.z)
+  // sans fond, la tuile dit « mer » et `altitudeMaillage` la pose SUR la sphère
+  assert.equal(g.hauteurDessinee(lat, lon, liste), 0)
+  g._fondCrop = { valeurs: new Float32Array(cote * cote).fill(-1500), cote, repere, portee: 0.5, bathy: true, profMaxM: 1500 }
+  assert.ok(Math.abs(g.hauteurDessinee(lat, lon, liste) + 1500) < 1e-6,
+    'avec un fond posé, la paroi doit descendre AVEC la surface : ' + g.hauteurDessinee(lat, lon, liste))
 })
