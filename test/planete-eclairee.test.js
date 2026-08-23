@@ -417,6 +417,114 @@ test('⑥ le module DIT où D15 se trompe, plutôt que de le taire', () => {
   }
 })
 
+// ══════ ⑦ ⚡ LE GAIN MORD — LA GARDE ET LE CORPS DU NUANCEUR, EXÉCUTÉS ══════
+//
+// ⛔ **CE QUI A CRÉÉ CETTE SECTION.** La relecture de R6 a mené la campagne de
+// mutation que le premier tour n'avait PAS menée, et elle a trouvé que le poste
+// qui porte tout l'effet visible pouvait être ramené à un no-op strict **sans
+// qu'un seul des 4 219 tests rougisse** :
+//   · `RELIEF_MONDE.gain: 0.9 → 0` → suite verte ;
+//   · la garde `if (uReliefMondeGain > 0.0)` changée en `> 1000.0` → verte ;
+//   · `ombrageReliefMonde(…, uReliefMondeGain)` appelé avec `0.0` → verte.
+// La fonctionnalité était livrable ÉTEINTE, et le drapeau levé n'aurait rien
+// prouvé.
+//
+// ⚠️ **UNE ASSERTION QUI LIT LE TEXTE NE LES FERME PAS.** `assert.match` sur
+// `> 0.0` reste vert quand le gain tombe à zéro ailleurs, et un `return` muet
+// rend un test vert indistinguable d'un test qui a lu. Ce qui se vérifie ici est
+// donc **le comportement** : on extrait du fragment LIVRÉ sa garde et son corps,
+// on les exécute avec les uniformes d'un `new Globe()` RÉEL et la loi du module
+// injecté, et on exige que le facteur rendu soit **strictement différent de 1**
+// sur une pente. Les trois mutations le ramènent à 1 — donc les trois rougissent.
+
+/** Découpe une paire de délimiteurs ÉQUILIBRÉE à partir de l'index `i`. */
+function bloc(src, i, ouvrant, fermant) {
+  const a = src.indexOf(ouvrant, i)
+  assert.ok(a >= 0, `${ouvrant} introuvable`)
+  let p = 0
+  for (let j = a; j < src.length; j++) {
+    if (src[j] === ouvrant) p++
+    else if (src[j] === fermant && --p === 0) return { texte: src.slice(a + 1, j), fin: j }
+  }
+  throw new Error(`${fermant} manquant`)
+}
+
+/**
+ * Extrait du fragment livré : la valeur de repos d'`ombreRelief`, la condition
+ * de la garde, et le corps gardé — puis rend le tout EXÉCUTABLE.
+ * ⚠️ On ne réécrit rien : si le nuanceur change, ceci change avec lui ou rougit.
+ */
+function extraireOmbrageMonde(frag) {
+  const mInit = /float ombreRelief = ([^;]+);/.exec(frag)
+  assert.ok(mInit, 'la valeur de repos d’ombreRelief a disparu du fragment')
+  const i = frag.indexOf('if (uReliefMondeGain')
+  assert.ok(i >= 0, 'la garde du gain a disparu du fragment')
+  const cond = bloc(frag, i, '(', ')')
+  const corps = bloc(frag, cond.fin, '{', '}')
+  const js = corps.texte.replace(/\bvec3\b|\bfloat\b/g, 'let')
+  const f = new Function(
+    'est', 'nord', 'haut', 'nMonde',
+    'uReliefMondeGain', 'uReliefMondeAz', 'uReliefMondeEl',
+    'lampeReliefMonde', 'ombrageReliefMonde',
+    `let ombreRelief = ${mInit[1]};
+     if (${cond.texte}) {${js}}
+     return ombreRelief`
+  )
+  return (u, n) => f(
+    EST, NORD, HAUT, n,
+    u.uReliefMondeGain.value, u.uReliefMondeAz.value, u.uReliefMondeEl.value,
+    GLSL.lampe, GLSL.ombre
+  )
+}
+const OMBRAGE_FRAG = extraireOmbrageMonde(FRAG_NU)
+
+/** Une normale penchée vers le nord-ouest (vers la lampe) ou vers le sud-est. */
+const PENTE_NO = v3.norm(V3(-0.3, 1, 0.3))
+const PENTE_SE = v3.norm(V3(0.3, 1, -0.3))
+
+test('⑦ drapeau LEVÉ, le nuanceur livré MODULE vraiment sur une pente', () => {
+  // ⚡ **C'EST LE TEST QUI DÉCIDE DE L'EFFET VISIBLE.** Il tient ensemble le
+  // gain du module, la garde du fragment et l'argument passé à la loi : que
+  // l'un des trois soit neutralisé et le facteur retombe à 1.
+  const u = new Globe({ planeteEclairee: true }).uniforms
+  const versLaLampe = OMBRAGE_FRAG(u, PENTE_NO)
+  const dosALaLampe = OMBRAGE_FRAG(u, PENTE_SE)
+  assert.ok(versLaLampe > 1.02, `une pente vers la lampe doit ÉCLAIRCIR (obtenu ${versLaLampe})`)
+  assert.ok(dosALaLampe < 0.98, `une pente au dos de la lampe doit ASSOMBRIR (obtenu ${dosALaLampe})`)
+  // et l'écart entre les deux versants est ce qu'Adrien appelle « du relief »
+  assert.ok(versLaLampe - dosALaLampe > 0.2, 'la modulation est trop faible pour se voir')
+})
+
+test('⑦ le gain de production est NON NUL, et c’est lui qui module', () => {
+  // ⛔ La mutation `RELIEF_MONDE.gain → 0` passait la suite entière. Ici elle
+  // ferme la garde du fragment, donc le facteur retombe à 1 et ceci rougit.
+  assert.ok(RELIEF_MONDE.gain > 0, 'un gain nul livre la planète nue sous un drapeau levé')
+  const u = new Globe({ planeteEclairee: true }).uniforms
+  assert.equal(u.uReliefMondeGain.value, RELIEF_MONDE.gain)
+  assert.notEqual(OMBRAGE_FRAG(u, PENTE_NO), 1)
+  // la loi du module, à ce gain-là, doit elle aussi sortir de 1 sur une pente
+  assert.notEqual(ombrageRelief(1, 0.7071, RELIEF_MONDE.gain), 1)
+})
+
+test('⑦ drapeau baissé, le MÊME bloc rend EXACTEMENT 1 — la garde tient', () => {
+  // L'autre bord de la même assertion : sans drapeau la garde ne s'ouvre pas et
+  // `colPlanete` reste celle du dépôt au bit près.
+  const u = new Globe().uniforms
+  assert.equal(u.uReliefMondeGain.value, RELIEF_MONDE_NUL)
+  for (const n of [PENTE_NO, PENTE_SE, HAUT]) assert.equal(OMBRAGE_FRAG(u, n), 1)
+})
+
+test('⑦ la garde s’ouvre AU GAIN, pas à autre chose', () => {
+  // Un gain minuscule doit déjà ouvrir la garde (sinon un seuil caché traîne),
+  // et un gain nul doit la laisser fermée.
+  const u = new Globe({ planeteEclairee: true }).uniforms
+  const truque = (g) => ({ ...u, uReliefMondeGain: { value: g } })
+  assert.equal(OMBRAGE_FRAG(truque(0), PENTE_NO), 1)
+  assert.notEqual(OMBRAGE_FRAG(truque(0.01), PENTE_NO), 1)
+  // et le facteur croît avec le gain : la garde ne masque pas une constante
+  assert.ok(OMBRAGE_FRAG(truque(0.9), PENTE_NO) > OMBRAGE_FRAG(truque(0.45), PENTE_NO))
+})
+
 // ══════════ LE COÛT — CE QUE CE FICHIER PEUT ET NE PEUT PAS DIRE ════════════
 
 test('le coût ne se mesure PAS ici, et le banc existe', () => {
