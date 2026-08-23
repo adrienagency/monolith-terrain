@@ -1753,6 +1753,29 @@ test('P14 · ⛔ UN ANCÊTRE GROSSIER GARDE TOUTE SA JUPE, et `tuileDansCrop` le
   assert.ok(loin > 50, `les sommets de l ancêtre doivent être TRÈS loin du crop (${loin})`)
 })
 
+test('P14 · ⛔ LA TUILE JUSTE DEHORS, QUI PARTAGE LA FRONTIÈRE, GARDE SA JUPE', () => {
+  // ⚠️ **C EST CE QUE LA GARDE `rPlancher > 0` PROTÈGE, ET RIEN D AUTRE NE LE
+  // FAIT.** La voisine immédiate du crop pose son côté ouest EXACTEMENT sur la
+  // frontière (`u = +1`), donc la bande de `jupeHorsDuMur` la désigne. Mais elle
+  // est DEHORS : aucun mur ne couvre sa jupe, qui pend sur la sphère. Sans le
+  // tri par `tuileDansCrop`, on lui retirerait son service anti-fente au bord
+  // même du bloc, là où le niveau de détail change.
+  const r = 2 * FRACTION_CHANFREIN
+  const g = globeP14({ retrait: r })
+  const dehors = tuileP14(P14_ZOOM, P14_X + 2, P14_Y)
+  assert.equal(g._rayonPlancherCrop(dehors), 0,
+    'la voisine doit être HORS du crop, sinon ce test ne mesure rien')
+  const mesh = batirP14(g, dehors)
+  const d = mesh.geometry.userData.jupe
+  let surLaFrontiere = 0
+  for (let bi = 0; bi < d.bord.length; bi++) {
+    if (jupeHorsDuMur(localBord(mesh, d, bi).u, localBord(mesh, d, bi).v, r)) surLaFrontiere++
+    assert.ok(!jupeEffacee(mesh, d, bi), `sommet ${bi} de la voisine DEHORS : jupe effacée à tort`)
+  }
+  assert.ok(surLaFrontiere >= 24,
+    `la voisine doit poser un côté SUR la frontière (${surLaFrontiere}) — sinon la garde n est pas exercée`)
+})
+
 test('P14 · le retrait NUL reproduit le dépôt AU BIT PRÈS, et l aller-retour aussi', () => {
   // ⚡ L instrument de banc de la règle D13 : c est lui qui permet l A/B à témoin
   // nul dans une seule page, et c est par lui que le balayage a été fait.

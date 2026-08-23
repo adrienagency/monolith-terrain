@@ -500,7 +500,12 @@ export function jupeHorsDuMur(u, v, retrait) {
 export function jupesEffacees(locaux, retrait) {
   const n = locaux ? locaux.length : 0
   const brut = new Uint8Array(n)
-  if (!(retrait > 0) || n === 0) return brut
+  // ⚠️ **PAS DE GARDE `retrait > 0` ICI, ET C'EST UNE SURVIVANTE QUI L'A DIT.**
+  // La mutation M11 de la campagne P14 la retirait et personne ne mourait :
+  // `jupeHorsDuMur` porte déjà son propre neutre, donc `aucun` reste vrai et on
+  // rend le tableau nul par le chemin d'en dessous. **Une garde qu'aucun test ne
+  // peut distinguer est du code mort** — c'est la dixième de ce chantier.
+  if (n === 0) return brut
   let aucun = true
   for (let i = 0; i < n; i++) {
     const l = locaux[i]
