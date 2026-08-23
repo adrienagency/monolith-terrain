@@ -978,7 +978,9 @@ export class Modes {
   // inclinaison au nadir local **0,000° → 46,548°**. En orbite la caméra vise
   // le centre de la planète, donc le nadir, TOUJOURS ; en surface la pose
   // d'arrivée est oblique (`PENTE_ARRIVEE = {y: 18, z: 19}` — et
-  // `90° − atan(18/19) = 46,551°`, l'écart relevé au centième près).
+  // `90° − atan(18/19) = 46,54816°`, l'écart relevé **à la treizième décimale**
+  // — ce n'est pas une concordance, c'est une identité géométrique : la caméra
+  // d'arrivée est posée le long de `(0, 18, 19)` depuis une cible à son aplomb).
   //
   // ⚠️ **CE N'EST PAS UN BOGUE, C'EST LE PRODUIT** : la vue de trois quarts EST
   // ShibuMap. Le défaut n'est pas la pose d'arrivée, c'est qu'on y arrive d'un

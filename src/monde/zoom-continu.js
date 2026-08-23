@@ -234,9 +234,17 @@ export function poseFranchissement({
 // LA POSE.** En orbite la caméra vise le centre de la planète : sa visée EST le
 // nadir local, à toutes les altitudes (mesuré : 0,000° sur toute la portion
 // orbitale). En surface, la pose d'arrivée de ShibuMap est oblique —
-// `PENTE_ARRIVEE = {y: 18, z: 19}`, soit `90° − atan(18/19) = 46,551°` du nadir,
-// ce qui est **exactement** l'écart relevé. La vue de trois quarts EST le
-// produit ; l'annuler serait un autre chantier, et pas celui-ci.
+// `PENTE_ARRIVEE = {y: 18, z: 19}`, soit `90° − atan(18/19) = 46,54816°` du
+// nadir, ce qui est **exactement** l'écart relevé.
+//
+// ⚠️ **« EXACTEMENT » EST À PRENDRE AU MOT, ET LE PREMIER JET IMPRIMAIT
+// 46,551°** — Tâche R4, tour de correction. La valeur juste est
+// **46,548157698978°** ; la trace du navigateur rend **46,548157698978194°**.
+// Treize décimales : ce n'est pas une concordance heureuse, c'est une identité
+// géométrique — la caméra d'arrivée est posée le long de `(0, 18, 19)` depuis
+// une cible qui est à son aplomb, donc l'angle au nadir vaut `atan(19/18)` par
+// construction, à toute altitude. La vue de trois quarts EST le produit ;
+// l'annuler serait un autre chantier, et pas celui-ci.
 //
 // **Ce qui est réparable, c'est qu'elle soit posée en UNE image.** Adrien
 // accepte la transition — « si je dézoome en scrollant, alors là tu peux faire

@@ -851,7 +851,12 @@ test('⑪ le fondu de pose part du NADIR et finit sur la pose d’arrivée, à c
     assert.ok(incl >= precedent - 1e-9, 'l’inclinaison est revenue en arrière')
     precedent = incl
   }
-  assert.ok(Math.abs(precedent - 46.551) < 0.01, `arrivée à ${precedent.toFixed(3)}° au lieu de 46,551°`)
+  // ⛔ **46,54816° ET NON 46,551° — Tâche R4, tour de correction.** Le premier
+  // jet imprimait 46,551° à six endroits. `90° − atan(18/19)` vaut
+  // **46,548157698978°**, et la trace du navigateur rend 46,548157698978194° :
+  // l'identification est EXACTE à la treizième décimale, pas approchée. La
+  // tolérance descend donc de 0,01 à 1e-9 — au-delà, elle cachait l'erreur.
+  assert.ok(Math.abs(precedent - 46.548157698978) < 1e-9, `arrivée à ${precedent.toFixed(12)}° au lieu de 46,548157698978°`)
 })
 
 test('⑪ une visée rasante ou une caméra sous la cible ne rendent RIEN, jamais zéro', () => {
