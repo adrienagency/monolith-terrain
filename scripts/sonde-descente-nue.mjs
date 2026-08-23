@@ -15,8 +15,13 @@
 //   node scripts/sonde-descente-nue.mjs --port 5519 --sortie .banc/R6/avant.json
 //   node scripts/sonde-descente-nue.mjs --vues .banc/R6/vues-avant   # + les PNG
 //
-// Dépendance : puppeteer-core, installée à la demande (`npm i --no-save
-// puppeteer-core`) — c'est un outil de diagnostic, pas une dépendance produit.
+// ⚠️ **APRÈS UN `npm ci`, CETTE SONDE NE DÉMARRE PAS TOUTE SEULE — RÉSERVE I3.**
+// `puppeteer-core` n'est PAS dans `package.json` : c'est un outil de
+// diagnostic, pas une dépendance produit. **La phrase à rejouer est :**
+//     npm i --no-save puppeteer-core@25.8.0
+// Les relevés, eux, sont commités sous
+// `.superpowers/sdd/2026-08-22-globe-studio/traces-R6/` — PAS sous `.banc/`,
+// qui est gitignoré (`.gitignore:44`) et ne survit pas à la fusion.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -49,6 +54,8 @@ const ATTENTE = Number(opt('--attente', '2600'))
 // du palier. Le grain de film est gelé (`params.animations = false`) pour que
 // deux captures d'un état identique soient réellement identiques.
 const APPARIE = A.includes('--apparie')
+// Le mode APPARIÉ à trois états — voir `poserEtat` plus bas (constat C2).
+const TRIPLE = A.includes('--triple')
 // ⚠️ **LE LIEU SE POSE PAR LE HASH `#s=`, PAS PAR LA REQUÊTE.** `main.js` ne lit
 // un lien de partage que dans `location.hash` (ligne « A pasted share link
 // carries #s=<payload> in the URL HASH — never the query »). Sans ça, la sonde
@@ -75,7 +82,7 @@ function trouverChrome() {
 
 const puppeteer = await (async () => {
   try { return (await import('puppeteer-core')).default } catch {
-    console.error('puppeteer-core absent : npm i --no-save puppeteer-core'); process.exit(2)
+    console.error('puppeteer-core absent : npm i --no-save puppeteer-core@25.8.0'); process.exit(2)
   }
 })()
 
@@ -188,6 +195,34 @@ async function ecartPixels(b64a, b64b) {
   }, [b64a, b64b])
 }
 
+// ══════ ⚡ LES TROIS ÉTATS — NÉS DU CONSTAT C2 DE LA RELECTURE ═════════════
+//
+// ⛔ **CE QUE `--triple` CORRIGE.** Le premier tour de R6 justifiait l'ajout de
+// la lampe de carte par « écart-type 14,053 contre 14,089, soit +0,26 % », en
+// citant un `.banc/R6/apres-normale-seule.json` **qui n'existe pas** — et la
+// référence était **gravée dans le code livré**. Les deux valeurs comparées
+// venaient de DEUX SESSIONS : exactement la faute que l'Étape 7 du même rapport
+// déclare ne rien prouver (15,6 % de dérive inter-session).
+//
+// ➡️ `--triple` capture les TROIS états au même palier, dans la même session,
+// sur le même jeu de tuiles, grain gelé : `nue` (rien), `normale` (la normale
+// par fragment SEULE, gain à zéro), `d15` (les deux). C'est la seule façon de
+// dire ce que la normale fine pèse toute seule.
+//
+// @param {'nue'|'normale'|'d15'} quoi
+async function poserEtat(quoi) {
+  return page.evaluate((e) => {
+    const u = window.__exp.globe.uniforms
+    // ⚠️ Le gain de production est capturé UNE fois, à la première bascule :
+    // ensuite les uniformes sont écrasés par la sonde elle-même.
+    if (window.__R6gain == null) window.__R6gain = (u.uReliefMondeGain && u.uReliefMondeGain.value) || 0.9
+    u.uNormaleFineOn.value = e === 'nue' ? 0 : 1
+    if (u.uReliefMondeGain) u.uReliefMondeGain.value = e === 'd15' ? window.__R6gain : 0
+    window.__exp.params.animations = false
+    return { etat: e, normale: u.uNormaleFineOn.value, gain: u.uReliefMondeGain ? u.uReliefMondeGain.value : null }
+  }, quoi)
+}
+
 // Les deux postes que D15 rend globaux, coupés et rallumés SANS recharger.
 async function poserD15(on) {
   return page.evaluate((allume) => {
@@ -229,7 +264,34 @@ for (const m of PALIERS) {
       tuiles: e.globe.tiles ? e.globe.tiles.size : null,
     }
   })
-  if (APPARIE) {
+  if (TRIPLE) {
+    // ⚠️ MÊME ORDRE QUE LE MODE APPARIÉ, et une image passe entre chaque
+    // bascule : un uniforme posé n'atteint le GPU qu'au dessin suivant.
+    const cliche = async () => {
+      await new Promise((r) => setTimeout(r, 400))
+      return 'data:image/png;base64,' + await page.screenshot({ clip: CADRE, encoding: 'base64' })
+    }
+    etat.postes = await poserEtat('nue')
+    const a1 = await cliche()
+    const a2 = await cliche()          // le plancher de bruit DU PALIER
+    etat.nue = await condense(a1)
+    etat.plancher = (await ecartPixels(a1, a2)).ecartPixel
+    await poserEtat('normale')
+    const b1 = await cliche()
+    etat.normaleSeule = await condense(b1)
+    const eN = await ecartPixels(a1, b1)
+    etat.effetNormale = eN.ecartPixel
+    etat.partBougeeNormale = eN.partBougee
+    await poserEtat('d15')
+    const c1 = await cliche()
+    etat.eclairee = await condense(c1)
+    const eD = await ecartPixels(a1, c1)
+    etat.effet = eD.ecartPixel
+    etat.partBougee = eD.partBougee
+    etat.gainNormalePct = +((etat.normaleSeule.ecart / etat.nue.ecart - 1) * 100).toFixed(2)
+    etat.gainD15Pct = +((etat.eclairee.ecart / etat.nue.ecart - 1) * 100).toFixed(2)
+    Object.assign(etat, etat.eclairee)
+  } else if (APPARIE) {
     // ⚠️ L'ORDRE COMPTE : on éteint D'ABORD, on rallume ENSUITE, et on laisse
     // une image passer entre chaque bascule — un uniforme posé n'atteint le
     // GPU qu'au dessin suivant.
@@ -271,7 +333,14 @@ for (const m of PALIERS) {
   }
   releves.push(etat)
   const b = (x) => (x === 1 ? '1' : x === 0 ? '.' : '?')
-  if (APPARIE) {
+  if (TRIPLE) {
+    const pc = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(1)} %`
+    console.log(
+      `${String(Math.round(etat.altitude)).padStart(9)} m  crop=${etat.crop ? 'O' : '.'} n=${String(etat.tuiles).padStart(4)}  ` +
+      `ecart nue=${etat.nue.ecart.toFixed(3).padStart(7)}  normale seule=${etat.normaleSeule.ecart.toFixed(3).padStart(7)} (${pc(etat.gainNormalePct)})  ` +
+      `D15=${etat.eclairee.ecart.toFixed(3).padStart(7)} (${pc(etat.gainD15Pct)})   ` +
+      `plancher=${etat.plancher.toFixed(3)}  ecart/pixel normale=${etat.effetNormale.toFixed(2)} D15=${etat.effet.toFixed(2)}`)
+  } else if (APPARIE) {
     const g = (etat.eclairee.ecart / etat.nue.ecart - 1) * 100
     console.log(
       `${String(Math.round(etat.altitude)).padStart(9)} m  crop=${etat.crop ? 'O' : '.'} n=${String(etat.tuiles).padStart(4)}  ` +

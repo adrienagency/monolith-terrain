@@ -120,11 +120,24 @@ export function postesGlobalisables() {
 
 // ══════════ ⚡ L'OMBRAGE DE RELIEF DE LA PLANÈTE ════════════════════════════
 //
-// ⛔ **LA NORMALE FINE SEULE NE SUFFIT PAS, ET C'EST MESURÉ.** Allumée seule
-// (`.banc/R6/apres-normale-seule.json`), elle a rendu un écart-type de
-// luminance de **14,053 contre 14,089** avant, à 40 000 m : le relief est
-// bien là — on le VOIT sur `.banc/R6/vues-apres/alt-00039985.png`, les vallées
-// se dessinent — mais il ne pèse **rien**. La cause est arithmétique et le dépôt
+// ⛔ **LA NORMALE FINE SEULE NE SUFFIT PAS, ET C'EST MESURÉ EN APPARIÉ.**
+// ⚠️ Le premier tour de R6 justifiait ce module par « 14,053 contre 14,089,
+// soit +0,26 % », en renvoyant à un fichier de banc **qui n'existait pas** et en
+// comparant **deux sessions** — la faute que le rapport dénonce lui-même dix
+// pages plus haut. Ce chiffre est RETIRÉ. Voici le sien, mesuré dans une SEULE
+// session, sur le MÊME jeu de tuiles, grain gelé, plancher de bruit relevé à
+// chaque palier (`scripts/sonde-descente-nue.mjs --triple`, traces dans
+// `.superpowers/sdd/2026-08-22-globe-studio/traces-R6/triple-*.json`) — gain
+// d'écart-type de luminance, normale fine SEULE puis D15 entier :
+//
+//     lieu par défaut, 39 902 m (plancher 0,000) :  **−1,7 %**  /  **+36,5 %**
+//     bande du défaut, 39 927 m (plancher 0,292) :  **+3,7 %**  /  **+83,1 %**
+//     bande du défaut, 39 854 m (plancher 0,000) :  **+3,0 %**  /  **+83,3 %**
+//     bande du défaut, 59 891 m (plancher 0,000) :  **+5,6 %**  /  **+80,9 %**
+//
+// ➡️ La normale fine seule pèse **de −2 % à +6 %** là où D15 entier pèse **+37 %
+// à +83 %** : un rapport de **dix à vingt**. Le relief est bien là — on le VOIT
+// sur les vues — mais **il ne se lit pas**. La cause est arithmétique et le dépôt
 // la dit déjà (`globe.js`, § « LE BLOC EST UN MATERIAU ECLAIRE ») : hors du
 // crop la seule lumière est `col × (0.74 + 0.30 × diff)`, **un rapport de
 // 1,4:1 là où un vrai Lambert va de 0 à 1**. Et `uSunDir` n'est pas le soleil

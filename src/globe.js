@@ -1899,8 +1899,13 @@ void main() {
 
     // ══════ ⚡ L'OMBRAGE DE RELIEF DE LA PLANETE — regle D15, Tache R6 ══════
     //
-    // ⛔ LA NORMALE FINE SEULE NE SE VOYAIT PAS, ET C'EST MESURE : ecart-type de
-    // luminance 14,053 contre 14,089 avant, a 40 000 m (.banc/R6). La cause est
+    // ⛔ LA NORMALE FINE SEULE NE SE LIT PAS, ET C'EST MESURE EN APPARIE : elle
+    // apporte de -1,7 % a +5,6 % d'ecart-type de luminance la ou D15 entier en
+    // apporte de +36,5 % a +83,1 % — un rapport de dix a vingt. Le detail des
+    // quatre paliers, ses planchers de bruit et le protocole sont dans
+    // src/monde/planete-eclairee.js ; les traces dans traces-R6/triple-*.json.
+    // ⚠️ Le « 14,053 contre 14,089 » du premier tour est RETIRE : il renvoyait a
+    // un fichier inexistant et comparait deux sessions. La cause, elle, est
     // ecrite plus bas, au bloc « LE BLOC EST UN MATERIAU ECLAIRE » : la loi de
     // planete est col x (0,74 + 0,30 x diff), un rapport de 1,4:1, et uSunDir
     // suit la CAMERA — donc au nadir il eclaire de face.

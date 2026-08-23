@@ -1,0 +1,112 @@
+{
+  "url": "http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ",
+  "cadre": {
+    "x": 340,
+    "y": 130,
+    "width": 620,
+    "height": 340
+  },
+  "quand": "2026-08-23T21:53:12.590Z",
+  "releves": [
+    {
+      "altitude": 119996.79909562413,
+      "crop": false,
+      "uCropOn": 0,
+      "uHabOn": 0,
+      "uEclairageOn": 0,
+      "uNormaleFineOn": 0,
+      "uAnalysisOn": 0,
+      "uRampCropOn": 0,
+      "uMerZeroSousEau": 0,
+      "uMppFacteur": 42.677607624467065,
+      "uEstompage": 0,
+      "uEstompageOn": 1,
+      "uReliefMondeGain": 0,
+      "tuiles": 883,
+      "postes": {
+        "etat": "nue",
+        "normale": 0,
+        "gain": 0
+      },
+      "nue": {
+        "moy": 196.549,
+        "ecart": 16.829,
+        "entropie": 5.615,
+        "partPic": 0.0574
+      },
+      "plancher": 5.47,
+      "normaleSeule": {
+        "moy": 196.73,
+        "ecart": 18.327,
+        "entropie": 5.659,
+        "partPic": 0.0661
+      },
+      "effetNormale": 6.642,
+      "partBougeeNormale": 0.2622,
+      "eclairee": {
+        "moy": 190.43,
+        "ecart": 29.832,
+        "entropie": 6.188,
+        "partPic": 0.0586
+      },
+      "effet": 13.703,
+      "partBougee": 0.4123,
+      "gainNormalePct": 8.9,
+      "gainD15Pct": 77.27,
+      "moy": 190.43,
+      "ecart": 29.832,
+      "entropie": 6.188,
+      "partPic": 0.0586
+    },
+    {
+      "altitude": 39854.09975776469,
+      "crop": false,
+      "uCropOn": 0,
+      "uHabOn": 0,
+      "uEclairageOn": 0,
+      "uNormaleFineOn": 1,
+      "uAnalysisOn": 0,
+      "uRampCropOn": 0,
+      "uMerZeroSousEau": 0,
+      "uMppFacteur": 42.677607624467065,
+      "uEstompage": 0.0008181278067300242,
+      "uEstompageOn": 1,
+      "uReliefMondeGain": 0.9,
+      "tuiles": 1224,
+      "postes": {
+        "etat": "nue",
+        "normale": 0,
+        "gain": 0
+      },
+      "nue": {
+        "moy": 197.723,
+        "ecart": 17.708,
+        "entropie": 5.265,
+        "partPic": 0.0853
+      },
+      "plancher": 0,
+      "normaleSeule": {
+        "moy": 197.17,
+        "ecart": 18.241,
+        "entropie": 5.333,
+        "partPic": 0.0831
+      },
+      "effetNormale": 1.34,
+      "partBougeeNormale": 0.0203,
+      "eclairee": {
+        "moy": 188.568,
+        "ecart": 32.451,
+        "entropie": 6.133,
+        "partPic": 0.0639
+      },
+      "effet": 12.446,
+      "partBougee": 0.3513,
+      "gainNormalePct": 3.01,
+      "gainD15Pct": 83.26,
+      "moy": 188.568,
+      "ecart": 32.451,
+      "entropie": 6.133,
+      "partPic": 0.0639
+    }
+  ]
+}
