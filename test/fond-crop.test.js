@@ -281,8 +281,8 @@ test('⑤ `hauteurSurface` rend le FOND en mer quand il est posé', () => {
     valeurs: new Float32Array(cote * cote).fill(-1500),
     cote, repere, portee: 3, bathy: true, profMaxM: 1500,
   }
-  const nu = { tuilesAvecHauteurs: () => [t], _fondCrop: null }
-  const garni = { tuilesAvecHauteurs: () => [t], _fondCrop: fond }
+  const nu = { tuilesAvecHauteurs: () => [t], _fondCrop: null, _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine }
+  const garni = { tuilesAvecHauteurs: () => [t], _fondCrop: fond, _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine }
   const lat = -21.248422235627014
   const lon = 55.7666015625
   assert.equal(Globe.prototype.hauteurSurface.call(nu, lat, lon), 0,
@@ -297,9 +297,15 @@ test('⑤ bis hors couverture, la sonde rend TOUJOURS `null`, fond ou pas', () =
     valeurs: new Float32Array(25).fill(-1500),
     cote: 5, repere, portee: 3, bathy: true, profMaxM: 1500,
   }
-  const garni = { tuilesAvecHauteurs: () => [], _fondCrop: fond }
+  const garni = { tuilesAvecHauteurs: () => [], _fondCrop: fond, _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine }
   assert.equal(Globe.prototype.hauteurSurface.call(garni, -21.25, 55.77), null,
     'un fond posé ne remplace pas une tuile absente : `null`, jamais zéro')
+  // ⚡ **ET LA SECONDE SONDE A LE MÊME CONTRAT — Tâche P11.** `hauteurDessinee`
+  // sert la PAROI ; si elle rendait zéro là où la tuile manque, le refus de
+  // couverture du §7 de `parois-crop.js` cesserait de mordre et le bloc
+  // reprendrait ses encoches au niveau de la mer.
+  assert.equal(Globe.prototype.hauteurDessinee.call(garni, -21.25, 55.77), null,
+    'la sonde du maillage doit rendre `null` elle aussi')
 })
 
 // ══════════ ⑥ LE REPÈRE DU CHAMP EST CELUI DE LA CALOTTE ════════════════════

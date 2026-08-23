@@ -628,8 +628,15 @@ function tuile(z, x, y, size, f) {
 const UNITE = { cx: 0, cy: 0, demi: 1 }
 const deMerc = (mx, my) => latLonDeLocal(mx, my, UNITE)
 
+// ⚠️ **`_tuileLaPlusFine` FAIT PARTIE DU `this` MINIMAL DEPUIS LA TÂCHE P11** :
+// la recherche de tuile est sortie de `hauteurSurface` le jour où
+// `hauteurDessinee` en a eu besoin, pour qu'il n'y ait qu'UN repli
+// d'antiméridien — celui que ce fichier teste juste en dessous.
 const lisSurface = (liste, lat, lon) =>
-  Globe.prototype.hauteurSurface.call({ tuilesAvecHauteurs: () => liste }, lat, lon)
+  Globe.prototype.hauteurSurface.call(
+    { tuilesAvecHauteurs: () => liste, _tuileLaPlusFine: Globe.prototype._tuileLaPlusFine },
+    lat, lon,
+  )
 
 test('hauteurSurface INTERPOLE — elle ne s accroche pas au nœud le plus proche', () => {
   // une rampe franche sur 4 texels : le nœud voisin vaut 300 m de plus

@@ -98,6 +98,11 @@ import { loiTextureMonde, GRAIN_PAR_PIXEL, METRES_PAR_DEGRE } from './monde/loi-
 // `crop-sphere.js`, pur) : il ne rend que des nombres, et c'est ce fichier-ci
 // qui décide QUAND les lire. Son en-tête porte les mesures qui le fondent.
 import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './monde/fond-crop.js'
+// LE MAILLAGE D'UNE TUILE — Tâche P11. Pur lui aussi. ⚠️ **IL PORTE LA TABLE DES
+// SEGMENTS**, qui vivait ici sous le nom `gridFor` : elle a désormais DEUX
+// lecteurs (`_buildMesh` qui pose les sommets, `hauteurDessinee` qui les relit),
+// et une table recopiée diverge en silence.
+import { segmentsTuile, interpolerMaille } from './monde/maillage-tuile.js'
 // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
 //
 // ⚠️ **CE N'EST PAS UNE COPIE DU SOCLE, C'EST LE MÊME TEXTE.** `terrain.js`
@@ -712,16 +717,12 @@ const IMAGES_BLOQUEE = 600
 // assez pour tuer la boucle, assez peu pour qu'un réseau revenu soit réessayé.
 const IMAGES_QUARANTAINE = 600
 
-// segments per patch edge — low zooms form the planet silhouette in the full
-// view, so they get denser grids: a z3 tile spans 45 degrees of longitude and
-// 24 segments there leaves visibly flat facets (and jagged exaggerated relief)
-// on the limb
-function gridFor(z) {
-  if (z <= 2) return 64
-  if (z <= 3) return 48
-  if (z <= 5) return 32
-  return 24
-}
+// ⚠️ **`gridFor` A DÉMÉNAGÉ DANS `src/monde/maillage-tuile.js` SOUS LE NOM
+// `segmentsTuile` — Tâche P11.** Elle a un SECOND lecteur depuis que la paroi du
+// crop suit la surface DESSINÉE et non la texture : `hauteurDessinee` doit
+// connaître la grille exacte sur laquelle `_buildMesh` a posé ses sommets. La
+// recopier là-bas aurait fait « deux écritures jumelles qui divergent », et la
+// paroi se serait posée sur une grille que le maillage n'a pas.
 
 // ---------------------------------------------------------------- shader
 
@@ -1679,7 +1680,7 @@ void main() {
   // lumiere fabrique 45,8 % du modele du socle et 6,6 % du sien.
   //
   // ⚠️ ET LA CAUSE EST ARITHMETIQUE, PAS ESTHETIQUE : vNormalW vient de
-  // _buildMesh, qui pose gridFor(z) = 24 quads par tuile — 5 625 sommets sur un
+  // _buildMesh, qui pose segmentsTuile(z) = 24 quads par tuile — 5 625 sommets sur un
   // bloc de 3 x 3 tuiles, contre 594 434 au socle (releve). La texture de
   // hauteur, elle, fait 256 x 256 par tuile et le fragment la lit DEJA
   // (decodeMetersAA, quelques lignes plus haut) : la couleur voyait le relief
@@ -4629,6 +4630,74 @@ export class Globe {
    * @returns {number|null}
    */
   hauteurSurface(lat, lon, candidates = null) {
+    const best = this._tuileLaPlusFine(lat, lon, candidates)
+    // ⚠️ **`null`, JAMAIS `0`** : zéro est le NIVEAU DE LA MER, et le confondre
+    // avec « je ne sais pas » creuse une encoche dans la paroi (§7 de
+    // `parois-crop.js`). C'est l'appelant qui décide, pas cette méthode.
+    // ⚠️ **ET LE FOND DU CROP PASSE PAR ICI AUSSI — Tâche J bis.** Sans fond
+    // posé, `altitudeSonde` rend la valeur BRUTE — le dépôt au bit près,
+    // négatifs du terrarium compris.
+    const brut = best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
+    const fond = this._fondCrop ?? null
+    return altitudeSonde(brut, fond ? echantillonnerFond(fond, lat, lon) : null)
+  }
+
+  /**
+   * LA HAUTEUR QUE LE GPU DESSINE — Tâche P11.
+   *
+   * ⛔ **CE N'EST PAS `hauteurSurface`, ET LA DIFFÉRENCE EST LE MANQUE N° 2 DE LA
+   * NOTATION 03.** `hauteurSurface` rend la DONNÉE : la texture terrarium,
+   * interpolée bilinéairement à ses 256 (ou 512) texels par tuile. Le GPU, lui,
+   * dessine le MAILLAGE : `segmentsTuile(z)` quads, soit **vingt-cinq sommets
+   * par côté à z12**. La paroi du crop se posait sur la première et se raccordait
+   * à la seconde — d'où, mesuré sur les 1 020 points de l'anneau dans la page
+   * vivante (`.banc/P11/M1-bord-avant.json`), un écart de **18,94 m en moyenne
+   * absolue**, **±(54 ; 47) m aux percentiles 5 et 95**, **−270,6 / +202,4 m aux
+   * extrêmes**, soit **|0,65| px à l'écran en moyenne et 9,8 px au pire**. Là où
+   * l'anneau passe SOUS le maillage, la surface pend par-dessus l'arête haute :
+   * c'est le drapé. Là où il passe AU-DESSUS, on voit du mur là où le socle
+   * montre du terrain.
+   *
+   * ⚠️ **ELLE REPRODUIT LA LOI DE NŒUD DE `_buildMesh`, PAS UNE LOI VOISINE** :
+   * `altitudeMaillage(sampleHeights(...), echantillonnerFond(...))`, aux MÊMES
+   * `(u, v)` et avec le MÊME `lat/lon` par nœud. `altitudeSonde` y écrêterait
+   * autrement la mer (`test/fond-crop.test.js` porte l'écart), et une paroi qui
+   * suivrait `altitudeSonde` repasserait sous sa propre surface.
+   *
+   * ⚠️ **`null` TRAVERSE, COMME POUR `hauteurSurface`** : c'est ce qui garde le
+   * refus de couverture des parois (§7 de `parois-crop.js`) exactement aussi
+   * mordant qu'avant.
+   */
+  hauteurDessinee(lat, lon, candidates = null) {
+    const best = this._tuileLaPlusFine(lat, lon, candidates)
+    if (!best) return null
+    const t = best.t
+    const G = segmentsTuile(t.z)
+    const fond = this._fondCrop ?? null
+    return interpolerMaille(best.tx, best.ty, G, (i, j) => {
+      const u = i / G
+      const v = j / G
+      // ⚠️ **LE `lat/lon` DU NŒUD, PAS CELUI DU POINT DEMANDÉ** : `_buildMesh`
+      // lit le champ du fond à la position de CHAQUE sommet. Prendre le lat/lon
+      // du point rendrait un fond constant sur toute la cellule — une seconde
+      // loi, et elle divergerait de la première dès que le fond a du relief.
+      const p = tileToLatLon(t.x + u, t.y + v, t.z)
+      return altitudeMaillage(
+        sampleHeights(t.heights, u, v, t.size),
+        fond ? echantillonnerFond(fond, p.lat, p.lon) : null,
+      )
+    })
+  }
+
+  /**
+   * La tuile la plus FINE qui couvre un point — **une seule écriture**.
+   *
+   * ⚠️ **ELLE ÉTAIT DANS `hauteurSurface`, ET LA TÂCHE P11 L'EN SORT PARCE QU'UN
+   * SECOND LECTEUR EST APPARU.** Le repli d'antiméridien au modulo (ci-dessous)
+   * a coûté un banc entier à la Tâche B ; le recopier dans `hauteurDessinee`
+   * aurait fait deux replis à garder d'accord.
+   */
+  _tuileLaPlusFine(lat, lon, candidates = null) {
     const liste = candidates || this.tuilesAvecHauteurs()
     const mx = mercX(lon)
     const my = mercY(lat)
@@ -4650,17 +4719,7 @@ export class Globe {
       if (tx < 0 || tx >= 1 || ty < 0 || ty >= 1) continue
       if (!best || t.z > best.t.z) best = { t, tx, ty }
     }
-    // ⚠️ **`null`, JAMAIS `0`** : zéro est le NIVEAU DE LA MER, et le confondre
-    // avec « je ne sais pas » creuse une encoche dans la paroi (§7 de
-    // `parois-crop.js`). C'est l'appelant qui décide, pas cette méthode.
-    // ⚠️ **ET LE FOND DU CROP PASSE PAR ICI AUSSI — Tâche J bis.** Les parois et
-    // la rampe se posent sur CETTE sonde ; si le maillage descendait au fond
-    // marin sans elles, le bloc aurait un flanc qui commence deux kilomètres
-    // au-dessus de sa propre surface. Sans fond posé, `altitudeSonde` rend la
-    // valeur BRUTE — le dépôt au bit près, négatifs du terrarium compris.
-    const brut = best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
-    const fond = this._fondCrop ?? null
-    return altitudeSonde(brut, fond ? echantillonnerFond(fond, lat, lon) : null)
+    return best
   }
 
   /** Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier. */
@@ -4711,7 +4770,14 @@ export class Globe {
       // valeur écrite ici en serait une seconde, et deux défauts jumeaux
       // divergent (le `uContourInterval` de la Tâche C, réparé au tour 1).
       fractionProfondeur,
-      hauteur: (lat, lon) => this.hauteurSurface(lat, lon, liste),
+      // ⛔ **`hauteurDessinee`, PAS `hauteurSurface` — Tâche P11, ET C'EST LE
+      // MANQUE N° 2 DU NOTEUR.** L'anneau haut doit se poser sur la surface que
+      // le GPU DESSINE (le maillage de la tuile), pas sur la donnée qu'il n'a
+      // pas (la texture, dix fois plus fine). Le §0 de `monde/maillage-tuile.js`
+      // porte la mesure : 18,94 m d'écart moyen absolu le long de l'anneau, ±10
+      // pixels à l'écran, dans les DEUX SENS — la paroi dépassait la surface
+      // ici, la surface pendait par-dessus l'arête là.
+      hauteur: (lat, lon) => this.hauteurDessinee(lat, lon, liste),
       rayon: R_GLOBE,
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
       profondeur,
@@ -5466,7 +5532,7 @@ export class Globe {
   // gagné. C'est aussi pour ça que `positions` reste ABSOLU : la jupe s'y
   // appuie pour descendre vers le centre de la PLANÈTE, pas de la tuile.
   _buildMesh(t) {
-    const G = gridFor(t.z)
+    const G = segmentsTuile(t.z)
     const nV = (G + 1) * (G + 1)
     const positions = new Float64Array(nV * 3) // absolues, en doubles : voir ci-dessus
     const normals = new Float32Array(nV * 3)
@@ -5540,7 +5606,7 @@ export class Globe {
       // dénivelé lu sur une fenêtre deux fois trop courte.
       //
       // ⚠️ ET LE CHIFFRE SE DÉRIVE DU DÉPÔT, il n'a pas eu besoin d'un banc :
-      // `G = gridFor(z) = 24`, tuile de 256 px, donc la fenêtre vaut
+      // `G = segmentsTuile(z) = 24`, tuile de 256 px, donc la fenêtre vaut
       // `x(u+ε) − x(u−ε)` = **21,333 px au centre contre 10,167 px au bord**,
       // soit **47,7 %** — 407 m de pente lus sur 853 m de pente vraie. D'où un
       // liseré d'éclairage : chaque tuile s'aplatit sur son pourtour.
