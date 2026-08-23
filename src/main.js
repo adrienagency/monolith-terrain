@@ -58,7 +58,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive, planeteEclaireeActive } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond } from './monde/frontiere-rendu.js'
@@ -840,6 +840,23 @@ const params = {
 // ⚠️ **IL EST DÉCLARÉ ICI, AVANT LE PARTAGE D'EXAGÉRATION ET AVANT LE GLOBE,
 // PARCE QUE LES DEUX LE LISENT.**
 const terreUniqueBranchee = terreUniqueActive()
+
+// ══════════ LA PLANÈTE N'EST PLUS NUE — règle D15, Tâche R6 ════════════════
+//
+// > **Adrien, 2026-08-23** : « Non, la planète ne doit plus jamais être nue. »
+//
+// ⚠️ **LU ICI ET NULLE PART AILLEURS**, même discipline que la ligne
+// au-dessus : un second appel ailleurs pourrait diverger. Le drapeau ne décide
+// que d'une chose — l'ÉTAT DE REPOS de la tuile du globe — et `flags.js` le
+// garde derrière le drapeau `terre unique`, parce que le pas du gradient de la
+// normale fine a besoin de `uMppFacteur`, que seul `poserLoiMonde` pose.
+//
+// ⚠️ **ET CE COMMENTAIRE N'ÉCRIT PAS LE NOM DE L'AUTRE LECTEUR AVEC SES
+// PARENTHÈSES**, délibérément : `test/crop-branche.test.js` (⑧ septies) COMPTE
+// les occurrences de `terreUniqueActive` suivi de parenthèses dans ce fichier et
+// en exige exactement deux — la lecture, et la phrase qui dit pourquoi il n'y en
+// a qu'une. Une troisième, fût-elle dans un commentaire, le fait rougir.
+const planeteEclaireeBranchee = planeteEclaireeActive()
 
 // ⚠️ **`constante` EST TOUT LE GESTE DE D10, ET IL TIENT EN UN ARGUMENT.**
 // `setExaggeration` (`globe.js`) rend au réseau TOUTES les tuiles prêtes ;
@@ -4156,7 +4173,7 @@ function distanceCadrageM() {
 // planète entière : **114 demandes de tuiles par chargement**, soit **59,7 %
 // des 191 avec `?globe=continu`** et **71,7 % des 159 sans**. Voir `_cropAttendu` dans
 // `globe.js` pour le relevé et pour ce que ça coûte quand le MNT ne vient pas.
-globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee, cropAttendu: terreUniqueBranchee })
+globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee, cropAttendu: terreUniqueBranchee, planeteEclairee: planeteEclaireeBranchee })
 
 // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
 //

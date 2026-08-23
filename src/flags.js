@@ -174,6 +174,41 @@ export const FLAGS = {
   //
   // `?terre=unique` l'essaie, `?terre=deux` (ou `?terre=0`) le coupe.
   terreUnique: false,
+
+  // LA PLANÈTE NE DOIT PLUS JAMAIS ÊTRE NUE — règle D15, Tâche R6.
+  //
+  // > **Adrien, 2026-08-23** : « Non, la planète ne doit plus jamais être nue. »
+  //
+  // Ce que le drapeau fait, et rien de plus : l'état de repos de la tuile du
+  // globe cesse d'être la COULEUR NUE. `uNormaleFineOn` et `uMerZeroSousEau`
+  // valent 1 **sans crop**, donc la planète porte son ombrage de relief et son
+  // niveau de mer partout, pas seulement sous les 32 274 m du crop. Le
+  // départage — ce qui peut devenir global et ce qui ne le peut pas — vit dans
+  // `src/monde/planete-eclairee.js`, qui **corrige D15 sur trois postes**.
+  //
+  // ⚠️ **IL EXIGE `?terre=unique`, ET C'EST UNE MESURE QUI L'EXIGE.** Le pas du
+  // gradient de la normale fine retombe au TEXEL quand `uMppFacteur` vaut 0
+  // (`pas = max(1/uTilePx, pasEmpreinte)`), et `uMppFacteur` n'est posé que par
+  // `poserLoiMonde`, sous `terreUnique`. Allumer la normale fine sans la loi de
+  // texture ancrée au monde rendrait un gradient plus fin que le pixel en vue
+  // orbitale — c'est-à-dire le scintillement que la Tâche K a fermé.
+  //
+  // ⚠️ **OFF, ET LE DÉFAUT NE BASCULE PAS ICI** : `terreUnique` est encore OFF,
+  // donc ce drapeau ne pourrait rien allumer en production de toute façon.
+  //
+  // `?planete=eclairee` l'essaie, `?planete=nue` le coupe.
+  planeteEclairee: false,
+}
+
+// LA PLANÈTE ÉCLAIRÉE — règle D15, Tâche R6. ⚠️ **ELLE EXIGE `terre unique`**,
+// même patron que `seuilSocleActif()` / `terreUniqueActive()`, et la raison est
+// écrite au drapeau : sans `poserLoiMonde`, le pas du gradient retombe au texel.
+export function planeteEclaireeActive() {
+  if (!terreUniqueActive()) return false
+  const v = paramAdresse('planete')
+  if (v === '0' || v === 'nue') return false
+  if (v === '1' || v === 'eclairee') return true
+  return FLAGS.planeteEclairee
 }
 
 // UNE SEULE TERRE — Tâche I. ⚠️ **ELLE EXIGE LA FRONTIÈRE DE RENDU**, même

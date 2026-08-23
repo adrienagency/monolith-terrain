@@ -57,6 +57,9 @@ import { ZOOM_SOCLE } from '../src/monde/seuil-socle.js'
 import { BLOCK_TILES } from '../src/landmarks.js'
 import { latLonToWorld, tileToLatLon, latLonToTile } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
+// ⚡ L'ÉTAT DE REPOS DU MONDE — règle D15, Tâche R6. Le zéro de la mer n'est
+// plus un littéral de `globe.js` ; il vient de là, et ⑤ bis le vérifie.
+import { styleMonde } from '../src/monde/planete-eclairee.js'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
 const TERRAIN_SRC = readFileSync(new URL('../src/terrain.js', import.meta.url), 'utf8')
@@ -358,7 +361,15 @@ test('⑤ bis l’uniforme du zéro de la mer est DÉCLARÉ, et son défaut est 
   // doit le faire naître à 0 (sans quoi la vue orbitale en ligne changerait de
   // couleur sans que personne l'ait demandé). Même patron que `uMerRampeOn`.
   assert.match(FRAG, /uniform float uMerZeroSousEau;/)
-  assert.match(GLOBE_SRC, /uMerZeroSousEau: \{ value: 0 \}/)
+  // ⚡ **LA SECONDE MOITIÉ NE SE LIT PLUS COMME UN LITTÉRAL — règle D15,
+  // Tâche R6.** `globe.js` écrivait `uMerZeroSousEau: { value: 0 }` ; il écrit
+  // désormais `styleMonde(this.planeteEclairee).merZeroSousEau`, parce que
+  // l'état de repos du monde a cessé d'être une constante. **L'exigence, elle,
+  // n'a pas bougé d'un iota** : sans drapeau, il naît à 0 — et c'est vérifié
+  // ici sur la VALEUR, ce qui est plus fort qu'un texte.
+  // `test/planete-eclairee.test.js` (⑤) rejoue l'aller-retour complet.
+  assert.match(GLOBE_SRC, /uMerZeroSousEau: \{ value: styleMonde\(this\.planeteEclairee\)\.merZeroSousEau \}/)
+  assert.equal(styleMonde(false).merZeroSousEau, 0)
 })
 
 // ══════════ ⑥ LE GRAIN — sur le sol, sur la terre, et borné ════════════════
