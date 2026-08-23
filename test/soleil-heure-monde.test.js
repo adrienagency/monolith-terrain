@@ -18,15 +18,7 @@
 //
 // **`uSunDir` est identique au bit près aux huit heures essayées.** La planète
 // ne lit pas l'heure ; elle lit la CAMÉRA — `main.js` reposait, à chaque image,
-// `globe.setSunDir(camPosition.normalize().applyAxisAngle(Y, −0,73))`. L'épreuve
-// inverse le confirme : horloge figée à 12 h, caméra tournée de 60° en 60°,
-// l'élévation vue par la planète parcourt **−66,5° à +38,8°** pendant que celle
-// du socle ne bouge pas d'un centième.
-//
-// ⚠️ **ET CE N'ÉTAIT PAS « LA CAMÉRA QUI PASSE DU CÔTÉ NUIT ».** À 03h22 au lieu
-// filmé (30,8804 N · −5,5899 E), `lightingFor` rend **−26,12°** : il fait nuit,
-// et le bloc a raison d'être sombre. C'est la planète qui a tort d'être en plein
-// jour au même instant et au même endroit.
+// `globe.setSunDir(camPosition.normalize().applyAxisAngle(Y, −0,73))`.
 //
 // ══════════ ⚠️ LA MONNAIE DE L'ÉLÉVATION — LE PIÈGE DE CETTE TÂCHE ══════════
 //
@@ -41,8 +33,30 @@
 //     pour MODELER le relief : le socle et le crop l'emploient tous les deux.
 //
 // ⛔ **DONNER `params.sunElevation` À LA PLANÈTE RENDRAIT LE PLEIN JOUR À 3 h DU
-// MATIN** — une grandeur juste, dans la mauvaise monnaie. C'est exactement ce
-// que ce fichier garde, et §① le vérifie dans les deux sens.
+// MATIN** — une grandeur juste, dans la mauvaise monnaie.
+//
+// ══════════ ⚠️ CE QUE LE TOUR 1 DE CE FICHIER NE GARDAIT PAS ════════════════
+//
+// Une campagne de 14 mutations menée à la relecture en a laissé passer SEPT.
+// Toutes avaient la même cause : le §③ d'alors ne lisait que du **TEXTE
+// SOURCE**, et un texte ne s'exécute pas. On pouvait inverser les deux gardes de
+// la boucle d'image, neutraliser entièrement l'aiguilleur, ou empoisonner
+// `skyState` à 70 lignes de là — 4 204 tests au vert dans les trois cas.
+//
+// ➡️ **Ce fichier EXÉCUTE maintenant le branchement au lieu de le lire.** Les
+// trois morceaux de `main.js` qui portent la décision (les deux gardes de la
+// boucle d'image, l'aiguilleur `soleilDuGlobe`, et la ligne d'`applyTimeOfDay`
+// qui choisit la monnaie) sont **découpés du source et évalués** avec des
+// doublures. Une mutation qui les neutralise fait tomber une assertion, pas un
+// `assert.match`.
+//
+// ══════════ ⚠️ ET LA DATE EST FIGÉE — ELLE NE L'ÉTAIT PAS ══════════════════
+//
+// `lightingFor(h, lat, lon)` sans quatrième argument suit le jour où le test
+// tourne. Mesuré sur les 365 jours de 2026 : l'assertion « midi haut » (> 60°)
+// échouait **183 jours**, et « nuit franche » (< −20°) **64 jours**. Reproduit
+// horloge figée au 15 janvier 2027 : midi vaut **37,876°**. `daycycle.test.js`
+// et `light-gain.test.js` figent la date ; ce fichier ne le faisait pas.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -59,7 +73,16 @@ import {
 import { FLAGS, soleilHeureMondeActif } from '../src/flags.js'
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SRC_MAIN = fs.readFileSync(path.join(RACINE, 'src/main.js'), 'utf8')
+// ⚠️ CE FICHIER DÉCOUPE DES LIGNES, DONC IL SUPPOSE DU LF — et le dépôt lui en
+// donne : `.gitattributes` impose `* text=auto eol=lf`. C'est une dette soldée
+// par la Tâche P13, après que cinq agents s'y soient pris les pieds — dont une
+// campagne de mutation qui a rendu de FAUX SURVIVANTS à cause d'un `\r` traînant
+// en fin de ligne. Si un jour ces assertions tombent en bloc, c'est là qu'il
+// faut regarder avant de suspecter le code.
+const lire = (rel) => fs.readFileSync(path.join(RACINE, rel), 'utf8')
+const SRC_MAIN = lire('src/main.js')
+const SRC_GLOBE = lire('src/globe.js')
+const SRC_NUAGES = lire('src/globe-clouds.js')
 
 // Le lieu et l'heure LUS SUR LA VIDÉO d'Adrien (bandeau « REFINING — 30.8804,
 // -5.5899 » à t20 ; horloge « 03h22 » sur les 39 images).
@@ -163,6 +186,25 @@ test('① le soleil du monde SUIT L HEURE — et il passe sous l horizon la nuit
   assert.ok(vues[4] > 60, `midi haut, lu ${vues[4]}`)
 })
 
+test('① ⚡ L AZIMUT AUSSI — une élévation seule laisse le soleil planté plein nord', () => {
+  // ⛔ **UNE MUTATION A SURVÉCU ICI AU TOUR 1** : `directionSoleilLocale(0, …)`,
+  // azimut ignoré, 4 204 tests au vert. Toutes les assertions ci-dessus
+  // comparent des ÉLÉVATIONS, et l'élévation est INVARIANTE par rotation
+  // d'azimut. La moitié de la loi n'était gardée nulle part.
+  const azimuts = []
+  for (const h of [6, 9, 12, 15, 18]) {
+    const s = lightingFor(h, LAT, LON, JOUR_VIDEO)
+    const dir = soleilMondeDeLHeure(s, { lat: LAT, lon: LON })
+    const az = azimutVu(dir, LAT, LON)
+    assert.ok(ecartAngulaire(az, s.azimuth) < 1e-6,
+      `à ${h} h l'azimut doit valoir ${s.azimuth}°, la planète lit ${az}°`)
+    azimuts.push(az)
+  }
+  // et il TOURNE : le soleil se lève à l'est et se couche à l'ouest.
+  assert.equal(new Set(azimuts.map((v) => v.toFixed(3))).size, 5)
+  assert.ok(azimuts[0] < azimuts[4], `l'azimut doit croître du matin au soir, lu ${azimuts}`)
+})
+
 test('① ⛔ LA MAUVAISE MONNAIE RENDRAIT LE PLEIN JOUR À 3 h DU MATIN', () => {
   const s = lightingFor(H_VIDEO, LAT, LON, JOUR_VIDEO)
   // ce que `params.sunElevation` porte, c'est `s.elevation` — la LAMPE.
@@ -192,7 +234,7 @@ test('① sans lieu ni cycle, elle rend null plutôt qu un vecteur inventé', ()
   assert.equal(soleilMondeDeLHeure(s, null), null)
 })
 
-// ══════════ ② LE DRAPEAU — LEVÉ ET BAISSÉ ═══════════════════════════════════
+// ══════════ ② LE DRAPEAU — LEVÉ ET BAISSÉ, ET SES DEUX BRANCHES ════════════
 
 test('② le drapeau existe, il est BAISSÉ par défaut, et il a son échappatoire', () => {
   assert.equal(FLAGS.soleilHeureMonde, false, 'la production ne bouge pas')
@@ -201,10 +243,31 @@ test('② le drapeau existe, il est BAISSÉ par défaut, et il a son échappatoi
   assert.equal(soleilHeureMondeActif(), false)
 })
 
-// ══════════ ③ LE BRANCHEMENT — GARDÉ PAR LECTURE DU SOURCE ══════════════════
-//
-// Aucun test ne charge `main.js` (§0 du plan) — précédent de
-// `test/crop-branche.test.js` et de onze autres fichiers de ce dossier.
+test('② ⛔ LES DEUX BRANCHES DE L ÉCHAPPATOIRE, EXERCÉES', () => {
+  // ⛔ **UNE MUTATION A SURVÉCU AU TOUR 1** : `?soleil=camera` LEVAIT le drapeau
+  // et `?soleil=heure` le baissait, tests au vert — parce que ni l'une ni
+  // l'autre branche n'était jamais parcourue sous node. C'est pourtant le levier
+  // par lequel Adrien est censé essayer le drapeau.
+  assert.equal(soleilHeureMondeActif('?soleil=heure'), true)
+  assert.equal(soleilHeureMondeActif('?soleil=1'), true)
+  assert.equal(soleilHeureMondeActif('?soleil=camera'), false)
+  assert.equal(soleilHeureMondeActif('?soleil=0'), false)
+  // une valeur inconnue, ou une autre clé, rendent le drapeau nu.
+  assert.equal(soleilHeureMondeActif('?soleil=bidon'), FLAGS.soleilHeureMonde)
+  assert.equal(soleilHeureMondeActif('?autre=heure'), FLAGS.soleilHeureMonde)
+  assert.equal(soleilHeureMondeActif(''), FLAGS.soleilHeureMonde)
+})
+
+test('② QUI POSE LE SOLEIL — la polarité est du code, plus une négation dans main.js', () => {
+  // ⛔ **INVERSER LES DEUX `!` DE `main.js` A SURVÉCU À 4 204 TESTS** : le test
+  // d'avant ne lisait que le MOT `soleilHeureMonde`, qu'une inversion laisse en
+  // place. La polarité vit maintenant ici, et elle est exécutée.
+  assert.equal(poseurDuSoleilDuGlobe(false), 'camera', 'drapeau baissé = la production, inchangée')
+  assert.equal(poseurDuSoleilDuGlobe(true), 'heure')
+  assert.notEqual(poseurDuSoleilDuGlobe(true), poseurDuSoleilDuGlobe(false))
+})
+
+// ══════════ ③ LE PLANCHER DE NUIT — LE VRAI PRIX DU CORRECTIF ══════════════
 
 test('③ ⛔ DRAPEAU BAISSÉ, LE PLANCHER DE NUIT EST L IDENTITÉ', () => {
   // les trois valeurs neutres, celles qui rendent les shaders d'avant AU BIT
@@ -215,21 +278,106 @@ test('③ ⛔ DRAPEAU BAISSÉ, LE PLANCHER DE NUIT EST L IDENTITÉ', () => {
   assert.deepEqual(plancherNuitMonde(false), NUIT_PRODUCTION)
 })
 
-test('③ ⛔ LE SOLEIL DE CAMÉRA N EST PLUS REPOSÉ SANS CONDITION', () => {
-  // les deux `globe.setSunDir(_orbSun)` de la boucle d'image sont la cause
-  // MESURÉE du défaut. Chacun doit être gardé par le drapeau.
+test('③ ⛔ DRAPEAU LEVÉ, LA FACE NUIT RESTE UNE CARTE — elle ne s efface pas', () => {
+  // Mesuré à 10 h (l'heure PAR DÉFAUT du produit), six poses d'orbite : à
+  // l'antisolaire la planète devenait une sphère unie. La luminance MONTAIT
+  // pendant que la carte disparaissait — l'instrument qui le voit est la chroma.
+  const n = plancherNuitMonde(true)
+  assert.equal(n, NUIT_LISIBLE)
+  assert.ok(n.carte >= 0.45 && n.carte <= 0.60, `plancher de carte hors fourchette : ${n.carte}`)
+  assert.ok(n.carte > NUIT_PRODUCTION.carte * 4, 'il doit être RELEVÉ, pas ajusté')
+  // refroidir plutôt qu'effacer : le fond de nuit s'écarte du fond du décor.
+  assert.ok(n.froid > 0 && n.froid <= 1, `refroidissement hors bornes : ${n.froid}`)
+  // et la coquille de nuages DOIT s'assombrir avec la planète — elle n'avait
+  // aucun terminateur (plancher 0,74 sans `day`) et brillait au-dessus d'une
+  // planète éteinte.
+  assert.ok(n.coquille < 1 && n.coquille > 0, `gain de coquille hors bornes : ${n.coquille}`)
+})
+
+test('③ les TROIS surfaces de la planète partagent le même plancher — pas seulement les tuiles', () => {
+  // tuiles, parois du crop et calottes polaires portaient la MÊME ligne
+  // `mix(uShadowColor, …, 0.10 + 0.90 * day)`, recopiée trois fois. Un plancher
+  // relevé sur une seule aurait mis une couture au pôle.
+  assert.equal(SRC_GLOBE.match(/0\.10 \+ 0\.90 \* day/g), null,
+    'il reste un plancher de nuit EN DUR dans globe.js')
+  const mix = SRC_GLOBE.match(/mix\(uNuitFond, \w+, uNuitCarte \+ \(1\.0 - uNuitCarte\) \* day\)/g)
+  assert.equal(mix?.length, 3, 'les trois surfaces : tuiles, parois, calottes')
+  // et la coquille de nuages a enfin un terminateur.
+  assert.match(SRC_NUAGES, /col \*= uNuitCoquille \+ \(1\.0 - uNuitCoquille\) \* day/)
+  assert.match(SRC_NUAGES, /float day = smoothstep\(-0\.22, 0\.16,/)
+})
+
+test('③ main.js pousse le plancher au globe, et il le prend de la loi', () => {
+  const poses = lignesDeCode(/globe\.setNuitPlanete\(/)
+  assert.equal(poses.length, 1, 'une seule écriture du plancher')
+  assert.equal(poses[0].l.trim(), 'globe.setNuitPlanete(plancherNuitMonde(soleilHeureMonde))',
+    'le plancher doit venir de la loi, pas d une constante recopiée')
+})
+
+// ══════════ ④ LE BRANCHEMENT — DÉCOUPÉ DE `main.js` ET EXÉCUTÉ ═════════════
+
+test('④ main.js importe la loi au lieu d en écrire une seconde', () => {
+  assert.match(SRC_MAIN,
+    /import \{ soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde \} from '\.\/monde\/soleil-monde\.js'/)
+})
+
+test('④ ⚡ L AIGUILLEUR EST EXÉCUTÉ — baissé il rend le soleil d avant, levé celui de l heure', () => {
+  // ⛔ **« `soleilDuGlobe()` rend toujours `sun.position` » A SURVÉCU À 4 204
+  // TESTS.** Le correctif était ENTIÈREMENT neutralisable : le test d'avant
+  // vérifiait que le TEXTE `globe.setSunDir(soleilDuGlobe())` était là, jamais
+  // qu'il faisait quelque chose. Ici l'aiguilleur est découpé et APPELÉ.
+  const src = sourceDeFonction('soleilDuGlobe')
+  const CAMERA = { marque: 'sun.position' } // le vecteur d'AVANT, reconnaissable
+  const fabrique = (drapeau, monde) => {
+    const _soleilMonde = { fromArray(a) { this.recu = a; return this } }
+    const f = new Function(
+      'poseurDuSoleilDuGlobe', 'soleilHeureMonde', 'soleilMonde', 'sun', '_soleilMonde',
+      `${src}\nreturn soleilDuGlobe`,
+    )(poseurDuSoleilDuGlobe, drapeau, monde, { position: CAMERA }, _soleilMonde)
+    return { f, _soleilMonde }
+  }
+
+  // drapeau BAISSÉ : la production, inchangée — le soleil d'avant, et rien d'autre.
+  const bas = fabrique(false, [0, 0, 1])
+  assert.equal(bas.f(), CAMERA, 'drapeau baissé, l aiguilleur doit rendre sun.position')
+  assert.equal(bas._soleilMonde.recu, undefined, 'et il ne doit RIEN poser d autre')
+
+  // drapeau LEVÉ : le soleil de l'heure, et c'est bien CE vecteur-là.
+  const haut = fabrique(true, [0.1, 0.2, 0.3])
+  const v = haut.f()
+  assert.notEqual(v, CAMERA, 'drapeau levé, l aiguilleur ne doit PLUS rendre sun.position')
+  assert.deepEqual(haut._soleilMonde.recu, [0.1, 0.2, 0.3])
+
+  // et le REPLI : sans direction calculée (démarrage), on retombe sur l'avant.
+  assert.equal(fabrique(true, null).f(), CAMERA, 'repli au démarrage')
+})
+
+test('④ ⚡ LES DEUX GARDES DE LA BOUCLE D IMAGE SONT ÉVALUÉES, PAS LUES', () => {
+  // ⛔ **INVERSER LES DEUX GARDES A SURVÉCU À 4 204 TESTS**, et c'est la plus
+  // grave des sept survivantes — elle touche la PRODUCTION. Le test d'avant
+  // exigeait le MOT `soleilHeureMonde` dans les douze lignes qui précèdent :
+  // une inversion le laisse en place. Drapeau baissé, la boucle d'image ne
+  // reposait alors plus rien du tout. La garantie « production rigoureusement
+  // inchangée » n'était tenue par AUCUN test.
   const lignes = SRC_MAIN.split('\n')
-  const poses = lignes
-    .map((l, i) => ({ l, i }))
-    // ⚠️ les LIGNES DE CODE, pas les commentaires : deux blocs de prose de ce
-    // fichier citent l'appel mot pour mot pour expliquer le défaut.
-    .filter(({ l }) => /globe\.setSunDir\(_orbSun\)/.test(l) && !/^\s*\/\//.test(l))
+  const poses = lignesDeCode(/globe\.setSunDir\(_orbSun\)/)
   assert.equal(poses.length, 2, 'toujours les deux poses orbitales, ni plus ni moins')
+
   for (const { i } of poses) {
     // le garde est au-dessus, dans les douze lignes qui précèdent
-    const amont = lignes.slice(Math.max(0, i - 12), i).join('\n')
-    assert.match(amont, /soleilHeureMonde/,
-      `la pose de la ligne ${i + 1} n est gardée par aucun drapeau`)
+    let cond = null
+    for (let k = i - 1; k >= Math.max(0, i - 12); k--) {
+      const m = /^\s*if \((.+)\) \{$/.exec(lignes[k])
+      if (m) { cond = m[1]; break }
+    }
+    assert.ok(cond, `la pose de la ligne ${i + 1} n est gardée par aucun \`if\``)
+    const juge = (drapeau) => new Function(
+      'poseurDuSoleilDuGlobe', 'soleilHeureMonde', `return (${cond})`,
+    )(poseurDuSoleilDuGlobe, drapeau)
+    // drapeau BAISSÉ : la caméra repose le soleil, exactement comme avant R7.
+    assert.equal(juge(false), true, `ligne ${i + 1} : drapeau baissé, la pose caméra DOIT courir`)
+    // drapeau LEVÉ : elle se tait, sinon elle écraserait le soleil de l'heure.
+    assert.equal(juge(true), false, `ligne ${i + 1} : drapeau levé, la pose caméra doit se taire`)
   }
 })
 

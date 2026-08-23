@@ -210,8 +210,8 @@ export const FLAGS = {
 
 // L'HEURE DE LA PLANÈTE — Tâche R7. Même patron d'échappatoire que les autres ;
 // isolé dans une fonction parce que `location` n'existe pas sous node.
-export function soleilHeureMondeActif() {
-  const v = paramAdresse('soleil')
+export function soleilHeureMondeActif(recherche) {
+  const v = paramAdresse('soleil', recherche)
   if (v === '0' || v === 'camera') return false
   if (v === '1' || v === 'heure') return true
   return FLAGS.soleilHeureMonde
@@ -433,7 +433,14 @@ export function portionPoursuite() {
   return 'reine'
 }
 
-function paramAdresse(nom) {
-  if (typeof location === 'undefined' || !location.search) return null
-  return new URLSearchParams(location.search).get(nom)
+function paramAdresse(nom, recherche) {
+  // ⚠️ `recherche` EST UNE COUTURE DE TEST, ET UNE MUTATION L'A EXIGÉE. Les
+  // échappatoires d'adresse n'étaient exercées que sous node, où `location`
+  // n'existe pas : les DEUX branches (`?x=1` / `?x=0`) n'étaient jamais
+  // parcourues, et inverser l'une d'elles ne faisait bouger aucun test. Passer
+  // la chaîne de requête en argument la rend exécutable sans DOM. Absente, le
+  // comportement est exactement celui d'avant.
+  const q = recherche ?? (typeof location === 'undefined' ? null : location.search)
+  if (!q) return null
+  return new URLSearchParams(q).get(nom)
 }

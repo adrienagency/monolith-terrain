@@ -12119,7 +12119,7 @@ function tick() {
     // poussé le soleil de l'heure, et il ne bouge que quand l'heure ou le lieu
     // bougent. Une pose par image serait un troisième écrivain pour un uniforme
     // qui en avait déjà deux de trop.
-    if (!soleilHeureMonde) {
+    if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') {
       _orbSun.copy(camGlobe.position).normalize().applyAxisAngle(_upY, -0.73)
       globe.setSunDir(_orbSun)
     }
@@ -12140,7 +12140,7 @@ function tick() {
     // l'heure elle aussi — à 03h22 elle devient nocturne. Ce que ça coûte est
     // écrit au drapeau (`flags.js`) : c'est un arbitrage produit, pas une
     // correction silencieuse.
-    if (!soleilHeureMonde) {
+    if (poseurDuSoleilDuGlobe(soleilHeureMonde) === 'camera') {
       _orbSun.copy(camera.position).normalize().applyAxisAngle(_upY, -0.73)
       globe.setSunDir(_orbSun)
     }
