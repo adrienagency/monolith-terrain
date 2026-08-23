@@ -155,6 +155,136 @@ export function poseApresNiveau({ camY, pente, empriseAvant, empriseApres, yCibl
   return { camY: y, distanceCible: (y - yCible) / pente, pente }
 }
 
+// ══════════ 4 bis. LA CIBLE CHANGE DE REPÈRE, ELLE AUSSI — Tâche R4 ═════════
+//
+// ⛔ **`poseApresNiveau` PROMET QUE « LA PENTE TRAVERSE INCHANGÉE », ET LE
+// DÉPÔT LA CHANGEAIT — DE 1,3° À 10,4° PAR FRANCHISSEMENT, MESURÉ À L'ÉCRAN.**
+//
+// Le relevé, image par image, d'une descente de 60 000 km au sol
+// (`.banc/R4/descente.mjs`, croisement z3 → z4, images 651 → 652) :
+//
+//   | image | caméra                     | cible                      | inclinaison |
+//   | 651   | (−2,229 ; 23,821 ; 25,157) | (−2,229 ; −0,156 ; −0,153) | 46,548°     |
+//   | 652   | (−8,418 ; 44,628 ; 38,989) | ( 4,814 ; −0,297 ;  8,949) | **36,154°** |
+//
+// **La cible saute de 9,1 unités en z, en UNE image.** C'est normal : le bloc
+// d'après a sa propre origine, et `_cibleVisee` rend le MÊME point géographique
+// dans le NOUVEAU repère. Ce qui ne l'est pas, c'est que `_rescale` écrivait
+// cette cible-là **avant** de reposer la caméra, et que la direction était
+// ensuite relue sur le couple dépareillé
+// `caméra(repère d'avant) − cible(repère d'après)`. La pente qu'on croyait
+// conserver était déjà fausse quand on la lisait.
+//
+// ⚠️ **C'EST LA SIXIÈME FOIS SUR CE CHANTIER QU'UNE GRANDEUR JUSTE EST EXPRIMÉE
+// DANS LE MAUVAIS REPÈRE**, et c'est pourquoi la loi vit ici plutôt que dans
+// `modes.js` : elle prend les DEUX cibles, donc elle ne PEUT pas mélanger les
+// repères — l'erreur devient impossible à écrire au lieu d'être interdite par
+// un commentaire.
+//
+// La direction se lit sur `caméra − cibleAvant` (tous deux dans le repère
+// d'avant), l'altitude se convertit par le rapport des emprises, et la caméra
+// se repose sur `cibleApres` (repère d'après) **le long de cette direction-là**.
+//
+// Rend `null` quand la géométrie ne porte rien : caméra sur la cible, ou visée
+// rasante (`|pente| < penteMin`) — dans ce dernier cas la distance
+// `(camY − yCible) / pente` explose, et c'est déjà la garde que `_suivreEmprise`
+// portait en clair. **Un `null` veut dire « ne repose pas », jamais « repose à
+// zéro ».**
+export function poseFranchissement({
+  camera,
+  cibleAvant,
+  cibleApres,
+  empriseAvant,
+  empriseApres,
+  distanceMin = 0,
+  distanceMax = Infinity,
+  penteMin = 1e-3,
+} = {}) {
+  if (!camera || !cibleAvant || !cibleApres) return null
+  const dx = camera.x - cibleAvant.x
+  const dy = camera.y - cibleAvant.y
+  const dz = camera.z - cibleAvant.z
+  const norme = Math.hypot(dx, dy, dz)
+  if (!(norme > 1e-6)) return null
+  const pente = dy / norme
+  if (!(Math.abs(pente) > penteMin)) return null
+  const camY = camYApresNiveau({ camY: camera.y, empriseAvant, empriseApres })
+  const brute = (camY - cibleApres.y) / pente
+  if (!Number.isFinite(brute)) return null
+  const d = Math.min(Math.max(brute, distanceMin), distanceMax)
+  return {
+    x: cibleApres.x + (dx / norme) * d,
+    y: cibleApres.y + (dy / norme) * d,
+    z: cibleApres.z + (dz / norme) * d,
+    camY,
+    distanceCible: d,
+    pente,
+  }
+}
+
+// ══════════ 4 ter. LE FONDU DE POSE DE LA PLONGÉE — Tâche R4 ════════════════
+//
+// ⛔ **LA PLONGÉE TOURNAIT LA CAMÉRA DE 46,55° EN UNE IMAGE**, et c'est le
+// « déplacement de la Terre » qu'Adrien filme en descendant de l'orbite. Mesuré
+// (`.banc/R4/descente.mjs`, images 345 → 346, altitude 5 977 km) : inclinaison
+// au nadir local **0,000° → 46,548°**, cible (0,0,0) → la visée du bloc, le tout
+// entre deux images consécutives.
+//
+// ⚠️ **CE N'EST PAS UN BOGUE DE REPÈRE, ET C'EST POURQUOI ON NE « CORRIGE » PAS
+// LA POSE.** En orbite la caméra vise le centre de la planète : sa visée EST le
+// nadir local, à toutes les altitudes (mesuré : 0,000° sur toute la portion
+// orbitale). En surface, la pose d'arrivée de ShibuMap est oblique —
+// `PENTE_ARRIVEE = {y: 18, z: 19}`, soit `90° − atan(18/19) = 46,551°` du nadir,
+// ce qui est **exactement** l'écart relevé. La vue de trois quarts EST le
+// produit ; l'annuler serait un autre chantier, et pas celui-ci.
+//
+// **Ce qui est réparable, c'est qu'elle soit posée en UNE image.** Adrien
+// accepte la transition — « si je dézoome en scrollant, alors là tu peux faire
+// réapparaître le reste » — il refuse le claquement. La plongée arrive donc AU
+// NADIR, c'est-à-dire dans la pose exacte que l'orbite quittait, puis
+// l'inclinaison balaie jusqu'à la pose d'arrivée.
+//
+// ⚠️ **C'EST L'ANGLE QU'ON INTERPOLE, PAS LA POSITION**, et l'altitude en
+// dépend : la caméra tourne à **`camY` CONSTANT** autour de la cible, donc
+// `altitudeFondM = camY × emprise / span` ne bouge pas d'un mètre pendant tout
+// le balayage. Interpoler la position aurait gardé `camY` elle aussi (les deux
+// bouts sont à la même hauteur), mais aurait fait passer la caméra par une
+// corde — donc accéléré puis ralenti l'angle sans aucune raison.
+//
+// La géométrie, en une ligne : à élévation `θ` au-dessus de l'horizontale et à
+// hauteur `dy = camY − yCible` au-dessus de la cible, le rayon horizontal vaut
+// `dy / tan θ`. À `θ = 90°` il est nul (caméra à l'aplomb), à `θ = atan(18/19)`
+// il vaut `dy × 19/18` — la pose d'arrivée, au bit près.
+//
+// `avancement` est DÉJÀ adouci par l'appelant : cette loi est géométrique, la
+// courbe d'accompagnement est de la plomberie. Rend `null` quand la direction
+// d'arrivée ne porte pas d'élévation exploitable (visée rasante, caméra sous la
+// cible) — même convention que `poseFranchissement`.
+//
+// `direction` est le vecteur cible → caméra de la pose d'ARRIVÉE ; il n'a pas
+// besoin d'être unitaire, il est normalisé ici.
+export function poseFonduArrivee({ cible, camY, direction, avancement = 1, penteMin = 1e-3 } = {}) {
+  if (!cible || !direction || !Number.isFinite(camY)) return null
+  const dy = camY - cible.y
+  if (!(dy > 0)) return null
+  const norme = Math.hypot(direction.x, direction.y, direction.z)
+  if (!(norme > 1e-6)) return null
+  const sinFin = direction.y / norme
+  if (!(sinFin > penteMin)) return null
+  const elevFin = Math.asin(Math.min(1, sinFin))
+  const e = Math.min(1, Math.max(0, avancement))
+  // du nadir (π/2) vers l'élévation d'arrivée
+  const elevation = Math.PI / 2 + (elevFin - Math.PI / 2) * e
+  const t = Math.tan(elevation)
+  const r = Math.abs(t) > 1e-9 ? dy / t : 0
+  // l'azimut est celui de la direction d'arrivée ; à `e = 0` le rayon est nul,
+  // donc il n'a aucun effet — la caméra est à l'aplomb et n'a pas d'azimut.
+  const hn = Math.hypot(direction.x, direction.z)
+  const ax = hn > 1e-9 ? direction.x / hn : 0
+  const az = hn > 1e-9 ? direction.z / hn : 0
+  return { x: cible.x + ax * r, y: camY, z: cible.z + az * r, elevation }
+}
+
 // ══════════ 5. LA PLONGÉE QUI NE SAUTE PAS ══════════════════════════════════
 //
 // ⚠️ **`_posePlongee` CONSERVAIT, LUI AUSSI, LA MAUVAISE ALTITUDE**, et

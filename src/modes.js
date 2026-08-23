@@ -44,9 +44,18 @@ import {
   PAS_NIVEAU,
   facteurCran,
   franchissement,
-  poseApresNiveau,
+  // ⛔ **`poseApresNiveau` N'EST PLUS IMPORTÉE ICI — Tâche R4.**
+  // `poseFranchissement` l'appelle pour son compte et fait EN PLUS le
+  // ré-ancrage sur la nouvelle cible. Garder les deux imports laisserait deux
+  // façons d'écrire le même geste, dont une qui rouvre le saut de 10°.
   distancePourAltitudeFond,
   niveauDArrivee,
+  // LA POSE — Tâche R4. Les deux lois vivent là-bas pour la même raison que les
+  // précédentes : elles se vérifient sous node. Et celle du franchissement prend
+  // les DEUX cibles, donc elle ne PEUT plus mélanger les repères — voir ses
+  // §4 bis et §4 ter, qui portent le relevé image par image.
+  poseFranchissement,
+  poseFonduArrivee,
 } from './monde/zoom-continu.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
@@ -149,6 +158,25 @@ const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast st
 const ZOOM_VEL_MAX = 1.3 // caps a fast burst
 const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
 const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRESH gesture
+
+// ══════════ LA DURÉE DU BALAYAGE DE POSE — Tâche R4 ═════════════════════════
+//
+// ⚠️ **ELLE SE DÉRIVE D'UN BUDGET PAR IMAGE, ELLE NE SE CHOISIT PAS AU GOÛT.**
+// La plongée doit balayer `90° − atan(18/19) = 46,551°` (le §4 ter de
+// `monde/zoom-continu.js` porte le relevé). Avec la quadratique adoucie aux deux
+// bouts, la vitesse de pointe vaut DEUX fois la moyenne : le plus grand pas d'une
+// image à l'autre vaut donc `2 × 46,551 / (durée × 60)` degrés à 60 Hz.
+//
+//   | durée | pas de pointe à 60 Hz |
+//   | 0,5 s | 3,1° — encore un à-coup |
+//   | 1,1 s | **1,41°** |
+//   | 2,0 s | 0,78° — mais la caméra tient la main une seconde de trop |
+//
+// **1,1 s**, donc : c'est la plus courte qui tienne le pas de pointe sous 1,5°
+// par image, l'ordre de grandeur d'un mouvement de caméra qu'on lit au lieu de
+// le subir. Le test ⑪ de `test/zoom-continu.test.js` mesure ce pas et refuse
+// au-delà de 3°.
+const DUREE_FONDU_POSE_S = 1.1
 
 // ══════════ LE BUDGET DU NIVEAU VAUT EXACTEMENT UN CRAN — Tâche 2 bis ═══════
 //
@@ -263,6 +291,7 @@ export class Modes {
     this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
     this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
     this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
+    this._fonduPose = null // le balayage nadir → oblique de la plongée — voir _armerFonduPose
 
     this._buildDom()
 
@@ -340,28 +369,53 @@ export class Modes {
   // ⚠️ **ET C'EST UNE CONVERSION D'UNITÉS, PAS UNE REPOSITION.** L'invariant est
   // `camY × emprise`, c'est-à-dire l'altitude que la caméra de FOND occupe. La
   // pente traverse inchangée : l'angle de vue de l'utilisateur est gardé.
-  _suivreEmprise() {
+  //
+  // ⛔ **ET LA PENTE NE TRAVERSAIT PAS — 10,4° DE PERDUS AU CRAN z3 → z4,
+  // MESURÉS À L'ÉCRAN — Tâche R4.** La phrase ci-dessus était juste tant que la
+  // CIBLE ne bougeait pas ; or `_rescale` écrit la visée du nouveau bloc AVANT
+  // d'appeler ce suiveur, et la direction se relisait alors sur le couple
+  // dépareillé `caméra(repère d'avant) − cible(repère d'après)`. Le relevé image
+  // par image est dans le §4 bis de `monde/zoom-continu.js`.
+  //
+  // ➡️ **`cibleAvant` EST LA RÉPARATION, ET C'EST LE SEUL ARGUMENT.** Quand
+  // l'appelant sait que la cible vient de changer de repère, il donne
+  // l'ANCIENNE : la direction se lit sur le couple accordé, et la caméra se
+  // repose sur la nouvelle cible le long de cette direction-là. Sans argument,
+  // le comportement est celui d'avant, au caractère près — c'est le chemin par
+  // image, où rien n'a bougé de repère.
+  //
+  // ⚠️ **AVEC `cibleAvant`, ON REPOSE MÊME À EMPRISE ÉGALE**, et ce n'est pas
+  // une prudence : pendant l'`await` du chargement, le suiveur PAR IMAGE a pu
+  // voir passer la nouvelle emprise et l'avoir déjà convertie. Sortir sur
+  // `avant === emprise` laisserait alors la caméra ancrée sur l'ancienne cible,
+  // c'est-à-dire exactement le défaut, une image plus tard.
+  _suivreEmprise(cibleAvant = null) {
     const emprise = this.hooks.empriseBlocM?.()
     const avant = this._empriseVue
     if (!(emprise > 0)) { this._empriseVue = null; return }
     this._empriseVue = emprise
-    if (!this._continu() || this.mode !== 'surface' || !(avant > 0) || avant === emprise) return
+    if (!this._continu() || this.mode !== 'surface') return
+    if (!(avant > 0) && !cibleAvant) return
+    if (avant === emprise && !cibleAvant) return
     const c = this.controls
     const cible = c.target
-    _zoomDir.copy(this.camera.position).sub(cible)
-    const norme = _zoomDir.length()
-    if (!(norme > 1e-6)) return
-    _zoomDir.multiplyScalar(1 / norme)
-    if (Math.abs(_zoomDir.y) < 1e-3) return // vue rasante : la pente ne porte plus rien
-    const pose = poseApresNiveau({
-      camY: this.camera.position.y,
-      pente: _zoomDir.y,
-      empriseAvant: avant,
+    const pose = poseFranchissement({
+      camera: this.camera.position,
+      cibleAvant: cibleAvant ?? cible,
+      cibleApres: cible,
+      // ⚠️ **SANS EMPRISE MÉMORISÉE, ON RÉ-ANCRE SANS CONVERTIR** — Tâche R4.
+      // Le ré-ancrage sur la nouvelle cible et la conversion d'unités sont deux
+      // gestes distincts qui tombent au même endroit ; ignorer le second n'est
+      // pas une raison de sauter le premier, sans quoi la caméra resterait
+      // accrochée à une cible qui n'existe plus. `emprise / emprise = 1` :
+      // l'altitude traverse à l'identique, ce qui est exactement juste ici.
+      empriseAvant: avant > 0 ? avant : emprise,
       empriseApres: emprise,
-      yCible: cible.y,
+      distanceMin: c.minDistance,
+      distanceMax: c.maxDistance,
     })
-    const borne = THREE.MathUtils.clamp(pose.distanceCible, c.minDistance, c.maxDistance)
-    this.camera.position.copy(cible).addScaledVector(_zoomDir, borne)
+    if (!pose) return // caméra sur la cible, ou visée rasante : rien à reposer
+    this.camera.position.set(pose.x, pose.y, pose.z)
     c.update()
   }
 
@@ -401,7 +455,12 @@ export class Modes {
   // est celle de la troncature (`franchissement`), donc symétrique et sans
   // seuil à régler.
   _franchirSiBesoin() {
-    if (!this._continu() || this.busy || this.travel || this._diveTween) return
+    // ⚠️ **ET PAS PENDANT LE BALAYAGE DE POSE — Tâche R4.** Un franchissement
+    // écrit une nouvelle cible et repose la caméra ; lancé au milieu du
+    // balayage, il se battrait avec lui pour la même caméra, image par image.
+    // Le compteur de budget, lui, TRAVERSE : le niveau se franchit à l'image
+    // suivant la fin du balayage, sans rien perdre.
+    if (!this._continu() || this.busy || this.travel || this._diveTween || this._fonduPose) return
     const { niveaux, reste } = franchissement(this._levelZoom, BUDGET_NIVEAU)
     if (niveaux === 0) return
     if (niveaux > 0) {
@@ -890,9 +949,77 @@ export class Modes {
       this.controls.enabled = true
       this.controls.update()
       this.mode = 'surface'
+      // ══════ LE FONDU DE POSE — Tâche R4 ═══════════════════════════════════
+      //
+      // ⚠️ **APRÈS `this.mode = 'surface'`, ET C'EST OBLIGATOIRE** : `update`
+      // n'avance le fondu que dans la branche de surface. Armé avant, il
+      // resterait figé une image, ce qui remettrait exactement le claquement
+      // qu'il supprime — plus petit, donc plus difficile à voir.
+      this._armerFonduPose(arrival.target)
     })
     this.announce('FX ONLINE — SURFACE MODE ENGAGED')
     this.busy = false
+  }
+
+  // ══════════ LE FONDU DE POSE DE LA PLONGÉE — Tâche R4 ═══════════════════
+  //
+  // **Adrien, 2026-08-23 :** *« J'ai toujours le problème de déplacement de la
+  // Terre quand je descends depuis l'orbite. »*
+  //
+  // ⛔ **LA PLONGÉE TOURNAIT LA CAMÉRA DE 46,55° EN UNE IMAGE**, mesuré au
+  // navigateur (`.banc/R4/descente.mjs`, images 345 → 346, altitude 5 977 km) :
+  // inclinaison au nadir local **0,000° → 46,548°**. En orbite la caméra vise
+  // le centre de la planète, donc le nadir, TOUJOURS ; en surface la pose
+  // d'arrivée est oblique (`PENTE_ARRIVEE = {y: 18, z: 19}` — et
+  // `90° − atan(18/19) = 46,551°`, l'écart relevé au centième près).
+  //
+  // ⚠️ **CE N'EST PAS UN BOGUE, C'EST LE PRODUIT** : la vue de trois quarts EST
+  // ShibuMap. Le défaut n'est pas la pose d'arrivée, c'est qu'on y arrive d'un
+  // coup. La plongée arrive donc dans la pose que l'orbite quittait — le nadir —
+  // et l'inclinaison balaie jusqu'à l'oblique. Adrien accepte la transition,
+  // il refuse le claquement.
+  //
+  // ⚠️ **L'ALTITUDE NE BOUGE PAS D'UN MÈTRE PENDANT LE BALAYAGE**, et c'est la
+  // condition pour ne pas rouvrir le défaut de la Tâche M par l'autre bout : la
+  // caméra tourne à `camera.position.y` CONSTANT, or `altitudeFondM` vaut
+  // `camY × emprise / span`. La loi est dans `monde/zoom-continu.js`, §4 ter.
+  //
+  // ⚠️ **ET `camY` SE RELIT À CHAQUE IMAGE, PAS UNE FOIS À L'ARMEMENT** : sous
+  // le drapeau le glissé inertiel court pendant le fondu (`_applyZoom` ignore
+  // `busy`). Figer `camY` annulerait la molette de l'utilisateur pendant une
+  // seconde entière — donc rendrait la main avec un saut, ce qu'on ferme ici.
+  _armerFonduPose(cible) {
+    this._fonduPose = null
+    if (!this._continu()) return
+    const direction = this.camera.position.clone().sub(cible)
+    if (!(direction.lengthSq() > 1e-6)) return
+    direction.normalize()
+    // ⚠️ **UNE ARRIVÉE DÉJÀ RASANTE N'A RIEN À BALAYER**, et le rayon horizontal
+    // `dy / tan θ` y explose. Même garde, même convention que `_suivreEmprise` :
+    // ne rien faire, jamais faire zéro.
+    if (!(direction.y > 1e-3)) return
+    // ⚠️ **ET UNE ARRIVÉE TROP BASSE NON PLUS** : à l'aplomb, la distance à la
+    // cible vaut `camY − yCible` ; sous `minDistance`, `controls.update()` la
+    // repousserait à chaque image et le fondu se battrait contre la butée.
+    if (!(this.camera.position.y - cible.y > this.controls.minDistance * 1.05)) return
+    this._fonduPose = { t: 0, cible: cible.clone(), direction }
+    this._avancerFonduPose(0)
+  }
+
+  // Une image de fondu. `e` est l'avancement DÉJÀ adouci.
+  _avancerFonduPose(e) {
+    const f = this._fonduPose
+    if (!f) return
+    const p = poseFonduArrivee({
+      cible: f.cible,
+      camY: this.camera.position.y,
+      direction: f.direction,
+      avancement: e,
+    })
+    if (!p) { this._fonduPose = null; return }
+    this.camera.position.set(p.x, p.y, p.z)
+    this.controls.target.copy(f.cible)
+    this.controls.update()
   }
 
   // surface → surface: reload the patch two zoom steps finer, centered on
@@ -958,6 +1085,17 @@ export class Modes {
     }
     const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
     const arrival = this._arrivalPose(next)
+    // ⚠️ **L'ANCIENNE CIBLE SE LIT ICI, ET PAS UNE LIGNE PLUS BAS — Tâche R4.**
+    // La ligne suivante la remplace par la visée du NOUVEAU bloc, exprimée dans
+    // le repère du nouveau bloc : la lire après, c'est lire un repère et une
+    // caméra qui ne sont plus dans le même monde. Mesuré : 10,4° de rotation au
+    // cran z3 → z4, et de 1,3° à 8,1° aux six suivants.
+    //
+    // ⛔ **ET `prevDir` NE POUVAIT PAS SERVIR ICI** : il est lu AVANT le
+    // chargement, alors que sous le drapeau le glissé inertiel continue de
+    // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
+    // direction est celle d'il y a quelques images, pas celle de maintenant.
+    const cibleAvant = continu ? this.controls.target.clone() : null
     this.controls.target.copy(arrival.target)
     // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
     // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
@@ -965,7 +1103,7 @@ export class Modes {
     // des EMPRISES, alors que `poseCranContinu` prend le rapport des échelles
     // VERTICALES — lequel porte l'exagération, et c'est LUI l'accrochage (jusqu'à
     // ×2 au cran z4 → z5 avec la table de paliers du dépôt).
-    if (continu) { this._suivreEmprise(); this.busy = false; return }
+    if (continu) { this._suivreEmprise(cibleAvant); this.busy = false; return }
     const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
     // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
     // comparer : on retombe sur la pose d'arrivée, qui est le comportement
@@ -1278,6 +1416,24 @@ export class Modes {
           this.controls.enabled = true
           this._loadDive(dv.target)
         }
+      }
+      // ══════ LE BALAYAGE DE POSE DE LA PLONGÉE — Tâche R4 ══════════════════
+      //
+      // ⚠️ **APRÈS `_applyZoom`, ET L'ORDRE EST LA MOITIÉ DU GESTE.** Le glissé
+      // pose la DISTANCE (donc `camY`, donc l'altitude), le balayage pose
+      // l'ANGLE en relisant le `camY` que le glissé vient d'écrire. Dans l'autre
+      // ordre, le glissé repousserait la caméra le long de la direction
+      // intermédiaire et l'angle serait celui de l'image d'avant.
+      //
+      // ⚠️ **LA COURBE EST CELLE DU TWEEN DE CLIC**, la même quadratique
+      // adoucie aux deux bouts : deux courbes différentes pour deux mouvements
+      // de caméra du même fichier seraient deux sensations à tenir d'accord.
+      if (this._fonduPose) {
+        const f = this._fonduPose
+        f.t = Math.min(1, f.t + dt / DUREE_FONDU_POSE_S)
+        const e = f.t < 0.5 ? 2 * f.t * f.t : 1 - ((-2 * f.t + 2) ** 2) / 2
+        this._avancerFonduPose(e)
+        if (f.t >= 1) this._fonduPose = null
       }
       this.altM = this.hooks.surfaceCamAltMeters()
     }

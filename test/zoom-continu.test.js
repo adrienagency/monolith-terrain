@@ -28,6 +28,8 @@ import {
   franchissement,
   camYApresNiveau,
   poseApresNiveau,
+  poseFranchissement,
+  poseFonduArrivee,
   camYPourAltitudeFond,
   distancePourAltitudeFond,
   niveauDArrivee,
@@ -372,10 +374,14 @@ test('⑥ la conversion d’unités tombe sur la MÊME image que le changement',
   // UNE IMAGE avant que la caméra ne suive — onze bascules du seuil du socle au
   // lieu d'une. Le suiveur est donc appelé EN TÊTE d'`update`, avant que
   // `majSeuilSocle()` et `majCameraFond()` ne lisent quoi que ce soit.
-  assert.match(SRC_MODES, /_suivreEmprise\(\) \{/)
+  // ⚠️ **LA SIGNATURE PORTE MAINTENANT `cibleAvant` — Tâche R4.** Voir la
+  // section ⑪ : sans l'ancienne cible, la direction se relisait sur le couple
+  // dépareillé `caméra(repère d'avant) − cible(repère d'après)`, et le
+  // franchissement tournait la caméra de 10,4°, mesurés au navigateur.
+  assert.match(SRC_MODES, /_suivreEmprise\(cibleAvant = null\) \{/)
   assert.match(SRC_MODES, /update\(dt\) \{[\s\S]{0,700}?this\._suivreEmprise\(\)/)
-  const suiv = SRC_MODES.slice(SRC_MODES.indexOf('  _suivreEmprise() {'))
-  assert.match(suiv.slice(0, suiv.indexOf('\n  }\n')), /poseApresNiveau/)
+  const suiv = SRC_MODES.slice(SRC_MODES.indexOf('  _suivreEmprise(cibleAvant = null) {'))
+  assert.match(suiv.slice(0, suiv.indexOf('\n  }\n')), /poseFranchissement/)
   // et `main.js` appelle bien `modes.update` avant les deux lecteurs d'altitude
   const iUpdate = SRC_MAIN.indexOf('modes.update(dt)')
   assert.ok(iUpdate > 0 && iUpdate < SRC_MAIN.indexOf('  majSeuilSocle()'))
@@ -390,7 +396,9 @@ test('⑥ le franchissement ne remet PAS l’élan à zéro sous le drapeau', ()
   assert.match(corps, /if \(!continu\) this\._resetZoom\(\)/)
   // ⚠️ et le cran ne repose PAS la caméra lui-même : il rend la main au suiveur
   // d'unités, seul écrivain de la conversion.
-  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(\); this\.busy = false; return \}/)
+  // ⚠️ **ET IL LUI PASSE L'ANCIENNE CIBLE — Tâche R4** : c'est la seule chose
+  // que le suiveur ne peut pas retrouver seul une fois la cible réécrite.
+  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(cibleAvant\); this\.busy = false; return \}/)
   // ⚠️ **LA FORME D'APPEL, PAS LA MENTION** : le commentaire au-dessus nomme
   // `poseCranContinu` pour dire pourquoi on ne l'emploie plus. L'APPEL, lui, est
   // après le retour anticipé — donc hors du chemin continu.
@@ -562,7 +570,7 @@ function domDePacotille() {
   return corps
 }
 
-async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326 } = {}) {
+async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false } = {}) {
   domDePacotille()
   const THREE = await import('three')
   const { Modes } = await import('../src/modes.js')
@@ -590,6 +598,12 @@ async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326
     getRefineTarget: () => ({ lat, lon: 6.86, zoom: 12 }),
     getCoarsenTarget: () => ({ lat, lon: 6.86, zoom: 10 }),
     async loadSurface(_lat, _lon, zoom) { etat.loadSurface++; etat.zoomCharge.push(zoom); etat.emprise /= 2 },
+    // ⚠️ **LA VISÉE DU LIEU DÉPLACE LA CIBLE, ET C'EST CE QUE LA PRODUCTION FAIT**
+    // — Tâche R4. `main.js` rend le point géographique visé dans le repère du
+    // bloc COURANT ; d'un niveau au suivant, ce même point change donc de
+    // coordonnées. Sans ce crochet, la cible reste à l'origine et le saut
+    // d'orientation du franchissement est structurellement invisible.
+    ...(viseeMobile ? { viseeDuLieu: () => ({ x: 4.814 + etat.loadSurface, z: 8.949 - etat.loadSurface }) } : {}),
   }
   const m = new Modes({ camera, controls, globe, domElement, hooks })
   m.mode = 'surface'
@@ -733,4 +747,179 @@ test('⑩ les trois crochets d’emprise lisent le MÊME couple que la caméra d
   const corps = fond.slice(0, fond.indexOf('})'))
   assert.match(corps, /extentMeters: largeur/)
   assert.match(corps, /span: TERRAIN_SIZE/)
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⑪ LA POSE — Tâche R4, « LA TERRE NE DOIT NI BOUGER NI SE RECHARGER »
+//
+// **Adrien, 2026-08-23, vidéo de 39 s à l'appui :** *« J'ai toujours le problème
+// de déplacement de la Terre quand je descends depuis l'orbite. »*
+//
+// ⚠️ **LA TÂCHE M AVAIT MESURÉ L'ALTITUDE, ET ELLE AVAIT RAISON : L'ALTITUDE NE
+// SAUTE PAS.** Ce qui saute, c'est l'ORIENTATION — une grandeur qu'aucune des
+// mesures d'altitude de ce fichier ne peut voir, puisqu'une caméra qui bascule
+// du nadir à l'oblique sans bouger d'un mètre garde son altitude ET son rapport
+// d'altitude d'une image à l'autre.
+//
+// Relevé image par image dans le navigateur (`.banc/R4/descente.mjs`, descente
+// de 60 000 km au sol, drapeau levé), inclinaison au nadir LOCAL :
+//
+//   | image | événement             | inclinaison       |
+//   | 346   | orbite → surface      | 0,000° → 46,548°  |
+//   | 652   | franchissement z3→z4  | 46,548° → 36,154° |
+//   | 1098  | franchissement z5→z6  | 34,52°  → 37,09°  |
+//   | 1984  | franchissement z9→z10 | 45,92°  → 54,05°  |
+//   | 2090  | NAISSANCE DU CROP     | 54,047° → 54,047° |
+//
+// ⚠️ **LA DERNIÈRE LIGNE EST CELLE QUI FIXE LE PÉRIMÈTRE** : la naissance du
+// crop ne touche PAS à la caméra, pas d'un millième de degré. Le brief de la
+// tâche l'attribuait au crop ; la mesure dit que ce sont la PLONGÉE et les
+// FRANCHISSEMENTS. Les deux sont réparés ici, le crop n'y est pour rien.
+// ══════════════════════════════════════════════════════════════════════════
+
+const inclinaisonDeg = (cam, cible) => {
+  const dx = cam.x - cible.x
+  const dy = cam.y - cible.y
+  const dz = cam.z - cible.z
+  return (Math.acos(dy / Math.hypot(dx, dy, dz)) * 180) / Math.PI
+}
+
+test('⑪ la pose de franchissement garde l’inclinaison, quel que soit le saut de cible', () => {
+  // le relevé du navigateur, rejoué : la cible saute de 9,1 unités en z
+  const camera = { x: -2.229, y: 23.821, z: 25.157 }
+  const cibleAvant = { x: -2.229, y: -0.156, z: -0.153 }
+  const cibleApres = { x: 4.814, y: -0.297, z: 8.949 }
+  const avant = inclinaisonDeg(camera, cibleAvant)
+  assert.ok(Math.abs(avant - 46.548) < 0.01, `relevé ${avant.toFixed(3)}° au lieu de 46,548°`)
+  const p = poseFranchissement({
+    camera,
+    cibleAvant,
+    cibleApres,
+    empriseAvant: 1e6,
+    empriseApres: 5e5,
+    distanceMin: 6,
+    distanceMax: 150,
+  })
+  const apres = inclinaisonDeg(p, cibleApres)
+  assert.ok(Math.abs(apres - avant) < 1e-9, `l’inclinaison a bougé de ${(apres - avant).toFixed(4)}°`)
+  // et l'altitude de fond traverse : camY est multipliée par le rapport des emprises
+  assert.ok(Math.abs(p.camY / (camera.y * 2) - 1) < 1e-12)
+})
+
+test('⑪ MUTATION — lire la direction sur la cible D’APRÈS rouvre le saut de 10°', () => {
+  // ⚠️ **SANS CETTE MUTATION, L’ASSERTION CI-DESSUS SERAIT UNE TAUTOLOGIE.**
+  // C'est le geste EXACT du dépôt d'avant R4 : `_rescale` écrivait la nouvelle
+  // cible, puis `_suivreEmprise` relisait la direction sur le couple dépareillé.
+  const camera = { x: -2.229, y: 23.821, z: 25.157 }
+  const cibleAvant = { x: -2.229, y: -0.156, z: -0.153 }
+  const cibleApres = { x: 4.814, y: -0.297, z: 8.949 }
+  const faux = poseFranchissement({
+    camera,
+    cibleAvant: cibleApres, // ⛔ la lecture d'avant : la cible du NOUVEAU repère
+    cibleApres,
+    empriseAvant: 1e6,
+    empriseApres: 5e5,
+    distanceMin: 6,
+    distanceMax: 150,
+  })
+  const ecart = Math.abs(inclinaisonDeg(faux, cibleApres) - inclinaisonDeg(camera, cibleAvant))
+  assert.ok(ecart > 9, `la loi d’avant ne dévie que de ${ecart.toFixed(2)}° — le relevé en donne 10,4`)
+})
+
+test('⑪ le fondu de pose part du NADIR et finit sur la pose d’arrivée, à camY constant', () => {
+  const cible = { x: 3, y: Y_CIBLE, z: -7 }
+  const camY = 44
+  // la direction d'arrivée du dépôt : PENTE_ARRIVEE = { y: 18, z: 19 }
+  const n = Math.hypot(18, 19)
+  const direction = { x: 0, y: 18 / n, z: 19 / n }
+  const d0 = poseFonduArrivee({ cible, camY, direction, avancement: 0 })
+  // à l'aplomb : la caméra est exactement au-dessus de la cible
+  assert.ok(Math.abs(d0.x - cible.x) < 1e-9 && Math.abs(d0.z - cible.z) < 1e-9)
+  assert.equal(d0.y, camY)
+  const d1 = poseFonduArrivee({ cible, camY, direction, avancement: 1 })
+  // à l'arrivée : la pose OBLIQUE, celle que `_arrivalPose` produit
+  const dist = (camY - cible.y) / direction.y
+  assert.ok(Math.abs(d1.x - (cible.x + direction.x * dist)) < 1e-9)
+  assert.ok(Math.abs(d1.z - (cible.z + direction.z * dist)) < 1e-9)
+  assert.ok(Math.abs(d1.y - camY) < 1e-9)
+  // l'inclinaison balaie de 0° à 46,55° SANS jamais reculer, et `camY` ne bouge
+  let precedent = -1
+  for (let i = 0; i <= 40; i++) {
+    const p = poseFonduArrivee({ cible, camY, direction, avancement: i / 40 })
+    assert.equal(p.y, camY, 'le fondu a changé l’altitude')
+    const incl = inclinaisonDeg(p, cible)
+    assert.ok(incl >= precedent - 1e-9, 'l’inclinaison est revenue en arrière')
+    precedent = incl
+  }
+  assert.ok(Math.abs(precedent - 46.551) < 0.01, `arrivée à ${precedent.toFixed(3)}° au lieu de 46,551°`)
+})
+
+test('⑪ une visée rasante ou une caméra sous la cible ne rendent RIEN, jamais zéro', () => {
+  const cible = { x: 0, y: 0, z: 0 }
+  assert.equal(poseFonduArrivee({ cible, camY: 40, direction: { x: 0, y: 0, z: 1 } }), null)
+  assert.equal(poseFonduArrivee({ cible, camY: -3, direction: { x: 0, y: 1, z: 1 } }), null)
+  assert.equal(
+    poseFranchissement({ camera: { x: 0, y: 0, z: 10 }, cibleAvant: cible, cibleApres: cible, empriseAvant: 1, empriseApres: 1 }),
+    null
+  )
+})
+
+test('⑪ BRANCHEMENT — un franchissement ne tourne PAS la caméra, visée mobile comprise', async () => {
+  // ⚠️ **LA VISÉE MOBILE EST TOUT LE TEST.** Sans crochet `viseeDuLieu`, la
+  // cible reste à l'origine d'un niveau à l'autre et le défaut est invisible :
+  // c'est exactement pourquoi il a survécu à `npm test`. La production, elle,
+  // rend le point géographique visé dans le repère du NOUVEAU bloc — donc une
+  // cible qui bouge de plusieurs unités à chaque franchissement.
+  const { m, camera, controls } = await machine({ emprise: 1e6, viseeMobile: true })
+  camera.position.set(-2.229, 23.821, 25.157)
+  controls.target.set(-2.229, -0.156, -0.153)
+  const incl = () => inclinaisonDeg(camera.position, controls.target)
+  const avant = incl()
+  await m._refine()
+  const apres = incl()
+  assert.ok(Math.abs(controls.target.z + 0.153) > 1, 'la cible n’a pas bougé : le test ne mord sur rien')
+  assert.ok(Math.abs(apres - avant) < 1e-6, `la caméra a tourné de ${(apres - avant).toFixed(3)}°`)
+})
+
+test('⑪ BRANCHEMENT — la plongée arrive AU NADIR puis balaie jusqu’à la pose oblique', async () => {
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56 })
+  m.mode = 'orbital'
+  m.altM = 500000
+  m._empriseVue = null
+  const incl = () => inclinaisonDeg(camera.position, controls.target)
+  await m._dive({ altM: 8000, zoom: null })
+  assert.equal(m.mode, 'surface')
+  assert.ok(incl() < 1e-6, `la plongée arrive à ${incl().toFixed(2)}° au lieu du nadir`)
+  const altArrivee = m._altitudeFondM()
+  // le balayage : on avance le fondu jusqu'au bout, et l'altitude de fond ne
+  // bouge pas d'un mètre en chemin
+  let plusGrandPas = 0
+  let precedent = incl()
+  for (let i = 0; i < 400 && m._fonduPose; i++) {
+    m.update(1 / 60)
+    plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
+    precedent = incl()
+    assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'le fondu a fait bouger l’altitude de fond')
+  }
+  assert.equal(m._fonduPose, null, 'le fondu ne s’est jamais terminé')
+  assert.ok(Math.abs(incl() - 46.551) < 0.05, `la pose finale vaut ${incl().toFixed(3)}° au lieu de 46,551°`)
+  // ⚠️ **LE CRITÈRE D'ADRIEN, CHIFFRÉ** : plus aucun pas d'image à image ne
+  // ressemble au saut de 46,55° relevé au navigateur.
+  assert.ok(plusGrandPas < 3, `le plus grand pas vaut encore ${plusGrandPas.toFixed(2)}° par image`)
+})
+
+test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, comme avant', async () => {
+  const { m, camera, controls } = await machine({ continu: false, emprise: 1e6, span: 56 })
+  m.mode = 'orbital'
+  m.altM = 500000
+  await m._dive({ altM: 8000, zoom: null })
+  const incl = inclinaisonDeg(camera.position, controls.target)
+  // ⚠️ **46,46° ET NON 46,551°, ET CE N'EST PAS UNE TOLÉRANCE MOLLE.** Hors
+  // drapeau, `_posePlongee` rend `arrival.pos`, c'est-à-dire `_ARRIVAL_DIR × d`
+  // — une position ABSOLUE, pas un décalage depuis la cible. La cible, elle, est
+  // à `Y_CIBLE = −0,3`, et ces 0,3 unité valent exactement les 0,09° d'écart. Ce
+  // chiffre est le relevé du dépôt AVANT R4 : il grave que le régime hors
+  // drapeau n'a pas bougé d'un centième.
+  assert.ok(Math.abs(incl - 46.46) < 0.02, `hors drapeau, la plongée arrive à ${incl.toFixed(3)}°`)
+  assert.equal(m._fonduPose ?? null, null, 'un fondu de pose s’est armé hors du régime continu')
 })
