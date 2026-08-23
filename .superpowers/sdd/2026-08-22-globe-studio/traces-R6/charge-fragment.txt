@@ -1,0 +1,18 @@
+→ http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ
+matériel : ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)
+
+39998 m — 876 tuiles
+  ×0.5  tampon=640x400     0.26 Mpx  appels=583 tri=897769  blocs=[5.75 5.66 5.59 5.73 5.26]  med=5.655 ms/image
+  ×1    tampon=1280x800    1.02 Mpx  appels=583 tri=897769  blocs=[5.04 5.67 5.58 5.41 5.68]  med=5.575 ms/image
+  ×2    tampon=2560x1600    4.1 Mpx  appels=583 tri=897769  blocs=[5.05 5.46 5.52 5.41 5.24]  med=5.405 ms/image
+  ×3    tampon=3840x2400   9.22 Mpx  appels=583 tri=897769  blocs=[5.29 5.80 5.21 5.42 5.55]  med=5.425 ms/image
+  ➡️ ×35 de fragments à appels constants ⇒ ×0.96 de temps par image
+
+1999999 m — 946 tuiles
+  ×0.5  tampon=640x400     0.26 Mpx  appels=52 tri=163685  blocs=[0.65 0.64 0.61 0.65 0.66]  med=0.650 ms/image
+  ×1    tampon=1280x800    1.02 Mpx  appels=52 tri=163685  blocs=[0.71 0.65 0.62 0.65 0.64]  med=0.650 ms/image
+  ×2    tampon=2560x1600    4.1 Mpx  appels=52 tri=163685  blocs=[0.86 0.80 0.81 0.83 0.82]  med=0.818 ms/image
+  ×3    tampon=3840x2400   9.22 Mpx  appels=52 tri=163685  blocs=[1.49 1.52 1.51 1.51 1.52]  med=1.515 ms/image
+  ➡️ ×35 de fragments à appels constants ⇒ ×2.33 de temps par image
+
+→ C:\Dev\wt-nue\.superpowers\sdd\2026-08-22-globe-studio\traces-R6\charge-fragment.json

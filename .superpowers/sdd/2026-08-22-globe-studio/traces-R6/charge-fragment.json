@@ -1,0 +1,159 @@
+{
+  "url": "http://localhost:5519/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee#s=eyJsb2MiOnsibGF0IjozMC44OCwibG9uIjotNS41OSwiem9vbSI6MTJ9fQ",
+  "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "quand": "2026-08-23T22:06:03.455Z",
+  "blocs": 5,
+  "images": 40,
+  "facteurs": [
+    0.5,
+    1,
+    2,
+    3
+  ],
+  "resultats": [
+    {
+      "largeurDeBase": 1280,
+      "hauteurDeBase": 800,
+      "altitude": 39998,
+      "tuiles": 876,
+      "mesures": [
+        {
+          "facteur": 0.5,
+          "demande": "640x400",
+          "tampon": "640x400",
+          "megapixels": 0.26,
+          "appels": 583,
+          "triangles": 897769,
+          "blocs": [
+            5.7475,
+            5.655,
+            5.5875,
+            5.7275,
+            5.265
+          ],
+          "med": 5.655
+        },
+        {
+          "facteur": 1,
+          "demande": "1280x800",
+          "tampon": "1280x800",
+          "megapixels": 1.02,
+          "appels": 583,
+          "triangles": 897769,
+          "blocs": [
+            5.0375,
+            5.6725,
+            5.575,
+            5.4075,
+            5.6775
+          ],
+          "med": 5.575
+        },
+        {
+          "facteur": 2,
+          "demande": "2560x1600",
+          "tampon": "2560x1600",
+          "megapixels": 4.1,
+          "appels": 583,
+          "triangles": 897769,
+          "blocs": [
+            5.0475,
+            5.465,
+            5.5225,
+            5.405,
+            5.24
+          ],
+          "med": 5.405
+        },
+        {
+          "facteur": 3,
+          "demande": "3840x2400",
+          "tampon": "3840x2400",
+          "megapixels": 9.22,
+          "appels": 583,
+          "triangles": 897769,
+          "blocs": [
+            5.29,
+            5.8025,
+            5.2075,
+            5.425,
+            5.5525
+          ],
+          "med": 5.425
+        }
+      ]
+    },
+    {
+      "largeurDeBase": 1280,
+      "hauteurDeBase": 800,
+      "altitude": 1999999,
+      "tuiles": 946,
+      "mesures": [
+        {
+          "facteur": 0.5,
+          "demande": "640x400",
+          "tampon": "640x400",
+          "megapixels": 0.26,
+          "appels": 52,
+          "triangles": 163685,
+          "blocs": [
+            0.65,
+            0.64,
+            0.61,
+            0.6525,
+            0.655
+          ],
+          "med": 0.65
+        },
+        {
+          "facteur": 1,
+          "demande": "1280x800",
+          "tampon": "1280x800",
+          "megapixels": 1.02,
+          "appels": 52,
+          "triangles": 163685,
+          "blocs": [
+            0.7075,
+            0.65,
+            0.6175,
+            0.65,
+            0.635
+          ],
+          "med": 0.65
+        },
+        {
+          "facteur": 2,
+          "demande": "2560x1600",
+          "tampon": "2560x1600",
+          "megapixels": 4.1,
+          "appels": 52,
+          "triangles": 163685,
+          "blocs": [
+            0.8625,
+            0.795,
+            0.8075,
+            0.835,
+            0.8175
+          ],
+          "med": 0.8175
+        },
+        {
+          "facteur": 3,
+          "demande": "3840x2400",
+          "tampon": "3840x2400",
+          "megapixels": 9.22,
+          "appels": 52,
+          "triangles": 163685,
+          "blocs": [
+            1.485,
+            1.5225,
+            1.515,
+            1.51,
+            1.5225
+          ],
+          "med": 1.515
+        }
+      ]
+    }
+  ]
+}
