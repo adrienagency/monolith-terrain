@@ -104,6 +104,12 @@ import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './
 // lecteurs (`_buildMesh` qui pose les sommets, `hauteurDessinee` qui les relit),
 // et une table recopiée diverge en silence.
 import { segmentsTuile, interpolerMaille } from './monde/maillage-tuile.js'
+// LA MÉMOIRE DES TUILES DE MNT — Tâche R3, correction I3. ⚠️ **ELLE A
+// DÉMÉNAGÉ, ELLE N'A PAS CHANGÉ** : même Map, même borne de 32 Mo, même LRU.
+// Elle vit désormais dans un module PUR parce que `dem.js` en est le SECOND
+// lecteur : les neuf tuiles z12 du bloc étaient téléchargées deux fois par
+// chargement (2,705 Mo), une fois par chaque chemin, faute d'une mémoire commune.
+import { memoTuiles, tuileMemorisee, viderMemoTuiles } from './monde/memo-tuiles-mnt.js'
 // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
 //
 // ⚠️ **CE N'EST PAS UNE COPIE DU SOCLE, C'EST LE MÊME TEXTE.** `terrain.js`
@@ -2073,13 +2079,11 @@ function poserIrradiance(cible, couleurHex, intensite) {
 // ne bouge pas d'un octet — 32 Mo, le coude mesuré ci-dessus — et sur un globe
 // entièrement AWS le comportement est identique au bit près (128 × 256 Kio =
 // exactement 32 Mo, donc exactement 128 entrées retenues).
-const TILE_MEMO_OCTETS_MAX = 128 * 256 * 256 * 4 // 32 Mo d'ImageBitmap décodé
-
-/** url → Promise<ImageBitmap>, LRU bornée. Exportée pour les tests. */
-export const _tileMemo = new Map()
-// coût de chaque entrée, en octets — même clé, même ordre que `_tileMemo`
-const _tileMemoCout = new Map()
-let _tileMemoOctets = 0
+// ⚠️ **LA BORNE ET LA MAP VIVENT MAINTENANT DANS `monde/memo-tuiles-mnt.js`**
+// (Tâche R3, I3), et le paragraphe ci-dessus reste le sien : c'est la MESURE qui
+// fonde les 32 Mo, et elle n'a pas bougé. Ce fichier ne fait que réexporter la
+// Map sous son nom historique — `test/globe-reseau.test.js` la lit ainsi.
+export const _tileMemo = memoTuiles
 
 // ═══════════ LE JOURNAL RÉSEAU — la source de `debitObserve` (Tâche 4 bis) ════
 //
@@ -2140,9 +2144,7 @@ function maintenant() {
 
 /** Remise à zéro de la mémoire de tuiles — tests uniquement. */
 export function _resetTileMemo() {
-  _tileMemo.clear()
-  _tileMemoCout.clear()
-  _tileMemoOctets = 0
+  viderMemoTuiles()
 }
 
 // ═══════════ LA SOURCE DE RELIEF — UNE POLITIQUE, PAS UNE URL ═══════════════
@@ -2217,13 +2219,12 @@ export function planTuile(z, x, y, source = activeDemSource()) {
 // Une SEULE entrée par URL, promesse comprise : deux demandes qui se
 // chevauchent partagent la requête au lieu d'en lancer deux.
 function tileBitmap(url, octets = 256 * 256 * 4) {
-  const memo = _tileMemo.get(url)
-  if (memo) {
-    _tileMemo.delete(url)
-    _tileMemo.set(url, memo) // ré-insertion = most-recently-used
-    return memo
-  }
-  const p = (async () => {
+  // ⚠️ **LA MÉMOIRE EST PARTAGÉE AVEC `dem.js` DEPUIS LA TÂCHE R3 (I3).** Le
+  // chargeur ci-dessous n'est appelé QUE sur un manque : si le bloc du socle est
+  // déjà passé par `loadDem`, ses neuf tuiles z12 ne repartent plus sur le
+  // réseau. Le reste — LRU, budget, « un échec ne se mémorise pas » — est celui
+  // d'avant, déplacé sans être touché.
+  return tuileMemorisee(url, () => (async () => {
     const debut = maintenant()
     let r
     try {
@@ -2248,31 +2249,7 @@ function tileBitmap(url, octets = 256 * 256 * 4) {
     // latence d'aller-retour et l'appellerait « débit ».
     noterReponse({ octets: blob?.size, debut, fin: maintenant() })
     return createImageBitmap(blob)
-  })()
-  _tileMemo.set(url, p)
-  _tileMemoCout.set(url, octets)
-  _tileMemoOctets += octets
-  // Un ÉCHEC ne se mémorise pas : `_pump` réessaie une fois, et une panne figée
-  // priverait la session de la tuile pour de bon.
-  // ⚠️ `p.then(null, …)` et pas `p.catch(…)` en tête de chaîne : cette branche
-  // de surveillance ABSORBE le rejet, sinon chaque tuile en panne lèverait un
-  // unhandledrejection à côté de `_pump` qui, lui, l'a bien traité.
-  p.then(null, () => {
-    if (_tileMemo.get(url) === p) oublieTuile(url)
-  })
-  // les entrées EN VOL viennent d'être insérées, elles sont donc en tête de
-  // fraîcheur : la purge par la queue ne peut pas casser la déduplication
-  while (_tileMemoOctets > TILE_MEMO_OCTETS_MAX && _tileMemo.size > 1) {
-    oublieTuile(_tileMemo.keys().next().value)
-  }
-  return p
-}
-
-function oublieTuile(url) {
-  if (!_tileMemo.has(url)) return
-  _tileMemoOctets -= _tileMemoCout.get(url) ?? 0
-  _tileMemoCout.delete(url)
-  _tileMemo.delete(url)
+  })(), octets)
 }
 
 // terrarium PNG/WebP → { texture, heights Float32Array(px*px), size }

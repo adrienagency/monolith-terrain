@@ -27,6 +27,11 @@ import {
   regionKey,
   resolveRegionMaxZoom,
 } from './dem-source.js'
+// LA MÉMOIRE DES TUILES DE MNT, PARTAGÉE AVEC LE GLOBE — Tâche R3 (I3).
+// Module PUR : il ne connaît ni `three` ni le DOM, et le chargement lui est
+// passé en paramètre. C'est ce qui permet à ce fichier de l'importer sans tirer
+// `globe.js` — lequel importerait `three`, que les tests node de `dem.js` n'ont pas.
+import { tuileMemorisee, viderMemoTuiles } from './monde/memo-tuiles-mnt.js'
 
 export { demTilePx }
 
@@ -129,22 +134,19 @@ const bathyMisses = new Set()
 //   z8, donc les 9 cases d'un MNT z12 lisent le MÊME ancêtre, et les 25 dalles
 //   du damier aussi. Une poignée de fichiers de 256² : les mémoriser coûte
 //   quelques centaines de Ko et supprime des milliers de requêtes.
-const tilesEnVol = new Map() // url → Promise<ImageBitmap|null>, purgée à l'atterrissage
-
-function enUnSeulExemplaire(url, charger) {
-  const vol = tilesEnVol.get(url)
-  if (vol) return vol
-  const p = charger()
-  tilesEnVol.set(url, p)
-  // ⚠️ `p.then(fini, fini)` et pas `p.finally()` : on veut ABSORBER le rejet de
-  // cette branche de surveillance, sinon chaque tuile en panne lèverait un
-  // unhandledrejection à côté de l'appelant qui, lui, l'a bien traité.
-  const fini = () => {
-    if (tilesEnVol.get(url) === p) tilesEnVol.delete(url)
-  }
-  p.then(fini, fini)
-  return p
-}
+// ⛔ **CE PARAGRAPHE A ÉTÉ DÉMENTI PAR LA MESURE — Tâche R3, correction I3.**
+// « Les garder APRÈS coup serait un cache d'images de 1 Mo pièce, pour un partage
+// marginal » : le partage n'est marginal qu'ENTRE DALLES DU DAMIER. Il ne l'est
+// pas du tout avec **la file du globe**, qui redemande exactement les mêmes neuf
+// tuiles z12 du bloc, même URL, à ~1,7 s d'écart — **2,705 Mo par chargement**,
+// mesurés sur 9 tirages sous `?terre=unique`.
+//
+// ⚠️ **ET LA RÉPONSE N'EST PAS UN CACHE DE PLUS, C'EST UN CACHE DE MOINS.** La
+// mémoire en vol de ce fichier disparaît au profit de celle du globe, déménagée
+// dans un module PUR : même borne (32 Mo), même LRU, un seul propriétaire. Le
+// budget total ne bouge pas d'un octet ; ce sont les requêtes qui disparaissent.
+// Voir `monde/memo-tuiles-mnt.js` pour ce qui n'est délibérément PAS mémorisé
+// (les `null` de 404 : les deux appelants ne les traduisent pas pareil).
 
 // LRU des GRILLES bathy décodées. 32 entrées de 256²·4 o = 8 Mo au pire absolu ;
 // en pratique un damier n'en touche qu'une poignée.
@@ -251,7 +253,7 @@ export const indexBathy = bathyIndex
 
 /** Remise à zéro des mémoires de tuiles — tests uniquement. */
 export function _resetTileCaches() {
-  tilesEnVol.clear()
+  viderMemoTuiles()
   bathyHits.clear()
   bathyMisses.clear()
   demMemoVider()
@@ -596,10 +598,11 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
 // DemSourceError si c'est la SOURCE qui a un problème (réseau, 5xx, DNS, image
 // indécodable — un navigateur sans WebP, par exemple).
 function fetchTerrainTile(source, t) {
-  return enUnSeulExemplaire(source.url(t.z, t.x, t.y), async () => {
+  const url = source.url(t.z, t.x, t.y)
+  return tuileMemorisee(url, async () => {
     let res
     try {
-      res = await fetch(source.url(t.z, t.x, t.y))
+      res = await fetch(url)
     } catch (err) {
       throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} → ${err?.message || err}`)
     }

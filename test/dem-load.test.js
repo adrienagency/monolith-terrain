@@ -152,6 +152,12 @@ test('une tuile manquante peint du VIDE et laisse vivre le reste du bloc', async
   const cx = Math.floor(((LON + 180) / 360) * n)
   const la = (LAT * Math.PI) / 180
   const cy = Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n)
+  // ⚠️ **LA MÉMOIRE DE TUILES EST PARTAGÉE AVEC LE GLOBE DEPUIS LA Tâche R3
+  // (I3), ET ELLE SURVIT À L'ATTERRISSAGE.** Ce test rejoue les MÊMES URL avec
+  // une autre réponse réseau : sans cette remise à zéro, il lirait les tuiles du
+  // test précédent et ne verrait jamais la panne qu'il simule. C'est l'idiome
+  // déjà employé trois fois plus bas dans ce fichier.
+  _resetTileCaches()
   serve({ zmax: 16, missTiles: [`${cx - 1},${cy - 1}`] })
   const dem = await loadDem({ lat: LAT, lon: LON, zoom: 14, bathy: false })
 
@@ -168,6 +174,12 @@ test('une tuile manquante peint du VIDE et laisse vivre le reste du bloc', async
 })
 
 test('plus AUCUNE tuile : c est une panne, pas un trou — loadDem lève', async () => {
+  // ⚠️ **LA MÉMOIRE DE TUILES EST PARTAGÉE AVEC LE GLOBE DEPUIS LA Tâche R3
+  // (I3), ET ELLE SURVIT À L'ATTERRISSAGE.** Ce test rejoue les MÊMES URL avec
+  // une autre réponse réseau : sans cette remise à zéro, il lirait les tuiles du
+  // test précédent et ne verrait jamais la panne qu'il simule. C'est l'idiome
+  // déjà employé trois fois plus bas dans ce fichier.
+  _resetTileCaches()
   serve({ zmax: 16, missTiles: null })
   globalThis.fetch = async (url, opts) => {
     if (url.startsWith('data/bathy/')) return { ok: false, status: 404 }
@@ -180,6 +192,12 @@ test('plus AUCUNE tuile : c est une panne, pas un trou — loadDem lève', async
 // ---------------------------------------------------------------- le repli
 
 test('un 5xx bascule sur AWS, rejoue le chargement, et retient la bascule', async () => {
+  // ⚠️ **LA MÉMOIRE DE TUILES EST PARTAGÉE AVEC LE GLOBE DEPUIS LA Tâche R3
+  // (I3), ET ELLE SURVIT À L'ATTERRISSAGE.** Ce test rejoue les MÊMES URL avec
+  // une autre réponse réseau : sans cette remise à zéro, il lirait les tuiles du
+  // test précédent et ne verrait jamais la panne qu'il simule. C'est l'idiome
+  // déjà employé trois fois plus bas dans ce fichier.
+  _resetTileCaches()
   serve({ zmax: 16, serverError: true })
   const dem = await loadDem({ lat: LAT, lon: LON, zoom: 14, bathy: false })
   assert.equal(dem.demSource, 'aws', 'le bloc a été rechargé depuis le bucket AWS')
@@ -272,6 +290,12 @@ test('bout en bout : l agrandissement Catmull-Rom ne déplace PAS le trait de c�
   // ⚠️ LA RÈGLE DU MODULE, éprouvée sur le chemin complet. Catmull-Rom dépasse
   // par construction ; ce dépassement ne doit jamais faire bouger un rivage.
   // La terre est ici à +240 m et la source marine hurle −4 000 m sous elle.
+  // ⚠️ **LA MÉMOIRE DE TUILES EST PARTAGÉE AVEC LE GLOBE DEPUIS LA Tâche R3
+  // (I3), ET ELLE SURVIT À L'ATTERRISSAGE.** Ce test rejoue les MÊMES URL avec
+  // une autre réponse réseau : sans cette remise à zéro, il lirait les tuiles du
+  // test précédent et ne verrait jamais la panne qu'il simule. C'est l'idiome
+  // déjà employé trois fois plus bas dans ce fichier.
+  _resetTileCaches()
   serve({ zmax: 12, bathy: true, landElev: 240 })
   const dem = await loadDem({ lat: 43.0, lon: 5.9, zoom: 13, bathy: true })
   for (let i = 0; i < dem.data.length; i++) {
