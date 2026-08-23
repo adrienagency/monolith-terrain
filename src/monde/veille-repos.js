@@ -80,7 +80,7 @@
 // changer — et **la distance qui ne bouge pas du tout** : `0`. La distance est
 // donc immunisée contre une classe de faux positifs que l'altitude subissait.
 //
-// ⚠️ **CE QUE LA DISTANCE FAIT MOINS BIEN, ET IL FAUT LE DIRE — mesuré aussi.**
+// ⚠️ **CE QUE LA DISTANCE FAIT MOINS BIEN, ET IL FAUT LE DIRE.**
 // Au franchissement d'un cran, `_suivreEmprise` (`modes.js`) repose la caméra
 // et `controls.target` saute : relevé **13,25 unités** de saut de cible, la
 // distance passant de 72,75 à 124,59 — un écart de `0,538` là où l'altitude,
@@ -88,6 +88,15 @@
 // pas un faux positif** : un cran ne survient que pendant un zoom délibéré, et
 // les DEUX grandeurs franchissent le seuil à cette image. C'est un vrai positif
 // plus gros, pas un réveil de plus.
+//
+// ⚠️ **CES TROIS NOMBRES N'ONT PAS ÉTÉ REPRIS, ET ILS SONT ÉCRITS ICI COMME
+// TELS.** La relecture a essayé et **n'a pu ni les confirmer ni les infirmer** :
+// la reprise de pose se joue entre l'enregistrement de sa sonde `rAF` et son
+// premier appel, et ses 340 images autour du cran sont toutes identiques
+// (`.banc/R1-relecture/cran-et-cine.json`). Un seul relevé, un seul instrument.
+// **Ce qu'elle a bien mesuré va dans le même sens** : un cran coûte exactement
+// UN aller-retour, `bascules` passant de 2 à 4, jamais plus — ce que la lecture
+// ci-dessus prédit. À reprendre si quelqu'un sait capturer ce transitoire.
 //
 // ══════════ 2. L'ÉCART EST LOGARITHMIQUE ═══════════════════════════════════
 //
