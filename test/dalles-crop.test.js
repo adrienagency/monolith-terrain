@@ -180,7 +180,17 @@ test('① ter la planète RESTE DESSINÉE pendant l’attente — le piège de l
   // `return` qui suit saute le dessin de la racine. Le globe deviendrait
   // invisible pendant tout le démarrage, sans une erreur nulle part.
   const { globe } = await demarrage({ cropAttendu: true })
-  assert.ok(globe._drawn > 0, 'aucune tuile dessinée : la planète a disparu pendant l’attente du crop')
+  // ⛔ **`> 0` ÉTAIT TROP FAIBLE D'EXACTEMENT UNE LIGNE, ET LA MUTATION A
+  // SURVÉCU.** Ligne de `_traverse` supprimée, `_drawn` tombe de **16 à 5** :
+  // onze racines sur seize disparaissent, et `5 > 0` restait vrai. On compte
+  // donc les racines, une par une.
+  assert.equal(
+    globe._drawn, globe.roots.length,
+    `${globe._drawn} tuiles dessinées pour ${globe.roots.length} racines : des racines ont disparu`,
+  )
+  const zDessinees = new Set()
+  for (const t of globe.tiles.values()) if (t.mesh?.visible) zDessinees.add(t.z)
+  assert.deepEqual([...zDessinees], [2], 'le dessin ne doit venir QUE des racines pendant l’attente')
 })
 
 test('② le crop posé, la descente REPART — la retenue n’est pas un blocage', async () => {
