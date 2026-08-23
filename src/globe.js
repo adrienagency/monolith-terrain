@@ -2826,7 +2826,7 @@ export class Globe {
       // quatrième convention aurait fabriqué deux règles pour un seul nuanceur.
       uAerial: { value: null },
       uAerialOn: { value: 0 },
-      uAerialOpacity: { value: 1 },
+      uAerialOpacity: { value: HABILLAGE_MONDE.aerialOpacite },
       uAerialOffset: { value: new THREE.Vector2(0, 0) },
       uAerialScale: { value: new THREE.Vector2(1, 1) },
       // LA NORMALE PAR FRAGMENT — Tâche P9. ⚠️ **`uNormaleFineOn: 0` : sans
@@ -3559,7 +3559,7 @@ export class Globe {
     solScale = null,
     solTexel = null,
     aerial = null,
-    aerialOpacite = 1,
+    aerialOpacite = HABILLAGE_MONDE.aerialOpacite,
     aerialOffset = null,
     aerialScale = null,
     amplitudeM = null,
@@ -3872,7 +3872,7 @@ export class Globe {
     // état qui traîne, et ce fichier en a déjà payé un.
     u.uAerial.value = null
     u.uAerialOn.value = 0
-    u.uAerialOpacity.value = 1
+    u.uAerialOpacity.value = HABILLAGE_MONDE.aerialOpacite
     u.uAerialOffset.value.set(0, 0)
     u.uAerialScale.value.set(1, 1)
     u.uContourInterval.value = HABILLAGE_MONDE.contourIntervalM

@@ -30,6 +30,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import { creditOrthophoto, orthophotoPeinteSurLeCrop } from '../src/monde/credit-orthophoto.js'
+import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
 /** ⚠️ SANS SES COMMENTAIRES — la Tâche K ter a trouvé une assertion verte parce
@@ -150,10 +151,17 @@ test('③ aux défauts du constructeur, la découpe ne peint pas — donc la pro
   // sont lus DANS `globe.js`, pas recopiés ici.
   assert.match(GLOBE_NU, /uCropOn: \{ value: 0 \}/)
   assert.match(GLOBE_NU, /uAerialOn: \{ value: 0 \}/)
-  const defaut = (nom) => Number(GLOBE_NU.match(new RegExp(`${nom}: \\{ value: ([\\d.]+) \\}`))[1])
+  // ⚠️ **L'OPACITÉ, ELLE, VIENT D'`HABILLAGE_MONDE`** — une seule écriture, lue
+  // du constructeur, de la signature de `poserHabillage` et de
+  // `retirerHabillage` (`test/crop-habillage.test.js` ⑨i l'exige). Elle est
+  // IMPORTÉE ici, pas relue dans le texte : c'est la même source ou rien.
+  assert.match(GLOBE_NU, /uAerialOpacity: \{ value: HABILLAGE_MONDE\.aerialOpacite \}/)
   assert.equal(orthophotoPeinteSurLeCrop(uni({
-    uCropOn: defaut('uCropOn'),
-    uAerialOn: defaut('uAerialOn'),
-    uAerialOpacity: defaut('uAerialOpacity'),
+    uCropOn: 0,
+    uAerialOn: 0,
+    uAerialOpacity: HABILLAGE_MONDE.aerialOpacite,
   })), false)
+  // et le défaut d'opacité, lui, ne bloque RIEN : c'est bien `uCropOn` et
+  // `uAerialOn` qui tiennent la production, pas une tirette à zéro.
+  assert.ok(HABILLAGE_MONDE.aerialOpacite > 0.001)
 })

@@ -79,6 +79,14 @@ export const HABILLAGE_MONDE = Object.freeze({
   // peut pas s'en contenter — 5 625 sommets sur le bloc contre 594 434 au socle.
   normaleFine: false,
   solOpacite: 1,
+  // ⚠️ **LA TIRETTE DE LA PHOTO AÉRIENNE — Tâche R9, tour de correction.** Elle
+  // était écrite **DEUX FOIS en littéral** (`uAerialOpacity: { value: 1 }` dans
+  // le constructeur, `u.uAerialOpacity.value = 1` dans `retirerHabillage`), plus
+  // une troisième comme défaut de signature de `poserHabillage` : trois jumeaux,
+  // et l'aller-retour bit à bit d'`⑨h` ne tient que s'ils restent d'accord.
+  // C'est mot pour mot le défaut que ce fichier raconte quatorze lignes plus
+  // haut, et `solOpacite` juste au-dessus en est le précédent exact.
+  aerialOpacite: 1,
   margeCoteM: 0,
 })
 
