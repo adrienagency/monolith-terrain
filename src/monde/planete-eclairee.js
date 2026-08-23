@@ -155,10 +155,20 @@ export function postesGlobalisables() {
 // ⚡ **ET IL EST NEUTRE SUR SOL PLAT, PAR CONSTRUCTION.** La loi n'est pas
 // `k × n·L` mais `1 + gain × (n·L − haut·L)` : là où la normale fine vaut la
 // sphère — c'est-à-dire partout où la tuile ne porte pas de relief, et partout
-// où l'empreinte du pixel a mangé le détail — elle rend **exactement 1**. Donc
-// la planète ne change ni de luminosité moyenne ni de teinte : seule sa
-// MODULATION apparaît. C'est ce qui rend la couture avec le bloc invisible, et
-// c'est ce qui rend le drapeau baissé vérifiable au bit près (`gain = 0`).
+// où l'empreinte du pixel a mangé le détail — elle rend **1**. Donc la planète
+// ne change ni de luminosité moyenne ni de teinte : seule sa MODULATION
+// apparaît, et la couture avec le bloc reste invisible.
+//
+// ⚠️ **« EXACTEMENT 1 » EST VRAI DE LA LOI, PAS DU NUANCEUR — m2 de la
+// relecture, et la nuance est bornée ici pour ne pas se perdre.** Sous node,
+// `ombrageRelief(x, x, gain)` rend `1` au bit près, et le test ① l'exige. Dans
+// le fragment, la normale fine sur sol plat vaut `normaleParGradientSol(0, 0, …)`
+// = `haut / length(haut)` (`eclairage-crop.js:670-674`) : `n ≈ haut` à ~1 ulp,
+// donc `n·L − haut·L ≈ 1e-7` et le facteur s'écarte de 1 d'environ `1e-7 × gain`.
+// Invisible sur huit bits par canal — mais ce n'est pas « au bit près ».
+// ➡️ **Ce qui rend le drapeau baissé vérifiable AU BIT PRÈS, c'est la garde
+// `uReliefMondeGain > 0.0`, pas la loi** : à gain nul le bloc n'est pas exécuté
+// et `ombreRelief` garde sa valeur de repos, `1.0`.
 
 /** La lampe de carte : azimut depuis le nord vers l'est, élévation, et le gain. */
 export const RELIEF_MONDE = Object.freeze({
@@ -179,7 +189,7 @@ export const RELIEF_MONDE_NUL = 0
  * @param {number} ndu    n·L de la normale FINE, déjà borné à [0, 1]
  * @param {number} nduPlat n·L de la normale de SPHÈRE, déjà borné à [0, 1]
  * @param {number} gain
- * @returns {number} 1 sur sol plat ; jamais négatif
+ * @returns {number} exactement 1 quand `ndu === nduPlat` ; jamais négatif
  */
 export function ombrageRelief(ndu, nduPlat, gain) {
   return Math.max(0, 1 + gain * (ndu - nduPlat))

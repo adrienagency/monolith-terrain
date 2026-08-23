@@ -1915,10 +1915,14 @@ void main() {
     // hemisphere entier eclaire par-dessous. est / nord / haut sont deja la,
     // orthonormalises, quatre lignes plus haut.
     //
-    // ⚠️ ET LA LOI EST NEUTRE SUR SOL PLAT : 1 + gain x (n.L - haut.L) rend
-    // EXACTEMENT 1 quand la normale fine vaut la sphere, donc la planete ne
-    // change ni de luminosite moyenne ni de teinte. Seule sa MODULATION
-    // apparait — et la couture avec le bloc reste invisible.
+    // ⚠️ ET LA LOI EST NEUTRE SUR SOL PLAT : 1 + gain x (n.L - haut.L) rend 1
+    // quand la normale fine vaut la sphere, donc la planete ne change ni de
+    // luminosite moyenne ni de teinte. Seule sa MODULATION apparait — et la
+    // couture avec le bloc reste invisible.
+    // ⚠️ « EXACTEMENT 1 » EST VRAI DE LA LOI, PAS D'ICI : sur sol plat
+    // normaleParGradientSol rend haut / length(haut), soit haut a ~1 ulp, donc
+    // le facteur s'ecarte de 1 d'environ 1e-7 x gain. Invisible sur huit bits,
+    // mais ce n'est pas « au bit pres » — c'est la garde ci-dessous qui l'est.
     //
     // ⚠️ uReliefMondeGain A 0 : RIEN NE CHANGE, ombreRelief vaut 1.0 et
     // colPlanete est celle du depot au bit pres. C'est la meme garde que

@@ -425,6 +425,25 @@ test('⑥ uEclairageOn hors crop est un NO-OP, et c’est le nuanceur qui le dit
   assert.equal(POSTES_MONDE.uEclairageOn.global, false)
 })
 
+test('⑥ les DEUX AUTRES lecteurs de `uEclairageOn` n’existent pas sans crop', async () => {
+  // ⛔ **m1 DE LA RELECTURE.** Le rapport concluait « l'allumer globalement ne
+  // changerait pas un pixel » **sans vérifier que l'uniforme est PARTAGÉ**. Il
+  // l'est, par deux autres nuanceurs : la mer du crop (il choisit `uSoleilDir`
+  // au lieu de `uSunDir`) et les parois du crop (elles choisissent `colBloc` au
+  // lieu de `colPlanete`). La conclusion tient — mais **parce que ni l'un ni
+  // l'autre n'EXISTE tant qu'aucun crop n'est posé**, et c'est ça qu'on vérifie.
+  assert.ok(GLOBE_NU.includes('uEclairageOn > 0.5 ? uSoleilDir : uSunDir'),
+    'la mer du crop ne lit plus uEclairageOn — relis la démonstration')
+  assert.ok(GLOBE_NU.includes('uEclairageOn > 0.5 ? colBloc : colPlanete'),
+    'les parois du crop ne lisent plus uEclairageOn — relis la démonstration')
+  // ⚡ ET LA DÉMONSTRATION, ELLE, EST EXÉCUTÉE : sans crop, les deux refusent.
+  const g = new Globe({ planeteEclairee: true })
+  assert.equal(g._crop, null, 'un globe neuf ne porte pas de crop')
+  assert.equal(g._mer, null, 'un globe neuf ne porte pas de mer')
+  assert.equal(g.construireParoisCrop(), null, 'les parois doivent refuser sans crop')
+  assert.equal(await g.poserMer(), null, 'la mer doit refuser sans crop')
+})
+
 test('⑥ le peigne des crêtes LIT l’analyse cuite, il ne dérive pas la tuile', () => {
   // ⛔ D15 écrit que `uTexShade` « se calcule depuis cette même texture de
   // hauteur ». Le nuanceur dit le contraire : les deux canaux viennent de
