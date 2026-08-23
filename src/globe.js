@@ -16,6 +16,12 @@ import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { overzoomTile } from './bathy.js'
+
+// LE BLEU DE NUIT DE LA PLANETE — Tache R7, tour de correction. La face nuit ne
+// fond plus vers le fond du decor NU (creme en theme clair, ce qui EFFACAIT la
+// carte) : elle fond vers ce fond REFROIDI vers ce bleu. La quantite de
+// refroidissement est un uniforme, NULLE en production. Voir setNuitPlanete.
+const NUIT_FROIDE = new THREE.Color('#0e1a2b')
 // LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
 // three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
 import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
@@ -916,6 +922,10 @@ uniform sampler2D uRamp;
 uniform vec3 uSunDir;
 uniform vec3 uInk;
 uniform vec3 uShadowColor;
+// LE PLANCHER DE NUIT — Tache R7, tour de correction. Le pourquoi et les
+// valeurs sont dans monde/soleil-monde.js (plancherNuitMonde).
+uniform vec3 uNuitFond;
+uniform float uNuitCarte;
 uniform float uContourInterval;
 uniform float uContourOpacity;
 uniform float uGraticuleOpacity;
@@ -1992,13 +2002,25 @@ void main() {
   float diff = max(dot(nMonde, uSunDir), 0.0);
   vec3 colPlanete = col * (0.74 + 0.30 * diff);
 
-  // terminateur jour/nuit (demande Adrien, façon Google Earth) : la face à
-  // l'ombre FOND VERS LA COULEUR DU FOND (uShadowColor — poussée par
-  // applyBackground, elle suit donc le fond ET le cycle jour/nuit) — la
-  // planète s'éteint dans son propre décor, pas dans un noir générique.
-  // Bande de crépuscule douce, 10 % de carte résiduelle en pleine nuit.
+  // terminateur jour/nuit (demande Adrien, facon Google Earth) : la face a
+  // l'ombre FOND VERS UNE COULEUR DE NUIT (uNuitFond, derivee de uShadowColor,
+  // poussee par applyBackground : elle suit donc le fond ET le cycle jour/nuit)
+  // — la planete s'eteint dans son propre decor, pas dans un noir generique.
+  //
+  // LE PLANCHER EST UN UNIFORME DEPUIS LA TACHE R7, ET C'EST UNE MESURE QUI L'A
+  // EXIGE. Le 0,10 + 0,90 * day d'avant a ete ecrit quand uSunDir suivait la
+  // CAMERA, c'est-a-dire quand la face nuit n'etait JAMAIS regardee de face. R7
+  // la met en plein cadre : a 10 h — l'heure PAR DEFAUT du produit — en
+  // tournant autour du globe, l'antisolaire devenait une sphere unie,
+  // bathymetrie, rampe de relief et palette parties, pendant que la LUMINANCE
+  // MOYENNE MONTAIT. uNuitCarte est la part de carte gardee en pleine nuit ;
+  // le pourquoi et les valeurs sont dans monde/soleil-monde.js.
+  //
+  // NEUTRE AU BIT PRES EN PRODUCTION : uNuitCarte = 0.10 rend
+  // 0.10 + (1.0 - 0.10) * day, et 1 - 0,1f == 0,9f en float32 ; uNuitFond y
+  // vaut exactement uShadowColor. Drapeau baisse, c'est la ligne d'avant.
   float day = smoothstep(-0.22, 0.16, dot(nMonde, uSunDir));
-  colPlanete = mix(uShadowColor, colPlanete, 0.10 + 0.90 * day);
+  colPlanete = mix(uNuitFond, colPlanete, uNuitCarte + (1.0 - uNuitCarte) * day);
 
   // ══════ LE BLOC EST UN MATERIAU ECLAIRE, PLUS UNE COULEUR NUE — Tache P3 ══
   //
@@ -2621,6 +2643,14 @@ export class Globe {
     this.uniforms = {
       uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.5).normalize() },
       uShadowColor: { value: new THREE.Color(params.bgColorA ?? '#dfe3ea') },
+      // LE PLANCHER DE NUIT — Tache R7, tour de correction. Ces deux valeurs-ci
+      // sont NEUTRES : uNuitFond suit uShadowColor tant que setNuitPlanete n'a
+      // pas demande de le refroidir, et uNuitCarte = 0,10 rend l'expression
+      // d'avant AU BIT PRES. C'est main.js qui les change, sous le drapeau
+      // soleilHeureMonde et lui seul — la valeur vient de
+      // monde/soleil-monde.js (plancherNuitMonde), qui dit pourquoi.
+      uNuitFond: { value: new THREE.Color(params.bgColorA ?? '#dfe3ea') },
+      uNuitCarte: { value: 0.10 },
       uInk: { value: new THREE.Color(params.contourColor ?? '#000000') },
       // ⚠️ **CES DEUX-LÀ VIENNENT DE `HABILLAGE_MONDE`, ET C'EST UN CORRECTIF DU
       // TOUR 1.** Ils sont PARTAGÉS et le bloc des courbes les lit **SANS
@@ -5429,6 +5459,9 @@ export class Globe {
       uniforms: {
         uSunDir: this.uniforms.uSunDir,
         uShadowColor: this.uniforms.uShadowColor,
+        // le MEME plancher de nuit que les tuiles — Tache R7, tour de correction
+        uNuitFond: this.uniforms.uNuitFond,
+        uNuitCarte: this.uniforms.uNuitCarte,
         // ⚠️ **PARTAGÉ, PAS PROPRE AU MATÉRIAU — Tâche P3.** Il valait
         // `new THREE.Color('#d8d4cc')`, le DÉFAUT de `params.plinthColor`,
         // pendant que la paroi vivante du socle rendait `c06a44`. Le pourquoi
@@ -5491,6 +5524,8 @@ export class Globe {
         varying float vAo;
         uniform vec3 uSunDir;
         uniform vec3 uShadowColor;
+        uniform vec3 uNuitFond;
+        uniform float uNuitCarte;
         uniform vec3 uCol;
         uniform vec3 uSoleilDir;
         uniform vec3 uHemiHaut;
@@ -5506,7 +5541,7 @@ export class Globe {
           float diff = max(dot(N, uSunDir), 0.0);
           vec3 colPlanete = uCol * (0.74 + 0.30 * diff) * vAo;
           float day = smoothstep(-0.22, 0.16, dot(N, uSunDir));
-          colPlanete = mix(uShadowColor, colPlanete, 0.10 + 0.90 * day);
+          colPlanete = mix(uNuitFond, colPlanete, uNuitCarte + (1.0 - uNuitCarte) * day);
           // L ALBEDO DE LA PAROI : sa couleur x son occlusion de contact, tout
           // comme le socle multiplie material.color par son attribut color.
           vec3 colBloc = uCol * vAo
@@ -5566,6 +5601,38 @@ export class Globe {
   // par le multiplicateur jour/nuit du décor (bgDayMul) pour rester accordé
   setShadowColor(hex, mul = 1) {
     this.uniforms.uShadowColor.value.set(hex).multiplyScalar(mul)
+    this._majNuitFond()
+  }
+
+  // ══════════ LE PLANCHER DE NUIT — Tâche R7, tour de correction ═══════════
+  //
+  // ⛔ **CE N'EST PAS UN RÉGLAGE D'APPARENCE, C'EST LE PRIX DU CORRECTIF R7.**
+  // Tant que `uSunDir` suivait la caméra, la face nuit n'était jamais regardée
+  // de face et ses 10 % de carte résiduelle ne se voyaient pas. Le correctif la
+  // met en plein cadre : à 10 h — l'heure PAR DÉFAUT du produit — l'antisolaire
+  // devenait une sphère unie. Mesuré en CHROMA, pas en luminance : la luminance
+  // MONTE pendant que la carte disparaît. Valeurs et mesures dans
+  // `monde/soleil-monde.js`.
+  //
+  // ⚠️ **`{ carte: 0.10, froid: 0, coquille: 1 }` EST L'IDENTITÉ** : c'est ce
+  // que le globe porte à sa naissance, et c'est ce que `main.js` lui repose
+  // drapeau baissé. Rien de tout ceci ne touche la production.
+  //
+  // @param {{carte:number, froid:number, coquille:number}} n
+  setNuitPlanete(n) {
+    if (!n) return
+    this._nuitFroid = n.froid
+    this.uniforms.uNuitCarte.value = n.carte
+    this._majNuitFond()
+    this.clouds?.setNuitCoquille(n.coquille)
+  }
+
+  // la couleur de nuit : le fond du décor, REFROIDI vers un bleu sombre plutôt
+  // qu'employé nu. `froid = 0` la laisse EXACTEMENT égale à `uShadowColor`.
+  _majNuitFond() {
+    const f = this._nuitFroid ?? 0
+    this.uniforms.uNuitFond.value.copy(this.uniforms.uShadowColor.value)
+    if (f > 0) this.uniforms.uNuitFond.value.lerp(NUIT_FROIDE, f)
   }
 
   setInk(color) {
@@ -5596,6 +5663,9 @@ export class Globe {
         uniforms: {
           uSunDir: this.uniforms.uSunDir,
           uShadowColor: this.uniforms.uShadowColor,
+          // le MEME plancher de nuit que les tuiles — Tache R7, tour de correction
+          uNuitFond: this.uniforms.uNuitFond,
+          uNuitCarte: this.uniforms.uNuitCarte,
           uCol: { value: new THREE.Color(north ? '#dfe7ea' : '#f4f1ec') },
           // les MÊMES objets que les tuiles — une seule écriture les couvre
           uEstompageOn: this.uniforms.uEstompageOn,
@@ -5611,6 +5681,8 @@ export class Globe {
           varying vec3 vN;
           uniform vec3 uSunDir;
           uniform vec3 uShadowColor;
+          uniform vec3 uNuitFond;
+          uniform float uNuitCarte;
           uniform vec3 uCol;
           uniform float uEstompageOn;
           uniform float uEstompage;
@@ -5623,7 +5695,7 @@ export class Globe {
             // OPAQUE resterait au pole pendant que la Terre autour s'efface.
             float estompeCalotte = uEstompageOn > 0.5 ? uEstompage : 0.0;
             float voileCalotte = 1.0 - estompeCalotte;
-            gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), voileCalotte);
+            gl_FragColor = vec4(mix(uNuitFond, col, uNuitCarte + (1.0 - uNuitCarte) * day), voileCalotte);
           }`,
       })
       const cap = new THREE.Mesh(geo, mat)

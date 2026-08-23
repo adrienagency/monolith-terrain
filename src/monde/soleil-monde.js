@@ -89,3 +89,85 @@ export function soleilMondeDeLHeure(cycle, lieu) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
   return directionSoleilLocale(azimuth, sunElevation, lat, lon)
 }
+
+// ══════════ 3. QUI POSE LE SOLEIL DU GLOBE — LA POLARITÉ, EXÉCUTABLE ════════
+//
+// ⛔ **UNE MUTATION A SURVÉCU À 4 204 TESTS EN INVERSANT DEUX `!`.** Le tour 1
+// gardait les deux poses de la boucle d'image par `if (!soleilHeureMonde)` et
+// n'en vérifiait que le MOT, par lecture du source : inverser le `!` laissait le
+// mot en place, et la production ne reposait alors plus rien du tout. La
+// polarité vit donc ici, dans du code que les tests EXÉCUTENT — `main.js` ne
+// porte plus de négation à inverser, il compare le nom du poseur.
+//
+// @param {boolean} actif l'état du drapeau `soleilHeureMonde`
+// @returns {'heure'|'camera'} qui a le droit d'écrire `uSunDir`
+export function poseurDuSoleilDuGlobe(actif) {
+  return actif ? 'heure' : 'camera'
+}
+
+// ══════════ 4. LE PLANCHER DE NUIT DE LA PLANÈTE — TOUR DE CORRECTION ═══════
+//
+// ⛔ **LE VRAI PRIX DU CORRECTIF N'ÉTAIT PAS « LA NUIT », C'ÉTAIT L'EFFACEMENT.**
+// Relevé par le relecteur puis remesuré ici, à **10 h — l'heure par défaut du
+// produit** (`params.timeOfDay ?? 10`), six poses d'orbite : à l'antisolaire la
+// planète devenait une **sphère unie**, sans bathymétrie, sans rampe de relief,
+// sans palette. La luminance moyenne ne pouvait pas le voir — elle MONTE
+// pendant que la carte disparaît. L'instrument qui le voit est la **chroma**.
+//
+// La cause n'est pas `uSunDir`, qui est enfin juste : c'est le plancher de nuit
+// de `globe.js`, `mix(uShadowColor, colPlanete, 0.10 + 0.90 * day)`. **10 % de
+// carte résiduelle**, écrit à une époque où `uSunDir` suivait la caméra — la
+// face nuit n'était jamais regardée de face, donc son effacement ne se voyait
+// jamais. Le correctif R7 la met en plein cadre.
+//
+// Ce que ces deux jeux de valeurs disent :
+//
+//   · `carte`     — la part de CARTE gardée en pleine nuit (le reste est le
+//                   fond de nuit). 0,10 en production, relevé sous le drapeau.
+//   · `froid`     — de combien la couleur de nuit s'écarte du fond du décor
+//                   vers un bleu sombre : **refroidir plutôt qu'effacer**.
+//                   0 en production → le fond, au bit près.
+//   · `coquille`  — le gain de la coquille de nuages sur sa face nuit. Elle
+//                   n'avait AUCUN terminateur (plancher 0,74 sans `day`,
+//                   `globe-clouds.js`) : drapeau levé, les nuages brillaient
+//                   au-dessus d'une planète éteinte. 1 en production → la
+//                   coquille d'avant, au bit près.
+//
+// ⚠️ **LES TROIS VALEURS DE PRODUCTION SONT NEUTRES AU BIT PRÈS**, et ce n'est
+// pas une formule de style : `uNuitCarte + (1 - uNuitCarte) * day` avec
+// `uNuitCarte = 0,10` EST `0,10 + 0,90 * day` (en float32, `1 - 0,1f == 0,9f`),
+// `uNuitFond` vaut alors exactement `uShadowColor`, et le gain de coquille vaut
+// exactement 1. Drapeau baissé, aucun de ces trois uniformes ne change une image.
+export const NUIT_PRODUCTION = Object.freeze({ carte: 0.10, froid: 0, coquille: 1 })
+
+// Les valeurs sous le drapeau, RÉGLÉES À LA MESURE — le détail et les bancs
+// sont dans `rapport-R7.md`, voici les trois raisons en une ligne chacune :
+//
+//   · `carte: 0.55` — dans la fourchette recommandée par la relecture
+//     (0,45–0,60). Mesuré à 10 h, caméra à l'antisolaire, sur le cadre central :
+//     la dispersion de chroma passe de **2,755** (plancher du tour 1) à **4,086**,
+//     soit **+48 %**, pour un plancher de bruit de **±0,010** (témoin nul). Entre
+//     0,45 (4,111) et 0,60 (4,136) l'instrument ne départage pas : 0,55 est pris
+//     au milieu de la fourchette, et parce qu'il vaut aussi le gain de coquille.
+//
+//   · `froid: 0.72` — REFROIDIR PLUTÔT QU'EFFACER, et c'est ce qui distingue
+//     cette correction d'un simple relèvement. Sans refroidissement (`froid: 0`)
+//     la face nuit garde la clarté du plein jour — L* mesuré **69,3**, contre
+//     **73,0** au plancher du tour 1 : elle ne se lit pas comme une nuit. Avec,
+//     elle tombe à **57,6** en gardant la carte.
+//
+//   · `coquille: 0.55` — LE MÊME NOMBRE QUE `carte`, et c'est une mesure qui l'a
+//     choisi, pas la symétrie. L'excédent de luminance que la coquille apporte
+//     à l'image (lue coquille cachée puis visible, même pose, même seconde) vaut
+//     **+0,50 %** sur la face ÉCLAIRÉE — la référence. Sur la face nuit il valait
+//     **+2,61 %**, soit **×5,2 la référence** : c'est ça, « les nuages brillent
+//     au-dessus d'une planète éteinte ». À 0,55 il retombe à **+0,51 %**, la
+//     référence de jour à 0,01 point près (plancher de bruit : ±0,01 point).
+//     À 0,42 il passe à **−0,22 %** : la coquille assombrirait l'image, elle
+//     serait trop éteinte.
+export const NUIT_LISIBLE = Object.freeze({ carte: 0.55, froid: 0.72, coquille: 0.55 })
+
+/** Le plancher de nuit à pousser dans le globe, selon l'état du drapeau. */
+export function plancherNuitMonde(actif) {
+  return actif ? NUIT_LISIBLE : NUIT_PRODUCTION
+}

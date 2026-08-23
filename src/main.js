@@ -116,7 +116,7 @@ import { coefAmbiante } from './sonde-ambiante.js'
 import { environnementEffectif } from './monde/eclairage-crop.js'
 // L'HEURE DE LA PLANÈTE — Tâche R7. La loi vit dans ce module PUR (et il
 // n'en écrit pas une seconde : il appelle `directionSoleilLocale` de P3).
-import { soleilMondeDeLHeure } from './monde/soleil-monde.js'
+import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from './monde/soleil-monde.js'
 // LE REPOS DE LA VUE — Tâche N. ⚠️ **PUR, POUR LA MÊME RAISON QUE LES TROIS
 // VEILLES CI-DESSUS** : c'est un SEUIL, et le seuil du socle a produit onze
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
@@ -4409,6 +4409,11 @@ setTimeout(assureRacinesGlobe, DELAI_FILET_RACINES_MS)
 syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
 globe.setSunDir(soleilDuGlobe()) // Tâche R7 — même aiguillage qu'en vol
+// LE PLANCHER DE NUIT DE LA PLANÈTE — Tâche R7, tour de correction. Drapeau
+// baissé, `plancherNuitMonde(false)` est l'IDENTITÉ : la production ne bouge
+// pas. Levé, la face nuit reste une CARTE, sombre et froide, au lieu de fondre
+// vers le fond crème du décor. Le pourquoi et les mesures : `soleil-monde.js`.
+globe.setNuitPlanete(plancherNuitMonde(soleilHeureMonde))
 // soleil orbital lié à la caméra (voir tick) — scratch vectors hors boucle
 const _orbSun = new THREE.Vector3()
 const _upY = new THREE.Vector3(0, 1, 0)

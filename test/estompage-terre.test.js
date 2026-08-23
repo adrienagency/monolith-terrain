@@ -358,7 +358,10 @@ test('⑤c LES CALOTTES — elles suivent, sinon un bandeau blanc OPAQUE reste a
   assert.equal(voile({ estompeCalotte: 0 }), 1, 'éteintes, les calottes ne sont plus opaques')
   assert.equal(voile({ estompeCalotte: 1 }), 0, 'à estompage plein, les calottes doivent disparaître')
   assert.ok(
-    /gl_FragColor = vec4\(mix\(uShadowColor, col, 0\.10 \+ 0\.90 \* day\), voileCalotte\);/.test(GLOBE),
+    // ⚠️ le plancher de nuit est un UNIFORME depuis la Tâche R7 (tour de
+    // correction) ; à `uNuitCarte = 0,10` et `uNuitFond = uShadowColor`, c'est
+    // l'expression d'avant AU BIT PRÈS. Voir `monde/soleil-monde.js`.
+    /gl_FragColor = vec4\(mix\(uNuitFond, col, uNuitCarte \+ \(1\.0 - uNuitCarte\) \* day\), voileCalotte\);/.test(GLOBE),
     'le voile n’atteint pas l’alpha de la calotte'
   )
 })

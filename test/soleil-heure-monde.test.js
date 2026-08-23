@@ -51,8 +51,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { lightingFor } from '../src/daycycle.js'
-import { hautLocal, directionSoleilLocale } from '../src/monde/eclairage-crop.js'
-import { soleilMondeDeLHeure } from '../src/monde/soleil-monde.js'
+import { hautLocal, repereSolSphere, directionSoleilLocale } from '../src/monde/eclairage-crop.js'
+import {
+  soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde,
+  NUIT_PRODUCTION, NUIT_LISIBLE,
+} from '../src/monde/soleil-monde.js'
 import { FLAGS, soleilHeureMondeActif } from '../src/flags.js'
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -142,9 +145,13 @@ test('② le drapeau existe, il est BAISSÉ par défaut, et il a son échappatoi
 // Aucun test ne charge `main.js` (§0 du plan) — précédent de
 // `test/crop-branche.test.js` et de onze autres fichiers de ce dossier.
 
-test('③ main.js importe la loi au lieu d en écrire une seconde', () => {
-  assert.match(SRC_MAIN, /import \{ soleilMondeDeLHeure \} from '\.\/monde\/soleil-monde\.js'/)
-  assert.match(SRC_MAIN, /soleilHeureMondeActif/)
+test('③ ⛔ DRAPEAU BAISSÉ, LE PLANCHER DE NUIT EST L IDENTITÉ', () => {
+  // les trois valeurs neutres, celles qui rendent les shaders d'avant AU BIT
+  // PRÈS : `uNuitCarte = 0,10` ⇒ `0,10 + (1 − 0,10)·day` ≡ `0,10 + 0,90·day`
+  // (en float32, `1 − 0,1f == 0,9f`) ; `froid = 0` ⇒ `uNuitFond == uShadowColor` ;
+  // `coquille = 1` ⇒ le gain de la coquille de nuages vaut exactement 1.
+  assert.deepEqual(plancherNuitMonde(false), { carte: 0.10, froid: 0, coquille: 1 })
+  assert.deepEqual(plancherNuitMonde(false), NUIT_PRODUCTION)
 })
 
 test('③ ⛔ LE SOLEIL DE CAMÉRA N EST PLUS REPOSÉ SANS CONDITION', () => {

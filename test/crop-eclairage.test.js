@@ -746,7 +746,13 @@ test('⑤c la garde est un UNIFORME, et à zéro le bloc n’existe pas', () => 
   assert.match(FRAG_NU, /col = mix\(colPlanete, colBloc, partBloc\);/)
   // et la loi de PLANÈTE est intacte, dans son ordre d'origine
   assert.match(FRAG_NU, /vec3 colPlanete = col \* \(0\.74 \+ 0\.30 \* diff\);/)
-  assert.match(FRAG_NU, /colPlanete = mix\(uShadowColor, colPlanete, 0\.10 \+ 0\.90 \* day\);/)
+  // ⚠️ **LE PLANCHER EST UN UNIFORME DEPUIS LA TÂCHE R7** (tour de correction) :
+  // `uNuitCarte + (1.0 - uNuitCarte) * day` avec `uNuitCarte = 0,10` EST
+  // `0,10 + 0,90 * day` — en float32 `1 - 0,1f == 0,9f` — et `uNuitFond` vaut
+  // alors exactement `uShadowColor`. La loi de planète est donc toujours
+  // intacte AU BIT PRÈS en production ; seul le drapeau `soleilHeureMonde` la
+  // relève, parce que le correctif met la face nuit en plein cadre.
+  assert.match(FRAG_NU, /colPlanete = mix\(uNuitFond, colPlanete, uNuitCarte \+ \(1\.0 - uNuitCarte\) \* day\);/)
 })
 
 test('⑤d dedansCrop est la SUPERELLIPSE, pas le carré de l’analyse', () => {
@@ -873,7 +879,13 @@ test('⑥b le nuanceur des parois porte la loi d IRRADIANCE, et son albédo est 
   assert.match(bloc, /gl_FragColor = vec4\(uEclairageOn > 0\.5 \? colBloc : colPlanete, 1\.0\);/)
   // le repli de planète reste, AU BIT PRÈS : c'est lui qu'un globe sans crop rend
   assert.match(bloc, /vec3 colPlanete = uCol \* \(0\.74 \+ 0\.30 \* diff\) \* vAo;/)
-  assert.match(bloc, /colPlanete = mix\(uShadowColor, colPlanete, 0\.10 \+ 0\.90 \* day\);/)
+  // ⚠️ **LE PLANCHER EST UN UNIFORME DEPUIS LA TÂCHE R7** (tour de correction) :
+  // `uNuitCarte + (1.0 - uNuitCarte) * day` avec `uNuitCarte = 0,10` EST
+  // `0,10 + 0,90 * day` — en float32 `1 - 0,1f == 0,9f` — et `uNuitFond` vaut
+  // alors exactement `uShadowColor`. La loi de planète est donc toujours
+  // intacte AU BIT PRÈS en production ; seul le drapeau `soleilHeureMonde` la
+  // relève, parce que le correctif met la face nuit en plein cadre.
+  assert.match(bloc, /colPlanete = mix\(uNuitFond, colPlanete, uNuitCarte \+ \(1\.0 - uNuitCarte\) \* day\);/)
 })
 
 test('⑥c `GLSL_IRRADIANCE` est INJECTÉ dans `GLSL_ECLAIRAGE`, jamais réécrit', () => {
