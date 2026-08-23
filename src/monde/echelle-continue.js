@@ -142,7 +142,15 @@ import { pentesMonotones } from './exageration-continue.js'
  * `dMer01` de la seconde bouge de **0,248** sur la descente : la laisser hors de
  * la courbe aurait laissé l'essentiel de la couleur de mer dehors.
  */
-export const CHAMPS = Object.freeze(['terreBas', 'terreHaut', 'profondeur', 'fondBudget'])
+/**
+ * ⚠️ **`creux` EST LE CINQUIÈME, ET IL N'EST PAS UNE ÉCHELLE DE MER — Tâche P11.**
+ * Les quatre autres pilotent la COULEUR D'UNE HAUTEUR ; celui-ci porte l'ANCRE
+ * BASSE DU RELIEF (`terreBas − creux` EST `minM`, voir `rampe-crop.js`), c'est-à-
+ * dire le jumeau d'`uHeightRange.x` du socle. Il entre dans la courbe pour la
+ * même raison que les autres — sans quoi il sauterait d'un cran à l'autre
+ * pendant que ses voisins glissent, et la rampe se contredirait elle-même.
+ */
+export const CHAMPS = Object.freeze(['terreBas', 'terreHaut', 'profondeur', 'creux', 'fondBudget'])
 
 // ══════════ ② LE CRAN ══════════════════════════════════════════════════════
 
@@ -182,6 +190,19 @@ export function champsUtiles(e) {
     terreBas: terre,
     terreHaut: terre,
     profondeur: fini(e?.profondeur) && e.profondeur > p,
+    // ⛔ **`creux` NE PASSE PAS PAR LE TEST DU PLANCHER, ET C'EST TOUT LE POINT
+    // DE LA TÂCHE P11.** Le plancher distingue « la mer est plate » de « je ne
+    // sais pas à quelle profondeur elle descend » — une distinction qui n'a de
+    // sens que pour un BUDGET. `creux = 0` veut dire « aucun point de ce crop ne
+    // descend sous sa terre la plus basse », et c'est une mesure prise sur les
+    // mêmes `pas²` points que `terreBas`. Le rendre muet aurait laissé l'ancre
+    // basse du relief au défaut MONDIAL (−6 000 m) sur tout crop intérieur.
+    //
+    // ⚠️ **IL SUIT LA TERRE, ET LA RAISON EST ARITHMÉTIQUE** : l'ancre basse est
+    // `terreBas − creux`. Ancrer l'un sans l'autre ferait une soustraction entre
+    // une mesure et un défaut mondial — un désaccord de monnaie, la faute que ce
+    // chantier a payée quatre fois.
+    creux: terre && fini(e?.creux),
     fondBudget: fini(e?.fondBudget) && e.fondBudget > p,
   }
 }
@@ -206,6 +227,7 @@ export function creerEchelleContinue(monde) {
     terreBas: Number.isFinite(m.terreBas) ? m.terreBas : 0,
     terreHaut: Number.isFinite(m.terreHaut) ? m.terreHaut : 0,
     profondeur: Number.isFinite(m.profondeur) ? m.profondeur : 0,
+    creux: Number.isFinite(m.creux) ? m.creux : 0,
     fondBudget: Number.isFinite(m.fondBudget) ? m.fondBudget : (Number.isFinite(m.profondeur) ? m.profondeur : 0),
     plancherM: Number.isFinite(m.plancherM) ? m.plancherM : 0,
   }
@@ -335,6 +357,7 @@ export function majEchelle(partage, altitudeM) {
     terreBas: valeurChamp(partage, 'terreBas', x),
     terreHaut: valeurChamp(partage, 'terreHaut', x),
     profondeur: valeurChamp(partage, 'profondeur', x),
+    creux: valeurChamp(partage, 'creux', x),
     fondBudget: valeurChamp(partage, 'fondBudget', x),
     plancherM: partage.plancherM,
   }

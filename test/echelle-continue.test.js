@@ -108,17 +108,44 @@ test('①b une mesure au PLANCHER est MUETTE, pas plate — le 0,009 m de Z13', 
 
 test('①c une ancre s’écrit UNE FOIS par cran — la re-mesure ne repasse pas', () => {
   const p = creerEchelleContinue(RAMPE_MONDE)
-  const poses = ancrerMesure(p, 8192, { terreBas: 0, terreHaut: 2000, profondeur: 1500, fondBudget: 4000, plancherM: 0.01 })
+  const poses = ancrerMesure(p, 8192, { terreBas: 0, terreHaut: 2000, profondeur: 1500, creux: 1500, fondBudget: 4000, plancherM: 0.01 })
   assert.deepEqual(poses.sort(), [...CHAMPS].sort())
   // une seconde mesure au MÊME cran ne change RIEN — c'est la propriété qui
   // remplace « re-mesurée par saut à chaque pose »
-  const rien = ancrerMesure(p, 9564, { terreBas: 400, terreHaut: 3057, profondeur: 900, fondBudget: 4415, plancherM: 0.01 })
+  const rien = ancrerMesure(p, 9564, { terreBas: 400, terreHaut: 3057, profondeur: 900, creux: 900, fondBudget: 4415, plancherM: 0.01 })
   assert.deepEqual(rien, [])
-  assert.deepEqual(p.ancres.get(13), { terreBas: 0, terreHaut: 2000, profondeur: 1500, fondBudget: 4000 })
+  assert.deepEqual(p.ancres.get(13), { terreBas: 0, terreHaut: 2000, profondeur: 1500, creux: 1500, fondBudget: 4000 })
   // ... mais un cran VOISIN, lui, s'écrit
-  const autre = ancrerMesure(p, 26720, { terreBas: 0, terreHaut: 2457.25, profondeur: 5639.5, fondBudget: 6228, plancherM: 1.13 })
+  const autre = ancrerMesure(p, 26720, { terreBas: 0, terreHaut: 2457.25, profondeur: 5639.5, creux: 5639.5, fondBudget: 6228, plancherM: 1.13 })
   assert.deepEqual(autre.sort(), [...CHAMPS].sort())
   assert.equal(p.ancres.size, 2)
+})
+
+test("①b bis LE CREUX EST ANCRÉ AVEC LA TERRE, ET ZÉRO EST UNE MESURE — Tâche P11", () => {
+  // ⛔ **LA RÈGLE DU §4 NE S'APPLIQUE PAS AU CREUX, ET LA CONFONDRE COÛTE LA
+  // PALETTE.** « Une mesure au plancher est muette » vaut pour `profondeur`,
+  // dont le plancher EST le repli de division. `creux`, lui, vaut ZÉRO quand
+  // aucun point du crop ne descend sous sa terre la plus basse — ce n'est pas un
+  // aveu, c'est un relevé. Le soumettre au test `> plancherM` l'aurait laissé au
+  // défaut MONDIAL de 6 000 m sur tout crop intérieur, c'est-à-dire exactement
+  // le défaut que la Tâche P11 répare.
+  const z13 = { ...DESCENTE[5], creux: 0, plancherM: PLANCHER_Z13 }
+  const u = champsUtiles(z13)
+  assert.equal(u.profondeur, false, 'la profondeur au plancher reste muette')
+  assert.equal(u.creux, true, '⛔ un creux NUL est une mesure, pas un aveu')
+  // ⚠️ ... et il suit la TERRE, parce que l'ancre basse du relief est
+  // `terreBas − creux` : ancrer l'un sans l'autre mélangerait une mesure et un
+  // défaut mondial dans la MÊME soustraction.
+  const plat = echelleRampe({ minM: 12, maxM: 12, minTerreM: 12, maxTerreM: 12 }, { plancherM: 0.0066 })
+  assert.equal(champsUtiles(plat).terreHaut, false)
+  assert.equal(champsUtiles(plat).creux, false, 'sans terre exploitable, le creux ne dit rien non plus')
+  // ⚡ ET LA COURBE LE PORTE : un cran ancré à creux = 0 rend 0, pas 6 000.
+  const p = creerEchelleContinue(RAMPE_MONDE)
+  ancrerMesure(p, 8192, { terreBas: 107, terreHaut: 3010, profondeur: PLANCHER_Z13, creux: 0, fondBudget: 4415, plancherM: PLANCHER_Z13 })
+  const v = majEchelle(p, 8192)
+  assert.equal(v.creux, 0)
+  assert.equal(v.terreBas - v.creux, 107, "l'ancre basse du relief est le minimum mesuré")
+  assert.equal(v.profondeur, RAMPE_MONDE.profondeur, 'la profondeur, elle, garde le monde — et c’est juste')
 })
 
 test('①d sans ancre, l’échelle est EXACTEMENT `RAMPE_MONDE` — la garde de production', () => {
@@ -358,6 +385,7 @@ function faussGlobe(crop = REPERE, hauteur = () => 400) {
       uLandBas: val(RAMPE_MONDE.terreBas),
       uLandMax: val(RAMPE_MONDE.terreHaut),
       uOceanDepth: val(RAMPE_MONDE.profondeur),
+      uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
       uPlancherRampeM: val(RAMPE_MONDE.plancherM),
       uMerFondBudgetM: val(RAMPE_MONDE.profondeur),
       uMerRampeOn: val(0),

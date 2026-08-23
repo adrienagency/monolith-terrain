@@ -264,7 +264,7 @@ export function mesurerRelief({
  *
  * @param {{minM:number, maxM:number, minTerreM:number, maxTerreM:number}} mesure
  * @param {{plancherM?:number}} [opts]
- * @returns {{terreBas:number, terreHaut:number, profondeur:number, plancherM:number}}
+ * @returns {{terreBas:number, terreHaut:number, profondeur:number, creux:number, plancherM:number}}
  */
 export function echelleRampe(mesure, { plancherM = 0 } = {}) {
   if (!mesure || !Number.isFinite(mesure.maxM)) {
@@ -286,7 +286,35 @@ export function echelleRampe(mesure, { plancherM = 0 } = {}) {
   const terreBas = mesure.minTerreM
   const terreHaut = Math.max(mesure.maxTerreM, terreBas + p)
   const profondeur = Math.max(-Math.min(0, mesure.minM), p)
-  return { terreBas, terreHaut, profondeur, plancherM: p }
+  // ══════════ LE CREUX — L'ANCRE BASSE DU RELIEF, Tâche P11 ════════════════
+  //
+  // ⛔ **`profondeur` NE PEUT PAS SERVIR D'ANCRE BASSE AU RELIEF, ET LA
+  // NOTATION 03 A PAYÉ CE GLISSEMENT.** Le nuanceur écrivait
+  // `hNormRelief = (h + uOceanDepth) / (uLandMax + uOceanDepth)` en justifiant
+  // que « le minimum du relief du crop EST −uOceanDepth ». **C'est vrai d'un
+  // crop qui a de la mer, et faux de tous les autres** : sans un seul point sous
+  // le niveau de la mer, `profondeur` retombe sur `p`, le PLANCHER DE DIVISION,
+  // c'est-à-dire sur un aveu — et `echelle-continue.js` §4 refuse (à raison) de
+  // l'ancrer, si bien que l'uniforme garde la valeur MONDIALE de 6 000 m. Le
+  // relief était alors normalisé sur un sous-sol de six kilomètres qui n'existe
+  // pas. Mesuré le 2026-08-23 à La Réunion, cadrage intérieur (`.banc/P11/`) :
+  // `uOceanDepth = 6 000` pour un crop dont le point le plus bas est à **107 m**,
+  // donc un pivot de rampe à **0,685** au lieu de 0,41 et une rampe qui
+  // n'atteignait JAMAIS sa moitié basse — l'olive du socle, ×3,51.
+  //
+  // ⚠️ **DEUX PROPRIÉTÉS OBLIGATOIRES, ET AUCUNE N'EST DE CONFORT.**
+  //   ① **POSITIF** : la courbe d'ancrage mélange en `log1p(max(0, v))`
+  //      (`echelle-continue.js` §6) — un champ négatif y serait écrasé à zéro
+  //      sans qu'aucune erreur ne soit levée.
+  //   ② **RELATIF À `terreBas`** : `terreBas − creux` rend `minM` au bit près, et
+  //      il le rend ENCORE après interpolation, parce que les deux champs
+  //      glissent ensemble. Ancrer `minM` directement aurait demandé un signe.
+  //
+  // ⚠️ **ET IL N'A PAS DE CAS DÉGÉNÉRÉ** : `creux = 0` n'est pas « je ne sais
+  // pas », c'est « aucun point de ce crop ne descend sous sa terre la plus
+  // basse » — un FAIT, mesuré sur les mêmes `pas²` points que le reste.
+  const creux = Math.max(0, terreBas - mesure.minM)
+  return { terreBas, terreHaut, profondeur, creux, plancherM: p }
 }
 
 // ══════════ ④ LA LOI — LA TRANSCRIPTION QUE LE NUANCEUR PORTE ══════════════
@@ -378,6 +406,12 @@ export const RAMPE_MONDE = Object.freeze({
   terreBas: 0,
   terreHaut: 5600,
   profondeur: 6000,
+  // ⚠️ **6 000 ET PAS 0, ET C'EST LA GARDE DE PRODUCTION DE LA TÂCHE P11.**
+  // L'ancre basse du relief est `terreBas − creux` ; à ces valeurs elle vaut
+  // `−6 000`, c'est-à-dire `−profondeur`, c'est-à-dire EXACTEMENT ce que le
+  // nuanceur portait avant que `uReliefBas` existe. Tant que personne n'appelle
+  // `poserRampe`, le globe peint au bit près comme avant.
+  creux: 6000,
   plancherM: 0,
 })
 

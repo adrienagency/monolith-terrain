@@ -604,7 +604,9 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
   const i = FRAG_GLOBE.indexOf('float hNormRelief = ')
   assert.ok(i > 0, 'hNormRelief est introuvable dans le nuanceur du globe')
   const expr = FRAG_GLOBE.slice(i + 'float hNormRelief = '.length, FRAG_GLOBE.indexOf(';', i))
-  assert.match(expr, /clamp\(\(h \+ uOceanDepth\) \/ max\(uLandMax \+ uOceanDepth, uPlancherRampeM\), 0\.0, 1\.0\)/)
+  // ⛔ **ET L'ANCRE BASSE N'EST PLUS `-uOceanDepth` — Tâche P11.** Voir ⑤d bis :
+  // cette écriture-là n'était juste que sur un crop AVEC MER.
+  assert.match(expr, /clamp\(\(h - uReliefBas\) \/ max\(uLandMax - uReliefBas, uPlancherRampeM\), 0\.0, 1\.0\)/)
   // ⚠️ **ET IL EST EXÉCUTÉ, PAS SEULEMENT LU.** On rejoue les DEUX conventions
   // sur les valeurs relevées et on exige que celle du nuanceur suive le socle.
   const SOCLE = { min: -2116, max: 2626 } // uHeightRange, relevé le 2026-08-22
@@ -612,7 +614,11 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
   const cl = (v) => Math.min(Math.max(v, 0), 1)
   const hSocle = (m) => cl((m - SOCLE.min) / (SOCLE.max - SOCLE.min))
   const hTerre = (m) => cl((m - G.landBas) / (G.landMax - G.landBas))
-  const hRelief = (m) => cl((m + G.oceanDepth) / (G.landMax + G.oceanDepth))
+  // ⚡ **CE CROP-LÀ A DE LA MER** : son `minM` vaut −2 106,8, donc `terreBas −
+  // creux` et `−profondeur` désignent le MÊME nombre. C'est la raison pour
+  // laquelle l'écriture d'avant passait ici — et ⑤d bis dit où elle ne passe pas.
+  const reliefBas = G.landBas - G.oceanDepth
+  const hRelief = (m) => cl((m - reliefBas) / (G.landMax - reliefBas))
   for (const m of [0, 200, 500, 1000, 1500, 2000]) {
     const cible = rampeT(hSocle(m), 0.65, 2.5)
     const bon = rampeT(hRelief(m), 0.65, 2.5)
@@ -621,8 +627,8 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
     if (m > 0 && m < 2000) assert.ok(Math.abs(faux - cible) > 0.05, `${m} m : les deux conventions ne se distinguent pas — le test ne prouve rien`)
   }
   // le plancher du pivot suit la MÊME conversion : la mer est à h = 0
-  assert.match(FRAG_GLOBE, /natPlancherPivot\(uOceanDepth \/ max\(uLandMax \+ uOceanDepth, uPlancherRampeM\)\)/)
-  assert.ok(Math.abs(plancherPivot(G.oceanDepth / (G.landMax + G.oceanDepth)) - plancherPivot(hSocle(0))) < 0.01)
+  assert.match(FRAG_GLOBE, /natPlancherPivot\(\(0\.0 - uReliefBas\) \/ max\(uLandMax - uReliefBas, uPlancherRampeM\)\)/)
+  assert.ok(Math.abs(plancherPivot((0 - reliefBas) / (G.landMax - reliefBas)) - plancherPivot(hSocle(0))) < 0.01)
   // et un pivot d'utilisateur plus haut que le plancher gagne — c'est un réglage
   assert.equal(Math.max(0.65, plancherPivot(hSocle(0))), 0.65)
   assert.equal(plancherPivot(0), MARGE_PIVOT)
@@ -630,6 +636,57 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
   for (const appel of ['natRampT(hNormRelief,', 'natHumiditeY(anl.b, anl.a, hNormRelief,', 'natVoile(hNormRelief,']) {
     assert.ok(FRAG_GLOBE.includes(appel), `${appel} : un lecteur est resté sur l’échelle de la Tâche D`)
   }
+})
+
+test('⑤d bis SUR UN CROP SANS MER, `-uOceanDepth` N’EST PAS LE MINIMUM DU RELIEF — Tâche P11', () => {
+  // ⛔ **⑤d ÉTAIT VERT PARCE QU'IL NE TESTAIT QU'UNE BRANCHE.** Son crop de
+  // référence a de la mer (`minM = −2 106,8`), et là `−profondeur` EST le
+  // minimum du relief. Sur un crop ENTIÈREMENT TERRESTRE, `echelleRampe` rend
+  // `profondeur = plancherM` (un aveu), `echelle-continue.js` §4 refuse de
+  // l'ancrer, et l'uniforme garde la valeur MONDIALE de 6 000 m.
+  //
+  // ⚡ **CE N'EST PAS UNE HYPOTHÈSE : C'EST LE RELEVÉ DU 2026-08-23**, La Réunion
+  // cadrage intérieur (lat −21,115 · lon 55,536, z12), page vivante, socle
+  // rallumé dans la même page (`.banc/P11/D2-ancre-basse-P11.json`) :
+  //   · posé      : uLandBas 130 · uLandMax 3 026 · uOceanDepth **6 000**
+  //   · mesuré    : terreBas 107,46 · terreHaut 3 009,64 · profondeur **0,0175**
+  //   · socle     : uHeightRange [−4,945 ; 7,161] unités, uSeaY −5,409 —
+  //                 c'est-à-dire un MNT dont le minimum est AU-DESSUS de la mer.
+  const SOCLE = { min: 111, max: 3010 } // dem.minM / dem.maxM, dérivés d'uHeightRange et d'uSeaY
+  const CROP = { landBas: 130, landMax: 3026, oceanDepth: 6000, creux: 0 }
+  const cl = (v) => Math.min(Math.max(v, 0), 1)
+  const hSocle = (m) => cl((m - SOCLE.min) / (SOCLE.max - SOCLE.min))
+  const avant = (m) => cl((m + CROP.oceanDepth) / (CROP.landMax + CROP.oceanDepth))
+  const bas = CROP.landBas - CROP.creux
+  // ⚡ **`apres` N'EST PAS RÉÉCRITE ICI : ELLE EST EXTRAITE DU NUANCEUR ET
+  // EXÉCUTÉE.** Une assertion de texte serait verte le jour où quelqu'un écrit
+  // l'expression dans un commentaire ; celle-ci meurt si le GPU calcule autre
+  // chose. (Le protocole est celui de `test/crop-rampe.test.js` ②b.)
+  const i2 = FRAG_GLOBE.indexOf('float hNormRelief = ')
+  const brut = FRAG_GLOBE.slice(i2 + 'float hNormRelief = '.length, FRAG_GLOBE.indexOf(';', i2))
+  const js = brut.replace(/\bclamp\s*\(/g, 'CL3(').replace(/\bmax\s*\(/g, 'Math.max(')
+  // eslint-disable-next-line no-new-func
+  const duNuanceur = new Function('h', 'uReliefBas', 'uLandMax', 'uPlancherRampeM', 'CL3', `return (${js});`)
+  const apres = (m) => duNuanceur(m, bas, CROP.landMax, 0.0175, (v, a, b) => Math.min(Math.max(v, a), b))
+  assert.ok(Math.abs(apres(1000) - cl((1000 - bas) / (CROP.landMax - bas))) < 1e-12, "l'expression extraite ne dit pas la loi")
+  // les deux pivots-planchers, dans les deux conventions
+  const pivotAvant = Math.max(0.41, plancherPivot(CROP.oceanDepth / (CROP.landMax + CROP.oceanDepth)))
+  const pivotApres = Math.max(0.41, plancherPivot((0 - bas) / (CROP.landMax - bas)))
+  const pivotSocle = Math.max(0.41, plancherPivot(hSocle(0)))
+  assert.ok(Math.abs(pivotAvant - pivotSocle) > 0.25, `le pivot d'avant valait ${pivotAvant}, celui du socle ${pivotSocle}`)
+  assert.ok(Math.abs(pivotApres - pivotSocle) < 1e-9, `le pivot d'après vaut ${pivotApres}`)
+  // ⚡ ET LA RAMPE ELLE-MÊME : l'écriture d'avant ne descend JAMAIS sous 0,45,
+  // celle d'après suit le socle à deux centièmes sur toute l'île.
+  let minAvant = 1
+  for (const m of [0, 200, 500, 800, 1200, 1800, 2400, 3000]) {
+    const cible = rampeT(hSocle(m), pivotSocle, 2.2)
+    const bon = rampeT(apres(m), pivotApres, 2.2)
+    const faux = rampeT(avant(m), pivotAvant, 2.2)
+    if (faux < minAvant) minAvant = faux
+    assert.ok(Math.abs(bon - cible) < 0.02, `${m} m : la loi P11 donne ${bon}, le socle ${cible}`)
+  }
+  assert.ok(minAvant > 0.44, `⛔ l'écriture d'avant descendait jusqu'à ${minAvant} — elle atteignait la moitié basse`)
+  assert.equal(rampeT(hSocle(0), pivotSocle, 2.2), 0, 'le socle, lui, part bien du bas de sa table')
 })
 
 // --- le stub, en fin de fichier : il n'est utile qu'aux tests ④

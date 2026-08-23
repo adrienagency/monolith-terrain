@@ -876,6 +876,24 @@ uniform float uLandMax;
 // poserRampe, le globe peint au bit pres comme avant la Tache D. Meme garde que
 // uCropOn (Tache A) et uHabOn (Tache C).
 uniform float uLandBas; // l ancre BASSE de la rampe terre, en metres
+// ══════════ L'ANCRE BASSE DU RELIEF — Tache P11 ═══════════════════════════
+//
+// ⛔ ELLE N'EST PAS -uOceanDepth, ET LA NOTATION 03 A CHIFFRE CE QUE CA COUTE.
+// L'ecriture d'avant justifiait l'egalite par « le minimum du relief du crop EST
+// -uOceanDepth ». Elle ne tient que si le crop A DE LA MER : sans un seul point
+// sous le niveau de la mer, echelleRampe rend le PLANCHER DE DIVISION,
+// echelle-continue refuse (a raison) d'ancrer un budget de profondeur muet, et
+// l'uniforme garde la valeur MONDIALE de 6 000 m. Releve le 2026-08-23, La
+// Reunion cadrage interieur, page vivante, socle rallume dans la MEME page
+// (.banc/P11/) : uOceanDepth = 6 000 pour un crop dont le point le plus bas est
+// a 107 m. Le pivot de rampe montait donc a 0,685 au lieu de 0,41 et la rampe
+// n'atteignait JAMAIS sa moitie basse — l'olive et l'ocre du socle, x3,51 et
+// x2,82, que le crop remplacait par du rose.
+//
+// ⚠️ SA VALEUR NEUTRE EST -RAMPE_MONDE.profondeur, donc la production rend
+// EXACTEMENT ce qu'elle rendait : (h - (-6000)) / (5600 - (-6000)) EST
+// (h + 6000) / (5600 + 6000), au bit pres. Meme garde que uCropOn et uHabOn.
+uniform float uReliefBas; // le minimum du RELIEF du crop, en metres (signe)
 // ══════════ LA RAMPE NAUTIQUE — Tache F ═══════════════════════════════════
 //
 // ⚠️ C'EST LA PIECE QUE LA TACHE D A NOMMEE SANS LA PRENDRE. Son bilan ecrit :
@@ -1544,7 +1562,7 @@ void main() {
   // 2 584,4 contre -2 116 et 2 626 cote socle, soit un ecart de 0,0029 sur le
   // hNorm du niveau de la mer. C'est la MEME grandeur, mesuree par deux
   // balayages de finesse differente.
-  float hNormRelief = clamp((h + uOceanDepth) / max(uLandMax + uOceanDepth, uPlancherRampeM), 0.0, 1.0);
+  float hNormRelief = clamp((h - uReliefBas) / max(uLandMax - uReliefBas, uPlancherRampeM), 0.0, 1.0);
 
   vec4 anl = vec4(0.5);
   if (uAnalysisOn > 0.5) {
@@ -1563,7 +1581,7 @@ void main() {
     // uTreeLine et uHazeAlt sont des reglages POSES PAR L'UTILISATEUR dans
     // l'echelle du socle, et l'echelle du socle porte le fond marin. Voir la
     // demonstration chiffree juste au-dessus.
-    float pivot = max(uHeightPivot, natPlancherPivot(uOceanDepth / max(uLandMax + uOceanDepth, uPlancherRampeM)));
+    float pivot = max(uHeightPivot, natPlancherPivot((0.0 - uReliefBas) / max(uLandMax - uReliefBas, uPlancherRampeM)));
     float rampT = natRampT(hNormRelief, pivot, uHeightContrast);
     float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
     col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
@@ -2471,6 +2489,11 @@ export class Globe {
       uOceanDepth: { value: RAMPE_MONDE.profondeur },
       uLandMax: { value: RAMPE_MONDE.terreHaut },
       uLandBas: { value: RAMPE_MONDE.terreBas },
+      // ⚠️ **DÉRIVÉ DE `RAMPE_MONDE`, JAMAIS ÉCRIT EN DUR** — Tâche P11. C'est
+      // la même discipline que les quatre du dessus : « une constante dupliquée
+      // diverge en silence ». `terreBas − creux` vaut `−6 000`, c'est-à-dire
+      // `−profondeur`, c'est-à-dire l'ancre que le nuanceur portait avant.
+      uReliefBas: { value: RAMPE_MONDE.terreBas - RAMPE_MONDE.creux },
       uPlancherRampeM: { value: RAMPE_MONDE.plancherM },
       uRamp: { value: null },
       // LA RAMPE NAUTIQUE — Tâche F. ⚠️ `uMerRampeOn: 0` : sans `poserMer`, RIEN
@@ -3675,6 +3698,13 @@ export class Globe {
     u.uLandBas.value = e.terreBas
     u.uLandMax.value = e.terreHaut
     u.uOceanDepth.value = e.profondeur
+    // ⚠️ **`e.creux` SE LIT SANS GARDE, ET C'EST UN CONTRAT, PAS UN OUBLI** —
+    // Tâche P11. `echelleRampe` et `majEchelle` le rendent TOUS LES DEUX, sur
+    // toutes leurs branches (`test/crop-rampe.test.js` ①j). Un repli ici serait
+    // un repli qu'aucun appelant réel ne peut déclencher — la faute que la Tâche
+    // D a retirée d'`echelleRampe`, et il masquerait un `NaN` dans un uniforme,
+    // c'est-à-dire une comparaison FAUSSE dans le nuanceur.
+    u.uReliefBas.value = e.terreBas - e.creux
     u.uPlancherRampeM.value = e.plancherM
     // ⚠️ **LE BUDGET DU FOND NE S'ÉCRIT QUE SI LA RAMPE NAUTIQUE EST ALLUMÉE.**
     // Éteinte, `uMerFondBudgetM` ne peint rien (le nuanceur le garde derrière
@@ -3717,6 +3747,7 @@ export class Globe {
   retirerRampe() {
     const u = this.uniforms
     u.uLandBas.value = RAMPE_MONDE.terreBas
+    u.uReliefBas.value = RAMPE_MONDE.terreBas - RAMPE_MONDE.creux
     u.uLandMax.value = RAMPE_MONDE.terreHaut
     u.uOceanDepth.value = RAMPE_MONDE.profondeur
     u.uPlancherRampeM.value = RAMPE_MONDE.plancherM

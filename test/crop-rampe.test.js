@@ -229,6 +229,52 @@ test("①h l'ancre basse est le minimum de la TERRE, pas du relief", () => {
   assert.equal(eAlpin.profondeur, PLANCHER)
 })
 
+test("①i le CREUX dit de combien le relief descend SOUS SA TERRE — Tâche P11", () => {
+  // ⛔ **CE QUE `profondeur` NE SAIT PAS DIRE, ET LA NOTATION 03 LE PAIE.**
+  // `profondeur` est un BUDGET DE PROFONDEUR : sur un crop sans mer elle retombe
+  // au PLANCHER DE DIVISION, c'est-à-dire sur un aveu (« je ne sais pas à quelle
+  // profondeur descend la mer »), et `echelle-continue` a raison de refuser de
+  // l'ancrer. Mais `hNormRelief` s'en servait comme ANCRE BASSE DU RELIEF, où
+  // « je ne sais pas » n'a aucun sens : le relief, lui, a toujours un minimum.
+  //
+  // `creux` est ce minimum, exprimé POSITIVEMENT et RELATIVEMENT à `terreBas` —
+  // deux propriétés obligatoires : positif parce que la courbe d'ancrage mélange
+  // en `log1p` (`echelle-continue.js` §6, `log1p(max(0, v))` écraserait un
+  // négatif), relatif parce que `terreBas - creux` doit rendre `minM` AU BIT PRÈS
+  // quelle que soit l'interpolation des deux champs.
+  assert.equal(eMaurice.creux, 140)      // terreBas 0, minM -140
+  assert.equal(eAlpin.creux, 0)          // ⚡ AUCUNE MER : le creux est NUL, et c'est un FAIT
+  assert.equal(ePlat.creux, 0)
+  // ⚡ ET C'EST L'IDENTITÉ QUI COMPTE : `terreBas - creux` EST `minM`.
+  for (const [m, e] of [[MAURICE, eMaurice], [ALPIN, eAlpin], [PLAT, ePlat]]) {
+    assert.ok(Object.is(e.terreBas - e.creux, m.minM), `${e.terreBas} - ${e.creux} != ${m.minM}`)
+  }
+  // ⛔ ET LE CREUX N'EST PAS `profondeur` : sur un crop sans mer, l'un vaut ZÉRO
+  // et l'autre le PLANCHER, et l'ancre basse qu'ils désignent diffère de 402 m.
+  assert.notEqual(eAlpin.creux, eAlpin.profondeur)
+  assert.equal(eAlpin.terreBas - eAlpin.creux, 402)
+  assert.ok(Math.abs(-eAlpin.profondeur - 402) > 400)
+})
+
+test("①j `echelleRampe` rend TOUJOURS un creux fini — il n'y a pas de repli à écrire", () => {
+  // ⚠️ **C'EST CE QUI AUTORISE `_poserUniformesRampe` À LE LIRE SANS GARDE.** Un
+  // `undefined` y poserait un `NaN` dans un uniforme, c'est-à-dire une
+  // comparaison FAUSSE dans le nuanceur (§ « écrêtage de Mercator » de
+  // `globe.js`). On exige donc la totalité, on n'écrit pas un repli qui la
+  // supposerait absente.
+  for (const m of [MAURICE, ALPIN, PLAT,
+    { minM: -6000, maxM: 0, minTerreM: 0, maxTerreM: 0 },   // tout en mer
+    { minM: 0, maxM: 0, minTerreM: 0, maxTerreM: 0 }]) {
+    const e = echelleRampe(m, { plancherM: PLANCHER })
+    assert.ok(Number.isFinite(e.creux) && e.creux >= 0, JSON.stringify(e))
+  }
+  assert.ok(Number.isFinite(RAMPE_MONDE.creux))
+  // ⚡ **ET LE DÉFAUT MONDIAL REND L'ANCRE D'AVANT LA TÂCHE P11, AU BIT PRÈS** :
+  // `terreBas - creux` vaut `-profondeur`, donc `hNormRelief` retombe sur
+  // `(h + uOceanDepth) / (uLandMax + uOceanDepth)`. La production est intouchée.
+  assert.ok(Object.is(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux, -RAMPE_MONDE.profondeur))
+})
+
 // ══════════ ② LE NUANCEUR — LA TRANSCRIPTION, EXÉCUTÉE ═════════════════════
 
 test("②a l'expression du nuanceur porte les QUATRE uniformes de la rampe", () => {
@@ -323,6 +369,30 @@ const CHAMPS = [
   ['uPlancherRampeM', 'plancherM'],
 ]
 
+// ⚠️ **`uReliefBas` EST LE CINQUIÈME, ET IL EST DÉRIVÉ, PAS RECOPIÉ — Tâche
+// P11.** Il ne correspond à aucun champ de `RAMPE_MONDE` pris seul : il vaut
+// `terreBas − creux`. Il est donc vérifié à part, ci-dessous, avec la même
+// exigence — lu depuis `RAMPE_MONDE`, jamais écrit en dur.
+const EXPR_RELIEF_BAS = 'RAMPE_MONDE.terreBas - RAMPE_MONDE.creux'
+
+test('②d bis `uReliefBas` naît de `RAMPE_MONDE` et `retirerRampe` l’y ramène — Tâche P11', () => {
+  assert.ok(blocUniformes().includes(`uReliefBas: { value: ${EXPR_RELIEF_BAS} }`),
+    'uReliefBas ne dérive pas de RAMPE_MONDE dans this.uniforms')
+  const retirer = globeSrc.slice(globeSrc.indexOf('  retirerRampe() {'))
+  assert.ok(retirer.slice(0, 900).includes(`u.uReliefBas.value = ${EXPR_RELIEF_BAS}`),
+    'retirerRampe ne rend pas uReliefBas')
+  // ⚡ ET LA VALEUR NEUTRE EST CELLE D'AVANT LA TÂCHE P11, AU BIT PRÈS.
+  assert.ok(Object.is(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux, -RAMPE_MONDE.profondeur))
+  // ⚠️ **ET IL EST POSÉ PAR L'ÉCRIVAIN UNIQUE**, `_poserUniformesRampe`, pas
+  // ailleurs : deux écritures d'un uniforme de rampe, c'est le défaut que ce
+  // module documente déjà (« il y en avait DEUX, plus un troisième »).
+  const ecritures = globeSrc.split('uReliefBas.value =').length - 1
+  assert.equal(ecritures, 2, 'uReliefBas doit s’écrire exactement dans _poserUniformesRampe et retirerRampe')
+  const poseur = globeSrc.slice(globeSrc.indexOf('  _poserUniformesRampe(e) {'))
+  assert.ok(poseur.slice(0, 1400).includes('u.uReliefBas.value = e.terreBas - e.creux'),
+    '_poserUniformesRampe ne pose pas l’ancre basse du relief')
+})
+
 test('②d les quatre uniformes sont PARTAGÉS — donc les alentours les portent', () => {
   // ⚠️ C'est la mécanique exacte de « les alentours la suivent » : les quatre
   // vivent dans `this.uniforms`, que `_materialFor` étale dans CHAQUE matériau
@@ -356,7 +426,7 @@ test("②e SANS `poserRampe`, LE GLOBE EST CELUI D'AVANT — au bit près", () =
   const loi = loiDuNuanceur(globeSrc)
   // ⚠️ Les valeurs par défaut sont celles de `RAMPE_MONDE`, et ②d vient de
   // vérifier que `this.uniforms` les LIT au lieu de les recopier.
-  assert.deepEqual({ ...RAMPE_MONDE }, { terreBas: 0, terreHaut: 5600, profondeur: 6000, plancherM: 0 })
+  assert.deepEqual({ ...RAMPE_MONDE }, { terreBas: 0, terreHaut: 5600, profondeur: 6000, creux: 6000, plancherM: 0 })
   const defauts = uniformesDe(RAMPE_MONDE)
   const historique = (h, se) =>
     se ? 0.35 * (1 - CLAMP(-h / 6000, 0, 1)) : 0.35 + 0.65 * CLAMP(h / 5600, 0, 1)
@@ -397,6 +467,7 @@ function faussGlobe(crop, hauteur) {
       uLandBas: val(RAMPE_MONDE.terreBas),
       uLandMax: val(RAMPE_MONDE.terreHaut),
       uOceanDepth: val(RAMPE_MONDE.profondeur),
+      uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
       uPlancherRampeM: val(RAMPE_MONDE.plancherM),
       uCropCoin: val(FORME.coin),
       uCropCoinN: val(FORME.expo),
@@ -726,7 +797,7 @@ test('⑥a aucune décision de CADRAGE ne lit l’échelle de la rampe', () => {
   for (const f of ['seuil-socle.js', 'descente-bornee.js', 'exageration-continue.js', 'veille-socle.js', 'flux-terrain.js']) {
     const src = readFileSync(new URL(`../src/monde/${f}`, import.meta.url), 'utf8')
     assert.ok(
-      !/uLandBas|uLandMax|uOceanDepth|uPlancherRampeM|rampe-crop/.test(src),
+      !/uLandBas|uLandMax|uOceanDepth|uReliefBas|uPlancherRampeM|rampe-crop/.test(src),
       `${f} lit l'échelle de la rampe — R1 est rompue`,
     )
   }
