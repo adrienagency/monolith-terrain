@@ -7,6 +7,30 @@ sans tête 1280 × 800, serveur de dev port 5519.
 
 ---
 
+## ⚠️ TOUR DE CORRECTION — CE QUI A CHANGÉ DEPUIS `d6a012a`
+
+La relecture a rendu **trois constats critiques**, tous fondés. **La substance
+tenait ; c'est la discipline de preuve qui cassait.** Ce qui a été corrigé :
+
+| | ce qui n'allait pas | ce qui a été fait |
+|---|---|---|
+| **C3** | trois mutations ramenaient la lampe à un no-op strict sans qu'un seul des 4 219 tests rougisse | **section ⑦ du test** : la garde et le corps du fragment sont **extraits et exécutés** ; les trois mutations sont **TUÉES** |
+| **I1** | `planeteEclaireeActive()` n'était **jamais exécutée** — quatre mutations survivaient, dont le passage du défaut à ON | test ④ réécrit sur le patron de `crop-branche` ⑦ bis ; **cinq mutations sur cinq TUÉES** |
+| **C2** | « 14,053 contre 14,089 » **gravé dans le code livré**, vers un fichier inexistant, obtenu **cross-session** | chiffre **retiré** du code et du rapport, remplacé par une mesure **appariée à trois états** (mode `--triple`) |
+| **C1** | six chiffres de chronométrage qui n'existaient que dans un **commentaire** | banc écrit (`scripts/diag-barriere-gpu.mjs`), mesuré, **et il contredit la conclusion publiée** — voir Étape 5 |
+| **I3** | `.banc/` gitignoré : le paquet de preuves ne survivait pas au commit | les dix relevés JSON déplacés sous `traces-R6/releves/`, et la phrase de réinstallation inscrite en tête des cinq scripts |
+| **④** | le plancher de bruit attribué **au grain** | cause **retirée** : `params.grain` vaut 0 dans l'application vivante, mesuré |
+
+⚡ **ET DEUX CHOSES QUE PERSONNE N'AVAIT VUES, MESURÉES CE TOUR-CI :**
+1. **La dispersion attribuée à `gl.finish()` est un artefact d'ORDRE**, pas une
+   propriété de la barrière (Étape 5).
+2. ⛔ **Ce banc est limité par la SOUMISSION CPU** : à 40 000 m, **multiplier les
+   fragments par 35 ne change pas le temps par image**. Le coût de D15 mesuré à
+   l'Étape 5 borne donc **ce que l'utilisateur subit sur cette machine à cette
+   résolution**, et **pas** le coût GPU du nuanceur.
+
+---
+
 ## EN UN PARAGRAPHE
 
 La planète n'est plus nue. **Deux** postes deviennent l'état de repos du monde —
@@ -15,8 +39,10 @@ parce que les deux premiers ne suffisaient pas : la loi de lumière de la planè
 ne module qu'à **1,4:1**, donc le relief y était présent et invisible. Mesuré en
 apparié, même session, mêmes tuiles, plancher de bruit **0,00** : dans la bande
 du défaut d'Adrien, la dispersion de luminance monte de **+64 % à +84 %** et
-**25 à 39 % des pixels bougent**. Le coût est **indiscernable de zéro** avec un
-banc qui résout une image entière. ⚠️ **Et le départage de D15 est faux sur trois
+**25 à 39 % des pixels bougent**. **Le temps par image ne bouge pas** — et ce
+tour de correction a mesuré **jusqu'où cette phrase porte** : le banc est limité
+par la soumission CPU, donc elle borne ce que l'utilisateur subit ici, **pas le
+coût GPU du nuanceur** (Étape 5). ⚠️ **Et le départage de D15 est faux sur trois
 postes sur quatre** — c'est démontré ci-dessous.
 
 ---
@@ -97,18 +123,39 @@ entière »).
 
 ➡️ **Il ne relève pas du même geste. Non traité, et c'est motivé.**
 
-### ⑥ Le plancher de bruit de 8,97 transmis par R4 — c'est le plancher DU GRAIN, pas du rendu
+### ⑥ Le plancher de bruit de 8,97 transmis par R4 — le RÉSULTAT tient, la CAUSE est retirée
 
-R4 a mesuré 8,97 d'écart moyen par pixel entre deux captures d'un état identique,
-et en a conclu que tout écart sous 9 est du bruit. **Avec `params.animations`
-coupé — c'est-à-dire le grain de film gelé — mon plancher tombe à 0,00 sur
-14 paliers sur 16** (les deux autres : 0,23 et 0,83), voir `.banc/R6/apparie.json`
-et `.banc/R6/maroc.json`. Les captures sont bit-à-bit identiques.
+R4 a mesuré 8,97 d'écart moyen par pixel entre deux captures d'un état
+identique, et en a conclu que tout écart sous 9 est du bruit. **Mon plancher est
+0,00** sur 14 paliers sur 16 (`.banc/R6/apparie.json`, `maroc.json`, copiés dans
+`traces-R6/releves/`) : les captures sont bit-à-bit identiques. **« Tout écart
+sous 9 est du bruit » n'est donc pas une règle universelle** — et ça, ça tient.
 
-⚠️ **Ce n'est pas une contradiction de sa mesure, c'est une contradiction de sa
-règle.** « Tout écart sous 9 est du bruit » n'est vrai que si le grain tourne.
-S'il retire son 43 % pour cette raison, **il peut probablement le récupérer** en
-gelant le grain avant de capturer.
+⛔ **MAIS J'AVAIS ÉCRIT QUE C'ÉTAIT LE PLANCHER DU GRAIN, ET C'EST FAUX.**
+`main.js` porte `grain: 0, // off by default` : `NoiseEffect.blendMode.opacity`
+vaut zéro et **le grain de film n'entre dans aucune capture** tant que personne
+ne choisit le look « Doux ». Vérifié dans l'application vivante — pas sur la
+source — par `scripts/diag-plancher-bruit.mjs` (trace
+`traces-R6/plancher-bruit.json`) :
+
+| altitude | `params.grain` | nuages | mer | plancher **anims ON** | plancher **anims OFF** |
+|---:|---:|:--:|:--:|---:|---:|
+| 1 999 996 m | **0** | invisibles | invisible | 0,015 | 0,000 |
+| 119 794 m | **0** | invisibles | invisible | **0,000** | 0,000 |
+| 39 854 m | **0** | invisibles | invisible | **0,000** | 0,000 |
+| 4 410 m (crop posé) | **0** | invisibles | invisible | **0,000** | 0,000 |
+
+➡️ **`params.animations = false` était une précaution sans effet sur ces scènes**,
+pas ce qui a produit le 0,00 : le plancher est déjà nul animations allumées.
+⚠️ **Et je ne peux pas nommer la cause du 8,97 de R4 ni du ~12 relevé par la
+relecture : je ne reproduis AUCUN plancher non nul sur mon banc.** Ce que je
+peux borner : ce n'est pas le grain par défaut, et rien d'animé n'est dans mes
+cadres — les consommateurs de `dtAmb` (mer de Gerstner, nuages, faune) y sont
+tous invisibles.
+
+⛔ **LE CONSEIL « GELEZ LE GRAIN ET VOUS RÉCUPÉREZ VOTRE 43 % » EST RETIRÉ.** Il
+reposait sur une cause que je n'avais pas vérifiée, et il a coûté un chiffre à
+un tiers.
 
 ---
 
@@ -153,15 +200,18 @@ rampe seule ne module plus rien ; `t30` (le crop) est correct.
 
 ## ÉTAPE 2 — TEST ROUGE
 
-`test/planete-eclairee.test.js`, **24 tests**, six familles :
+`test/planete-eclairee.test.js`, **29 tests**, sept familles :
 ① la loi sous node · ② **le GLSL livré TRADUIT ET EXÉCUTÉ** contre le module
-(72 azimuts × 7 élévations) · ③ l'unicité de l'écriture · ④ le branchement ·
-⑤ l'aller-retour bit à bit · ⑥ **le départage de D15, évalué sur le nuanceur**.
+(72 azimuts × 7 élévations) · ③ l'unicité de l'écriture · ④ le branchement,
+**drapeau ÉVALUÉ** · ⑤ l'aller-retour bit à bit · ⑥ **le départage de D15, évalué
+sur le nuanceur** · ⑦ ⚡ **la garde et le corps du fragment, EXTRAITS ET
+EXÉCUTÉS** — c'est la section née du constat C3, voir « campagne de mutation ».
 
 ⚠️ **Le traducteur GLSL→JS a lui-même eu un défaut, et je le note parce qu'il
 était SILENCIEUX** : une expression régulière `[^)]*` s'arrête à la **première**
 parenthèse fermante et rendait `NaN` aux 504 points du balayage. Il découpe
-désormais aux parenthèses **équilibrées**.
+désormais aux parenthèses **équilibrées** — et la section ⑦ réemploie ce même
+découpage équilibré pour extraire la garde du fragment.
 
 Inscrit dans la liste explicite de `package.json`. **`npm run audit:tests` :
 217 listés · 217 sur disque · aucun écart.**
@@ -185,14 +235,46 @@ défaut hors du crop** — démonstration au point ④ ci-dessus, verrouillée p
 | `uMerZeroSousEau` | `h <= 0` au lieu de `h < 0` | comparaison pure, aucune donnée. |
 | **`uReliefMondeGain`** *(nouveau)* | l'ombrage de relief | ne lit que la normale ci-dessus et le repère local, déjà calculés. |
 
-### ⚡ Pourquoi un troisième poste a été nécessaire — mesuré, pas supposé
+### ⚡ Pourquoi un troisième poste a été nécessaire — mesuré EN APPARIÉ
 
-**La normale fine seule ne se voit pas.** Allumée seule : écart-type **14,053
-contre 14,089** avant, à 40 000 m — soit **+0,26 %**, à comparer au plancher
-inter-session de 15,6 %. Le relief est bien là (on le voit sur
-`.banc/R6/vues-apres/alt-00039985.png`, les vallées se dessinent) mais il ne pèse
-**rien**. La cause est écrite dans le dépôt depuis P3 : hors du crop, la seule
-lumière est
+⛔ **LE CHIFFRE DU PREMIER TOUR EST RETIRÉ — c'est le constat C2.** J'avais écrit
+« écart-type 14,053 contre 14,089 à 40 000 m, soit +0,26 % », en renvoyant à un
+`.banc/R6/apres-normale-seule.json` **qui n'existe pas**, et — pire — en
+comparant **deux sessions différentes**, exactement ce que l'Étape 7 ci-dessous
+déclare ne rien prouver. **La conclusion était bonne pour de mauvaises raisons.**
+
+**La voici mesurée dans une SEULE session**, sur le même jeu de tuiles, grain
+gelé, avec le plancher de bruit du palier — `scripts/sonde-descente-nue.mjs
+--triple` bascule les trois états (nue → normale fine SEULE → D15 entier) sans
+recharger. Traces : `traces-R6/triple-defaut.json`, `triple-maroc.json`,
+`triple-maroc-bis.json`.
+
+| lieu | altitude | plancher | nue | **normale fine SEULE** | **D15 entier** |
+|---|---:|---:|---:|---:|---:|
+| défaut | 119 997 m | 0,298 | 22,653 | 22,554 (**−0,4 %**) | 22,760 (+0,5 %) |
+| défaut | 79 934 m | 1,259 | 18,187 | 18,516 (**+1,8 %**) | 21,526 (+18,4 %) |
+| défaut | 39 902 m | **0,000** | 15,971 | 15,700 (**−1,7 %**) | 21,795 (**+36,5 %**) |
+| Maroc | 59 891 m | **0,000** | 18,053 | 19,071 (**+5,6 %**) | 32,651 (**+80,9 %**) |
+| Maroc | 39 927 m | 0,292 | 17,590 | 18,234 (**+3,7 %**) | 32,205 (**+83,1 %**) |
+| Maroc *(2ᵉ session)* | 39 854 m | **0,000** | 17,708 | 18,241 (**+3,0 %**) | 32,451 (**+83,3 %**) |
+
+➡️ **La normale fine seule pèse de −2 % à +6 % là où D15 entier pèse +18 % à
++83 % : un rapport de dix à vingt.** Le relief est bien là — les vallées se
+dessinent sur `vues-apres/alt-00039985.png` — mais **il ne se LIT pas**. La lampe
+n'est pas une réinvention : sans elle, D15 ne referme pas le défaut d'Adrien.
+
+⚠️ **Une réserve honnête sur ce tableau** : le palier 119 997 m au Maroc rend
++8,5 % et +8,9 % sur les deux sessions, mais son plancher de bruit y vaut 3,3 et
+5,5 (le quadtree charge encore, 883 à 906 tuiles). **Je ne le publie pas comme
+acquis** ; les quatre lignes à plancher ≤ 0,3 sont celles qui portent la
+conclusion.
+
+⚡ **Reproduction indépendante** : mes trois lignes du Maroc retombent au
+centième sur celles de la relecture (19,071 contre 19,066 ; 18,234 ; 32,651 ;
+32,205 ; 29,832 au palier haut).
+
+**La cause, elle, est inchangée et écrite dans le dépôt depuis P3** : hors du
+crop, la seule lumière est
 
 ```glsl
 float diff = max(dot(nMonde, uSunDir), 0.0);
@@ -225,10 +307,21 @@ par-dessous.
 
 ⚡ **La forme `1 + gain × (n·L − haut·L)` n'est pas cosmétique.** Là où la normale
 fine vaut la sphère — partout où la tuile ne porte pas de relief, **et partout où
-l'empreinte du pixel a mangé le détail** — elle rend **exactement 1**. La planète
-ne change donc ni de luminosité moyenne ni de teinte : **seule sa modulation
-apparaît**. C'est ce qui rend la couture avec le bloc invisible, et ce qui rend le
-drapeau baissé vérifiable sans GPU.
+l'empreinte du pixel a mangé le détail** — elle rend **1**. La planète ne change
+donc ni de luminosité moyenne ni de teinte : **seule sa modulation apparaît**, et
+la couture avec le bloc reste invisible.
+
+⚠️ **Et « exactement 1 » est vrai de la LOI, pas du nuanceur — m2 de la relecture,
+et la borne est publiée ici.** Sous node, `ombrageRelief(x, x, gain)` rend 1 au
+bit près, et le test ① l'exige. Dans le fragment, la normale fine sur sol plat
+vaut `normaleParGradientSol(0, 0, …)` = `haut / length(haut)`
+(`eclairage-crop.js:670-674`), donc `n ≈ haut` à ~1 ulp et le facteur s'écarte de
+1 d'environ **1e-7 × gain**. Invisible sur huit bits par canal — mais ce n'est
+pas « au bit près ».
+➡️ **Ce qui rend le drapeau baissé vérifiable au bit près, c'est la garde
+`uReliefMondeGain > 0.0`, pas la loi** : à gain nul le bloc n'est pas exécuté et
+`ombreRelief` garde sa valeur de repos, `1.0`. C'est cette garde-là que la
+section ⑦ du test **exécute** désormais.
 
 ### Le départage tenu
 
@@ -243,22 +336,83 @@ drapeau baissé vérifiable sans GPU.
 ### La méthode, et ce qu'elle a corrigé chez elle-même
 
 `scripts/banc-relief-monde.mjs` — rendu piloté, ordre tournant (ABBA),
-différences appariées, chauffe de 40 images jetée. **Trois défauts de l'instrument
+différences appariées, chauffe de 40 images jetée. **Deux défauts de l'instrument
 ont été trouvés et corrigés avant d'annoncer le moindre chiffre :**
 
-1. ⛔ **`gl.finish()` NE BARRE PAS LA ROUTE sous ANGLE/D3D11.** Trois blocs de
-   40 images sur la **même scène** ont rendu **2,197 / 3,490 / 0,505 ms** — un
-   facteur **sept**. `gl.readPixels(1×1)` sur les mêmes blocs :
-   **0,657 / 0,640 / 0,700**. Le point de synchronisation est donc une lecture de
-   pixel (`.banc/R6/diag.mjs`).
-2. ⛔ **Tuer `requestAnimationFrame` tue la chaîne de rendu de l'application**, et
+1. ⛔ **Tuer `requestAnimationFrame` tue la chaîne de rendu de l'application**, et
    `tick()` n'en est pas le seul appelant : le dernier inscrit écrasait `tick`.
    Les trois altitudes ont alors été mesurées **sur le quadtree de la première** —
    `151` tuiles, `18` appels, `134 373` triangles **aux trois lignes**, y compris
    à 2 000 000 m. La boucle est désormais **capturée dans une file**, pas tuée.
-3. ⛔ **`renderer.info` se remet à zéro à chaque `renderer.render()`**, et
+   *(Ce défaut-là est réel, et `.banc/R6/diag.mjs` le montre.)*
+2. ⛔ **`renderer.info` se remet à zéro à chaque `renderer.render()`**, et
    `composer.render()` en enchaîne plusieurs : lu tel quel, il annonçait
    **`appels = 1`** — la dernière passe plein écran, et rien d'autre.
+
+### ⛔ LE TROISIÈME « DÉFAUT » N'EN ÉTAIT PAS UN — je retire ma correction de méthode
+
+**Ce que j'avais publié** : que `gl.finish()` ne barre pas la route sous
+ANGLE/D3D11 (2,197 / 3,490 / 0,505 ms contre 0,657 / 0,640 / 0,700 pour
+`readPixels(1×1)`), et **qu'il fallait requalifier les coûts du chantier mesurés
+à `finish`**. ⚠️ **Ces six chiffres n'existaient que dans un COMMENTAIRE** d'un
+script qui ne chronomètre rien — c'est le constat C1, et il est fondé.
+
+**Le banc qui les mesure existe maintenant** : `scripts/diag-barriere-gpu.mjs`.
+Il compare **trois** barrières — `finish`, `readPixels(1×1)` et **aucune** — sur
+le même bloc, en triplets d'**ordre tournant**, à trois charges, sur deux
+altitudes et **deux sessions**. Traces : `traces-R6/barriere-gpu.json` et
+`barriere-gpu-bis.json` (plus les journaux `.txt`).
+
+| ce qu'il mesure | ce qu'il trouve |
+|---|---|
+| **part du temps réel capturée** (somme des blocs ÷ temps de pendule du train, clos par une lecture franche) | **98 à 99 % SANS AUCUNE BARRIÈRE.** Dans une boucle serrée de `composer.render()`, la contre-pression du pilote synchronise seule : **il n'y a pas de travail caché à révéler.** |
+| **les trois barrières** | même temps à quelques pour cent près, aux deux altitudes, aux trois charges |
+| **la dispersion de `finish`** | **un artefact d'ORDRE.** Sur les deux sessions, les **cinq** blocs aberrants sont tombés sur le **PREMIER train du triplet**, quelle que soit la barrière (`aucune` mesurée en tête en a produit deux). `finish` mesuré en troisième est la série **la plus stable du relevé** : max/min = **1,02**. |
+
+➡️ **JE RETIRE « `gl.finish()` NE BARRE PAS LA ROUTE ».** Ce que je peux dire, et
+c'est borné à ce que j'ai mesuré : *sur ce banc* (Chrome sans tête 1280 × 800,
+ANGLE/D3D11, RTX 3080, boucle serrée de `composer.render(0)` sur 52 à 583 appels
+de dessin), **les trois barrières sont indiscernables, et le premier train mesuré
+paie un surcoût quelle que soit la barrière.** Je n'universalise pas : un autre
+chemin de rendu peut se comporter autrement.
+⛔ **Et par conséquent : AUCUN coût du chantier n'est à requalifier au motif
+qu'il a été pris à `gl.finish()`.** Ma phrase précédente était fausse ; elle a
+été répercutée, et je la retire nommément.
+
+`readPixels(1×1)` **reste** le point de synchronisation du banc : il est stable
+(±0,03 ms) et, quand il diffère, il **surestime** — une borne haute de coût reste
+une borne haute.
+
+### ⛔ ⚡ ET VOICI CE QUE PERSONNE N'AVAIT MESURÉ : CE BANC EST LIMITÉ PAR LA SOUMISSION CPU
+
+Le coordinateur a transmis l'hypothèse ; elle se tranche, elle ne se suppose pas.
+`scripts/diag-charge-fragment.mjs` garde **exactement** le protocole du banc et
+fait varier **le nombre de FRAGMENTS à nombre d'APPELS DE DESSIN CONSTANT**, en
+redimensionnant le rendu — avec pour témoin `gl.drawingBufferWidth/Height` relu
+**après** le redimensionnement. Trace : `traces-R6/charge-fragment.json`.
+
+| altitude | appels | 0,26 Mpx | 1,02 Mpx | 4,1 Mpx | 9,22 Mpx |
+|---:|---:|---:|---:|---:|---:|
+| **39 998 m** | 583 | 5,655 ms | 5,575 | 5,405 | **5,425** |
+| **2 000 000 m** | 52 | 0,650 ms | 0,650 | 0,818 | **1,515** |
+
+➡️ **À 40 000 m, multiplier les fragments par 35 ne change RIEN au temps par
+image** (×0,96). À l'orbite, il faut passer **au-delà de ~2 mégapixels** pour que
+le remplissage se voie ; à 1 280 × 800, **les deux altitudes sont limitées par la
+soumission.** *(Le ×2,33 de l'orbite à 9,2 Mpx est le **témoin positif** :
+l'instrument SAIT voir des fragments quand ils dominent — le plateau plat de
+40 000 m n'est donc pas un `setSize` sans effet.)*
+
+⚠️ **CE QUE ÇA FAIT AU RÉSULTAT DE CETTE ÉTAPE, ET IL FAUT LE LIRE COMME ÇA :**
+« le coût de D15 est indiscernable de zéro » **borne ce que l'utilisateur subit**
+sur cette machine à cette résolution — c'est vrai, c'est mesuré, et c'est la
+grandeur qui décide de la fluidité. **Mais ça ne borne PAS le coût GPU du
+nuanceur** : un ajout purement fragmentaire est **invisible par construction** sur
+un banc limité par la soumission. ➡️ **La réserve n° 5 (une seule machine) passe
+d'une intuition à un mécanisme mesuré** : sur une machine limitée par le
+remplissage — le cas que `palier-machine.js` couvre — ou en très haute
+résolution, le même ajout **peut** se voir. Ce n'est pas mesuré, et ça reste à
+mesurer.
 
 ### ⚡ Le témoin — l'instrument voit-il quelque chose ?
 
@@ -298,6 +452,18 @@ apparié descend à **±0,010 ms/image** et qui résout sans peine une image ent
 (0,53 à 1,26 ms). **Borne haute honnête : moins de 0,07 ms par image**, soit
 **moins de 5 %** d'une image à 40 000 m.
 
+⛔ ⚠️ **ET VOICI EXACTEMENT CE QUE CETTE PHRASE VEUT DIRE — corrigé ce tour-ci.**
+Ce banc est **limité par la soumission CPU** (mesuré ci-dessus : ×35 de fragments
+à 40 000 m ⇒ ×0,96 de temps par image). Donc :
+- ✅ **ce qui est prouvé** : allumer D15 **ne change pas le temps par image** que
+  cette application produit sur cette machine à 1 280 × 800. C'est la grandeur
+  qui décide de la fluidité, et c'est celle qu'Adrien subit.
+- ⛔ **ce qui n'est PAS prouvé** : que le nuanceur ajouté soit gratuit **sur le
+  GPU**. Un ajout purement fragmentaire est **invisible par construction** sur un
+  banc limité par la soumission. Le témoin « une image de plus » ne le sauve pas :
+  une image de plus ajoute aussi une soumission de plus.
+➡️ **La borne vaut pour cette machine et cette résolution. Voir la réserve 5.**
+
 ⚠️ **UN CHIFFRE À NE PAS ME FAIRE DIRE.** À **6 020 m**, couper les deux postes
 ensemble rend **+0,082 ± 0,011 ms/image**. **Ce n'est PAS un coût de D15** : à
 cette altitude le crop est posé et `uNormaleFineOn` valait **déjà 1** depuis la
@@ -308,8 +474,15 @@ l'ombrage seul : **+0,003 ± 0,018 ms**.
 
 Les quatre lectures supplémentaires tapent une texture **déjà en cache** (le
 fragment décode `uTex` cinq fois pour `decodeMetersAA`), et le nuanceur du globe
-est déjà lourd — rampe, courbes, graticule, grain. Le globe n'est pas limité par
-le remplissage à ces nombres de tuiles : **58 à 125 appels de dessin**, pas 283.
+est déjà lourd — rampe, courbes, graticule.
+
+⚡ **Et la vraie raison est celle-là, et elle est maintenant MESURÉE, pas
+supposée : le globe n'est pas limité par le remplissage à ces cadrages.** Le
+premier tour l'écrivait en se fondant sur le nombre d'appels de dessin (58 à
+125, pas 283) ; `scripts/diag-charge-fragment.mjs` le montre directement — à
+40 000 m, **passer de 0,26 à 9,22 mégapixels ne coûte rien**. ⛔ **Ce qui est une
+explication du résultat EST AUSSI SA LIMITE** : le remplissage est justement ce
+que ce banc ne pèse pas.
 
 ⚠️ **Le « 283 tuiles en orbite » du brief ne décrit pas ce qui est dessiné.**
 Mesuré au compteur de three à 2 000 000 m : **225 tuiles en cache, 58 appels de
@@ -438,31 +611,101 @@ c'est-à-dire le scintillement que la Tâche K a fermé.
 
 ## TESTS
 
-**4 219 tests · 0 échec · audit 217 = 217** (base : 4 195 / 216).
+**4 224 tests · 0 échec · audit 217 = 217** (livré : 4 219 / 217 · base : 4 195 /
+216). **Cinq tests ajoutés au tour de correction**, tous dans
+`test/planete-eclairee.test.js` : quatre en section ⑦ (C3) et un en ⑥ (m1). Le
+test ④ a été **réécrit**, pas ajouté.
 
-⚠️ **Trois assertions d'autres fichiers ont été mises à jour, et aucune n'a été
-affaiblie :**
+### ⚡ LA CAMPAGNE DE MUTATION — celle qui manquait
+
+⛔ **Elle était non négociable et elle n'avait pas été menée.** Voici la mienne,
+rejouée après correctif. **Une mutation est « TUÉE » quand au moins un test
+rougit** ; le harnais applique un remplacement littéral, lance
+`node --test test/planete-eclairee.test.js`, puis restaure.
+
+**C3 — le gain de la lampe (trois survivantes chez le relecteur, trois TUÉES ici) :**
+
+| mutation | avant | après |
+|---|---|---|
+| `RELIEF_MONDE.gain: 0.9 → 0` | **SURVIT** (4 219 verts) | **TUÉE** — 2 rouges |
+| `if (uReliefMondeGain > 0.0)` → `> 1000.0` | **SURVIT** (4 219 verts) | **TUÉE** — 3 rouges |
+| `ombrageReliefMonde(…, uReliefMondeGain)` → `(…, 0.0)` | **SURVIT** | **TUÉE** — 3 rouges |
+| *(témoin ajouté)* la loi JS → `return 1` | — | **TUÉE** — 3 rouges |
+| *(témoin)* le GLSL de l'ombrage → `return 1.0;` | — | **TUÉE** — 4 rouges |
+| *(témoin)* l'uniforme forcé à `RELIEF_MONDE_NUL` | — | **TUÉE** — 3 rouges |
+| *(témoin)* `float ombreRelief = 1.0;` → `0.5` | — | **TUÉE** — 2 rouges |
+| `> 0.0` → `>= 0.0` | SURVIT | **SURVIT — et c'est assumé** ⚠️ |
+
+⚠️ **La seule survivante est inoffensive, et je dis pourquoi plutôt que de la
+cacher** : à gain nul la loi rend `max(0, 1 + 0 × …)` = **1 exactement** (test ①),
+donc `colPlanete × 1.0` est le dépôt au bit près. Le seul effet de `>= 0.0` est
+de faire calculer une lampe inutile par fragment, drapeau baissé — **un coût, pas
+une régression d'image**. Je ne l'ai pas fermée par une assertion de texte, parce
+qu'une assertion de texte ne prouve rien.
+
+**I1 — le branchement du drapeau (quatre survivantes chez le relecteur, cinq TUÉES ici) :**
+
+| mutation | avant | après |
+|---|---|---|
+| `planeteEclairee: false → true` *(le défaut de production)* | **SURVIT** | **TUÉE** |
+| échappatoire `?planete=nue` supprimée | **SURVIT** | **TUÉE** |
+| branche `?planete=eclairee` supprimée | **SURVIT** | **TUÉE** |
+| nom du paramètre d'adresse cassé (`'planete' → 'planetee'`) | **SURVIT** | **TUÉE** |
+| garde `if (!terreUniqueActive()) return false` supprimée | *(non essayée)* | **TUÉE** |
+
+⚡ **Ce qui a fermé C3, et pourquoi c'est du COMPORTEMENT et pas du texte.** La
+section ⑦ **extrait du fragment livré** sa valeur de repos (`float ombreRelief =
+1.0;`), sa **garde** et son **corps**, les traduit et les **exécute** avec les
+uniformes d'un `new Globe({ planeteEclairee: true })` réel et la loi du module
+**injecté** — puis exige que le facteur sorte de 1 sur une pente (`> 1,02` face à
+la lampe, `< 0,98` dos à elle) et vaille **exactement 1** drapeau baissé.
+**Neutraliser n'importe lequel des trois maillons ramène le facteur à 1**, donc
+rougit. Un `return` muet ne peut pas rendre ce test vert : la valeur comparée est
+calculée depuis le texte livré, pas lue dedans.
+
+### Les assertions d'autres fichiers, inchangées et acquittées
+
+⚠️ **Trois assertions d'autres fichiers ont été mises à jour, et la relecture a
+vérifié par mutation qu'aucune n'a été affaiblie (m3, m4 : ACQUITTÉS) :**
 
 | fichier | ce qui a changé | pourquoi |
 |---|---|---|
 | `test/crop-habillage.test.js` ⑤ bis | `uMerZeroSousEau: { value: 0 }` → la nouvelle expression **+ `assert.equal(styleMonde(false).merZeroSousEau, 0)`** | l'exigence (« il naît à 0 sans drapeau ») est désormais vérifiée sur la **valeur**, pas sur le texte : **plus fort** qu'avant |
 | `test/crop-eclairage.test.js` ⑤c | la ligne `colPlanete` porte `* ombreRelief` | les deux constantes historiques sont gardées, **et** le facteur ajouté doit être celui-là, déclaré neutre |
-| `src/main.js` (commentaire) | une occurrence de `terreUniqueActive()` retirée d'un commentaire | `crop-branche` ⑧ septies **compte** ces occurrences et en exige deux ; une troisième, fût-elle en commentaire, le faisait rougir |
+| `src/main.js` (commentaire) | une occurrence de `terreUniqueActive()` retirée d'un commentaire | voir **m5** ci-dessous |
+
+⚠️ **m5 — et c'est une dette du dépôt, pas de R6.** `crop-branche` ⑧ septies
+compte les occurrences de `terreUniqueActive()` **dans le texte du fichier,
+commentaires compris**, et en exige exactement deux. Une troisième, **fût-elle en
+prose**, le fait rougir. **Cette assertion vient de coûter une modification à un
+fichier de production pour une raison qui n'est pas technique**, et elle
+recommencera. Elle est antérieure à R6 et je ne l'ai pas touchée — mais elle
+devrait compter les occurrences du **code**, pas du fichier.
 
 ---
 
 ## CE QUE JE TOUCHE (pour la fusion)
 
-**Modifiés** — `src/globe.js` (+~150 l.), `src/flags.js` (+35 l.), `src/main.js`
-(+21 l., **uniquement** le bloc de drapeau et un commentaire), `package.json`
-(un nom de test), `test/crop-eclairage.test.js` (une assertion),
+**Livré en `d6a012a`** — `src/globe.js` (+~150 l.), `src/flags.js` (+35 l.),
+`src/main.js` (+21 l., **uniquement** le bloc de drapeau et un commentaire),
+`package.json` (un nom de test), `test/crop-eclairage.test.js` (une assertion),
 `test/crop-habillage.test.js` (une assertion + un import).
-
 **Nouveaux** — `src/monde/planete-eclairee.js`, `test/planete-eclairee.test.js`,
-`scripts/sonde-descente-nue.mjs`, `scripts/banc-relief-monde.mjs`, `.banc/R6/`.
+`scripts/sonde-descente-nue.mjs`, `scripts/banc-relief-monde.mjs`.
 
-⛔ **Je n'ai touché ni `src/modes.js`, ni `src/monde/zoom-continu.js`** (R4), ni
-l'imagerie satellite, ni la mer.
+**Ajouté au tour de correction** — `test/planete-eclairee.test.js` (section ⑦,
+test ④ réécrit, un test en ⑥) ; `src/monde/planete-eclairee.js` et `src/globe.js`
+**en COMMENTAIRE uniquement** (C2 et m2 — **aucune ligne de rendu ne bouge**) ;
+`scripts/sonde-descente-nue.mjs` (mode `--triple`) ;
+`scripts/banc-relief-monde.mjs` (en-tête ② et phrase I3) ; trois scripts neufs —
+`scripts/diag-barriere-gpu.mjs`, `scripts/diag-charge-fragment.mjs`,
+`scripts/diag-plancher-bruit.mjs` ; et
+`.superpowers/sdd/2026-08-22-globe-studio/traces-R6/` (traces + les dix relevés).
+
+⛔ **Je n'ai touché ni `src/modes.js`, ni `src/monde/zoom-continu.js`** (R4), **ni
+le bloc aérien de `src/globe.js`** (R9), ni l'imagerie satellite, ni la mer, **ni
+la ligne du terminateur `globe.js:2073`** (R7 — voir la réserve 3).
+⛔ **`package.json` n'est pas modifié par ce tour** — voir la réserve 6.
 
 ---
 
@@ -474,17 +717,83 @@ l'imagerie satellite, ni la mer.
    `alt-00032962-eclairee.png` et le bloc de `t30`.
 2. ⚠️ **Le gain de 0,9 et l'azimut 315° n'ont pas été arbitrés par Adrien.** Ce
    sont des valeurs de convention cartographique (Imhof), pas un réglage validé à
-   l'œil par lui. Un seul nombre à changer : `RELIEF_MONDE.gain`.
-3. ⚠️ **Le terminateur jour/nuit lit désormais la normale FINE** (`day` dérive du
-   même `nMonde`). Aucun artefact vu aux paliers d'orbite, mais **je n'ai pas
-   cadré la ligne du crépuscule exprès** pour l'examiner.
+   l'œil par lui. Un seul nombre à changer : `RELIEF_MONDE.gain` — et il est
+   désormais **testé non nul**, donc on peut le discuter sans risquer de le
+   perdre en silence.
+3. ⛔ ⚡ **LE TERMINATEUR ET L'HEURE — CE QUE MON TRAVAIL DEVIENT QUAND R7 AURA
+   RELEVÉ LE PLANCHER.** *(Requalifiée de « mineure » en importante par la
+   relecture. **Je ne corrige rien ici : la ligne appartient à R7.**)*
+
+   **L'état des lieux.** `globe.js:2073` écrit
+   `colPlanete = mix(uShadowColor, colPlanete, 0.10 + 0.90 * day)`. Mon
+   `ombreRelief` multiplie `colPlanete` **avant** ce mélange
+   (`vec3 colPlanete = col * (0.74 + 0.30 * diff) * ombreRelief;`). **Les deux
+   lumières ne se battent donc pas : elles se composent** — l'une multiplie ce
+   que l'autre atténue. Mais la fraction conservée sur la face nocturne vaut
+   **0,10**, donc **toute modulation de relief y est divisée par dix**.
+   Aujourd'hui ça ne se voit pas, parce que `main.js` repose `uSunDir` à chaque
+   image sur la caméra tournée de 42° : **la face regardée n'est jamais dans la
+   nuit.** Dès que R7 branche le soleil sur l'heure du monde, « plus jamais nue »
+   ne vaudrait **que de jour**.
+
+   ⚡ **Et R7 corrige exactement ce plancher** : sa relecture lui demande de le
+   relever de **0,10 à 0,45–0,60** avec un refroidissement de teinte. **Ce que
+   mon travail devient alors, et c'est arithmétique** : la modulation de relief
+   sur la face nocturne passe de **10 %** à **45–60 %** de sa force de jour,
+   c'est-à-dire **×4,5 à ×6**. Une pente qui module la luminance de ±20 % au
+   soleil module ±2 % aujourd'hui dans la nuit — deux à trois niveaux sur 255, à
+   la limite du visible — et **±9 à ±12 %** après. ➡️ **Le plancher relevé ne
+   gêne pas D15 : il est ce qui la rend vraie de nuit.** Rien à changer chez moi.
+
+   ⛔ **CE QUI RESTE À ARBITRER, ET CE N'EST PAS ARITHMÉTIQUE** : ma lampe est
+   **fixe dans le repère local (nord-ouest, 45°)**. Elle ne tournera pas avec
+   l'heure. Une fois le soleil de R7 posé, **le terminateur dira une heure et
+   l'ombrage en dira une autre** — crépuscule au couchant, hachures toujours au
+   nord-ouest. Les deux lectures possibles :
+   - **garder la lampe fixe** — c'est une **hachure cartographique**, pas une
+     lumière ; c'est la convention d'Imhof, et le terminateur porte l'heure tout
+     seul. ⚡ **C'est ce que je recommande**, et pour une raison mesurable :
+   - **asservir l'azimut au soleil** rendrait `n·L − haut·L` nul partout où le
+     soleil est au zénith et **borné à zéro partout où il est sous l'horizon** —
+     c'est-à-dire **rouvrir le défaut de D15 sur toute la face nocturne, et au
+     nadir de midi**. L'angle qui écrase le relief au lieu de le révéler est
+     précisément celui que l'Étape 4 documente.
+
+   ➡️ **À trancher à la fusion R6/R7, pas après.**
 4. ⚠️ **Les coutures de bord de tuile n'ont pas été mesurées.** Le gradient lit
    `vUv ± pas` ; au bord d'une tuile, le mode ClampToEdge répète le dernier texel
    et la pente y est sous-estimée sur un texel. **Rien de visible aux dix-neuf
    captures**, mais c'est un examen que je n'ai pas fait à la loupe.
-5. ⚠️ **Une seule machine** (RTX 3080). Le coût peut être différent sur une
-   machine limitée par le remplissage — c'est justement le cas que
-   `palier-machine.js` couvre, et je ne l'ai pas essayé.
-6. ⚠️ **`puppeteer-core` est installé `--no-save`.** Les deux sondes le disent
-   dans leur en-tête et échouent avec le message d'installation s'il manque.
-   `package.json` n'a **pas** été modifié pour lui.
+5. ⛔ **UNE SEULE MACHINE — ET CETTE RÉSERVE A CHANGÉ DE NATURE.** Elle était une
+   intuition ; elle est maintenant **un mécanisme mesuré** (Étape 5) : à
+   1 280 × 800, ce banc est **limité par la soumission CPU**, et **×35 de
+   fragments à 40 000 m ne bouge pas le temps par image**. ➡️ Le « coût
+   indiscernable de zéro » borne **ce que l'utilisateur subit ici**, pas le coût
+   GPU du nuanceur. Sur une machine limitée par le remplissage — le cas que
+   `palier-machine.js` couvre — ou en très haute résolution, **le même ajout peut
+   se voir. Ce n'est pas mesuré.**
+6. ⚠️ **`puppeteer-core` reste hors de `package.json` — mais le paquet de
+   preuves, lui, n'en est plus absent.** `.banc/` est gitignoré
+   (`.gitignore:44`) : après un `npm ci`, aucune des cinq sondes ne démarrait
+   **et aucun chiffre de ce rapport n'était re-dérivable**. ➡️ Les **dix relevés
+   JSON** sont désormais commités sous `traces-R6/releves/`, avec les traces du
+   tour de correction à côté ; les captures PNG (~40 Mo) restent hors dépôt, ce
+   sont des illustrations, pas des sources de chiffres.
+   **La phrase à rejouer, inscrite en tête des cinq scripts et dans leur message
+   d'erreur :**
+
+   ```
+   npm i --no-save puppeteer-core@25.8.0
+   ```
+
+   ⚠️ `package.json` **n'a pas** été modifié : alourdir le `npm ci` de tout le
+   monde pour trois sondes de diagnostic n'est pas un arbitrage que R6 doit
+   prendre seul.
+7. ⛔ **UN CONFLIT DE MESURE RESTE OUVERT, ET JE NE L'AI PAS TRANCHÉ.** Une autre
+   tâche lit `finish` à 0,445–0,455 ms là où mon banc lit 0,49 à 0,85 ms au même
+   geste : **un facteur que la barrière n'explique pas**, puisque mes trois
+   barrières sont indiscernables entre elles. L'hypothèse la plus probable reste
+   que **nos deux bancs ne mesurent pas la même charge** — la mienne est écrite
+   noir sur blanc à l'Étape 5 (52 à 583 appels de dessin, 1 280 × 800,
+   ANGLE/D3D11, RTX 3080), et **mes scripts sont maintenant dans le dépôt**, ce
+   qui la rend enfin rejouable ailleurs. **Je n'universalise rien.**
