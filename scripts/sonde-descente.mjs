@@ -94,15 +94,28 @@ async function chargerPuppeteer() {
   process.exit(2)
 }
 
+// ══════════ FENÊTRE VISIBLE OU SANS TÊTE — ET CE QUE ÇA CHANGE VRAIMENT ═════
+//
+// ⛔ **« CHROME SANS TÊTE TOURNE EN SWIFTSHADER » EST FAUX SUR CETTE MACHINE, ET
+// LA PREMIÈRE LECTURE DE CE BANC L'AVAIT ÉCRIT — Tâche R4, tour de correction.**
+// `--enable-unsafe-swiftshader` **AUTORISE** le repli logiciel ; il ne l'impose
+// pas. Vérifié en lisant `WEBGL_debug_renderer_info` dans les DEUX
+// configurations : la sortie porte désormais le champ `gpu`, précisément pour
+// qu'on n'ait plus à le supposer. Ce qui diffère entre les deux, ce n'est pas le
+// pilote, c'est le **rythme des images** (compositeur, vsync, fenêtre réelle).
+//
+//   node scripts/sonde-descente.mjs --visible 1   # fenêtre Chrome à l'écran
+const VISIBLE = opt('--visible', '0') !== '0'
+
 const puppeteer = await chargerPuppeteer()
 const nav = await puppeteer.launch({
   executablePath: trouverChrome(),
-  headless: true,
-  args: ['--headless=new', '--no-sandbox', '--enable-unsafe-swiftshader', '--window-size=1280,800',
-    '--autoplay-policy=no-user-gesture-required'],
+  headless: !VISIBLE,
+  args: [...(VISIBLE ? [] : ['--headless=new']), '--no-sandbox', '--enable-unsafe-swiftshader',
+    '--window-size=1280,900', '--autoplay-policy=no-user-gesture-required'],
 })
 
-const sortie = { etiquette: ETIQ, departM: DEPART_M, url: URL_SUFFIXE, images: [] }
+const sortie = { etiquette: ETIQ, departM: DEPART_M, url: URL_SUFFIXE, visible: VISIBLE, images: [] }
 const dossierImg = path.join(ICI, `img-${ETIQ}`)
 if (IMAGES) fs.mkdirSync(dossierImg, { recursive: true })
 
@@ -113,6 +126,15 @@ try {
   page.on('pageerror', (e) => erreurs.push(String(e.message).slice(0, 200)))
   await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 90000 })
   await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe, { timeout: 60000, polling: 100 })
+  // ⚠️ **ON LIT LE PILOTE AU LIEU DE LE SUPPOSER** — voir l'en-tête `--visible`.
+  sortie.gpu = await page.evaluate(() => {
+    try {
+      const gl = window.__exp?.renderer?.getContext?.() ?? document.createElement('canvas').getContext('webgl2')
+      const d = gl?.getExtension('WEBGL_debug_renderer_info')
+      return d ? String(gl.getParameter(d.UNMASKED_RENDERER_WEBGL)) : 'inconnu'
+    } catch (e) { return 'erreur: ' + e.message }
+  })
+  console.log(`pilote WebGL : ${sortie.gpu}`)
   // laisser le premier dessin et le premier bloc arriver
   await new Promise((r) => setTimeout(r, 6000))
   // ⚠️ **L'ÉCRAN D'ACCUEIL RECOUVRE TOUT, ET IL FAUSSAIT LA MESURE D'IMAGE.**

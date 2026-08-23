@@ -293,6 +293,64 @@ export function poseFonduArrivee({ cible, camY, direction, avancement = 1, pente
   return { x: cible.x + ax * r, y: camY, z: cible.z + az * r, elevation }
 }
 
+// ══════ 4 quater. L'AVANCEMENT DU BALAYAGE — Tâche R4, tour de correction ═══
+//
+// ⛔ **LE PLAFOND `Math.min(dtBrut, 0,05)` DE `main.js` NE TENAIT PAS LA
+// PROMESSE, ET C'EST MESURÉ SUR LE GPU D'ADRIEN.** Le premier jet dérivait la
+// durée du balayage d'un budget par image — « 1,1 s, la plus courte qui tienne
+// le pas de pointe sous 1,5° » — puis annonçait que l'écrêtage du pas de temps
+// bornait le pire cas à 4,23°. **Les deux phrases ne peuvent pas être vraies en
+// même temps** : 4,23° n'est pas « sous 1,5° », c'est trois fois plus.
+//
+// Descente rejouée en Chrome VISIBLE sur une RTX 3080
+// (`.banc/R4/r4c-gpu-avant.json`, `node scripts/sonde-descente.mjs --visible 1`) :
+//
+//   | pas de pointe | image | pas > 3° | pas > 1,5° | balayage        |
+//   | **4,135°**    | 95 ms | **6**    | **13**     | 34 img / 1 974 ms |
+//
+// **Six pas au-dessus de 3° par balayage, sur du vrai matériel.** La plongée est
+// exactement le moment où l'application charge la surface : les images longues
+// n'y sont pas un accident de banc, elles y sont la règle.
+//
+// ➡️ **ON BORNE DONC L'ANGLE, PAS LE TEMPS.** L'inclinaison balayée vaut
+// EXACTEMENT `angleTotal × e` — le §4 ter interpole l'élévation linéairement en
+// `e` —, donc borner le pas d'inclinaison, c'est borner `Δe`, sans approximation
+// et sans avoir à mesurer d'angle. Quand le plafond mord, l'avancement `t` est
+// **remonté par la réciproque de la courbe** au lieu d'être laissé courir : sans
+// ça, l'image suivante rattraperait le retard d'un coup et remettrait le saut
+// qu'on vient d'enlever.
+//
+// ⚠️ **LE BALAYAGE S'ÉTIRE ALORS EN TEMPS RÉEL, ET C'EST LE PRIX ASSUMÉ.** Sur
+// une machine chargée il dure plus longtemps que `duree` ; c'est le seul
+// comportement qui tienne « la caméra ne claque jamais » sans mentir sur le
+// chiffre. La contrepartie est mesurée et publiée dans `rapport-R4.md` §4.
+//
+// La courbe est la quadratique adoucie aux deux bouts du tween de clic ; sa
+// réciproque est fermée, d'où `adoucirInverse`.
+export const adoucir = (t) => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2)
+export const adoucirInverse = (e) => (e < 0.5 ? Math.sqrt(e / 2) : 1 - Math.sqrt(2 * (1 - e)) / 2)
+
+export function avancerFonduPose({
+  t = 0,
+  e = 0,
+  dt = 0,
+  duree = 1,
+  angleTotalDeg = 0,
+  pasMaxDeg = Infinity,
+} = {}) {
+  if (!(duree > 0)) return { t: 1, e: 1, fini: true }
+  let tSuite = Math.min(1, Math.max(0, t) + Math.max(0, dt) / duree)
+  let eSuite = adoucir(tSuite)
+  // ⚠️ **LE PLAFOND EST EN DEGRÉS, PAS EN AVANCEMENT** : c'est la grandeur
+  // qu'Adrien juge à l'œil. `angleTotalDeg <= 0` veut dire « rien à balayer » —
+  // le plafond n'a alors aucun sens, et on ne l'applique pas.
+  if (angleTotalDeg > 0 && pasMaxDeg > 0 && Number.isFinite(pasMaxDeg)) {
+    const eMax = Math.max(0, Math.min(1, e)) + pasMaxDeg / angleTotalDeg
+    if (eSuite > eMax) { eSuite = eMax; tSuite = adoucirInverse(eSuite) }
+  }
+  return { t: tSuite, e: eSuite, fini: eSuite >= 1 }
+}
+
 // ══════════ 5. LA PLONGÉE QUI NE SAUTE PAS ══════════════════════════════════
 //
 // ⚠️ **`_posePlongee` CONSERVAIT, LUI AUSSI, LA MAUVAISE ALTITUDE**, et

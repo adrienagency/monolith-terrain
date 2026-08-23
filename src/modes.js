@@ -56,6 +56,11 @@ import {
   // §4 bis et §4 ter, qui portent le relevé image par image.
   poseFranchissement,
   poseFonduArrivee,
+  // ⛔ **L'AVANCEMENT DU BALAYAGE EST UNE LOI, PAS TROIS LIGNES DANS `update`**
+  // — Tâche R4, tour de correction. Écrite ici, elle était invérifiable : le
+  // banc de `machine()` alimente un `dt` parfait de 1/60, où le plafond ne mord
+  // jamais. Là-bas, elle se rejoue sur le `dt` RELEVÉ AU NAVIGATEUR.
+  avancerFonduPose,
 } from './monde/zoom-continu.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
@@ -162,28 +167,46 @@ const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRES
 // ══════════ LA DURÉE DU BALAYAGE DE POSE — Tâche R4 ═════════════════════════
 //
 // ⚠️ **ELLE SE DÉRIVE D'UN BUDGET PAR IMAGE, ELLE NE SE CHOISIT PAS AU GOÛT.**
-// La plongée doit balayer `90° − atan(18/19) = 46,551°` (le §4 ter de
-// `monde/zoom-continu.js` porte le relevé). Avec la quadratique adoucie aux deux
-// bouts, la vitesse de pointe vaut DEUX fois la moyenne : le plus grand pas d'une
-// image à l'autre vaut donc `2 × 46,551 / (durée × 60)` degrés à 60 Hz.
+// La plongée doit balayer `90° − atan(18/19) = 46,54816°` (le §4 ter de
+// `monde/zoom-continu.js` porte le relevé, et cette valeur est EXACTE : c'est une
+// identité géométrique, pas une concordance — l'écart au relevé du navigateur est
+// à la treizième décimale). Avec la quadratique adoucie aux deux bouts, la
+// vitesse de pointe vaut DEUX fois la moyenne : le plus grand pas d'une image à
+// l'autre vaut donc `2 × 46,54816 / (durée × 60)` degrés à 60 Hz.
 //
 //   | durée | pas de pointe à 60 Hz |
-//   | 0,5 s | 3,1° — encore un à-coup |
+//   | 0,5 s | 3,10° — encore un à-coup |
 //   | 1,1 s | **1,41°** |
 //   | 2,0 s | 0,78° — mais la caméra tient la main une seconde de trop |
 //
 // **1,1 s**, donc : c'est la plus courte qui tienne le pas de pointe sous 1,5°
 // par image, l'ordre de grandeur d'un mouvement de caméra qu'on lit au lieu de
-// le subir. Le test ⑪ de `test/zoom-continu.test.js` mesure ce pas et refuse
-// au-delà de 3°.
+// le subir.
+export const DUREE_FONDU_POSE_S = 1.1
+
+// ══════ LE PLAFOND PAR IMAGE — Tâche R4, tour de correction ═════════════════
 //
-// ⚠️ **ET LE PIRE CAS EST BORNÉ, QUEL QUE SOIT LE DÉBIT D'IMAGES** : `main.js`
-// écrête le pas de temps à `Math.min(dtBrut, 0,05)`. Une image lente ne consomme
-// donc jamais plus de 50 ms de balayage, soit `84,6 °/s × 0,05 = 4,23°` au pire.
-// Mesuré au banc sur une image de 118 ms : **4,12°** — le plafond, atteint. Le
-// balayage s'y étire en temps réel (1,592 s relevés pour 1,1 s de courbe) au
-// lieu de sauter, et c'est exactement le compromis qu'on veut ici.
-const DUREE_FONDU_POSE_S = 1.1
+// ⛔ **LA DÉRIVATION CI-DESSUS NE VALAIT QU'À 60 Hz, ET LE PREMIER JET LE
+// CACHAIT DERRIÈRE UN CALCUL RASSURANT.** Il écrivait : « le pire cas est borné
+// quel que soit le débit d'images — `main.js` écrête `dt` à 0,05 s, soit 4,23° au
+// pire ». **Un plafond de 4,23° ne « tient » pas un budget de 1,5°.** Et ce n'est
+// pas théorique : descente rejouée par MOI en Chrome VISIBLE sur la RTX 3080
+// d'Adrien (`node scripts/sonde-descente.mjs --visible 1`, trace
+// `.banc/R4/r4c-gpu-avant.json`) → **pas de pointe 4,135° sur une image de 95 ms,
+// et SIX pas au-dessus de 3° dans le même balayage.**
+//
+// ⚠️ **ET LA PRÉMISSE DU PREMIER JET ÉTAIT FAUSSE AUSSI** : « Chrome sans tête
+// tourne en SwiftShader » — non. `WEBGL_debug_renderer_info`, relu par moi dans
+// les deux configurations, rend la RTX 3080 des DEUX côtés
+// (`.banc/R4/r4c-pilote-sanstete.json`). `--enable-unsafe-swiftshader` AUTORISE
+// le repli logiciel, il ne l'impose pas. Le banc mesurait déjà le vrai GPU.
+//
+// ➡️ **ON BORNE DONC L'ANGLE PAR IMAGE, ET LE BALAYAGE S'ÉTIRE.** `1,5°` n'est
+// pas un chiffre neuf : c'est **exactement le budget dont `DUREE_FONDU_POSE_S`
+// est dérivée**, promu de vœu à invariant. La loi est `avancerFonduPose`
+// (`monde/zoom-continu.js`, §4 quater) : le pas d'inclinaison vaut
+// `46,54816° × Δe`, donc le plafonner est exact, pas approché.
+export const PAS_POSE_MAX_DEG = 1.5
 
 // ══════════ LE BUDGET DU NIVEAU VAUT EXACTEMENT UN CRAN — Tâche 2 bis ═══════
 //
@@ -1011,7 +1034,12 @@ export class Modes {
     // cible vaut `camY − yCible` ; sous `minDistance`, `controls.update()` la
     // repousserait à chaque image et le fondu se battrait contre la butée.
     if (!(this.camera.position.y - cible.y > this.controls.minDistance * 1.05)) return
-    this._fonduPose = { t: 0, cible: cible.clone(), direction }
+    // ⚠️ **`angleTotalDeg` SE CALCULE ICI, UNE FOIS** : c'est l'angle que le
+    // balayage doit couvrir, `90° − asin(direction.y)`, et c'est lui qui convertit
+    // le plafond en degrés (`PAS_POSE_MAX_DEG`) en plafond d'avancement. La
+    // direction ne change plus une fois le fondu armé ; l'angle non plus.
+    const angleTotalDeg = 90 - (Math.asin(Math.min(1, direction.y)) * 180) / Math.PI
+    this._fonduPose = { t: 0, e: 0, angleTotalDeg, cible: cible.clone(), direction }
     this._avancerFonduPose(0)
   }
 
@@ -1437,12 +1465,28 @@ export class Modes {
       // ⚠️ **LA COURBE EST CELLE DU TWEEN DE CLIC**, la même quadratique
       // adoucie aux deux bouts : deux courbes différentes pour deux mouvements
       // de caméra du même fichier seraient deux sensations à tenir d'accord.
+      //
+      // ⛔ **ET LE PAS D'INCLINAISON EST PLAFONNÉ, PAS SEULEMENT LE PAS DE
+      // TEMPS** — Tâche R4, tour de correction. Le premier jet laissait
+      // `Math.min(dtBrut, 0,05)` de `main.js` faire office de garde-fou : mesuré
+      // sur la RTX 3080 d'Adrien, il laissait passer **4,135°** et **six pas
+      // au-dessus de 3° par balayage**. `avancerFonduPose` borne l'ANGLE et
+      // remonte `t` par la réciproque de la courbe ; le balayage s'étire au lieu
+      // de sauter. Voir le §4 quater de `monde/zoom-continu.js`.
       if (this._fonduPose) {
         const f = this._fonduPose
-        f.t = Math.min(1, f.t + dt / DUREE_FONDU_POSE_S)
-        const e = f.t < 0.5 ? 2 * f.t * f.t : 1 - ((-2 * f.t + 2) ** 2) / 2
-        this._avancerFonduPose(e)
-        if (f.t >= 1) this._fonduPose = null
+        const pas = avancerFonduPose({
+          t: f.t,
+          e: f.e,
+          dt,
+          duree: DUREE_FONDU_POSE_S,
+          angleTotalDeg: f.angleTotalDeg,
+          pasMaxDeg: PAS_POSE_MAX_DEG,
+        })
+        f.t = pas.t
+        f.e = pas.e
+        this._avancerFonduPose(pas.e)
+        if (pas.fini) this._fonduPose = null
       }
       this.altM = this.hooks.surfaceCamAltMeters()
     }
