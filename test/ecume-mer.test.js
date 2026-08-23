@@ -395,7 +395,13 @@ test('③b les deux fichiers INJECTENT le texte partagé, ils ne le recopient pa
   assert.equal((g.match(/\$\{GLSL_JUPE_MER\}/g) || []).length, 1)
   // et les DEUX appellent la même fonction
   assert.match(o, /float foam = ecumeMer\(vCrest, vFade, foamNoise, foamNoise2, patchy, uTime, uFoam, uFoamScale, uViewCalm, uSurfCalm\);/)
-  assert.match(g, /ecumeMer\(vCrete, vFonduRive, n1, n2, tavelure, uMerTemps,\s*\n\s*uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf\)/)
+  // ⚠️ **`fonduRive` SANS `v` DEPUIS LA TÂCHE R5**, et le rôle est INCHANGÉ :
+  // c'est le même fondu de ressac, tiré des mêmes fonctions d'`ecume-mer.js`.
+  // Seule la FRÉQUENCE d'échantillonnage a changé — le fragment lit `uMerChamp`
+  // lui-même au lieu de recevoir un varying interpolé depuis les sommets, ce que
+  // le fragment d'`ocean.js` fait depuis toujours. `test/trait-cote-mer.test.js`
+  // garde ce changement-là, et l'en-tête de `MER_FRAG` porte sa mesure.
+  assert.match(g, /ecumeMer\(vCrete, fonduRive, n1, n2, tavelure, uMerTemps,\s*\n\s*uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf\)/)
 })
 
 test('③c le module est PUR : aucune importation, donc chargeable sous node', () => {
@@ -1219,15 +1225,21 @@ test('⑦d le nuanceur de la calotte BRANCHE le repli, et SEULEMENT là où il f
   assert.match(vert, /vProfondeurEau = profondeurEauMer\(vProfondeur, champ\.g, uMerUnite\);/)
   // ② le GLACIS le lit — c'est LUI qui portait les dents (mesuré : le repli posé
   //    sur la seule alpha ne déplace rien, 11,72 % contre 11,71 % au départ)
-  assert.match(frag, /float dLagon = clamp\(vProfondeurEau \/ max\(uMerProfMax \* 0\.15/)
+  // ⚠️ **LES NOMS DU FRAGMENT ONT PERDU LEUR `v` À LA TÂCHE R5**, et c'est le
+  // SEUL changement : `profondeur` / `profondeurEau` / `fonduRive` sont les
+  // mêmes grandeurs, tirées des mêmes fonctions, mais lues PAR FRAGMENT au lieu
+  // d'être interpolées depuis les sommets — c'est ce que le fragment
+  // d'`ocean.js` fait depuis toujours. Le VERTEX, lui, garde ses varyings : il
+  // en a besoin pour le critère de déferlement, gardé plus bas.
+  assert.match(frag, /float dLagon = clamp\(profondeurEau \/ max\(uMerProfMax \* 0\.15/)
   // ③ l'ALPHA le lit aussi — c'est le `shoreAA` d'ocean.js, sur `depth`
-  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, vProfondeurEau\)/g) || []).length, 2)
-  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, vProfondeur\)/g) || []).length, 0)
+  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, profondeurEau\)/g) || []).length, 2)
+  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, profondeur\)/g) || []).length, 0)
   // ⛔ **ET LA TERRE RESTE DÉCIDÉE PAR LA BATHYMÉTRIE NUE.** Une mutation qui
   // ferait discarder sur `vProfondeurEau` NOIERAIT LA CÔTE : le repli est > 0
   // partout où la distance au rivage l'est, c'est-à-dire sur la terre aussi.
-  assert.match(frag, /if \(vProfondeur <= 0\.0\) discard;/)
-  assert.equal(/if \(vProfondeurEau <= 0\.0\) discard;/.test(frag), false)
+  assert.match(frag, /if \(profondeur <= 0\.0\) discard;/)
+  assert.equal(/if \(profondeurEau <= 0\.0\) discard;/.test(frag), false)
   // ⛔ **ET LE DÉCLIN CÔTIER AUSSI** : `declinRivageMer` compare DÉJÀ la
   // profondeur à la distance (`max(prof × 2, distance)`). Lui passer le repli
   // ferait entrer la distance deux fois, et le ressac d'`ocean.js` n'est pas ça.

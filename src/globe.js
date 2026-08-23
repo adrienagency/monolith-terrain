@@ -380,6 +380,14 @@ uniform float uMerBrillance;
 uniform float uMerPortee;
 uniform float uMerLambda;
 uniform float uMerUnite;      // unites de scene par unite de socle — Tache P4
+// ══════ LE CHAMP, LU UNE SECONDE FOIS ET A UNE AUTRE FREQUENCE — Tache R5 ══
+// Le vertex le lit deja. Ce n est pas une duplication de LOI (les trois
+// fonctions appelees sont les memes, injectees par GLSL_ECUME) mais un
+// changement de FREQUENCE d echantillonnage, et c est tout le geste de la
+// tache. Le pourquoi, avec les chiffres, est au bloc « LE TRAIT MER/TERRE » de
+// main(). uMerParFragment a 0 rend l image d avant AU BIT PRES.
+uniform sampler2D uMerChamp;
+uniform float uMerParFragment;
 // ══════ LES DEUX ACCALMIES D'ocean.js, LUES ET NON RECALCULEES — Tache P4 ══
 // Elles pesent 0,4039 et 0,08 dans la page vivante du 2026-08-22 : le ressac du
 // socle y est multiplie par 0,0323 quand la calotte le multipliait par 1. Un
@@ -463,8 +471,43 @@ float bruitMer(vec2 q) {
 }
 
 void main() {
+  // ══════ LE TRAIT MER/TERRE — Tache R5 ═════════════════════════════════════
+  //
+  // ⛔ **LE TRAIT DU CROP ETAIT DECIDE PAR SOMMET, CELUI DU SOCLE PAR FRAGMENT.**
+  // vProfondeur, vProfondeurEau et vFonduRive sont des VARYINGS : MER_VERT lit
+  // le champ aux SOMMETS de la calotte et le fragment n en recoit qu une
+  // interpolation lineaire. La ligne d eau du crop etait donc le zero d une
+  // fonction affine par triangle — un polygone dont le cote vaut UNE MAILLE.
+  // ocean.js, lui, lit uField ET le masque cotier DANS SON FRAGMENT.
+  //
+  // ⚡ MESURE (La Reunion -21,05 / 55,25 z12, cadrage cote, bloc appari a
+  // -0,03 %, mer calmee des deux cotes, boucle gelee, A-B-A identique au
+  // chiffre pres) : la maille de la nappe vaut **6,475 px** a l ecran, le texel
+  // du champ **3,238 px**, le texel du champ du socle **1,08 px**. C est la
+  // MAILLE qui bornait, pas le champ : elle est deux fois plus grossiere que le
+  // champ qu elle echantillonne. Multiplier la resolution du champ par la
+  // portee — la « route A », neuf fois la cuisson — ne pouvait donc RIEN
+  // rendre tant que cette ligne-ci lisait par sommet.
+  //
+  // ⚠️ **CE N EST PAS UNE SECONDE ECRITURE DE LA LOI** : les trois fonctions
+  // appelees ici sont celles de monde/ecume-mer.js, les MEMES que le vertex
+  // appelle. Seule la FREQUENCE change.
+  float profondeur = vProfondeur;
+  float profondeurEau = vProfondeurEau;
+  float fonduRive = vFonduRive;
+  if (uMerParFragment > 0.5) {
+    // ⚠️ vCrop, PAS la position deplacee : c est la coordonnee PARAMETRIQUE de
+    // la calotte, celle-la meme que le vertex convertit en uvF avant que la
+    // houle ne bouge le sommet. Lire la position deplacee ferait onduler le
+    // trait de cote au rythme des vagues.
+    vec2 uvFrag = vCrop / (2.0 * uMerPortee) + 0.5;
+    vec2 champFrag = texture2D(uMerChamp, uvFrag).rg;
+    profondeur = max(-champFrag.r, 0.0);
+    profondeurEau = profondeurEauMer(profondeur, champFrag.g, uMerUnite);
+    fonduRive = fonduRessacMer(declinRivageMer(profondeur / max(uMerUnite, 1e-9), champFrag.g));
+  }
   // la TERRE ne porte jamais la mer : le fond au-dessus du niveau zéro discarde
-  if (vProfondeur <= 0.0) discard;
+  if (profondeur <= 0.0) discard;
 
   // ══════ LE RIDEAU D EAU — Tache P4 ═══════════════════════════════════════
   //
@@ -518,7 +561,7 @@ void main() {
   // 0,048. LES DENTS VIVENT DANS LE GLACIS. Le pourquoi — un echantillon vrai
   // de bathymetrie tous les 240 m dans le champ du crop — est a profondeurEau
   // (monde/ecume-mer.js), avec le halo qu ocean.js redoute, declare comme risque.
-  float dLagon = clamp(vProfondeurEau / max(uMerProfMax * 0.15, 1e-9), 0.0, 1.0);
+  float dLagon = clamp(profondeurEau / max(uMerProfMax * 0.15, 1e-9), 0.0, 1.0);
   // ══════ LE CORPS DE L EAU — Tache P6 ═════════════════════════════════════
   // Il portait mix(uMerPeu, uMerFond, pow(dLagon, 0.7)) : le corps d ocean.js
   // AMPUTE de son glacis de lagon (donc de la tirette de transparence) et de sa
@@ -566,7 +609,7 @@ void main() {
   // ⚠️ LA PENTE EST CELLE DU REPERE LOCAL — voir nLocal plus haut. Le decalage,
   // lui, est en UV D ECRAN des deux cotes : rien a convertir sur le gain.
   vec2 uvEcran = gl_FragCoord.xy / uMerResolution;
-  vec2 refOff = decalageRefraction(nLocal.xz, uMerRefract, vFonduRive);
+  vec2 refOff = decalageRefraction(nLocal.xz, uMerRefract, fonduRive);
   vec3 travers = texture2D(uMerScene, uvRefractee(uvEcran, refOff)).rgb;
   col = composeLameEau(travers, col, opac);
   col = mix(col, uSky, fres * 0.35);
@@ -603,7 +646,7 @@ void main() {
     // atteint zero et fait sortir le vertex), la ou uMerCalmeVue/Surf sont les
     // deux echelles de LOOK d ocean.js. Deux echelles, deux roles, toutes deux
     // presentes — c est exactement ce qui manquait.
-    float ecume = clamp(ecumeMer(vCrete, vFonduRive, n1, n2, tavelure, uMerTemps,
+    float ecume = clamp(ecumeMer(vCrete, fonduRive, n1, n2, tavelure, uMerTemps,
       uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf) * vRichesse, 0.0, 1.0);
     // ⚠️ blanchirEcume PORTE LA NUIT — Tache P6. La ligne d avant ecrivait
     // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
@@ -612,10 +655,10 @@ void main() {
     // ⚠️ PLUS DE opac ICI — Tache R2. Il vit desormais dans composeLameEau, et
     // l alpha ne porte que ce qui est GEOMETRIQUE : le bord du crop, le trait
     // d eau, l ecume. C est le max(shoreAA, foam * 0.85) d ocean.js, borde.
-    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeurEau), ecume * 0.85));
+    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, profondeurEau), ecume * 0.85));
     return;
   }
-  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeurEau));
+  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, profondeurEau));
 }
 `
 
@@ -4293,6 +4336,12 @@ export class Globe {
         // ⚠️ CONVERTI, PAS RECOPIÉ — voir `seuilTraitEauM` : `0,02` unité de socle
         // vaudrait 455 m d'eau ici, et toute la côte serait semi-transparente.
         uMerSeuilEau: { value: seuilTraitEauM(rep, exag) * echelle },
+        // ══════ LE TRAIT MER/TERRE PAR FRAGMENT — Tâche R5 ═══════════════════
+        // ⚠️ **POSÉ À 1, ET C'EST LA LIVRAISON, PAS UN RÉGLAGE.** Le zéro existe
+        // pour que le banc rende l'image d'avant AU BIT PRÈS dans la même page
+        // (`.banc/R5/`), et pour rien d'autre : aucun réglage d'interface ne le
+        // touche. Les chiffres qui le justifient sont dans `MER_FRAG`.
+        uMerParFragment: { value: 1 },
         uMerPeu: { value: cols.shallowT },
         uMerFond: { value: cols.deep },
         // ⛔ **PLUS DE TRANSCRIPTION DE `chopLook` ICI — Tâche P5.** Ces deux
