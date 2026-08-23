@@ -176,6 +176,13 @@ const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRES
 // par image, l'ordre de grandeur d'un mouvement de caméra qu'on lit au lieu de
 // le subir. Le test ⑪ de `test/zoom-continu.test.js` mesure ce pas et refuse
 // au-delà de 3°.
+//
+// ⚠️ **ET LE PIRE CAS EST BORNÉ, QUEL QUE SOIT LE DÉBIT D'IMAGES** : `main.js`
+// écrête le pas de temps à `Math.min(dtBrut, 0,05)`. Une image lente ne consomme
+// donc jamais plus de 50 ms de balayage, soit `84,6 °/s × 0,05 = 4,23°` au pire.
+// Mesuré au banc sur une image de 118 ms : **4,12°** — le plafond, atteint. Le
+// balayage s'y étire en temps réel (1,592 s relevés pour 1,1 s de courbe) au
+// lieu de sauter, et c'est exactement le compromis qu'on veut ici.
 const DUREE_FONDU_POSE_S = 1.1
 
 // ══════════ LE BUDGET DU NIVEAU VAUT EXACTEMENT UN CRAN — Tâche 2 bis ═══════
