@@ -5934,6 +5934,13 @@ modes = new Modes({
     // déjà `altitudeCadrageM()` et `majCameraFond()`. Deux conventions d'échelle
     // dans le même fichier divergeraient en silence.
     coteBloc: () => TERRAIN_SIZE,
+    // ⚡ **« ARRIVER AU BLOC » — D16 ter, étape 5.** `veilleCrop.repos` vaut
+    // `crop posé ET vue au repos` : le LIEU et le MOMENT dans un seul booléen,
+    // alimenté par le point unique de `branchement-crop.js`, à la même image que
+    // le seuil du socle et l'estompage. **Aucun nombre nouveau n'entre dans le
+    // dépôt** : le seuil de repos et son hystérésis sont ceux de la Tâche N,
+    // mesurés, et la naissance du crop est celle du seuil.
+    arriveeSurLeBloc: () => !!veilleCrop?.repos,
     // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
     // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
     // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à

@@ -321,7 +321,11 @@ export class Modes {
     this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
     this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
     this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
-    this._fonduPose = null // le balayage nadir → oblique de la plongée — voir _armerFonduPose
+    this._fonduPose = null // le balayage nadir → oblique — voir _armerFonduPose
+    // ⚡ **LA VUE DE TROIS QUARTS ATTEND LE BLOC — D16 ter, étape 5.**
+    // Vrai depuis la traversée jusqu'à l'arrivée sur le bloc : pendant tout ce
+    // temps la caméra garde l'axe de l'orbite. Voir `_attendreLeBloc`.
+    this._attenteTroisQuarts = false
 
     this._buildDom()
 
@@ -734,6 +738,11 @@ export class Modes {
       this.camera.lookAt(0, 0, 0)
       this.controls.update()
       this._empriseVue = null // on quitte l'espace du bloc : plus d'unité à suivre
+      // ⚠️ **L'ATTENTE DE LA VUE DE TROIS QUARTS MEURT AVEC LA SURFACE.** Sans
+      // ça, un aller-retour orbite → surface → orbite la laisserait armée, et la
+      // bascule tomberait au premier repos du PROCHAIN séjour, sans traversée.
+      this._attenteTroisQuarts = false
+      this._fonduPose = null
       this.mode = 'orbital'
     })
     this.busy = false
@@ -990,13 +999,20 @@ export class Modes {
       this.controls.enabled = true
       this.controls.update()
       this.mode = 'surface'
-      // ══════ LE FONDU DE POSE — Tâche R4 ═══════════════════════════════════
+      // ══════ LA TRAVERSÉE GARDE L'AXE DE L'ORBITE — D16 ter, étape 5 ═══════
       //
-      // ⚠️ **APRÈS `this.mode = 'surface'`, ET C'EST OBLIGATOIRE** : `update`
-      // n'avance le fondu que dans la branche de surface. Armé avant, il
-      // resterait figé une image, ce qui remettrait exactement le claquement
-      // qu'il supprime — plus petit, donc plus difficile à voir.
-      this._armerFonduPose(arrival.target)
+      // ⛔ **ADRIEN, APRÈS AVOIR VU R4 :** *« Je vois toujours un énorme
+      // déplacement entre orbite et surface mode. **Je veux garder la vue comme
+      // en orbite quand je fais la transition.** »*
+      //
+      // R4 avait ÉTALÉ la bascule de 46,548° sur ~1,9 s au lieu d'une image.
+      // ⚠️ **Étaler n'est pas supprimer**, et c'est ce qu'il refuse. D16 ter
+      // tranche : **nadir de l'orbite jusqu'au bloc, la vue de trois quarts à
+      // l'arrivée sur le bloc, et là seulement.**
+      //
+      // La traversée ne balaie donc plus rien : elle POSE le nadir — l'axe que
+      // l'orbite avait — et met la bascule EN ATTENTE.
+      this._attendreLeBloc(arrival.target)
     })
     this.announce('FX ONLINE — SURFACE MODE ENGAGED')
     this.busy = false
@@ -1031,10 +1047,76 @@ export class Modes {
   // le drapeau le glissé inertiel court pendant le fondu (`_applyZoom` ignore
   // `busy`). Figer `camY` annulerait la molette de l'utilisateur pendant une
   // seconde entière — donc rendrait la main avec un saut, ce qu'on ferme ici.
-  _armerFonduPose(cible) {
+  // ══════ LA TRAVERSÉE : ON POSE LE NADIR, ET ON ATTEND — D16 ter ════════
+  //
+  // `_posePlongee` a rendu une pose OBLIQUE (elle calcule la bonne DISTANCE le
+  // long de `_ARRIVAL_DIR`). On garde sa distance et on ramène l'axe au nadir :
+  // `poseFonduArrivee` à l'avancement 0 fait exactement ça — même `camY`, rayon
+  // horizontal nul. **L'altitude ne bouge donc pas d'un mètre** (même invariant
+  // que R4 : la caméra tourne à `camY` constant).
+  //
+  // ⚠️ **ET SURTOUT : `_fonduPose` RESTE NUL.** `_franchirSiBesoin` refuse de
+  // franchir un niveau tant qu'un balayage court (« pas pendant le balayage de
+  // pose », plus haut). Garder un fondu armé pendant toute la descente aurait
+  // **bloqué tous les crans** — la descente ne se serait jamais affinée.
+  // L'attente vit donc dans son propre drapeau, qui ne bloque rien.
+  _attendreLeBloc(cible) {
     this._fonduPose = null
+    this._attenteTroisQuarts = false
     if (!this._continu()) return
     const direction = this.camera.position.clone().sub(cible)
+    if (!(direction.lengthSq() > 1e-6)) return
+    direction.normalize()
+    // mêmes gardes que le balayage : une arrivée rasante ou trop basse n'a rien
+    // à redresser, et le rayon horizontal y explose.
+    if (!(direction.y > 1e-3)) return
+    if (!(this.camera.position.y - cible.y > this.controls.minDistance * 1.05)) return
+    const p = poseFonduArrivee({ cible, camY: this.camera.position.y, direction, avancement: 0 })
+    if (!p) return
+    this.camera.position.set(p.x, p.y, p.z)
+    this.controls.target.copy(cible)
+    this.controls.update()
+    this._attenteTroisQuarts = true
+  }
+
+  // ══════ « ARRIVER AU BLOC », LE SEUL NOMBRE QUE D16 ter LAISSAIT OUVERT ══
+  //
+  // ⚠️ **TROIS CANDIDATS ÉTAIENT SUR LA TABLE, ET LE PREMIER EST CELUI QU'ADRIEN
+  // REFUSE** — la naissance du crop (32 274,3 m) : c'est là que la bascule
+  // tombait, en plein milieu du trajet. Le troisième, l'altitude finale, est un
+  // seuil de plus : il tomberait lui aussi pendant le geste.
+  //
+  // ➡️ **LE SIGNAL RETENU EST `veilleCrop.repos`, ET IL N'AJOUTE AUCUN NOMBRE AU
+  // DÉPÔT** : il vaut `crop posé ET vue au repos`, c'est-à-dire **le LIEU et le
+  // MOMENT dans un seul booléen**, alimenté par le point unique de
+  // `branchement-crop.js`. La partie « repos » est un signal de GESTE, pas de
+  // seuil : `veille-repos.js` surveille `|Δ ln distance|`, calibré **4,7 fois sous
+  // le pic du geste le plus doux**, avec 30 images d'hystérésis.
+  //
+  // ⚡ **C'est donc le plus TARD des trois** : le crop doit être né (on est sur le
+  // bloc) **et** la molette doit s'être arrêtée (le geste est fini).
+  // ⚠️ Et ce n'est pas surprenant, parce que ce n'est pas une altitude qu'on
+  // franchit sans le vouloir : c'est l'utilisateur qui lâche la molette.
+  _armerBasculeTroisQuarts() {
+    this._attenteTroisQuarts = false
+    // ⚠️ **L'AZIMUT EST CELUI DE L'UTILISATEUR, PAS CELUI DE `_ARRIVAL_DIR`.**
+    // La bascule tombe maintenant à la FIN de la descente : entre la traversée et
+    // elle, l'utilisateur a pu tourner autour du bloc. Reprendre l'azimut sud de
+    // `_ARRIVAL_DIR` lui ferait faire un demi-tour à l'arrivée. On ne reprend de
+    // la pose d'arrivée que son ÉLÉVATION — les 46,548° qui SONT le produit.
+    const elev = Math.asin(Math.min(1, _ARRIVAL_DIR.y))
+    const az = this.controls.getAzimuthalAngle?.() ?? Math.atan2(_ARRIVAL_DIR.x, _ARRIVAL_DIR.z)
+    const ch = Math.cos(elev)
+    const direction = new THREE.Vector3(Math.sin(az) * ch, Math.sin(elev), Math.cos(az) * ch)
+    this._armerFonduPose(this.controls.target, direction)
+  }
+
+  _armerFonduPose(cible, directionImposee = null) {
+    this._fonduPose = null
+    if (!this._continu()) return
+    const direction = directionImposee
+      ? directionImposee.clone()
+      : this.camera.position.clone().sub(cible)
     if (!(direction.lengthSq() > 1e-6)) return
     direction.normalize()
     // ⚠️ **UNE ARRIVÉE DÉJÀ RASANTE N'A RIEN À BALAYER**, et le rayon horizontal
@@ -1484,6 +1566,16 @@ export class Modes {
       // au-dessus de 3° par balayage**. `avancerFonduPose` borne l'ANGLE et
       // remonte `t` par la réciproque de la courbe ; le balayage s'étire au lieu
       // de sauter. Voir le §4 quater de `monde/zoom-continu.js`.
+      // ══════ L'ARRIVÉE SUR LE BLOC ARME LA BASCULE — D16 ter, étape 5 ════
+      //
+      // ⚠️ **AVANT le bloc du balayage, et pas après** : armée ici, la bascule
+      // avance dès la MÊME image. Armée après, elle resterait figée une image —
+      // le défaut exact que R4 signale à l'armement de la traversée.
+      // ⚠️ Et jamais pendant un chargement (`busy`) : `_rescale` écrit la cible
+      // et repose la caméra, les deux se battraient pour la même caméra.
+      if (this._attenteTroisQuarts && !this._fonduPose && !this.busy && this.hooks.arriveeSurLeBloc?.()) {
+        this._armerBasculeTroisQuarts()
+      }
       if (this._fonduPose) {
         const f = this._fonduPose
         const pas = avancerFonduPose({
