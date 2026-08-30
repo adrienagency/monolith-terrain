@@ -490,3 +490,71 @@ test('altitudeFondM est la JAMBE VERTICALE, pas l’altitude de la caméra de fo
     assert.ok(rapport(haut) > rapport(bas), `l’écart devrait croître de ${bas} à ${haut} m`)
   }
 })
+
+// ═════ ⑪ UN SEUL TAMPON DE PROFONDEUR — CE QUE ÇA COÛTE, EN CHIFFRES ═════
+//
+// ⛔ **L'EN-TÊTE DE CE MODULE AFFIRME QU'UN `far` UNIQUE COÛTERAIT LE TAMPON DE
+// PROFONDEUR DU BLOC** — « sans desserrer le plan lointain du bloc de 290 à
+// ≈500, c'est-à-dire dégrader son tampon de profondeur pour rien ». **C'est la
+// justification écrite des DEUX PASSES et du `ClearPass` qui efface la
+// profondeur entre elles**, donc du flou d'arrière-plan inerte.
+//
+// ⚡ **L'ARITHMÉTIQUE DIT LE CONTRAIRE, ET IL FAUT LE DIRE AVEC LE CHIFFRE.**
+// Pour une projection perspective standard sur `b` bits, la résolution de
+// profondeur à la distance de vue `z` vaut
+//
+//     Δz(z) = z² · (far − near) / (near · far · (2^b − 1))
+//
+// Dès que `far ≫ near`, le facteur `(far − near)/(near · far)` tend vers
+// `1/near` : **il ne dépend PLUS de `far`.** C'est `near` qui commande, et lui
+// seul — le réflexe « far/near doit rester petit » ne s'applique pas ici.
+const resolutionProfondeur = (z, near, far, bits = 24) =>
+  (z * z * (far - near)) / (near * far * (2 ** bits - 1))
+
+test('desserrer `far` jusqu’à contenir la planète coûte MOINS DE 0,2 % de profondeur', () => {
+  // ⚠️ **LES DEUX BORNES SONT MESURÉES, PAS CHOISIES.** `near = 0,5` et
+  // `far = 290` sont les valeurs relevées à z16 sur la descente jusqu'au sol
+  // (`.banc/D16/desc-sol.json`, image 1554). Le `far` qu'un espace unique
+  // demanderait est la distance au limbe opposé de la planète, relevée sur la
+  // même image : **12,8 Mm, soit 4,2 · 10⁵ unités de bloc à ce niveau.**
+  const near = 0.5, farAujourdhui = 290, farEspaceUnique = 4.2e5
+  for (const z of [5, 30, 100, 289]) { // le bloc vit entre 5 et 290 unités
+    const a = resolutionProfondeur(z, near, farAujourdhui)
+    const b = resolutionProfondeur(z, near, farEspaceUnique)
+    const perte = b / a - 1
+    assert.ok(perte >= 0, 'desserrer far ne peut pas AMÉLIORER la profondeur')
+    assert.ok(perte < 0.002, `à z=${z} la perte vaut ${(perte * 100).toFixed(3)} %, attendu < 0,2 %`)
+  }
+  // ⚡ **ET LA COMPARAISON QUI DONNE L'ÉCHELLE** : diviser `near` par deux coûte
+  // deux fois plus que multiplier `far` par 1 448.
+  const base = resolutionProfondeur(30, near, farAujourdhui)
+  const farX1448 = resolutionProfondeur(30, near, farEspaceUnique) / base
+  const nearDivise2 = resolutionProfondeur(30, near / 2, farAujourdhui) / base
+  assert.ok(farX1448 < 1.002, `far ×1 448 : ×${farX1448.toFixed(5)}`)
+  assert.ok(nearDivise2 > 1.99, `near ÷2 : ×${nearDivise2.toFixed(5)}`)
+  // ⚠️ **CE QUE CE TEST NE DIT PAS** : il ne dit rien du z-fighting ENTRE le
+  // bloc et le globe, ni du format réel du tampon de la chaîne de post-traitement.
+  // Il dit seulement que l'argument écrit dans l'en-tête — « dégrader le tampon
+  // du bloc » — vaut **0,17 %**, et pas ce que le mot « dégrader » suggère.
+})
+
+test('le rapport far/near d’un espace unique est mesuré, pas supposé', () => {
+  // Relevé image par image sur `.banc/D16/desc-sol.json` (1 555 images,
+  // 60 000 km → 397 m) : `near` du bloc converti en unités de globe contre la
+  // distance au limbe opposé. Le pire de chaque niveau :
+  const releve = {
+    3: 2.098e2, 4: 3.181e2, 5: 5.108e2, 6: 9.127e2, 7: 1.727e3, 8: 3.368e3,
+    9: 6.653e3, 10: 1.322e4, 11: 2.634e4, 12: 5.261e4, 13: 1.051e5,
+    14: 2.102e5, 15: 4.203e5, 16: 8.405e5,
+  }
+  // il DOUBLE à chaque niveau, parce que `near` suit l'altitude et que `far` ne
+  // bouge plus une fois la planète à l'écran
+  for (let z = 4; z <= 16; z++) {
+    const r = releve[z] / releve[z - 1]
+    assert.ok(r > 1.4 && r < 2.1, `z${z - 1}→z${z} : rapport ×${r.toFixed(3)}`)
+  }
+  // ⚠️ **8,4 · 10⁵ AU PIRE**, et c'est le chiffre à opposer à quiconque dira
+  // « far/near doit rester sous 10⁴ » : la règle porte sur des scènes où la
+  // précision doit être UNIFORME. Ici la précision utile suit la distance.
+  assert.equal(Math.max(...Object.values(releve)), 8.405e5)
+})

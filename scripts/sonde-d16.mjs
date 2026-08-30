@@ -191,12 +191,22 @@ function poserInstrument() {
   } catch (err) { reseau.erreur = String(err).slice(0, 80) }
 
   // ── ② quelle caméra rend, dans quel ordre ────────────────────────────────
+  // ⚡ **ET CE QUE CHAQUE PASSE DESSINE RÉELLEMENT — TÂCHE D16, ÉTAPE 3.**
+  // L'inventaire dit que la passe de surface « ne dessine plus rien » sous le
+  // drapeau. C'est une affirmation, pas une mesure. On compte les appels de
+  // dessin et les triangles AUTOUR de chaque passe : `renderer.info.render` est
+  // remis à zéro par three au début de chaque `render`, donc l'état d'APRÈS est
+  // exactement ce que CETTE passe a dessiné.
   const passes = []
+  const dessins = []
   const renderOrig = R.render.bind(R)
   R.render = function (sc, cam) {
     const tag = cam === e.camera ? 'bloc' : cam === e.camGlobe ? 'fond' : 'autre'
     passes.push(tag)
-    return renderOrig(sc, cam)
+    const r = renderOrig(sc, cam)
+    const i = R.info.render
+    dessins.push(tag + ':' + i.calls + '/' + i.triangles)
+    return r
   }
 
   // ── ⑤ LES ANCRES CANDIDATES — Étape 2 : la similitude n'a pas d'obligation
@@ -259,6 +269,7 @@ function poserInstrument() {
   const compOrig = e.composer.render.bind(e.composer)
   e.composer.render = function (dt) {
     passes.length = 0
+    dessins.length = 0
     const r = compOrig(dt)
     if (!window.__d16.on) return r
     try {
@@ -302,6 +313,7 @@ function poserInstrument() {
         zoom: e.dem?.zoom ?? null,
         // les deux caméras
         passes: passes.slice(),
+        dessins: dessins.slice(),
         gx: gp?.x ?? null, gy: gp?.y ?? null, gz: gp?.z ?? null,
         gvx: gv?.x ?? null, gvy: gv?.y ?? null, gvz: gv?.z ?? null,
         gfov: cg?.fov ?? null,
@@ -409,6 +421,7 @@ function analyse(lignes) {
       rAlt, rDist, rEmp, dImg, dLum,
       crop: b.crop, cropAvant: a.crop,
       passes: (b.passes || []).join('+'),
+      dessins: (b.dessins || []).join(' '),
       dReq: (b.req ?? 0) - (a.req ?? 0), dTuiles: (b.tuiles ?? 0) - (a.tuiles ?? 0),
       fov: b.fov,
     })
@@ -553,6 +566,28 @@ try {
       if (fini) { await marque('CROP-ATTEINT'); break }
     }
     await dodo(2500)
+    // ⚡ **QUI DESSINE ENCORE DANS LA SCÈNE DU BLOC — TÂCHE D16, ÉTAPE 3.**
+    // La mesure dit que la passe du bloc rend 0 triangle sur 60,4 % des images
+    // de surface et au plus 168 sur les autres. Avant de retirer la passe, il
+    // faut NOMMER ce qui reste. On parcourt la scène et on liste ce qui est
+    // visible ET porteur de géométrie, avec son compte de triangles.
+    sortie.sceneBloc = await page.evaluate(() => {
+      const out = []
+      const visible = (o) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true }
+      window.__exp.scene.traverse((o) => {
+        const g = o.geometry
+        if (!g || !visible(o)) return
+        const idx = g.index ? g.index.count : g.attributes?.position?.count ?? 0
+        const tri = o.isMesh ? Math.round(idx / 3) : idx
+        out.push({
+          nom: o.name || '(sans nom)',
+          type: o.type,
+          tri,
+          parents: (() => { const c = []; for (let p = o.parent; p; p = p.parent) c.push(p.name || p.type); return c.slice(0, 3).join('<') })(),
+        })
+      })
+      return { mode: window.__exp.modes?.mode, objets: out.sort((a, b) => b.tri - a.tri).slice(0, 40), total: out.length }
+    })
     const brut = await vider()
     sortie.descente = analyse(brut)
     // le brut sans le condensé : il ne sert plus une fois les écarts calculés,
