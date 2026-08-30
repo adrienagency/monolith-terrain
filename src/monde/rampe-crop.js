@@ -64,6 +64,11 @@ import {
   COTE_CROP_UNITES,
   EXAG_SOCLE_NOMINALE,
 } from './habillage-crop.js'
+// LA RÈGLE DE CADRAGE DE LA RAMPE — Tâche R11. ⚠️ **IMPORTÉE, JAMAIS
+// RECOPIÉE** : `relief-grade.js` est le module PUR qui porte déjà `SPAN`, les
+// quatre garde-fous et la conversion des quantiles en `pivot` / `contraste`.
+// Il n'importe rien lui-même, donc aucun cycle.
+import { gradeForDem } from '../relief-grade.js'
 
 // ══════════ ① LE PLANCHER D'AMPLITUDE — CONVERTI, PAS CHOISI ═══════════════
 
@@ -414,6 +419,105 @@ export const RAMPE_MONDE = Object.freeze({
   creux: 6000,
   plancherM: 0,
 })
+
+// ══════════ ⑤ LE GRADE DU MONDE — Tâche R11 ════════════════════════════════
+//
+// ══════════ CE QUE ÇA RÉPARE, ET C'EST LE CONSTAT D'ADRIEN ═════════════════
+//
+// > « Je n'arrive toujours pas à comprendre pourquoi on a une différence si
+// > importante entre les couleurs de Z10 et Z11. Les couleurs et le style du
+// > bloc devraient s'appliquer à tout le mode sphère. »
+//
+// ⚠️ **LA CAUSE EST MESURÉE, ET CE N'EST PAS L'HUMIDITÉ.** Décomposition à
+// l'écran, Sri Lanka 6,4156 / 80,6643, MÊME caméra, MÊME seconde, chaque poste
+// neutralisé un par un depuis l'état bloc (ΔE 1976 moyen sur 103 090 pixels,
+// vue 100 % terre) :
+//
+//   | poste neutralisé      | ΔE moyen | ΔE max |
+//   | bornes (locales→monde)| **25,82**|  53,7  |
+//   | loi X (contraste/pivot)| **20,76**|  44,5  |
+//   | peigné (`texShade`)   |   4,06   |  26,6  |
+//   | voile aérien          |   3,92   |  34,7  |
+//   | humidité (axe Y)      | **2,89** |  21,3  |
+//
+// ➡️ **L'AXE X FAIT L'ÉCART ; L'AXE Y VAUT 2,89.** Et l'axe X est fait de deux
+// UNIFORMES — donc gratuit. C'est ce que cette constante porte.
+//
+// ══════════ L'HYPSOMÉTRIE DES TERRES, MESURÉE — PAS REPRISE ════════════════
+//
+// Balayage de la couverture MONDIALE complète du MNT de production (terrarium
+// AWS, 256 px/tuile), pondéré par `cos(latitude)` pour annuler l'étirement de
+// Mercator, terres émergées seules (`h > 0`) :
+//
+//   | zoom | tuiles | échecs | part de terre | p08   | p50    | p92     |
+//   | z3   |   64   |   0    |   33,58 %     | 53 m  | 478 m  | 3 018 m |
+//   | z4   |  256   |   0    |   33,39 %     | 53 m  | 483 m  | 3 023 m |
+//
+// ⚠️ **LES DEUX RÉSOLUTIONS S'ACCORDENT À 1 %** — le grade dérivé vaut
+// `pivot 0,085 / contraste 2,17` à z3 comme à z4 dans l'échelle des TERRES.
+// **On publie z3, la moins fine des deux**, donc la moins favorable au détail.
+//
+// ⛔ **CE QUI EST STOCKÉ, C'EST LA MESURE, PAS LA RÈGLE.** Le pivot et le
+// contraste sont recalculés ici par `gradeForDem`, la fonction du dépôt — la
+// recopier aurait fait deux écritures de la règle de cadrage à tenir d'accord,
+// et `relief-grade.js` porte déjà `SPAN`, `PIVOT_MIN` et `CONTRAST_MAX`.
+export const HYPSO_MONDE_M = Object.freeze({ p08: 53, p50: 478, p92: 3018 })
+
+/**
+ * Un histogramme à TROIS PICS qui rend EXACTEMENT les trois quantiles donnés.
+ *
+ * ⚠️ **CE N'EST PAS UNE APPROXIMATION, ET C'EST DÉMONTRABLE** :
+ * `quantileFromHistogram` lit un cumul, et `gradeForDem` ne lui demande QUE
+ * `q = 0,08`, `0,5` et `0,92`. Avec des masses 8 / 42 / 50 posées sur les cases
+ * de `p08`, `p50` et `p92`, le cumul atteint 8 % à la première, 50 % à la
+ * deuxième, 100 % à la troisième : les trois lectures rendent les trois cases,
+ * au pas de quantification de l'histogramme près.
+ *
+ * ⚠️ **1 024 CASES, ET LE PAS EST CHIFFRÉ** : sur `[−6 000 ; 5 600]` cela fait
+ * 11,33 m par case, soit **0,1 % de l'amplitude** — 55 m rendus pour 53,
+ * 476 pour 478, 3 023 pour 3 018. À 256 cases l'erreur montait à 22 m.
+ */
+export function histogrammeDesQuantiles({ p08, p50, p92 }, minM, maxM, bins = 1024) {
+  const h = new Uint32Array(bins)
+  const span = maxM - minM
+  if (!(span > 0)) return h
+  const case_ = (m) => {
+    const i = Math.floor(((m - minM) / span) * bins)
+    return i < 0 ? 0 : i >= bins ? bins - 1 : i
+  }
+  h[case_(p08)] += 8
+  h[case_(p50)] += 42
+  h[case_(p92)] += 50
+  return h
+}
+
+/**
+ * Le contraste et le pivot de rampe DU MONDE, dans l'échelle de `RAMPE_MONDE`.
+ *
+ * ⛔ **L'ÉCHELLE COMPTE, ET S'Y TROMPER EST SILENCIEUX.** Le nuanceur indexe
+ * `natRampT` sur `hNormRelief`, normalisé sur `[uReliefBas ; uLandMax]`,
+ * c'est-à-dire `[terreBas − creux ; terreHaut]` = **`[−6 000 ; 5 600]`** au
+ * repos — le FOND MARIN COMPRIS. Un grade calculé sur les seules terres
+ * (`[0 ; 5 600]`) rendrait `pivot 0,085` au lieu de `0,56`, et le nuanceur
+ * peindrait toute la planète avec le haut de la rampe.
+ *
+ * ⚠️ **VALEURS RENDUES, RELEVÉES** : `heightContrast = 4,5`,
+ * `heightPivot = 0,56`. La médiane des terres (478 m) tombe donc au MILIEU de
+ * la rampe, le niveau de la mer à `0,31` et 8 % des terres saturent en haut —
+ * c'est la règle de `relief-grade.js` (`SPAN = 1,15`), pas un goût.
+ */
+export const GRADE_MONDE = Object.freeze(
+  (() => {
+    const minM = RAMPE_MONDE.terreBas - RAMPE_MONDE.creux
+    const maxM = RAMPE_MONDE.terreHaut
+    const g = gradeForDem({
+      minM,
+      maxM,
+      histogram: histogrammeDesQuantiles(HYPSO_MONDE_M, minM, maxM),
+    })
+    return { heightContrast: g.heightContrast, heightPivot: g.heightPivot }
+  })()
+)
 
 /**
  * Le plancher d'amplitude d'un crop donné, en mètres — jumeau de

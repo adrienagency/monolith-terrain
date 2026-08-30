@@ -31,6 +31,7 @@ import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, 
 import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
+  GRADE_MONDE,
   PAS_MESURE,
   mesurerRelief,
   echelleRampe,
@@ -3221,6 +3222,12 @@ export class Globe {
     // valent ce qu'ils valaient. `poserRampe` et `poserMer` ANCRENT ;
     // `majEchelleRampe` évalue la courbe et POSE. Personne d'autre n'écrit.
     this._echelleContinue = creerEchelleContinue(RAMPE_MONDE)
+    // LA COLORISATION NATURELLE HORS CROP — Tâche R11. ⚠️ **`null` = LE GLOBE
+    // D'AVANT, AU BIT PRÈS** : tant que personne n'appelle `poserRampeMonde`,
+    // `retirerHabillage` rend `NATUREL_MONDE` comme il l'a toujours fait, et
+    // `uRampCropOn` retombe à zéro. Même discipline que `uCropOn: 0` (Tâche A)
+    // et `uHabOn: 0` (Tâche C).
+    this._rampeMonde = null
     this._cleFondPosee = ''
     this.rebuildRamp(params)
 
@@ -4118,6 +4125,61 @@ export class Globe {
    * `test/crop-habillage.test.js` (⑨) exige l'aller-retour bit à bit sur les
    * SEIZE.
    */
+  /**
+   * Donne au globe SANS CROP la table et le cadrage de rampe du bloc — Tâche R11.
+   *
+   * ⚠️ **UNE SEULE ENTRÉE, LE LUT ; LE RESTE EST MESURÉ.** Le contraste et le
+   * pivot ne viennent PAS de l'appelant : les valeurs du bloc sont graduées sur
+   * le relief d'un crop (`relief-grade.js` → `applyAutoShade`), et les poser sur
+   * la planète entière peindrait le monde avec l'échelle d'une île. C'est
+   * `GRADE_MONDE` qui décide, et il est dérivé d'un balayage mondial du MNT —
+   * voir le §⑤ de `rampe-crop.js`.
+   *
+   * ⚠️ **APPELABLE À TOUT MOMENT, ET IL APPLIQUE TOUT DE SUITE QUAND IL N'Y A
+   * PAS DE CROP.** `rebuildRamp` recuit le LUT à chaque changement de palette,
+   * y compris en orbite où aucun crop ne vit : sans cette application immédiate,
+   * la planète garderait la table de la palette précédente jusqu'à la prochaine
+   * mort de crop — un état qui traîne, exactement ce que `retirerHabillage`
+   * existe pour empêcher.
+   *
+   * ⛔ **ON PREND LE PORTEUR (`{ value }`), PAS LA TEXTURE — ET C'EST UNE FUITE
+   * ÉVITÉE, PAS UN STYLE.** `terrain.rebuildRamp` fait
+   * `uRampTex.value?.dispose()` puis pose une texture NEUVE : il recuit le LUT à
+   * chaque palette, à chaque `rampDry` / `rampWet`, et à chaque bascule
+   * Classique ↔ Naturel — **quatre sites**. Garder la TEXTURE ici l'aurait
+   * laissée pointer sur un objet libéré dès le premier de ces quatre, et le
+   * globe aurait échantillonné une texture morte. Le porteur, lui, pointe
+   * toujours sur la vivante : `_majRampeMonde` le relit à chaque image.
+   *
+   * @param {{value: THREE.Texture|null}|null} porteur `terrain.mapUniforms.uRampTex`
+   *   — **l'uniforme lui-même**. `null` rend au globe sa rampe 1D d'avant, au
+   *   bit près.
+   */
+  poserRampeMonde(porteur = null) {
+    this._rampeMonde = porteur && typeof porteur === 'object' ? porteur : null
+    this._majRampeMonde()
+  }
+
+  /**
+   * Recolle les quatre uniformes de la loi naturelle sur l'état de repos du
+   * monde — appelé par `update()`, donc à chaque image.
+   *
+   * ⚠️ **UNE COMPARAISON AVANT D'ÉCRIRE, ET CE N'EST PAS DE L'AVARICE** :
+   * `uRampCrop` est PARTAGÉ par les 1 700 matériaux de tuile ; écrire un
+   * `sampler2D` qui n'a pas changé forcerait three à repasser la liaison de
+   * texture à chaque image, sur chaque matériau.
+   */
+  _majRampeMonde() {
+    if (this._crop) return // le crop décide tant qu'il vit — `retirerHabillage` prend le relais
+    const u = this.uniforms
+    const lut = this._rampeMonde?.value || null
+    if (u.uRampCrop.value === lut && u.uRampCropOn.value === (lut ? 1 : 0)) return
+    u.uRampCrop.value = lut
+    u.uRampCropOn.value = lut ? 1 : 0
+    u.uHeightContrast.value = lut ? GRADE_MONDE.heightContrast : NATUREL_MONDE.heightContrast
+    u.uHeightPivot.value = lut ? GRADE_MONDE.heightPivot : NATUREL_MONDE.heightPivot
+  }
+
   retirerHabillage() {
     const u = this.uniforms
     u.uHabOn.value = 0
@@ -4191,10 +4253,35 @@ export class Globe {
     u.uExpoK.value = NATUREL_MONDE.expoK
     u.uHemi.value = NATUREL_MONDE.hemi
     u.uTreeLine.value = NATUREL_MONDE.treeLine
-    u.uRampCrop.value = null
-    u.uRampCropOn.value = 0
-    u.uHeightContrast.value = NATUREL_MONDE.heightContrast
-    u.uHeightPivot.value = NATUREL_MONDE.heightPivot
+    // ══════ LA LOI DU BLOC SURVIT AU CROP — Tâche R11 ═══════════════════════
+    //
+    // ⛔ **C'EST ICI QUE LES DEUX MONDES D'ADRIEN SE SÉPARAIENT.** `uRampCrop`
+    // partait avec l'analyse, donc `uRampCropOn` retombait à zéro, donc la
+    // sphère repassait à la loi LINÉAIRE `0,35 + 0,65 · hNorm` sur la rampe 1D
+    // — pendant que le bloc, lui, indexait `natRampT` sur le LUT 2D. Deux lois,
+    // deux tables, à un mètre d'altitude de caméra d'écart.
+    //
+    // ⚠️ **ET LE LUT N'EST PAS UNE TEXTURE DE CROP** : c'est `uRampTex`, la
+    // table du SOCLE, que `rebuildRamp` recuit à chaque palette et que le socle
+    // détient de toute façon. Le lâcher ici ne libérait rien — l'argument
+    // « lâchées, pas seulement débranchées » vaut pour `uAnalysis` (12 Mo par
+    // MNT 1536²), qui part toujours, et pour `uCoastMask`. Le LUT reste.
+    //
+    // ⚠️ **L'ANALYSE, ELLE, NE SUIT PAS — ET C'EST MESURÉ, PAS RENONCÉ.**
+    // Neutralisée seule sur le bloc, l'humidité vaut **ΔE 2,89** quand les
+    // bornes en valent 25,82 et la loi X 20,76 (relevé complet dans
+    // `rampe-crop.js`, §⑤). Elle ne se pave pas — voir le rapport R11, Étape 3.
+    // `wetY` retombe donc sur `natHumiditeY(0,5 ; 0,5 ; …) = 0,5` exactement,
+    // c'est-à-dire la LIGNE MÉDIANE du LUT, c'est-à-dire la rampe historique.
+    const lutMonde = this._rampeMonde?.value || null
+    u.uRampCrop.value = lutMonde
+    u.uRampCropOn.value = lutMonde ? 1 : 0
+    u.uHeightContrast.value = lutMonde ? GRADE_MONDE.heightContrast : NATUREL_MONDE.heightContrast
+    u.uHeightPivot.value = lutMonde ? GRADE_MONDE.heightPivot : NATUREL_MONDE.heightPivot
+    // ⛔ **LE VOILE NE SUIT PAS, ET CE N'EST PAS UN OUBLI.** `natVoile` lit
+    // `fd = length(qCrop)`, une distance au centre du CROP. Sans crop, `qCrop`
+    // est la dernière emprise morte : le voile peindrait un dégradé centré sur
+    // un lieu qu'on a quitté. Il reste donc à `NATUREL_MONDE.hazeAmt = 0`.
     u.uHazeAmt.value = NATUREL_MONDE.hazeAmt
     u.uHazeAlt.value = NATUREL_MONDE.hazeAlt
     u.uHazeDist.value = NATUREL_MONDE.hazeDist
@@ -6731,6 +6818,14 @@ export class Globe {
     // exactement celui d'avant, au caractère près.
     if (!this.enabled && !this.frontiereFond) return 0
     this.clouds.update(camera, dt)
+    // LA LOI DU BLOC HORS CROP — Tâche R11. ⚠️ **ICI ET PAS DANS LES QUATRE
+    // SITES QUI RECUISENT LE LUT** : `terrain.rebuildRamp` est appelé depuis la
+    // palette, depuis `rampDry` / `rampWet` et depuis `setColorMode`, et chacun
+    // libère la texture précédente. Quatre branchements à tenir d'accord, c'est
+    // la classe d'erreur que ce fichier a déjà payée trois fois ; une relecture
+    // du porteur par image n'en fait qu'un, et elle sort en deux comparaisons
+    // quand rien n'a changé.
+    this._majRampeMonde()
     this.frame++
     const camPos = camera.position
     const camDir = camPos.clone().normalize()
