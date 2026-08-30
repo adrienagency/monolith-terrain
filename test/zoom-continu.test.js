@@ -580,7 +580,7 @@ function domDePacotille() {
   return corps
 }
 
-async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false } = {}) {
+async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false, arrive = { valeur: false }, surBloc = { valeur: false } } = {}) {
   domDePacotille()
   const THREE = await import('three')
   const { Modes } = await import('../src/modes.js')
@@ -614,6 +614,17 @@ async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326
     // coordonnées. Sans ce crochet, la cible reste à l'origine et le saut
     // d'orientation du franchissement est structurellement invisible.
     ...(viseeMobile ? { viseeDuLieu: () => ({ x: 4.814 + etat.loadSurface, z: 8.949 - etat.loadSurface }) } : {}),
+    // ⚡ **« EST-ON ARRIVÉ SUR LE BLOC » — D16 ter, étape 5.** En production
+    // c'est `veilleCrop.repos` (crop posé ET vue au repos) ; ici c'est une boîte
+    // que le test ouvre quand il veut, pour vérifier les DEUX côtés : que rien ne
+    // bascule tant qu'elle est fermée, et que tout bascule quand elle s'ouvre.
+    arriveeSurLeBloc: () => !!arrive.valeur,
+    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** En production `veilleCrop.pose`.
+    // Ici une seconde boîte, parce que les deux signaux ne sont PAS le même :
+    // l'arrivée demande « le crop est né ET la vue est posée », le départ
+    // demande seulement « le crop est né ». Les confondre ferait revenir la vue
+    // au nadir à chaque coup de molette sur le bloc.
+    surLeBloc: () => !!surBloc.valeur,
   }
   const m = new Modes({ camera, controls, globe, domElement, hooks })
   m.mode = 'surface'
@@ -896,36 +907,109 @@ test('⑪ BRANCHEMENT — un franchissement ne tourne PAS la caméra, visée mob
   assert.ok(Math.abs(apres - avant) < 1e-6, `la caméra a tourné de ${(apres - avant).toFixed(3)}°`)
 })
 
-test('⑪ BRANCHEMENT — la plongée arrive AU NADIR puis balaie jusqu’à la pose oblique', async () => {
-  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56 })
+test('⑪ BRANCHEMENT — la traversée GARDE l’axe de l’orbite, et ne balaie RIEN', async () => {
+  // ⛔ **CE TEST A CHANGÉ DE CONTRAT, ET C'EST ADRIEN QUI L'A CHANGÉ.** Il
+  // vérifiait que la plongée arrive au nadir **puis balaie toute seule** jusqu'à
+  // la pose oblique — le geste de R4. Adrien, après l'avoir vu : *« Je vois
+  // toujours un énorme déplacement entre orbite et surface mode. Je veux garder
+  // la vue comme en orbite quand je fais la transition. »*
+  // D16 ter : **nadir jusqu'au bloc, la vue de trois quarts à l'arrivée.**
+  const arrive = { valeur: false }
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56, arrive })
   m.mode = 'orbital'
   m.altM = 500000
   m._empriseVue = null
   const incl = () => inclinaisonDeg(camera.position, controls.target)
   await m._dive({ altM: 8000, zoom: null })
   assert.equal(m.mode, 'surface')
-  assert.ok(incl() < 1e-6, `la plongée arrive à ${incl().toFixed(2)}° au lieu du nadir`)
+  assert.ok(incl() < 1e-6, `la traversée arrive à ${incl().toFixed(2)}° au lieu du nadir`)
+  assert.equal(m._fonduPose, null, 'un balayage s’est armé à la traversée')
+  assert.equal(m._attenteTroisQuarts, true, 'la bascule n’est pas en attente')
+
+  // ⚡ **ET ELLE Y RESTE.** Trois cents images sans arriver sur le bloc : la
+  // caméra ne doit pas avoir tourné d'un millionième de degré.
   const altArrivee = m._altitudeFondM()
-  // le balayage : on avance le fondu jusqu'au bout, et l'altitude de fond ne
-  // bouge pas d'un mètre en chemin
+  for (let i = 0; i < 300; i++) m.update(1 / 60)
+  assert.ok(incl() < 1e-6, `la caméra a dérivé à ${incl().toFixed(6)}° sans qu’on arrive au bloc`)
+  // ⚠️ **ET `_fonduPose` DOIT RESTER NUL PENDANT TOUTE L'ATTENTE**, ce n'est pas
+  // une redondance : `_franchirSiBesoin` refuse de franchir un niveau tant qu'un
+  // balayage court. Une attente qui garderait un fondu armé aurait **bloqué tous
+  // les crans** de la descente — elle ne se serait jamais affinée.
+  assert.equal(m._fonduPose, null, 'un balayage est parti tout seul pendant l’attente')
+
+  // ── on arrive sur le bloc : la bascule part, et elle est plafonnée ────────
+  arrive.valeur = true
+  m.update(1 / 60)
+  assert.ok(m._fonduPose, 'la bascule ne s’est pas armée à l’arrivée sur le bloc')
+  assert.equal(m._attenteTroisQuarts, false, 'l’attente n’a pas été levée')
   let plusGrandPas = 0
   let precedent = incl()
   for (let i = 0; i < 400 && m._fonduPose; i++) {
     m.update(1 / 60)
     plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
     precedent = incl()
-    assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'le fondu a fait bouger l’altitude de fond')
+    assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'la bascule a fait bouger l’altitude de fond')
   }
-  assert.equal(m._fonduPose, null, 'le fondu ne s’est jamais terminé')
+  assert.equal(m._fonduPose, null, 'la bascule ne s’est jamais terminée')
   assert.ok(Math.abs(incl() - 46.54816) < 0.01, `la pose finale vaut ${incl().toFixed(5)}° au lieu de 46,54816°`)
-  // ⚠️ **LE CRITÈRE D'ADRIEN, CHIFFRÉ** : plus aucun pas d'image à image ne
-  // ressemble au saut de 46,55° relevé au navigateur.
-  // ⛔ **ET LE SEUIL DESCEND DE 3° À 1,5° — Tâche R4, tour de correction.** À
-  // `dt = 1/60` la courbe donne 1,41° : un seuil à 3° **ne pouvait pas échouer
-  // ici**, quelle que soit la bêtise commise. C'est le défaut que la relecture a
-  // relevé, et il n'est pas réparé par un seuil plus serré sur un `dt` parfait —
-  // il l'est par le test ⑫, qui rejoue le `dt` RELEVÉ AU NAVIGATEUR.
   assert.ok(plusGrandPas < 1.5, `le plus grand pas vaut encore ${plusGrandPas.toFixed(3)}° par image`)
+})
+
+test('⑪ ter — revenir en orbite ÉTEINT l’attente, sans quoi elle survivrait au séjour', async () => {
+  // ⚠️ Sans cet oubli, un aller-retour orbite → surface → orbite laisserait
+  // l'attente armée : la bascule tomberait au premier repos du PROCHAIN séjour,
+  // **sans traversée**, donc n'importe où.
+  const arrive = { valeur: false }
+  const { m } = await machine({ emprise: 1e6, span: 56, arrive })
+  m.mode = 'orbital'
+  m.altM = 500000
+  m._empriseVue = null
+  await m._dive({ altM: 8000, zoom: null })
+  assert.equal(m._attenteTroisQuarts, true)
+  await m.enterOrbit(1200000)
+  assert.equal(m.mode, 'orbital')
+  assert.equal(m._attenteTroisQuarts, false, 'l’attente a survécu au retour en orbite')
+})
+
+test('⑪ quater — QUITTER le bloc rend la vue au nadir, avec le même plafond', async () => {
+  // ⛔ **LA MOITIÉ QUI RESTAIT OUVERTE.** Mesuré sur la remontée : `enterOrbit`
+  // reposait la caméra au nadir en UNE image, et la caméra du bloc y tournait de
+  // **46,548°** — la même bascule, par l'autre bout. La vue de trois quarts
+  // appartient au bloc : on la prend en arrivant, on la rend en partant.
+  const arrive = { valeur: true }
+  const surBloc = { valeur: true }
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56, arrive, surBloc })
+  m.mode = 'orbital'
+  m.altM = 500000
+  m._empriseVue = null
+  const incl = () => inclinaisonDeg(camera.position, controls.target)
+  await m._dive({ altM: 8000, zoom: null })
+  // on arrive sur le bloc et on prend la vue de trois quarts
+  for (let i = 0; i < 400 && (m._attenteTroisQuarts || m._fonduPose); i++) m.update(1 / 60)
+  assert.ok(Math.abs(incl() - 46.54816) < 0.01, `la vue de trois quarts n’est pas posée : ${incl().toFixed(3)}°`)
+  assert.equal(m._fonduPose, null)
+
+  // ── on quitte le bloc : le crop meurt ───────────────────────────────
+  const altAvant = m._altitudeFondM()
+  surBloc.valeur = false
+  m.update(1 / 60)
+  assert.ok(m._fonduPose, 'aucun retour au nadir ne s’est armé en quittant le bloc')
+  let plusGrandPas = 0
+  let precedent = incl()
+  for (let i = 0; i < 400 && m._fonduPose; i++) {
+    m.update(1 / 60)
+    plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
+    precedent = incl()
+    assert.ok(Math.abs(m._altitudeFondM() / altAvant - 1) < 1e-9, 'le retour a fait bouger l’altitude de fond')
+  }
+  assert.equal(m._fonduPose, null, 'le retour au nadir ne s’est jamais terminé')
+  assert.ok(incl() < 1e-6, `la vue n’est pas revenue au nadir : ${incl().toFixed(6)}°`)
+  // ⚠️ **LE MÊME PLAFOND QU'À L'ALLER**, sans quoi on aurait déplacé le claquement
+  // au lieu de le supprimer.
+  assert.ok(plusGrandPas < 1.5, `le plus grand pas du retour vaut ${plusGrandPas.toFixed(3)}° par image`)
+  // ⚠️ **ET IL NE SE REJOUE PAS** : le front est descendant, pas le niveau.
+  for (let i = 0; i < 60; i++) m.update(1 / 60)
+  assert.equal(m._fonduPose, null, 'le retour au nadir s’est rearmé tout seul')
 })
 
 test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, comme avant', async () => {
@@ -1214,12 +1298,17 @@ test('⑫ bis BRANCHEMENT — la plongée rejouée sur le `dt` RELEVÉ ne franch
   // ⚠️ **C'EST LE TEST QUE LA RELECTURE DEMANDAIT** : la vraie machinerie
   // (`Modes.update`), alimentée par le `dt` du navigateur et non par un 1/60
   // parfait. Sur le code d'avant ce tour, il échoue à plus de 4°.
-  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56 })
+  // ⚠️ **LA BASCULE NE PART PLUS À LA TRAVERSÉE — D16 ter, étape 5** : elle
+  // attend l'arrivée sur le bloc. Le plafond, lui, est exactement le même, et
+  // c'est ce que ce test mesure ; on ouvre donc la boîte avant de rejouer le `dt`.
+  const arrive = { valeur: true }
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56, arrive })
   m.mode = 'orbital'
   m.altM = 500000
   m._empriseVue = null
   const incl = () => inclinaisonDeg(camera.position, controls.target)
   await m._dive({ altM: 8000, zoom: null })
+  m.update(1 / 60) // l'image où l'arrivée arme la bascule
   assert.ok(m._fonduPose, 'aucun balayage ne s’est armé : le test ne mord sur rien')
   const altArrivee = m._altitudeFondM()
   let plusGrandPas = 0

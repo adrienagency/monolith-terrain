@@ -84,10 +84,18 @@ const IMAGES = opt('--images', '0') !== '0'
 // l'altitude a laquelle la descente s'arrete — 60 km par defaut (le premier crop),
 // 500 m pour le banc de precision float32 (voir le rapport, Etape 9).
 const ARRIVEE_M = Number(opt('--arrivee', '60000'))
-const URL_SUFFIXE = opt(
-  '--url',
-  '?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee&soleil=heure'
-)
+// ⚡ **LE TEMPS QU'ON LAISSE À LA VUE DE SE POSER, APRÈS LA DERNIÈRE MOLETTE.**
+// ⛔ **2,5 s NE SUFFISENT PAS, ET C'EST MESURÉ** : le glissé inertiel court
+// encore — relevé sur `.banc/D16/avant34.json`, l'altitude descend toujours de
+// 23 109 à 22 736 m pendant les 2,5 s finales et `veilleRepos.auRepos` reste
+// FAUX sur les 150 images. Une sonde qui s'arrête là ne peut pas voir l'arrivée
+// sur le bloc, donc ne peut pas la dater.
+const ATTENTE_MS = Number(opt('--attente', '2500'))
+// ⚡ **PLUS DE CHAÎNE DE PARAMÈTRES — le mode sphère est devenu le mode de
+// démarrage (`9ffe101`, sept drapeaux levés).** `http://localhost:PORT/` rend
+// déjà ce que la chaîne rendait. On la garde en argument pour pouvoir rejouer
+// une trace d'avant, mais elle n'est plus le défaut.
+const URL_SUFFIXE = opt('--url', '')
 
 function trouverChrome() {
   const donne = opt('--chrome', process.env.CHROME_PATH)
@@ -332,6 +340,13 @@ function poserInstrument() {
         aT: t ? ancreDe(t.x, t.z) : null,
         bascules: e.veilleCrop?.bascules ?? null,
         repos: !!e.veilleRepos?.auRepos,
+        // ⚡ **LE SIGNAL D'ARRIVÉE SUR LE BLOC — Tâche D16 ter, étape 5.**
+        // `veilleCrop.repos` vaut `crop posé ET vue au repos` : le LIEU et le
+        // MOMENT dans un seul booléen, déjà alimenté par le point unique.
+        cropPose: !!e.veilleCrop?.pose,
+        cropRepos: !!e.veilleCrop?.repos,
+        attente34: !!e.modes?._attenteTroisQuarts,
+        fondu34: !!e.modes?._fonduPose,
         estompe: e.veilleEstompage?.valeur ?? null,
         // réseau
         req: reseau.total, tuiles: reseau.tuiles,
@@ -420,6 +435,8 @@ function analyse(lignes) {
       deplG, deplGRel, dViseeG, inclG, dInclG, altFond, rAltFond,
       rAlt, rDist, rEmp, dImg, dLum,
       crop: b.crop, cropAvant: a.crop,
+      cropPose: b.cropPose, cropRepos: b.cropRepos, cropReposAvant: a.cropRepos,
+      attente34: b.attente34, fondu34: b.fondu34, repos: b.repos,
       passes: (b.passes || []).join('+'),
       dessins: (b.dessins || []).join(' '),
       dReq: (b.req ?? 0) - (a.req ?? 0), dTuiles: (b.tuiles ?? 0) - (a.tuiles ?? 0),
@@ -565,7 +582,7 @@ try {
       }, ARRIVEE_M)
       if (fini) { await marque('CROP-ATTEINT'); break }
     }
-    await dodo(2500)
+    await dodo(ATTENTE_MS)
     // ⚡ **QUI DESSINE ENCORE DANS LA SCÈNE DU BLOC — TÂCHE D16, ÉTAPE 3.**
     // La mesure dit que la passe du bloc rend 0 triangle sur 60,4 % des images
     // de surface et au plus 168 sur les autres. Avant de retirer la passe, il
