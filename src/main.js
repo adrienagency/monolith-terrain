@@ -4575,12 +4575,20 @@ if (frontiereActive) {
 // LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
 // (0 · 0) au lieu de la cible. **C'est l'ancre de la similitude**, et ce n'est
 // PAS le lieu demandé : voir la mesure citée dans `majCameraFond`.
-function latLonOrigineBloc() {
+// ⚠️ **GÉNÉRALISÉE À UN POINT QUELCONQUE DU BLOC — Tâche D16, étape 2.** Sans
+// argument elle rend exactement ce qu'elle rendait : le lat/lon du CENTRE du
+// bloc. Avec `(x · z)` elle rend celui du point `(x · z)` — c'est ce qui permet
+// d'ancrer la similitude ailleurs qu'au centre (voir `poseFond`, et la mesure
+// des trois ancres candidates qui y est reportée).
+function latLonDuBloc(x = 0, z = 0) {
   const f = terrain.fenetreBornee
-  if (f?.emprise) return mondeVersLatLonEmprise(f.emprise, 0, 0, TERRAIN_SIZE)
+  if (f?.emprise) return mondeVersLatLonEmprise(f.emprise, x, z, TERRAIN_SIZE)
   if (!dem) return null
   const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
-  return worldToLatLon(dem, fen?.x ?? 0, fen?.z ?? 0)
+  return worldToLatLon(dem, (fen?.x ?? 0) + x, (fen?.z ?? 0) + z)
+}
+function latLonOrigineBloc() {
+  return latLonDuBloc(0, 0)
 }
 
 // La caméra de fond, remise à jour AVANT chaque dessin. Deux régimes, décrits
@@ -4628,11 +4636,26 @@ function majCameraFond() {
   // planète de fond de **28 pixels sur 562**, constants sur tout l'écran. Un
   // décalage CONSTANT est la signature d'une mauvaise ANCRE, pas d'une mauvaise
   // échelle : c'est ça qui l'a fait trouver.
-  const ancre = latLonOrigineBloc()
+  //
+  // ⚡ **ET L'ANCRE N'EST PLUS LE CENTRE DU BLOC, C'EST L'APLOMB DE LA CIBLE —
+  // Tâche D16, étape 2.** Le centre du bloc est calé sur la grille de tuiles :
+  // il SAUTE de 15,2215° d'arc en une image au cran z3 → z4, ce qui faisait
+  // pivoter la caméra de fond de **11,863°** pendant que celle du bloc ne
+  // bougeait pas d'un millième. L'aplomb de la cible, lui, traverse : **0,2138°
+  // au même cran, 0,000159° en médiane**. Le tableau des trois candidates et
+  // leurs chiffres sont dans `poseFond` (`monde/frontiere-rendu.js`).
+  //
+  // ⚠️ **`origineBloc` NE PORTE QUE x ET z, PAS y.** Le plan du bloc `y = 0` est
+  // ce qui se pose sur la sphère de rayon `R_GLOBE` ; la cible, elle, vit à
+  // `Y_CIBLE = −0,3`. Lui retrancher son `y` enfoncerait la planète de 0,3 unité
+  // de bloc sous la caméra — soit 1 340 m à z12, et 75 km à z3.
+  const ancreXZ = controls.target
+  const ancre = latLonDuBloc(ancreXZ.x, ancreXZ.z)
   if (!ancre) return
   const pose = poseFond({
     lat: ancre.lat,
     lon: ancre.lon,
+    origineBloc: [ancreXZ.x, 0, ancreXZ.z],
     positionBloc: [camera.position.x, camera.position.y, camera.position.z],
     quaternionBloc: camera.getWorldQuaternion(_qBloc).toArray(),
     extentMeters: largeur,

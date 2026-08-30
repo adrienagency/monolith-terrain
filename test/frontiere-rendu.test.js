@@ -317,3 +317,114 @@ test('l’écart plan tangent / sphère est celui du tableau de l’en-tête, au
   assert.ok(Math.abs(surplombM - attendu[10]) / attendu[10] < 0.03,
     `surplomb mesuré ${surplombM.toFixed(1)} m, attendu ${attendu[10]} m`)
 })
+
+// ══════════ ⑧ L'ANCRE — TÂCHE D16, ÉTAPE 2 ═════════════════════════════════
+//
+// ⚠️ **CE QUI EST VÉRIFIÉ ICI EST LA CAUSE MESURÉE DE LA PIRE RUPTURE DE LA
+// DESCENTE**, pas une propriété algébrique de confort. L'inventaire D16 a relevé
+// **11,863° de rotation de la caméra QUI REND, en une image, au cran z3 → z4,
+// alors que la caméra du bloc ne bougeait pas d'un millième** — et il a montré
+// que ces degrés viennent ENTIÈREMENT de `quaternionDeBase(ancre)`, donc du
+// déplacement de l'ancre, calée sur la grille de tuiles slippy.
+
+// Une emprise carrée en MERCATOR autour d'un lieu — la forme que `terrain`
+// donne à `fenetreBornee.emprise`, réduite à ce dont ces tests ont besoin.
+function empriseAutour(lat, lon, largeDeg) {
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  const m = mY(lat), demi = (largeDeg * D2R) / 2
+  const inv = (v) => Math.atan(Math.sinh(v)) * R2D
+  return { ouest: lon - largeDeg / 2, est: lon + largeDeg / 2, nord: inv(m + demi), sud: inv(m - demi) }
+}
+// La réciproque de `mondeVersLatLonEmprise`, recopiée de `geo.js` : le test doit
+// pouvoir dire OÙ, dans le bloc, tombe un lieu donné.
+function mondeDe(emprise, lat, lon, span = TERRAIN_SIZE) {
+  const D2R = Math.PI / 180
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  let dLon = lon - emprise.ouest
+  dLon -= Math.round((dLon - large / 2) / 360) * 360
+  const mN = mY(emprise.nord), mS = mY(emprise.sud)
+  return { x: (dLon / large - 0.5) * span, z: ((mY(lat) - mN) / (mS - mN) - 0.5) * span }
+}
+
+test('sans `origineBloc`, poseFond rend EXACTEMENT ce qu’elle rendait — non-régression', () => {
+  const extentMeters = 81800, span = TERRAIN_SIZE
+  const qb = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.9, 0.4, 0.15, 'YXZ')).toArray()
+  for (const { lat, lon } of LIEUX) {
+    for (const P of [[0, 30, 0], [12.5, 7.2, -3.4], [-28, 0.5, 28]]) {
+      const sans = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span })
+      const zero = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span, origineBloc: [0, 0, 0] })
+      assert.deepEqual(zero.position, sans.position, `position en ${lat},${lon}`)
+      assert.deepEqual(zero.quaternion, sans.quaternion, `orientation en ${lat},${lon}`)
+    }
+  }
+})
+
+test('`origineBloc` est une TRANSLATION du repère du bloc, rien de plus', () => {
+  const extentMeters = 81800, span = TERRAIN_SIZE
+  const qb = [0, 0, 0, 1]
+  const g = [3.5, 0, -7.25]
+  for (const { lat, lon } of LIEUX) {
+    const P = [12.5, 7.2, -3.4]
+    const a = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span, origineBloc: g })
+    const b = poseFond({
+      lat, lon, quaternionBloc: qb, extentMeters, span,
+      positionBloc: [P[0] - g[0], P[1] - g[1], P[2] - g[2]],
+    })
+    assert.ok(vec(a.position).distanceTo(vec(b.position)) < 1e-12, `translation cassée en ${lat},${lon}`)
+    assert.deepEqual(a.quaternion, b.quaternion)
+  }
+})
+
+// ⛔ **LE TEST QUI COMPTE : LE FRANCHISSEMENT DE NIVEAU.**
+//
+// On rejoue la seule chose que fait un cran de zoom : le bloc est REBÂTI, deux
+// fois plus fin, ET RECALÉ SUR LA GRILLE DE TUILES — son centre part ailleurs.
+// La géographie, elle, ne bouge pas : le lieu VISÉ reste le même, à la même
+// altitude, sous la même orientation. **L'image ne doit donc pas bouger.**
+test('un franchissement de niveau ne déplace PAS la caméra de fond — si l’ancre est le lieu visé', () => {
+  const LIEU = { lat: -21.115, lon: 55.536 } // La Réunion, le lieu des mesures D16
+  // repère AVANT : bloc large de 40°, centré 3,7° au nord-ouest du lieu visé
+  const empriseA = empriseAutour(LIEU.lat + 3.7, LIEU.lon - 3.1, 40)
+  // repère APRÈS : deux fois plus fin, ET recalé ailleurs — le saut de la grille
+  const empriseB = empriseAutour(LIEU.lat - 1.9, LIEU.lon + 2.4, 20)
+  const extentA = 4.4e6, extentB = extentA / 2 // l'emprise en mètres suit la largeur
+  const gA = mondeDe(empriseA, LIEU.lat, LIEU.lon)
+  const gB = mondeDe(empriseB, LIEU.lat, LIEU.lon)
+  // la caméra : même altitude réelle, même écart au sol, exprimés dans chaque
+  // repère — les unités de bloc valent deux fois moins de mètres après le cran
+  const hautA = 24.3, deportA = 25.4
+  const camA = [gA.x, hautA, gA.z + deportA]
+  const camB = [gB.x, hautA * 2, gB.z + deportA * 2]
+  const qb = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.81, 0, 0, 'YXZ')).toArray()
+  const commun = { lat: LIEU.lat, lon: LIEU.lon, quaternionBloc: qb, span: TERRAIN_SIZE }
+
+  const avant = poseFond({ ...commun, positionBloc: camA, extentMeters: extentA, origineBloc: [gA.x, 0, gA.z] })
+  const apres = poseFond({ ...commun, positionBloc: camB, extentMeters: extentB, origineBloc: [gB.x, 0, gB.z] })
+  assert.ok(vec(avant.position).distanceTo(vec(apres.position)) < 1e-9,
+    `la caméra de fond a bougé de ${vec(avant.position).distanceTo(vec(apres.position))} unité-globe`)
+  assert.ok(quat(avant.quaternion).angleTo(quat(apres.quaternion)) < 1e-9, 'l’orientation a tourné')
+
+  // ⚠️ **ET LE CONTRE-ESSAI, SANS LEQUEL LE TEST CI-DESSUS NE PROUVE RIEN :**
+  // la MÊME géographie, ancrée au CENTRE du bloc comme le faisait le dépôt,
+  // fait tourner la caméra de fond de plusieurs degrés — l'ordre de grandeur
+  // des 11,863° relevés à l'écran.
+  const centreA = mondeVersLatLon(empriseA)
+  const centreB = mondeVersLatLon(empriseB)
+  const vieuxA = poseFond({ ...commun, lat: centreA.lat, lon: centreA.lon, positionBloc: camA, extentMeters: extentA })
+  const vieuxB = poseFond({ ...commun, lat: centreB.lat, lon: centreB.lon, positionBloc: camB, extentMeters: extentB })
+  const tourne = (quat(vieuxA.quaternion).angleTo(quat(vieuxB.quaternion)) * 180) / Math.PI
+  assert.ok(tourne > 3, `l’ancre au centre du bloc devrait tourner de plusieurs degrés, mesuré ${tourne.toFixed(3)}°`)
+})
+
+// le lat/lon du CENTRE d'une emprise — c'est-à-dire l'ancre du dépôt
+function mondeVersLatLon(emprise) {
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  const mN = mY(emprise.nord), mS = mY(emprise.sud)
+  return { lat: Math.atan(Math.sinh((mN + mS) / 2)) * R2D, lon: emprise.ouest + large / 2 }
+}
