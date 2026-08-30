@@ -287,3 +287,119 @@ Le test que j'ai écrit calcule le rapport en **arithmétique pure** : `(√((R+
 1. **Le balayage à +32,6 %.** ⚠️ **Non isolé chez moi.** Sur mes descentes à la molette, le balayage et la descente courent ensemble : j'ai relevé **×1,0619 avant / ×1,0599 après** sur la fenêtre où la caméra du bloc tourne au plafond, **et cette fenêtre est contaminée** — mon filtre `dVisee > 1,4°` attrape aussi l'image de traversée à 111°. **L'inventaire l'a isolé avec le scénario `clic` (aucune molette pendant la séquence) : c'est par là qu'il faut passer.** ⚡ **Mais je n'ai plus besoin de la mesure pour en connaître la cause** : l'arithmétique du test ⑨ la reproduit à quatre décimales (×1,0026 à 30 km).
 2. **Le gel de 1 849,7 ms à la naissance du crop.** ⚠️ **Non reproduit.** Mon MAX `dt` vaut **438,8 ms** (descente avec ancre) et **392,3 ms** (ligne de base), sur cinq sessions complètes. L'inventaire lui-même donne **1 849,7 ms** dans une session et **429,3 ms** dans une autre, au même endroit : **c'est intermittent**, pas absent. ⛔ **Un phénomène intermittent non reproduit n'est pas un phénomène absent.** Ce que je n'ai PAS essayé et qu'il faudrait : répéter la naissance du crop seule, une vingtaine de fois, cache HTTP froid.
 3. **La borne théorique ≈ 21° de la rupture ③.** ⚠️ **Pas encore cherchée.** Ma correction supprime la CAUSE (l'ancre calée sur la grille) et non une valeur ; mais tant que je n'ai pas exhibé un lieu qui approche 21° avant, je ne peux pas transformer le résultat en garantie.
+
+---
+
+# ÉTAPE 3 — MESURE PRÉALABLE : LA SECONDE CAMÉRA DESSINE UN SOLEIL, ET RIEN D'AUTRE
+
+**Statut : ⛔ je m'arrête et je rapporte, comme le contrat l'exige.** Deux mesures changent la forme de la réécriture, et l'une d'elles change son AMPLEUR — dans les deux sens à la fois. ⛔ **Aucune ligne de rendu n'a été touchée** : la sonde compte, elle ne modifie pas.
+
+## ① CE QUE LA PASSE DU BLOC DESSINE VRAIMENT
+
+Comptage de `renderer.info.render` **autour de chaque passe** (three remet le compteur à zéro au début de chaque `render`, donc l'état d'après est exactement ce que cette passe a dessiné). Trace `.banc/D16/passes1.json`, 969 images de surface :
+
+| | appels de dessin | triangles |
+|---|---|---|
+| passe de **FOND** (`sceneGlobe`, `camGlobe`) | 32 à 124 | **129 122 en médiane, 286 246 au MAX** |
+| passe de **SURFACE** (`scene`, `camera`) — 60,4 % des images | **0** | **0** |
+| passe de **SURFACE** — les 39,6 % restantes | 3 à 36 | **168 au pire** |
+
+➡️ **0,059 % des triangles, au pire.**
+
+## ⚡ ET L'INVENTAIRE DE LA SCÈNE LE NOMME
+
+Parcours de `scene` en mode surface, drapeau levé (`.banc/D16/scene2.json`) — **objets visibles porteurs de géométrie : UN.**
+
+```
+Sprite · SpriteMaterial · CanvasTexture · échelle 13 · depthWrite false
+renderOrder posé · enfant direct de Scene · position (59,65 · 86,61 · −106,96)
+```
+
+C'est **`SunDisc`** (`src/sun-disc.js` : `scale.setScalar(13 + 9·(1 − opacity))`, texture de canevas, `renderOrder = 5`, `depthWrite: false`, ajouté directement à `scene`).
+
+Les racines de la scène, avec leur visibilité :
+
+```
+V  DirectionalLight   V  HemisphereLight   V  DirectionalLight   V  Sprite   V  boats(0)
+.  Mesh (le bloc)  .  plinth  .  ground-info  .  clouds2  .  traffic
+.  real-water  .  water  .  places  .  Group(14)  .  Group(3)
+```
+
+⚡ **TOUT est éteint sauf trois lumières, un groupe vide, et le soleil.**
+
+➡️ **La seconde caméra, le second espace, la similitude `poseFond`, la seconde passe et le `ClearPass` qui efface la profondeur existent pour dessiner UN SPRITE DE SOLEIL — deux triangles.**
+
+⚠️ **Ce n'est pas une découverte de bogue** : `src/monde/visibilite-surface.js` l'écrit déjà — *« sous le drapeau, la réponse est NON, à toutes les altitudes »*. **Ce qui est neuf, c'est le chiffre, et ce que le chiffre implique.**
+
+## ② LE FLOU INERTE — la démonstration, à partir de deux faits mesurés
+
+⚠️ **`scripts/sonde-flou-focus.mjs` N'EXISTE PAS dans cet arbre** (`ls scripts/` : aucun script de flou). Je ne peux donc pas le rejouer, et je ne reprends pas son chiffre à mon compte. **Mais les deux faits que je viens de mesurer le démontrent :**
+
+1. `ClearPass(false, true, false)` remet la profondeur à **1,0 partout** ;
+2. la seule géométrie dessinée après lui est **un sprite en `depthWrite: false`**, qui n'écrit donc aucune profondeur.
+
+➡️ **Le tampon de profondeur vaut donc 1,0 sur toute l'image, par construction.** ⛔ **Aucun effet d'écran qui lit la profondeur ne peut fonctionner** — ni le flou, ni l'occlusion ambiante, ni la brume de profondeur. **C'est une déduction à partir de deux mesures, pas un comptage de pixels : je le dis comme tel.**
+
+## ③ LE PLAN LOINTAIN UNIQUE NE COÛTE PAS LE TAMPON DE PROFONDEUR
+
+⛔ **L'en-tête de `frontiere-rendu.js` justifie les deux passes ainsi** : « aucun `far` unique ne satisfait les deux mondes sans desserrer le plan lointain du bloc de 290 à ≈500, **c'est-à-dire dégrader son tampon de profondeur pour rien** ». **C'est la justification écrite du `ClearPass`, donc du flou inerte.**
+
+Pour une projection perspective sur `b` bits, la résolution de profondeur à la distance `z` vaut `z²·(f − n) / (n·f·(2^b − 1))`. Dès que `f ≫ n`, le facteur tend vers `1/n` : **il ne dépend plus de `f`.**
+
+| geste | perte de résolution sur le bloc |
+|---|---|
+| `far` 290 → 4,2 · 10⁵ (**×1 448**, ce qu'un espace unique demande à z16) | **+0,173 %** |
+| `near` 0,5 → 0,25 (÷2) | **+99,7 %** |
+
+Et le rapport `far/near` d'un espace unique est **relevé image par image**, pas supposé (`.banc/D16/desc-sol.json`, 1 555 images jusqu'à 397 m) : **2,098 · 10² à z3**, il **double à chaque niveau**, **8,405 · 10⁵ à z16**.
+
+➡️ **L'argument écrit vaut 0,17 %.** ⚠️ **Ce que ça ne dit pas** : rien sur le z-fighting entre le bloc et le globe, ni sur le format réel du tampon de la chaîne de post-traitement. Ça dit seulement que « dégrader » était le mauvais mot.
+
+---
+
+# ⛔ CE QUE JE DOIS REMONTER AVANT D'ALLER PLUS LOIN
+
+**Adrien a décidé sur 49 branchements / 57 sites / 9 fichiers / 26 fichiers de test. Ces chiffres viennent de bouger dans les DEUX SENS, et l'écart est d'un ordre de grandeur.**
+
+### ⚡ MOINS CHER QUE PRÉVU : la partie RENDU
+
+Il n'y a **pas deux mondes à fusionner géométriquement**. La fusion des passes, telle que la décrit l'étape 4 du découpage, se réduit à :
+
+1. reloger **un sprite de soleil** dans la scène du globe ;
+2. supprimer la passe de surface et le `ClearPass` ;
+3. pointer les effets qui lisent la profondeur sur la caméra qui rend.
+
+**Le tampon de profondeur redevient vrai, et le flou avec lui.**
+
+### ⛔ BEAUCOUP PLUS CHER QUE PRÉVU : la partie MONDE
+
+⚠️ **La raison pour laquelle la partie rendu est si petite est aussi ce qui rend l'autre énorme : le monde du drapeau est INCOMPLET.** Sont éteints, à toutes les altitudes :
+
+> le maillage du bloc · le socle (`plinth`) · les toponymes · les infos-sol · les nuages · le trafic · la mer réelle · l'eau · les lieux · le ruban GPX · deux groupes de 14 et 3 objets
+
+**Une caméra unique en PRODUCTION veut dire reloger tout cela dans l'espace du globe.** Ce n'est pas dans D16, ce n'est chiffré nulle part, et c'est plusieurs fois le coût annoncé.
+
+⚠️ **Le dépôt le sait déjà pour un cas, et il a écrit la méthode** : `visibilite-surface.js` documente que les plans de cinéma sont éteints sous le drapeau parce que `shots` reçoit `sampleGround: (x, z) => terrain.sample(x, z)` — *« le champ de hauteurs du bloc plat, celui qui n'est plus dessiné »* — et conclut : *« Donner aux plans un `sampleGround` de GLOBE, puis retirer cette exception — et pas l'inverse. »* **Il y a une douzaine de cas comme celui-là.**
+
+### ➡️ CE QUE JE PROPOSE, ET QUI DOIT ÊTRE ARBITRÉ
+
+**Séparer les deux, et ne pas les vendre comme une seule tâche :**
+
+- **D16-a — LA CAMÉRA ET LES PASSES.** Faisable, borné, mesurable : un sprite déplacé, deux passes en une, les effets sur la bonne caméra, `poseFond` retiré du chemin de la caméra. **Ça rend le flou, ça supprime le `ClearPass`, ça supprime la seconde caméra.** ⚡ **C'est ce qu'Adrien a acheté.**
+- **D16-b — LE MONDE.** Reloger les douze couches de surface dans l'espace du globe. **C'est le vrai chantier « une seule Terre », et il n'a jamais été chiffré.** `frontiere-rendu.js` ne peut pas disparaître avant lui : tant que le bloc existe comme espace d'interaction, quelque chose doit convertir.
+
+⛔ **Je n'ai PAS commencé D16-a**, parce que la première chose qu'elle demande — déplacer le sprite du soleil dans la scène du globe — a un risque d'artefact visible que je ne peux pas lever sans le montrer, et parce que le contrat dit de remonter dès que le chiffre bouge d'un ordre de grandeur. **Il vient de bouger.**
+
+## Fichiers touchés à cette étape
+
+- `scripts/sonde-d16.mjs` — compte des appels de dessin et triangles **par passe** ; inventaire de la scène du bloc (objets visibles, matériaux, racines et leur visibilité)
+- `test/frontiere-rendu.test.js` — **+2 tests** : ce que coûte un `far` unique, et le relevé du rapport `far/near` niveau par niveau
+
+**Tests : 4 300 / 0 échec · audit 221 = 221.**
+
+## Réserves de cette étape
+
+1. ⚠️ **Le comptage par passe suppose que `renderer.info.autoReset` est vrai.** Vérifié indirectement : la passe du bloc rend `0/0` **immédiatement après** une passe de fond à 33 appels — impossible si le compteur était cumulatif. **Je n'ai pas lu le drapeau directement.**
+2. ⚠️ **L'inventaire de scène est pris à UN instant**, à la fin de la descente (crop posé, ~20 km). Les cas non nuls à 168 triangles tombent ailleurs — **je ne les ai pas datés**.
+3. ⛔ **Le flou n'est pas mesuré en pixels par moi** : `scripts/sonde-flou-focus.mjs` n'existe pas dans cet arbre. Ma conclusion est **déduite** de deux mesures.
+4. ⚠️ **Le test du plan lointain est de l'arithmétique**, pas une image. Il réfute un argument écrit ; il ne prouve pas qu'une passe unique sera propre.

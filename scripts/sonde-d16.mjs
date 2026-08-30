@@ -579,14 +579,30 @@ try {
         if (!g || !visible(o)) return
         const idx = g.index ? g.index.count : g.attributes?.position?.count ?? 0
         const tri = o.isMesh ? Math.round(idx / 3) : idx
+        const m = Array.isArray(o.material) ? o.material[0] : o.material
         out.push({
           nom: o.name || '(sans nom)',
           type: o.type,
           tri,
+          mat: m ? (m.type + (m.name ? '/' + m.name : '')) : '(sans)',
+          carte: m?.map ? (m.map.name || m.map.image?.src?.slice(-40) || m.map.constructor.name) : null,
+          pos: [Math.round(o.position.x * 100) / 100, Math.round(o.position.y * 100) / 100, Math.round(o.position.z * 100) / 100],
+          echelle: [Math.round(o.scale.x * 1000) / 1000, Math.round(o.scale.y * 1000) / 1000],
+          rendreEnDernier: !!o.renderOrder,
+          testProfondeur: m ? m.depthTest : null,
+          ecritProfondeur: m ? m.depthWrite : null,
           parents: (() => { const c = []; for (let p = o.parent; p; p = p.parent) c.push(p.name || p.type); return c.slice(0, 3).join('<') })(),
         })
       })
-      return { mode: window.__exp.modes?.mode, objets: out.sort((a, b) => b.tri - a.tri).slice(0, 40), total: out.length }
+      const racines = window.__exp.scene.children.map((c) => ({
+        nom: c.name || c.type, visible: c.visible, enfants: c.children.length,
+      }))
+      return {
+        mode: window.__exp.modes?.mode,
+        objets: out.sort((a, b) => b.tri - a.tri).slice(0, 40),
+        total: out.length,
+        racines,
+      }
     })
     const brut = await vider()
     sortie.descente = analyse(brut)
