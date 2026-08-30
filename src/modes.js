@@ -326,6 +326,10 @@ export class Modes {
     // Vrai depuis la traversée jusqu'à l'arrivée sur le bloc : pendant tout ce
     // temps la caméra garde l'axe de l'orbite. Voir `_attendreLeBloc`.
     this._attenteTroisQuarts = false
+    // ⚡ **ET LE CHEMIN INVERSE — D16 ter, symétrique.** Vrai tant que le crop
+    // est posé, c'est-à-dire tant qu'on est SUR le bloc. Son front descendant
+    // rend la vue au nadir : voir `_armerRetourNadir`.
+    this._etaitSurLeBloc = false
 
     this._buildDom()
 
@@ -742,6 +746,7 @@ export class Modes {
       // ça, un aller-retour orbite → surface → orbite la laisserait armée, et la
       // bascule tomberait au premier repos du PROCHAIN séjour, sans traversée.
       this._attenteTroisQuarts = false
+      this._etaitSurLeBloc = false
       this._fonduPose = null
       this.mode = 'orbital'
     })
@@ -1111,7 +1116,30 @@ export class Modes {
     this._armerFonduPose(this.controls.target, direction)
   }
 
-  _armerFonduPose(cible, directionImposee = null) {
+  // ══════ QUITTER LE BLOC REND LA VUE AU NADIR — D16 ter, symétrique ═════
+  //
+  // ⛔ **SANS ÇA, LA MOITIÉ DE LA PLAINTE D'ADRIEN RESTAIT OUVERTE.** Mesuré sur
+  // la remontée : `enterOrbit` repose la caméra au nadir en UNE image, et la
+  // caméra du bloc y tourne de **46,548°** — exactement la bascule de trois
+  // quarts, prise par l'autre bout. La descente était devenue continue, la
+  // remontée claquait toujours.
+  //
+  // ➡️ **LA RÈGLE EST SYMÉTRIQUE, ET C'EST LA MÊME PHRASE** : la vue de trois
+  // quarts appartient au BLOC. On la prend en arrivant dessus, on la rend en le
+  // quittant. Le signal est le miroir de l'arrivée : `veilleCrop.pose`, le crop
+  // lui-même — un signal de LIEU, pas de geste. Il tombe vers 40 km, très
+  // au-dessous des ~33 000 km où `enterOrbit` prend la main : le balayage a tout
+  // le temps de finir, et la sortie d'orbite trouve la caméra déjà au nadir.
+  _armerRetourNadir() {
+    const cible = this.controls.target
+    const direction = this.camera.position.clone().sub(cible)
+    if (!(direction.lengthSq() > 1e-6)) return
+    direction.normalize()
+    if (direction.y > 1 - 1e-9) return // déjà au nadir : rien à rendre
+    this._armerFonduPose(cible, direction, true)
+  }
+
+  _armerFonduPose(cible, directionImposee = null, versNadir = false) {
     this._fonduPose = null
     if (!this._continu()) return
     const direction = directionImposee
@@ -1132,7 +1160,7 @@ export class Modes {
     // le plafond en degrés (`PAS_POSE_MAX_DEG`) en plafond d'avancement. La
     // direction ne change plus une fois le fondu armé ; l'angle non plus.
     const angleTotalDeg = 90 - (Math.asin(Math.min(1, direction.y)) * 180) / Math.PI
-    this._fonduPose = { t: 0, e: 0, angleTotalDeg, cible: cible.clone(), direction }
+    this._fonduPose = { t: 0, e: 0, angleTotalDeg, cible: cible.clone(), direction, versNadir }
     this._avancerFonduPose(0)
   }
 
@@ -1144,7 +1172,12 @@ export class Modes {
       cible: f.cible,
       camY: this.camera.position.y,
       direction: f.direction,
-      avancement: e,
+      // ⚡ **UN SEUL BALAYAGE, DEUX SENS — D16 ter.** À l'aller il va du nadir
+      // vers les trois quarts ; au retour, des trois quarts vers le nadir. La
+      // LOI est la même (l'élévation interpolée linéairement en `e`), le PLAFOND
+      // est le même (`PAS_POSE_MAX_DEG`), et `e` court toujours de 0 à 1 : c'est
+      // l'avancement passé à la loi qu'on retourne, pas la mécanique.
+      avancement: f.versNadir ? 1 - e : e,
     })
     if (!p) { this._fonduPose = null; return }
     this.camera.position.set(p.x, p.y, p.z)
@@ -1576,6 +1609,12 @@ export class Modes {
       if (this._attenteTroisQuarts && !this._fonduPose && !this.busy && this.hooks.arriveeSurLeBloc?.()) {
         this._armerBasculeTroisQuarts()
       }
+      // ── et le front DESCENDANT : on quitte le bloc, on rend la vue au nadir ─
+      const surLeBloc = !!this.hooks.surLeBloc?.()
+      if (this._etaitSurLeBloc && !surLeBloc && !this._fonduPose && !this.busy) {
+        this._armerRetourNadir()
+      }
+      this._etaitSurLeBloc = surLeBloc
       if (this._fonduPose) {
         const f = this._fonduPose
         const pas = avancerFonduPose({

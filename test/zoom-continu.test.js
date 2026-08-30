@@ -580,7 +580,7 @@ function domDePacotille() {
   return corps
 }
 
-async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false, arrive = { valeur: false } } = {}) {
+async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false, arrive = { valeur: false }, surBloc = { valeur: false } } = {}) {
   domDePacotille()
   const THREE = await import('three')
   const { Modes } = await import('../src/modes.js')
@@ -619,6 +619,12 @@ async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326
     // que le test ouvre quand il veut, pour vérifier les DEUX côtés : que rien ne
     // bascule tant qu'elle est fermée, et que tout bascule quand elle s'ouvre.
     arriveeSurLeBloc: () => !!arrive.valeur,
+    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** En production `veilleCrop.pose`.
+    // Ici une seconde boîte, parce que les deux signaux ne sont PAS le même :
+    // l'arrivée demande « le crop est né ET la vue est posée », le départ
+    // demande seulement « le crop est né ». Les confondre ferait revenir la vue
+    // au nadir à chaque coup de molette sur le bloc.
+    surLeBloc: () => !!surBloc.valeur,
   }
   const m = new Modes({ camera, controls, globe, domElement, hooks })
   m.mode = 'surface'
@@ -963,6 +969,47 @@ test('⑪ ter — revenir en orbite ÉTEINT l’attente, sans quoi elle survivra
   await m.enterOrbit(1200000)
   assert.equal(m.mode, 'orbital')
   assert.equal(m._attenteTroisQuarts, false, 'l’attente a survécu au retour en orbite')
+})
+
+test('⑪ quater — QUITTER le bloc rend la vue au nadir, avec le même plafond', async () => {
+  // ⛔ **LA MOITIÉ QUI RESTAIT OUVERTE.** Mesuré sur la remontée : `enterOrbit`
+  // reposait la caméra au nadir en UNE image, et la caméra du bloc y tournait de
+  // **46,548°** — la même bascule, par l'autre bout. La vue de trois quarts
+  // appartient au bloc : on la prend en arrivant, on la rend en partant.
+  const arrive = { valeur: true }
+  const surBloc = { valeur: true }
+  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56, arrive, surBloc })
+  m.mode = 'orbital'
+  m.altM = 500000
+  m._empriseVue = null
+  const incl = () => inclinaisonDeg(camera.position, controls.target)
+  await m._dive({ altM: 8000, zoom: null })
+  // on arrive sur le bloc et on prend la vue de trois quarts
+  for (let i = 0; i < 400 && (m._attenteTroisQuarts || m._fonduPose); i++) m.update(1 / 60)
+  assert.ok(Math.abs(incl() - 46.54816) < 0.01, `la vue de trois quarts n’est pas posée : ${incl().toFixed(3)}°`)
+  assert.equal(m._fonduPose, null)
+
+  // ── on quitte le bloc : le crop meurt ───────────────────────────────
+  const altAvant = m._altitudeFondM()
+  surBloc.valeur = false
+  m.update(1 / 60)
+  assert.ok(m._fonduPose, 'aucun retour au nadir ne s’est armé en quittant le bloc')
+  let plusGrandPas = 0
+  let precedent = incl()
+  for (let i = 0; i < 400 && m._fonduPose; i++) {
+    m.update(1 / 60)
+    plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
+    precedent = incl()
+    assert.ok(Math.abs(m._altitudeFondM() / altAvant - 1) < 1e-9, 'le retour a fait bouger l’altitude de fond')
+  }
+  assert.equal(m._fonduPose, null, 'le retour au nadir ne s’est jamais terminé')
+  assert.ok(incl() < 1e-6, `la vue n’est pas revenue au nadir : ${incl().toFixed(6)}°`)
+  // ⚠️ **LE MÊME PLAFOND QU'À L'ALLER**, sans quoi on aurait déplacé le claquement
+  // au lieu de le supprimer.
+  assert.ok(plusGrandPas < 1.5, `le plus grand pas du retour vaut ${plusGrandPas.toFixed(3)}° par image`)
+  // ⚠️ **ET IL NE SE REJOUE PAS** : le front est descendant, pas le niveau.
+  for (let i = 0; i < 60; i++) m.update(1 / 60)
+  assert.equal(m._fonduPose, null, 'le retour au nadir s’est rearmé tout seul')
 })
 
 test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, comme avant', async () => {

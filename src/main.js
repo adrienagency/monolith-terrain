@@ -5941,6 +5941,10 @@ modes = new Modes({
     // dépôt** : le seuil de repos et son hystérésis sont ceux de la Tâche N,
     // mesurés, et la naissance du crop est celle du seuil.
     arriveeSurLeBloc: () => !!veilleCrop?.repos,
+    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** `veilleCrop.pose` seul — un
+    // signal de LIEU. Son front descendant rend la vue au nadir, pour que la
+    // sortie d'orbite n'ait plus rien à faire claquer. Voir `_armerRetourNadir`.
+    surLeBloc: () => !!veilleCrop?.pose,
     // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
     // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
     // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à
