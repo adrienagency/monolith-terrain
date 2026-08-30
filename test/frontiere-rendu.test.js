@@ -369,3 +369,243 @@ test('⛔ LES DEUX BRANCHES DE L ÉCHAPPATOIRE `?frontiere`, EXERCÉES CONTRE LE
     else globalThis.location = avant
   }
 })
+// ══════════ ⑧ L'ANCRE — TÂCHE D16, ÉTAPE 2 ═════════════════════════════════
+//
+// ⚠️ **CE QUI EST VÉRIFIÉ ICI EST LA CAUSE MESURÉE DE LA PIRE RUPTURE DE LA
+// DESCENTE**, pas une propriété algébrique de confort. L'inventaire D16 a relevé
+// **11,863° de rotation de la caméra QUI REND, en une image, au cran z3 → z4,
+// alors que la caméra du bloc ne bougeait pas d'un millième** — et il a montré
+// que ces degrés viennent ENTIÈREMENT de `quaternionDeBase(ancre)`, donc du
+// déplacement de l'ancre, calée sur la grille de tuiles slippy.
+
+// Une emprise carrée en MERCATOR autour d'un lieu — la forme que `terrain`
+// donne à `fenetreBornee.emprise`, réduite à ce dont ces tests ont besoin.
+function empriseAutour(lat, lon, largeDeg) {
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  const m = mY(lat), demi = (largeDeg * D2R) / 2
+  const inv = (v) => Math.atan(Math.sinh(v)) * R2D
+  return { ouest: lon - largeDeg / 2, est: lon + largeDeg / 2, nord: inv(m + demi), sud: inv(m - demi) }
+}
+// La réciproque de `mondeVersLatLonEmprise`, recopiée de `geo.js` : le test doit
+// pouvoir dire OÙ, dans le bloc, tombe un lieu donné.
+function mondeDe(emprise, lat, lon, span = TERRAIN_SIZE) {
+  const D2R = Math.PI / 180
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  let dLon = lon - emprise.ouest
+  dLon -= Math.round((dLon - large / 2) / 360) * 360
+  const mN = mY(emprise.nord), mS = mY(emprise.sud)
+  return { x: (dLon / large - 0.5) * span, z: ((mY(lat) - mN) / (mS - mN) - 0.5) * span }
+}
+
+test('sans `origineBloc`, poseFond rend EXACTEMENT ce qu’elle rendait — non-régression', () => {
+  const extentMeters = 81800, span = TERRAIN_SIZE
+  const qb = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.9, 0.4, 0.15, 'YXZ')).toArray()
+  for (const { lat, lon } of LIEUX) {
+    for (const P of [[0, 30, 0], [12.5, 7.2, -3.4], [-28, 0.5, 28]]) {
+      const sans = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span })
+      const zero = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span, origineBloc: [0, 0, 0] })
+      assert.deepEqual(zero.position, sans.position, `position en ${lat},${lon}`)
+      assert.deepEqual(zero.quaternion, sans.quaternion, `orientation en ${lat},${lon}`)
+    }
+  }
+})
+
+test('`origineBloc` est une TRANSLATION du repère du bloc, rien de plus', () => {
+  const extentMeters = 81800, span = TERRAIN_SIZE
+  const qb = [0, 0, 0, 1]
+  const g = [3.5, 0, -7.25]
+  for (const { lat, lon } of LIEUX) {
+    const P = [12.5, 7.2, -3.4]
+    const a = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span, origineBloc: g })
+    const b = poseFond({
+      lat, lon, quaternionBloc: qb, extentMeters, span,
+      positionBloc: [P[0] - g[0], P[1] - g[1], P[2] - g[2]],
+    })
+    assert.ok(vec(a.position).distanceTo(vec(b.position)) < 1e-12, `translation cassée en ${lat},${lon}`)
+    assert.deepEqual(a.quaternion, b.quaternion)
+  }
+})
+
+// ⛔ **LE TEST QUI COMPTE : LE FRANCHISSEMENT DE NIVEAU.**
+//
+// On rejoue la seule chose que fait un cran de zoom : le bloc est REBÂTI, deux
+// fois plus fin, ET RECALÉ SUR LA GRILLE DE TUILES — son centre part ailleurs.
+// La géographie, elle, ne bouge pas : le lieu VISÉ reste le même, à la même
+// altitude, sous la même orientation. **L'image ne doit donc pas bouger.**
+test('un franchissement de niveau ne déplace PAS la caméra de fond — si l’ancre est le lieu visé', () => {
+  const LIEU = { lat: -21.115, lon: 55.536 } // La Réunion, le lieu des mesures D16
+  // repère AVANT : bloc large de 40°, centré 3,7° au nord-ouest du lieu visé
+  const empriseA = empriseAutour(LIEU.lat + 3.7, LIEU.lon - 3.1, 40)
+  // repère APRÈS : deux fois plus fin, ET recalé ailleurs — le saut de la grille
+  const empriseB = empriseAutour(LIEU.lat - 1.9, LIEU.lon + 2.4, 20)
+  const extentA = 4.4e6, extentB = extentA / 2 // l'emprise en mètres suit la largeur
+  const gA = mondeDe(empriseA, LIEU.lat, LIEU.lon)
+  const gB = mondeDe(empriseB, LIEU.lat, LIEU.lon)
+  // la caméra : même altitude réelle, même écart au sol, exprimés dans chaque
+  // repère — les unités de bloc valent deux fois moins de mètres après le cran
+  const hautA = 24.3, deportA = 25.4
+  const camA = [gA.x, hautA, gA.z + deportA]
+  const camB = [gB.x, hautA * 2, gB.z + deportA * 2]
+  const qb = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.81, 0, 0, 'YXZ')).toArray()
+  const commun = { lat: LIEU.lat, lon: LIEU.lon, quaternionBloc: qb, span: TERRAIN_SIZE }
+
+  const avant = poseFond({ ...commun, positionBloc: camA, extentMeters: extentA, origineBloc: [gA.x, 0, gA.z] })
+  const apres = poseFond({ ...commun, positionBloc: camB, extentMeters: extentB, origineBloc: [gB.x, 0, gB.z] })
+  assert.ok(vec(avant.position).distanceTo(vec(apres.position)) < 1e-9,
+    `la caméra de fond a bougé de ${vec(avant.position).distanceTo(vec(apres.position))} unité-globe`)
+  assert.ok(quat(avant.quaternion).angleTo(quat(apres.quaternion)) < 1e-9, 'l’orientation a tourné')
+
+  // ⚠️ **ET LE CONTRE-ESSAI, SANS LEQUEL LE TEST CI-DESSUS NE PROUVE RIEN :**
+  // la MÊME géographie, ancrée au CENTRE du bloc comme le faisait le dépôt,
+  // fait tourner la caméra de fond de plusieurs degrés — l'ordre de grandeur
+  // des 11,863° relevés à l'écran.
+  const centreA = mondeVersLatLon(empriseA)
+  const centreB = mondeVersLatLon(empriseB)
+  const vieuxA = poseFond({ ...commun, lat: centreA.lat, lon: centreA.lon, positionBloc: camA, extentMeters: extentA })
+  const vieuxB = poseFond({ ...commun, lat: centreB.lat, lon: centreB.lon, positionBloc: camB, extentMeters: extentB })
+  const tourne = (quat(vieuxA.quaternion).angleTo(quat(vieuxB.quaternion)) * 180) / Math.PI
+  assert.ok(tourne > 3, `l’ancre au centre du bloc devrait tourner de plusieurs degrés, mesuré ${tourne.toFixed(3)}°`)
+})
+
+// le lat/lon du CENTRE d'une emprise — c'est-à-dire l'ancre du dépôt
+function mondeVersLatLon(emprise) {
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI
+  const mY = (l) => Math.log(Math.tan(l * D2R) + 1 / Math.cos(l * D2R))
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  const mN = mY(emprise.nord), mS = mY(emprise.sud)
+  return { lat: Math.atan(Math.sinh((mN + mS) / 2)) * R2D, lon: emprise.ouest + large / 2 }
+}
+
+// ══════════ ⑩ L'ALTITUDE DE LA CAMÉRA QUI REND — TÂCHE D16, ÉTAPE ① ═════
+//
+// ⛔ **`altitudeFondM` N'EST PAS L'ALTITUDE DE LA CAMÉRA DE FOND, ET SON NOM
+// MENT.** Elle rend `camY × emprise / span` : le côté VERTICAL du triangle. La
+// caméra, elle, est à `√((R + k·camY)² + k²·r²)` du centre — le déport
+// horizontal `r` de la vue de trois quarts la pousse vers le haut.
+//
+// ⚠️ **CE N'EST PAS UNE FINESSE : `enterOrbit` REMETTAIT LA CAMÉRA À CETTE
+// ALTITUDE-LÀ EN SORTANT.** Mesuré à l'écran, sur la remontée de référence :
+// **33 105 716 m rendus contre 23 879 470 m annoncés — la caméra plongeait de
+// 9 226 246 m en UNE image**, alors que le commentaire d'`enterOrbit` revendique
+// une sortie « à l'altitude EXACTE » et a retiré un recul de 15 % pour cela.
+// Le défaut est **deux fois et demie** le recul qu'il avait supprimé.
+test('altitudeFondM est la JAMBE VERTICALE, pas l’altitude de la caméra de fond', () => {
+  const span = TERRAIN_SIZE
+  const LAT = -21.115, LON = 55.536
+  // la vue de trois quarts du produit : `PENTE_ARRIVEE = { y: 18, z: 19 }`
+  const pente = 18 / 19
+  for (const { extentMeters, camY } of [
+    { extentMeters: 4.4e6, camY: 40 }, // continental, là où la sortie d’orbite tombe
+    { extentMeters: 1.1e6, camY: 40 },
+    { extentMeters: 27309, camY: 40 }, // z12
+  ]) {
+    const deport = camY / pente // le déport horizontal de la vue de trois quarts
+    const p = poseFond({
+      lat: LAT, lon: LON, quaternionBloc: [0, 0, 0, 1], extentMeters, span,
+      positionBloc: [0, camY, deport], origineBloc: [0, 0, 0],
+    })
+    const rendue = (vec(p.position).length() - R_GLOBE) * ORBITAL_M_PER_UNIT
+    const jambe = altitudeFondM({ camY, extentMeters, span })
+    assert.ok(rendue > jambe, 'la caméra de fond est TOUJOURS plus haut que la jambe verticale')
+    const k = facteurEchelle({ extentMeters, span })
+    // l’excès se calcule d’avance : c’est le théorème de Pythagore, rien d’autre
+    const attendu = (Math.hypot(R_GLOBE + k * camY, k * deport) - R_GLOBE) * ORBITAL_M_PER_UNIT
+    assert.ok(Math.abs(rendue - attendu) / attendu < 1e-12, 'la pose ne suit pas Pythagore')
+  }
+  // ⚡ **ET L’ÉCART NE DÉPEND QUE DE L’ALTITUDE** — ni de `camY`, ni de
+  // l’emprise séparément : `k·camY` est l’altitude en unités de globe, et
+  // `k·déport` vaut `k·camY / pente`. C’est pour ça que personne ne l’a vu tant
+  // que les bancs partaient de 1 600 km : énorme en haut, nul en bas.
+  const rapport = (altVerticaleM) => {
+    const a = altVerticaleM / ORBITAL_M_PER_UNIT
+    return ((Math.hypot(R_GLOBE + a, a / pente) - R_GLOBE) * ORBITAL_M_PER_UNIT) / altVerticaleM
+  }
+  // ⛔ **LE POINT DE FONCTIONNEMENT MESURÉ** : la sortie d’orbite tombait à
+  // 23 879 470 m de jambe verticale, pour 33 105 716 m rendus — ×1,386.
+  assert.ok(Math.abs(rapport(23879470) - 1.386) < 0.01,
+    `à la sortie d’orbite l’écart doit valoir ×1,386 — mesuré ×${rapport(23879470).toFixed(4)}`)
+  assert.ok(rapport(1600000) > 1.05, 'à 1 600 km l’écart dépasse encore +5 %')
+  // ⚡ **ET À 30 km IL VAUT ×1,0026 — le chiffre que l’inventaire D16 avait
+  // relevé À L’ÉCRAN pour le balayage de pose près du sol (« l’effet s’éteint
+  // près du sol : à 30 km le même balayage rend ×1,0026 »). Deux mesures
+  // indépendantes, la sienne au navigateur et celle-ci en arithmétique pure,
+  // tombent sur les mêmes quatre décimales.
+  assert.ok(Math.abs(rapport(30000) - 1.0026) < 0.0005,
+    `à 30 km l’écart doit valoir ×1,0026 — mesuré ×${rapport(30000).toFixed(4)}`)
+  // et l’écart CROÎT avec l’altitude, il ne fait pas de bosse
+  for (const [bas, haut] of [[30000, 1600000], [1600000, 12000000], [12000000, 60000000]]) {
+    assert.ok(rapport(haut) > rapport(bas), `l’écart devrait croître de ${bas} à ${haut} m`)
+  }
+})
+
+// ═════ ⑪ UN SEUL TAMPON DE PROFONDEUR — CE QUE ÇA COÛTE, EN CHIFFRES ═════
+//
+// ⛔ **L'EN-TÊTE DE CE MODULE AFFIRME QU'UN `far` UNIQUE COÛTERAIT LE TAMPON DE
+// PROFONDEUR DU BLOC** — « sans desserrer le plan lointain du bloc de 290 à
+// ≈500, c'est-à-dire dégrader son tampon de profondeur pour rien ». **C'est la
+// justification écrite des DEUX PASSES et du `ClearPass` qui efface la
+// profondeur entre elles**, donc du flou d'arrière-plan inerte.
+//
+// ⚡ **L'ARITHMÉTIQUE DIT LE CONTRAIRE, ET IL FAUT LE DIRE AVEC LE CHIFFRE.**
+// Pour une projection perspective standard sur `b` bits, la résolution de
+// profondeur à la distance de vue `z` vaut
+//
+//     Δz(z) = z² · (far − near) / (near · far · (2^b − 1))
+//
+// Dès que `far ≫ near`, le facteur `(far − near)/(near · far)` tend vers
+// `1/near` : **il ne dépend PLUS de `far`.** C'est `near` qui commande, et lui
+// seul — le réflexe « far/near doit rester petit » ne s'applique pas ici.
+const resolutionProfondeur = (z, near, far, bits = 24) =>
+  (z * z * (far - near)) / (near * far * (2 ** bits - 1))
+
+test('desserrer `far` jusqu’à contenir la planète coûte MOINS DE 0,2 % de profondeur', () => {
+  // ⚠️ **LES DEUX BORNES SONT MESURÉES, PAS CHOISIES.** `near = 0,5` et
+  // `far = 290` sont les valeurs relevées à z16 sur la descente jusqu'au sol
+  // (`.banc/D16/desc-sol.json`, image 1554). Le `far` qu'un espace unique
+  // demanderait est la distance au limbe opposé de la planète, relevée sur la
+  // même image : **12,8 Mm, soit 4,2 · 10⁵ unités de bloc à ce niveau.**
+  const near = 0.5, farAujourdhui = 290, farEspaceUnique = 4.2e5
+  for (const z of [5, 30, 100, 289]) { // le bloc vit entre 5 et 290 unités
+    const a = resolutionProfondeur(z, near, farAujourdhui)
+    const b = resolutionProfondeur(z, near, farEspaceUnique)
+    const perte = b / a - 1
+    assert.ok(perte >= 0, 'desserrer far ne peut pas AMÉLIORER la profondeur')
+    assert.ok(perte < 0.002, `à z=${z} la perte vaut ${(perte * 100).toFixed(3)} %, attendu < 0,2 %`)
+  }
+  // ⚡ **ET LA COMPARAISON QUI DONNE L'ÉCHELLE** : diviser `near` par deux coûte
+  // deux fois plus que multiplier `far` par 1 448.
+  const base = resolutionProfondeur(30, near, farAujourdhui)
+  const farX1448 = resolutionProfondeur(30, near, farEspaceUnique) / base
+  const nearDivise2 = resolutionProfondeur(30, near / 2, farAujourdhui) / base
+  assert.ok(farX1448 < 1.002, `far ×1 448 : ×${farX1448.toFixed(5)}`)
+  assert.ok(nearDivise2 > 1.99, `near ÷2 : ×${nearDivise2.toFixed(5)}`)
+  // ⚠️ **CE QUE CE TEST NE DIT PAS** : il ne dit rien du z-fighting ENTRE le
+  // bloc et le globe, ni du format réel du tampon de la chaîne de post-traitement.
+  // Il dit seulement que l'argument écrit dans l'en-tête — « dégrader le tampon
+  // du bloc » — vaut **0,17 %**, et pas ce que le mot « dégrader » suggère.
+})
+
+test('le rapport far/near d’un espace unique est mesuré, pas supposé', () => {
+  // Relevé image par image sur `.banc/D16/desc-sol.json` (1 555 images,
+  // 60 000 km → 397 m) : `near` du bloc converti en unités de globe contre la
+  // distance au limbe opposé. Le pire de chaque niveau :
+  const releve = {
+    3: 2.098e2, 4: 3.181e2, 5: 5.108e2, 6: 9.127e2, 7: 1.727e3, 8: 3.368e3,
+    9: 6.653e3, 10: 1.322e4, 11: 2.634e4, 12: 5.261e4, 13: 1.051e5,
+    14: 2.102e5, 15: 4.203e5, 16: 8.405e5,
+  }
+  // il DOUBLE à chaque niveau, parce que `near` suit l'altitude et que `far` ne
+  // bouge plus une fois la planète à l'écran
+  for (let z = 4; z <= 16; z++) {
+    const r = releve[z] / releve[z - 1]
+    assert.ok(r > 1.4 && r < 2.1, `z${z - 1}→z${z} : rapport ×${r.toFixed(3)}`)
+  }
+  // ⚠️ **8,4 · 10⁵ AU PIRE**, et c'est le chiffre à opposer à quiconque dira
+  // « far/near doit rester sous 10⁴ » : la règle porte sur des scènes où la
+  // précision doit être UNIFORME. Ici la précision utile suit la distance.
+  assert.equal(Math.max(...Object.values(releve)), 8.405e5)
+})

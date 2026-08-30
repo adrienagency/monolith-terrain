@@ -58,6 +58,14 @@ const SORTIE = opt('--sortie', '.banc/R10/flou-focus.json')
 const CAPTURES = opt('--captures', '.banc/R10')
 const SEUIL = Number(opt('--seuil', '4')) // écart par canal au-delà duquel un pixel « a changé »
 const DISTANCES = (opt('--distances', '0.5,100,130,142.26,160,200,400')).split(',').map(Number)
+// ⚡ **LA PORTÉE EST UNE LONGUEUR, DONC ELLE SE CONVERTIT AUSSI — Tâche D16-a.**
+// Épinglée à 23 (unités de bloc) par la version d'origine. Sous `?terre=unique`
+// la caméra qui rend est en unités de GLOBE : 23 y vaut 1 465 km, c'est-à-dire
+// **vingt fois la profondeur de toute la scène** — tout est net, quelle que soit
+// la mise au point, et le balayage ne montre rien. **Mesuré : 2 000 pixels sur
+// six réglages, contre 248 229 en production.** Ce n'était pas le flou qui
+// manquait, c'était la portée qui était dans la mauvaise unité.
+const PORTEE = Number(opt('--portee', '23'))
 
 function trouverChrome() {
   const donne = opt('--chrome', process.env.CHROME_PATH)
@@ -72,10 +80,22 @@ function trouverChrome() {
   if (!t) { console.error('Chrome introuvable — passe --chrome <chemin>.'); process.exit(2) }
   return t
 }
+// ⚠️ **LE MÊME CHARGEUR QUE `sonde-d16.mjs`, ET C'EST UNE PORTABILITÉ, PAS UN
+// CONFORT.** `puppeteer-core` n'est pas une dépendance produit : il n'est
+// installé que dans certains arbres de travail. Sans ce repli, la sonde refuse
+// de démarrer dans l'arbre où la mesure doit être rejouée — et une sonde qui ne
+// tourne pas là où le code change ne sert à rien.
 const puppeteer = await (async () => {
-  try { return (await import('puppeteer-core')).default } catch {
-    console.error('puppeteer-core absent : npm i --no-save puppeteer-core@25.8.0'); process.exit(2)
+  try { return (await import('puppeteer-core')).default } catch { /* on cherche ailleurs */ }
+  const pistes = [
+    'C:/Dev/wt-f3/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
+    'C:/Dev/wt-warm/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
+  ]
+  for (const c of pistes) {
+    if (!fs.existsSync(c)) continue
+    return (await import('file:///' + c.split(String.fromCharCode(92)).join('/'))).default
   }
+  console.error('puppeteer-core absent : npm i --no-save puppeteer-core@25.8.0'); process.exit(2)
 })()
 
 const CONFIGS = [
@@ -93,7 +113,7 @@ const nav = await puppeteer.launch({
 const dossierCaptures = path.resolve(RACINE, CAPTURES)
 fs.mkdirSync(dossierCaptures, { recursive: true })
 
-const releve = { date: new Date().toISOString(), port: PORT, seuil: SEUIL, distances: DISTANCES, configs: [] }
+const releve = { date: new Date().toISOString(), port: PORT, seuil: SEUIL, distances: DISTANCES, portee: PORTEE, configs: [] }
 
 for (const cfg of CONFIGS) {
   const page = await nav.newPage()
@@ -119,7 +139,7 @@ for (const cfg of CONFIGS) {
   // ── allumer le bokeh par l'INTERRUPTEUR DE L'INTERFACE, pas par une porte
   // dérobée : `setDofEnabled` n'est pas sur `window.__exp`, et c'est ce chemin-là
   // que l'utilisateur emprunte.
-  const etat = await page.evaluate(() => {
+  const etat = await page.evaluate((portee) => {
     const e = window.__exp
     const lab = [...document.querySelectorAll('label')].find((x) => /bokeh/i.test(x.textContent || ''))
     if (!lab) return { erreur: 'interrupteur bokeh introuvable' }
@@ -129,7 +149,7 @@ for (const cfg of CONFIGS) {
     const dof = passeDof.effects.find((x) => x.constructor.name === 'DepthOfFieldEffect')
     // réglages ÉPINGLÉS : le brassage du look les tire au sort au démarrage
     e.params.bokehScale = 16; dof.bokehScale = 16
-    e.params.focusRange = 23; dof.cocMaterial.worldFocusRange = 23
+    e.params.focusRange = portee; dof.cocMaterial.worldFocusRange = portee
     // le grain repose un bruit neuf par rendu : il noierait le compteur
     const derniere = e.composer.passes[e.composer.passes.length - 1]
     const bruit = derniere.effects && derniere.effects.find((f) => f.constructor.name === 'NoiseEffect')
@@ -144,11 +164,21 @@ for (const cfg of CONFIGS) {
       frontiere: !!e.frontiereActive,
       distanceCamera: +e.camera.position.distanceTo(e.controls.target).toFixed(2),
       near: e.camera.near, far: e.camera.far,
+      // ⚡ **L'ÉCHELLE DE LA CAMÉRA QUI REND — Tâche D16-a.** Sans elle, un
+      // balayage de mise au point en unités de BLOC sur une caméra qui rend en
+      // unités de GLOBE ne dit pas s'il ne trouve rien ou s'il cherche au mauvais
+      // endroit. `k` est le facteur de la similitude ; `distanceRendue` est la
+      // distance caméra→cible telle que la caméra qui rend la voit.
+      emprise: e.dem?.extentMeters ?? null,
+      k: e.camGlobe && e.dem?.extentMeters ? e.dem.extentMeters / 56 / (6371000 / 100) : 1,
+      distanceRendue: e.camGlobe && e.dem?.extentMeters
+        ? +(e.camera.position.distanceTo(e.controls.target) * (e.dem.extentMeters / 56 / (6371000 / 100))).toFixed(4)
+        : null,
       bokehScale: e.params.bokehScale, focusRange: e.params.focusRange,
     }
-  })
+  }, PORTEE)
   if (etat.erreur) { console.error('  ⛔ ' + etat.erreur); await page.close(); continue }
-  console.log('  ' + etat.passes.join(' → ') + ' | socle visible : ' + etat.socleVisible + ' | distance caméra : ' + etat.distanceCamera)
+  console.log('  ' + etat.passes.join(' → ') + ' | socle visible : ' + etat.socleVisible + ' | distance caméra : ' + etat.distanceCamera + ' | k = ' + etat.k + ' | distance RENDUE : ' + etat.distanceRendue)
 
   // ── UNE ERREUR GL PAR IMAGE COMPOSÉE ? (le défaut tracé par R5)
   const gl = await page.evaluate(() => {

@@ -156,10 +156,47 @@ export function altitudeFondM({ camY, extentMeters, span }) {
 // l'écart est sous le mètre-texel du globe ; aux zooms continentaux, le bord du
 // bloc surplombe la planète et **ça se verra à l'horizon**. C'est écrit ici pour
 // qu'on ne le découvre pas à l'écran en croyant à un bogue de raccord.
-export function poseFond({ lat, lon, positionBloc, quaternionBloc, extentMeters, span }) {
+// ══════════ ⚡ `origineBloc` — L'ANCRE N'EST PAS OBLIGÉE D'ÊTRE LE CENTRE DU
+//            BLOC, ET C'EST LA RÉPARATION DE LA PIRE RUPTURE DE LA DESCENTE ══
+//
+// `lat/lon` dit OÙ, sur la sphère, se pose le point `origineBloc` du bloc. Le
+// dépôt y mettait le CENTRE du bloc, `(0 · 0 · 0)`, et c'est ce choix — pas la
+// similitude — qui produisait la rupture ③ de l'inventaire D16.
+//
+// **Pourquoi.** Le centre du bloc est CALÉ SUR LA GRILLE DE TUILES SLIPPY
+// (`loadDem` : `cx = Math.floor(tuileX)`). À chaque changement de niveau il
+// SAUTE — mesuré ici même, sur la descente de référence : **15,2215° d'arc en
+// une image au cran z3 → z4**, puis 7,7183°, 3,7829°. Or `quaternionDeBase`
+// est une fonction de l'ancre seule : l'ancre tourne, la caméra de fond tourne
+// avec — **11,863° mesurés, quand la caméra du bloc ne bouge pas d'un millième.**
+//
+// **La sortie n'est pas de lisser ce saut, c'est de choisir une ancre qui n'en
+// fait pas.** Mesuré sur la MÊME descente, trois candidates, en degrés d'arc
+// parcourus d'une image à l'autre :
+//
+//   | ancre                       | médiane   | p99      | MAX au franchissement |
+//   |-----------------------------|-----------|----------|-----------------------|
+//   | centre du bloc (le dépôt)   | 0,000°    | 8,5e-7°  | **15,2215°**          |
+//   | aplomb de la caméra         | 0,03815°  | 1,882°   | 2,0725°               |
+//   | **aplomb de la CIBLE**      | 0,000159° | 0,00531° | **0,2138°**           |
+//
+// ➡️ **L'aplomb de la cible est géographiquement CONTINU au franchissement** —
+// `_rescale` repose la cible sur le nouveau bloc puis `_suivreEmprise` y
+// raccroche la caméra, si bien que le LIEU visé traverse. Le centre du bloc, lui,
+// est un artefact de la grille de tuiles et n'a aucune raison d'être continu.
+//
+// ⚠️ **CE QUE ÇA DÉPLACE, ET C'EST À DIRE :** la similitude est exacte au point
+// d'ancrage et approchée ailleurs (plan tangent, voir le tableau plus haut).
+// Ancrer sur la cible met l'exactitude AU CENTRE DE LA VUE au lieu du centre du
+// bloc ; l'écart entre les deux est du second ordre (`d² / 2R` : **17 km pour un
+// bloc de 14 005 km à z3**, soit 0,12 % de sa largeur).
+// ⛔ **Ce n'est donc PAS neutre au bit près, et le §③ du rapport le mesure.**
+export function poseFond({ lat, lon, positionBloc, quaternionBloc, extentMeters, span, origineBloc = [0, 0, 0] }) {
   const k = facteurEchelle({ extentMeters, span })
   const { est, haut, sud } = repereGlobe(lat, lon)
-  const [bx, by, bz] = positionBloc
+  const bx = positionBloc[0] - (origineBloc[0] || 0)
+  const by = positionBloc[1] - (origineBloc[1] || 0)
+  const bz = positionBloc[2] - (origineBloc[2] || 0)
   const position = [0, 1, 2].map(
     (i) => haut[i] * R_GLOBE + k * (bx * est[i] + by * haut[i] + bz * sud[i])
   )

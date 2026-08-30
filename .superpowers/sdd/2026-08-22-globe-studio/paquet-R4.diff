@@ -1,0 +1,1374 @@
+=== COMMITS ===
+6876607 R4 : la sonde qui decompose le claquement — et son plancher de bruit
+9af9b4f R4 : la pose de camera ne saute plus — ni a la plongee, ni aux franchissements
+
+=== STAT ===
+ scripts/lit-sonde-descente.mjs |  58 ++++++++++
+ scripts/sonde-claquement.mjs   | 179 ++++++++++++++++++++++++++++++
+ scripts/sonde-descente.mjs     | 246 +++++++++++++++++++++++++++++++++++++++++
+ src/modes.js                   | 197 ++++++++++++++++++++++++++++++---
+ src/monde/zoom-continu.js      | 130 ++++++++++++++++++++++
+ test/zoom-continu.test.js      | 199 ++++++++++++++++++++++++++++++++-
+ 6 files changed, 987 insertions(+), 22 deletions(-)
+
+=== DIFF ===
+diff --git a/scripts/lit-sonde-descente.mjs b/scripts/lit-sonde-descente.mjs
+new file mode 100644
+index 0000000..9d3b984
+--- /dev/null
++++ b/scripts/lit-sonde-descente.mjs
+@@ -0,0 +1,58 @@
++// LECTEUR DE TRACE — le verdict de R4 en trois tableaux.
++//
++// 1. les SAUTS D'INCLINAISON : où l'orientation change de plus de `--seuil`
++//    degrés d'une image à la suivante, et de combien.
++// 2. les BASCULES DE CONTENU : où `uCropOn` et `veilleCrop.pose` changent.
++// 3. le RÉSUMÉ : nombre de bascules, plus grand saut, régime de chaque bord.
++//
++// EMPLOI  node scripts/lit-sonde-descente.mjs <etiquette> [--seuil 1]
++import fs from 'node:fs'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++const ICI = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), '.banc', 'R4')
++const A = process.argv.slice(2)
++const ETIQ = A[0] ?? 'descente'
++const opt = (n, d) => { const i = A.indexOf(n); return i >= 0 && A[i + 1] !== undefined ? A[i + 1] : d }
++const SEUIL = Number(opt('--seuil', '1'))
++
++const j = JSON.parse(fs.readFileSync(path.join(ICI, `${ETIQ}.json`), 'utf8'))
++const L = j.images.filter((l) => !l.err)
++const t0 = L[0]?.t ?? 0
++const km = (m) => (m == null ? '—' : (m / 1000).toFixed(m > 1e6 ? 0 : 1))
++
++console.log(`# ${ETIQ} — ${L.length} images, départ ${(j.departM / 1000).toFixed(0)} km, ${j.dureeMs} ms`)
++console.log(`erreurs de page : ${(j.erreurs ?? []).length}`)
++
++console.log(`\n## 1. SAUTS D'INCLINAISON (> ${SEUIL}° d'une image à la suivante)`)
++console.log('img\tt(ms)\tΔincl°\tincl av→ap\talt km\tmode\tbusy\tcropOn\tpose')
++let maxSaut = 0, nSauts = 0
++for (let i = 1; i < L.length; i++) {
++  const d = Math.abs(L[i].incl - L[i - 1].incl)
++  if (!Number.isFinite(d)) continue
++  if (d > maxSaut) maxSaut = d
++  if (d <= SEUIL) continue
++  nSauts++
++  if (nSauts <= 40) {
++    console.log(`${i}\t${L[i].t - t0}\t${d.toFixed(2)}\t${L[i - 1].incl.toFixed(2)}→${L[i].incl.toFixed(2)}\t${km(L[i].alt)}\t${L[i].mode}\t${L[i].busy ? 1 : 0}\t${L[i].cropOn}\t${L[i].pose ? 1 : 0}`)
++  }
++}
++console.log(`total : ${nSauts} sauts > ${SEUIL}°, plus grand écart image-à-image ${maxSaut.toFixed(2)}°`)
++
++console.log('\n## 2. BASCULES DE CONTENU')
++console.log('img\tt(ms)\tquoi\tvaleur\talt km\tincl°\tmode\tbusy')
++let nb = 0
++for (let i = 1; i < L.length; i++) {
++  const a = L[i - 1], b = L[i]
++  if (a.cropOn !== b.cropOn) { nb++; console.log(`${i}\t${b.t - t0}\tuCropOn\t${a.cropOn}→${b.cropOn}\t${km(b.alt)}\t${b.incl.toFixed(2)}\t${b.mode}\t${b.busy ? 1 : 0}`) }
++  if (a.pose !== b.pose) { nb++; console.log(`${i}\t${b.t - t0}\tpose\t${a.pose ? 1 : 0}→${b.pose ? 1 : 0}\t${km(b.alt)}\t${b.incl.toFixed(2)}\t${b.mode}\t${b.busy ? 1 : 0}`) }
++  if (a.mode !== b.mode) { nb++; console.log(`${i}\t${b.t - t0}\tmode\t${a.mode}→${b.mode}\t${km(b.alt)}\t${b.incl.toFixed(2)}\t\t${b.busy ? 1 : 0}`) }
++  if (a.zoom !== b.zoom) { nb++; console.log(`${i}\t${b.t - t0}\tzoom\t${a.zoom}→${b.zoom}\t${km(b.alt)}\t${b.incl.toFixed(2)}\t${b.mode}\t${b.busy ? 1 : 0}`) }
++}
++console.log(`total : ${nb} bascules ; veilleCrop.bascules final = ${L[L.length - 1]?.bascules}`)
++
++console.log('\n## 3. PROFIL (une ligne toutes les 40 images)')
++console.log('img\tt(ms)\talt km\tdist\tincl°\tmode\tbusy\tcropOn\tpose\testompe\tzoom')
++for (let i = 0; i < L.length; i += 40) {
++  const l = L[i]
++  console.log(`${i}\t${l.t - t0}\t${km(l.alt)}\t${l.dist == null ? '—' : l.dist.toFixed(0)}\t${l.incl.toFixed(2)}\t${l.mode}\t${l.busy ? 1 : 0}\t${l.cropOn}\t${l.pose ? 1 : 0}\t${l.estompe == null ? '—' : Number(l.estompe).toFixed(2)}\t${l.zoom}`)
++}
+diff --git a/scripts/sonde-claquement.mjs b/scripts/sonde-claquement.mjs
+new file mode 100644
+index 0000000..28f2934
+--- /dev/null
++++ b/scripts/sonde-claquement.mjs
+@@ -0,0 +1,179 @@
++// SONDE DE CLAQUEMENT — DE QUOI EST FAIT LE SAUT D'IMAGE À LA NAISSANCE DU CROP.
++//
++// ══════════ POURQUOI ELLE EXISTE ═══════════════════════════════════════════
++//
++// La naissance du crop remplace l'image d'un coup : `uCropOn` passe de 0 à 1 en
++// une image, et avec lui six autres interrupteurs que la chaîne allume ensemble.
++// « Il faudrait un fondu » est une phrase ; **sur QUOI** est une mesure.
++//
++// Cette sonde immobilise la caméra juste sous `SEUIL_NAISSANCE_M`, puis retire
++// les maillons du crop UN PAR UN, en capturant l'image composée à chaque étape.
++// Elle rend l'écart moyen par pixel entre chaque état et l'état crop-posé, sur
++// la zone de canevas seule (l'interface est exclue du cadre).
++//
++// ⚠️ **LE CADRE DE MESURE EXCLUT L'INTERFACE, ET C'EST UNE DÉCISION.** Les
++// panneaux de ShibuMap sont translucides : ils suivent le canevas et
++// gonfleraient l'écart d'un effet qui n'est pas le leur. Le cadre retenu est
++// `600×300` au centre, là où il n'y a que de la scène.
++//
++// ⚠️ **CHROME SANS TÊTE COMPOSITE**, `readPixels` non : `preserveDrawingBuffer`
++// est faux sur ce contexte. Même patron que `scripts/sonde-demarrage.mjs`.
++//
++// EMPLOI
++//   node scripts/sonde-claquement.mjs                 # sur le serveur de dev 5503
++//   node scripts/sonde-claquement.mjs --port 5503 --altitude 30000
++//
++// Sort : `.banc/R4/claquement/*.png` et un tableau sur la sortie standard.
++
++import fs from 'node:fs'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++const RACINE = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
++const SORTIE = path.join(RACINE, '.banc', 'R4', 'claquement')
++fs.mkdirSync(SORTIE, { recursive: true })
++
++const A = process.argv.slice(2)
++const opt = (n, d) => { const i = A.indexOf(n); return i >= 0 && A[i + 1] !== undefined ? A[i + 1] : d }
++const PORT = Number(opt('--port', '5503'))
++const ALT_CIBLE = Number(opt('--altitude', '30000'))
++const URL_SUFFIXE = opt('--url', '?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0')
++
++function trouverChrome() {
++  const donne = opt('--chrome', process.env.CHROME_PATH)
++  if (donne) return donne
++  const pistes = [
++    'C:/Program Files/Google/Chrome/Application/chrome.exe',
++    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
++    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
++    '/usr/bin/google-chrome',
++  ]
++  const t = pistes.find((p) => fs.existsSync(p))
++  if (!t) { console.error('Chrome introuvable — passe --chrome <chemin>.'); process.exit(2) }
++  return t
++}
++
++async function chargerPuppeteer() {
++  const pistes = [
++    path.join(RACINE, 'node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js'),
++    'C:/Dev/wt-f3/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
++    'C:/Dev/wt-warm/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
++  ]
++  for (const p of pistes) if (fs.existsSync(p)) return (await import('file:///' + p.replace(/\\/g, '/'))).default
++  console.error('puppeteer-core introuvable. `npm i -D puppeteer-core`.')
++  process.exit(2)
++}
++
++const puppeteer = await chargerPuppeteer()
++const nav = await puppeteer.launch({
++  executablePath: trouverChrome(),
++  headless: true,
++  args: ['--headless=new', '--no-sandbox', '--enable-unsafe-swiftshader', '--window-size=1280,800'],
++})
++
++// ⚠️ **LA COMPARAISON SE FAIT SUR LES PIXELS, PAS SUR UNE MOYENNE.** Deux images
++// de moyenne identique peuvent être entièrement différentes ; c'est exactement
++// le piège qu'un « écart de luminance » aurait laissé passer ici, la mer bleue
++// et l'aplat olive ayant des luminances voisines. On rend donc l'écart moyen
++// ABSOLU par pixel — et la moyenne, à côté, pour mémoire.
++function comparer(a, b) {
++  let s = 0
++  const n = Math.min(a.length, b.length)
++  for (let i = 0; i < n; i++) s += Math.abs(a[i] - b[i])
++  return s / n
++}
++
++try {
++  const page = await nav.newPage()
++  await page.setViewport({ width: 1280, height: 800 })
++  const erreurs = []
++  page.on('pageerror', (e) => erreurs.push(String(e.message).slice(0, 160)))
++  await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 90000 })
++  await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe, { timeout: 60000, polling: 100 })
++  await new Promise((r) => setTimeout(r, 6000))
++  await page.keyboard.press('Escape')
++  await new Promise((r) => setTimeout(r, 1500))
++
++  // ── la descente, PAR CRANS, jusqu'à passer juste sous le seuil ───────────
++  //
++  // ⚠️ **PAR CRANS ET PAS À LA MOLETTE, ET LA PREMIÈRE VERSION L'A PAYÉ.** Le
++  // glissé inertiel court après le dernier événement : viser 30 000 m à la
++  // molette a rendu **5 225 m**, c'est-à-dire une mesure faite six crans sous
++  // la naissance du crop — donc sur un régime établi, pas sur la transition.
++  // `cranZoom(1)` applique ×1/√2 IMMÉDIATEMENT et sans élan : on s'arrête où
++  // l'on veut, au cran près.
++  //
++  // ⚠️ **ON REPART DE L'ORBITE, ET CE N'EST PAS UN DÉTOUR.** L'application
++  // DÉMARRE en surface à ~12 km, c'est-à-dire DÉJÀ sous la naissance du crop :
++  // une descente qui part de là n'a aucune transition à traverser, et la
++  // première version de cette sonde a mesuré 5 842 m en croyant mesurer 32 000.
++  await page.evaluate(() => window.__exp.modes.enterOrbit(120000))
++  await new Promise((r) => setTimeout(r, 4000))
++  for (let i = 0; i < 60; i++) {
++    const e = await page.evaluate(() => ({ alt: window.__exp.altitudeCadrageM?.() ?? 0, mode: window.__exp.modes.mode }))
++    if (e.mode === 'surface' && e.alt > 0 && e.alt < ALT_CIBLE) break
++    await page.evaluate(() => window.__exp.modes.cranZoom(1))
++    await new Promise((r) => setTimeout(r, 600))
++  }
++  // ⚠️ **ON LAISSE TOUT SE POSER AVANT DE MESURER.** Une caméra encore en
++  // mouvement, ou une chaîne de crop dont un maillon vient de refuser et sera
++  // repris à la trentième image, ferait attribuer à un retrait un écart qui
++  // n'est que du temps qui passe.
++  await page.evaluate(() => window.__exp.modes._resetZoom())
++  await new Promise((r) => setTimeout(r, 4000))
++
++  const etat = await page.evaluate(() => ({
++    alt: window.__exp.altitudeCadrageM?.(),
++    pose: !!window.__exp.veilleCrop?.pose,
++    cropOn: window.__exp.globe?.uniforms?.uCropOn?.value,
++    estompe: window.__exp.veilleEstompage?.valeur,
++  }))
++  console.log(`altitude ${Math.round(etat.alt)} m · crop posé ${etat.pose} · uCropOn ${etat.cropOn} · estompage ${Number(etat.estompe).toFixed(3)}`)
++
++  const client = await page.createCDPSession()
++  const prendre = async (nom) => {
++    await new Promise((r) => setTimeout(r, 900)) // laisser deux ou trois images passer
++    const b = await client.send('Page.captureScreenshot', { format: 'png' })
++    const f = path.join(SORTIE, `${nom}.png`)
++    fs.writeFileSync(f, Buffer.from(b.data, 'base64'))
++    return f
++  }
++
++  // ── les états, du plus complet au plus nu ────────────────────────────────
++  const etapes = []
++  etapes.push({ nom: '0-crop-entier', f: await prendre('0-crop-entier') })
++  // ⚠️ **LE PLANCHER DE BRUIT SE MESURE, IL NE SE SUPPOSE PAS — ET IL A FAILLI
++  // FAIRE PUBLIER UN FAUX CHIFFRE.** Le grain de film est ANIMÉ : deux captures
++  // du MÊME état, à 900 ms d'écart, diffèrent sur presque tout l'écran. La
++  // première lecture de ce banc donnait « les parois changent 43 % des pixels de
++  // plus de 8 niveaux » — c'était le grain, pas les parois. Cet état témoin ne
++  // touche à RIEN : tout écart mesuré contre lui est du bruit, et tout écart
++  // qui ne le dépasse pas n'est pas une mesure.
++  etapes.push({ nom: '0bis-temoin', f: await prendre('0bis-temoin') })
++
++  await page.evaluate(() => window.__exp.globe.retirerParoisCrop())
++  etapes.push({ nom: '1-sans-parois', f: await prendre('1-sans-parois') })
++
++  await page.evaluate(() => window.__exp.globe.retirerFondCrop())
++  etapes.push({ nom: '2-sans-fond', f: await prendre('2-sans-fond') })
++
++  // ⚠️ **LE STYLE EN DERNIER, ET D'UN SEUL BLOC** : `retirerHabillage`,
++  // `retirerRampe` et `retirerMer` éteignent `uHabOn`, `uRampCropOn`,
++  // `uMerRampeOn` et `uEclairageOn`. C'est la part que la règle D15 réattribue à
++  // R6 — on la MESURE ici, on ne la corrige pas.
++  await page.evaluate(() => {
++    const g = window.__exp.globe
++    g.retirerHabillage(); g.retirerRampe(); g.retirerMer()
++  })
++  etapes.push({ nom: '3-sans-style', f: await prendre('3-sans-style') })
++
++  await page.evaluate(() => { window.__exp.globe.retirerCrop(); window.__exp.globe.retirerEstompage() })
++  etapes.push({ nom: '4-planete-nue', f: await prendre('4-planete-nue') })
++
++  console.log(`\ncaptures dans .banc/R4/claquement/`)
++  console.log(`erreurs de page : ${erreurs.length}${erreurs.length ? ' — ' + erreurs.slice(0, 2).join(' | ') : ''}`)
++  console.log(`\n⚠️ l'écart se calcule hors de ce script : voir le rapport R4.`)
++  for (const e of etapes) console.log(`  ${e.nom}`)
++} finally {
++  await nav.close()
++}
+diff --git a/scripts/sonde-descente.mjs b/scripts/sonde-descente.mjs
+new file mode 100644
+index 0000000..558b96a
+--- /dev/null
++++ b/scripts/sonde-descente.mjs
+@@ -0,0 +1,246 @@
++// SONDE DE DESCENTE — LA DESCENTE INSTRUMENTÉE, IMAGE PAR IMAGE.
++//
++// ══════════ CE QU'IL MESURE, ET POURQUOI CELUI-CI ET PAS UN AUTRE ═══════════
++//
++// La Tâche M avait mesuré la descente et conclu « aucun saut de caméra ». Sa
++// mesure portait sur l'ALTITUDE et sur le rapport d'une image à l'autre. Deux
++// choses lui échappaient par construction :
++//
++//   · **l'ORIENTATION de la caméra.** Une caméra qui bascule du nadir à
++//     l'oblique sans bouger d'un mètre garde son altitude ET son rapport
++//     d'altitude. Le saut qu'Adrien filme est là.
++//   · **le CONTENU.** `uCropOn` vaut 0 ou 1 ; le crop ne paraît pas, il surgit.
++//     Aucune grandeur de caméra ne peut le voir.
++//
++// Ce banc enregistre donc, à CHAQUE image de rendu :
++//   alt (altitudeCadrageM), dist (distanceCadrageM), la direction de visée en
++//   coordonnées monde, **l'inclinaison au nadir LOCAL** (voir plus bas),
++//   `uCropOn`, `veilleCrop.pose`, `.bascules`, le mode, `modes.busy`,
++//   l'estompage, et le zoom du bloc.
++//
++// ⚠️ **L'INCLINAISON EST LA GRANDEUR QUI COMPTE, ET ELLE EST COMPARABLE ENTRE
++// LES DEUX RÉGIMES.** C'est l'angle entre la direction de visée et le « bas »
++// LOCAL :
++//   · en orbite, le bas local est `-position.normalisée` (la caméra est sur une
++//     sphère centrée à l'origine) ;
++//   · en surface, le monde est Y-haut (`camera.up = (0,1,0)`,
++//     `controls.maxPolarAngle = π×0,49`), donc le bas local est `(0,-1,0)`.
++// 0° = visée au nadir (« à la verticale »), 90° = visée à l'horizontale
++// (« rasante »). Un écart d'une image à l'autre EST le saut de pose.
++//
++// ⚠️ **LE CONDENSÉ D'IMAGE PASSE PAR `Page.captureScreenshot`, PAS PAR
++// `readPixels`.** `preserveDrawingBuffer` est faux et `autoClear` aussi : lire
++// le tampon depuis une autre image rendrait du vide. Chrome sans tête, lui,
++// composite (patron de `scripts/sonde-demarrage.mjs`).
++//
++// EMPLOI
++//   node scripts/sonde-descente.mjs                       # depuis MAX_ALT_M (60 000 km)
++//   node scripts/sonde-descente.mjs --depart 1600000      # depuis 1 600 km (la Tâche M)
++//   node scripts/sonde-descente.mjs --etiquette apres     # nomme la trace
++//   node scripts/sonde-descente.mjs --port 5503 --images 1
++//
++// Sort : `.banc/R4/<etiquette>.json` (une ligne par image) et, si `--images 1`,
++// `.banc/R4/img-<etiquette>/*.png`.
++
++import fs from 'node:fs'
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++// ⚠️ **LES TRACES VONT DANS `.banc/R4/`, LE SCRIPT VIT DANS `scripts/`.**
++// `.banc/` est ignoré par git (« bancs de mesure jetables ») : y laisser
++// l'instrument, c'est le perdre au prochain nettoyage — et ce chantier a huit
++// rapports d'affilée qui n'ont pas su mesurer faute d'instrument.
++const RACINE = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
++const ICI = path.join(RACINE, '.banc', 'R4')
++fs.mkdirSync(ICI, { recursive: true })
++
++const A = process.argv.slice(2)
++const opt = (n, d) => { const i = A.indexOf(n); return i >= 0 && A[i + 1] !== undefined ? A[i + 1] : d }
++const PORT = Number(opt('--port', '5503'))
++const DEPART_M = Number(opt('--depart', '60000000'))
++const ETIQ = opt('--etiquette', 'descente')
++const IMAGES = opt('--images', '1') !== '0'
++const CRANS = Number(opt('--crans', '160'))
++const PERIODE = Number(opt('--periode', '160')) // ms entre deux crans de molette
++const URL_SUFFIXE = opt('--url', '?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0')
++
++function trouverChrome() {
++  const donne = opt('--chrome', process.env.CHROME_PATH)
++  if (donne) return donne
++  const pistes = [
++    'C:/Program Files/Google/Chrome/Application/chrome.exe',
++    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
++    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
++    '/usr/bin/google-chrome',
++  ]
++  const t = pistes.find((p) => fs.existsSync(p))
++  if (!t) { console.error('Chrome introuvable — passe --chrome <chemin>.'); process.exit(2) }
++  return t
++}
++
++// puppeteer-core n'est pas une dépendance du produit (même règle que
++// `scripts/sonde-demarrage.mjs`). On le prend là où il est installé.
++async function chargerPuppeteer() {
++  const pistes = [
++    path.join(RACINE, 'node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js'),
++    'C:/Dev/wt-f3/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
++    'C:/Dev/wt-warm/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js',
++  ]
++  for (const p of pistes) {
++    if (!fs.existsSync(p)) continue
++    return (await import('file:///' + p.replace(/\\/g, '/'))).default
++  }
++  console.error('puppeteer-core introuvable. `npm i -D puppeteer-core`, ou pointe une autre copie.')
++  process.exit(2)
++}
++
++const puppeteer = await chargerPuppeteer()
++const nav = await puppeteer.launch({
++  executablePath: trouverChrome(),
++  headless: true,
++  args: ['--headless=new', '--no-sandbox', '--enable-unsafe-swiftshader', '--window-size=1280,800',
++    '--autoplay-policy=no-user-gesture-required'],
++})
++
++const sortie = { etiquette: ETIQ, departM: DEPART_M, url: URL_SUFFIXE, images: [] }
++const dossierImg = path.join(ICI, `img-${ETIQ}`)
++if (IMAGES) fs.mkdirSync(dossierImg, { recursive: true })
++
++try {
++  const page = await nav.newPage()
++  await page.setViewport({ width: 1280, height: 800 })
++  const erreurs = []
++  page.on('pageerror', (e) => erreurs.push(String(e.message).slice(0, 200)))
++  await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 90000 })
++  await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe, { timeout: 60000, polling: 100 })
++  // laisser le premier dessin et le premier bloc arriver
++  await new Promise((r) => setTimeout(r, 6000))
++  // ⚠️ **L'ÉCRAN D'ACCUEIL RECOUVRE TOUT, ET IL FAUSSAIT LA MESURE D'IMAGE.**
++  // Il porte un `backdrop-filter`, donc la scène derrière est floutée et
++  // délavée : les premières captures de ce banc rendaient 215 de luminance
++  // moyenne pour un écran… d'accueil. Adrien filme SANS lui (« Echap —
++  // explorer librement »). On appuie donc sur Échap, et on vérifie qu'il est
++  // parti au lieu de l'espérer.
++  await page.keyboard.press('Escape')
++  await new Promise((r) => setTimeout(r, 1500))
++  const accueil = await page.evaluate(() => {
++    const el = document.elementFromPoint(640, 400)
++    return el ? el.tagName + '.' + (el.className || '') : 'rien'
++  })
++  if (!/CANVAS/i.test(accueil)) console.log(`⚠️ le centre de la vue n'est pas le canvas mais ${accueil}`)
++
++  // ── L'INSTRUMENT ─────────────────────────────────────────────────────────
++  // Il s'installe DANS la page et échantillonne à chaque image d'animation.
++  // ⚠️ On ne touche à rien : lecture seule, aucun uniforme écrit.
++  await page.evaluate(() => {
++    const e = window.__exp
++    window.__banc = { lignes: [], on: true, marque: '' }
++    const dir = new (window.THREE?.Vector3 ?? Object)()
++    const lireUniforme = () => {
++      // `uCropOn` vit sur les uniformes partagés du globe. On le cherche là où
++      // `globe.js` le pose, sans supposer une profondeur.
++      const g = e.globe
++      const u = g?.uniforms ?? g?._uniforms ?? null
++      if (u && u.uCropOn) return u.uCropOn.value
++      return null
++    }
++    const boucle = () => {
++      if (!window.__banc.on) return
++      requestAnimationFrame(boucle)
++      try {
++        const cam = e.camera
++        const v = new cam.position.constructor(0, 0, -1).applyQuaternion(cam.quaternion).normalize()
++        const p = cam.position
++        const mode = e.modes?.mode ?? '?'
++        // le « bas » LOCAL : centre de la planète en orbite, -Y en surface
++        let bx = 0, by = -1, bz = 0
++        if (mode === 'orbital') {
++          const n = Math.hypot(p.x, p.y, p.z) || 1
++          bx = -p.x / n; by = -p.y / n; bz = -p.z / n
++        }
++        const cos = Math.max(-1, Math.min(1, v.x * bx + v.y * by + v.z * bz))
++        const t = e.controls?.target
++        window.__banc.lignes.push({
++          t: Math.round(performance.now()),
++          mode,
++          busy: !!e.modes?.busy,
++          alt: e.altitudeCadrageM?.() ?? null,
++          dist: e.distanceCadrageM?.() ?? null,
++          altM: e.modes?.altM ?? null,
++          incl: (Math.acos(cos) * 180) / Math.PI,
++          vx: v.x, vy: v.y, vz: v.z,
++          px: p.x, py: p.y, pz: p.z,
++          tx: t?.x ?? null, ty: t?.y ?? null, tz: t?.z ?? null,
++          upy: e.camera.up.y,
++          cropOn: lireUniforme(),
++          pose: !!e.veilleCrop?.pose,
++          bascules: e.veilleCrop?.bascules ?? null,
++          repos: !!e.veilleCrop?.repos,
++          estompe: e.veilleEstompage?.valeur ?? null,
++          zoom: e.dem?.zoom ?? null,
++          marque: window.__banc.marque,
++        })
++        window.__banc.marque = ''
++      } catch (err) { window.__banc.lignes.push({ err: String(err).slice(0, 120) }) }
++    }
++    requestAnimationFrame(boucle)
++  })
++
++  // ── LE DÉPART : L'ORBITE, À L'ALTITUDE DEMANDÉE ─────────────────────────
++  await page.evaluate((altM) => {
++    const m = window.__exp.modes
++    m.enterOrbit(altM)
++    window.__banc.marque = 'orbite'
++  }, DEPART_M)
++  await new Promise((r) => setTimeout(r, 3000))
++  // `enterOrbit` amortit ; on force la valeur atteinte pour partir NET du haut
++  await page.evaluate((altM) => {
++    const m = window.__exp.modes
++    const parUnite = m.orbAlt > 0 && m.altM > 0 ? m.altM / m.orbAlt : null
++    if (parUnite) { m.orbAlt = m.orbAltTarget = altM / parUnite }
++  }, DEPART_M)
++  await new Promise((r) => setTimeout(r, 1500))
++
++  const client = await page.createCDPSession()
++
++  let nImg = 0
++  const t0 = Date.now()
++
++  for (let i = 0; i < CRANS; i++) {
++    // ⚠️ **L'ÉVÉNEMENT PART SUR LE CANVAS, PAS SUR LE POINT DE L'ÉCRAN.**
++    // `Input.dispatchMouseEvent` vise le PIXEL : au centre de la vue, ce pixel
++    // porte un bouton d'interface (`document.elementFromPoint(640,400)` rend
++    // `BUTTON.ce-wm-btn`), et `modes.js` écoute sur `renderer.domElement`. Un
++    // bouton qui n'est pas un descendant du canvas ne fait pas remonter la
++    // molette jusqu'à lui : mesuré, **120 crans, zéro mouvement**. On dispatche
++    // donc sur l'écouteur réel — c'est le même chemin de code, sans le hasard
++    // de la mise en page.
++    await page.evaluate((n) => {
++      const el = window.__exp.renderer.domElement
++      el.dispatchEvent(new WheelEvent('wheel', {
++        deltaY: -120, clientX: 640, clientY: 400, bubbles: true, cancelable: true,
++      }))
++      window.__banc.marque = 'molette' + n
++    }, i)
++    await new Promise((r) => setTimeout(r, PERIODE))
++    if (IMAGES && i % 4 === 0) {
++      const b = await client.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
++      const alt = await page.evaluate(() => window.__exp.altitudeCadrageM?.() ?? 0)
++      fs.writeFileSync(path.join(dossierImg, `${String(nImg).padStart(3, '0')}-c${i}-alt${Math.round(alt)}.png`), Buffer.from(b.data, 'base64'))
++      nImg++
++    }
++    const fini = await page.evaluate(() => (window.__exp.altitudeCadrageM?.() ?? 1e9) < 2500 && window.__exp.modes?.mode === 'surface')
++    if (fini) break
++  }
++
++  await new Promise((r) => setTimeout(r, 2000))
++  const lignes = await page.evaluate(() => { window.__banc.on = false; return window.__banc.lignes })
++  sortie.images = lignes
++  sortie.erreurs = erreurs
++  sortie.dureeMs = Date.now() - t0
++  fs.writeFileSync(path.join(ICI, `${ETIQ}.json`), JSON.stringify(sortie))
++  console.log(`${lignes.length} images enregistrées → .banc/R4/${ETIQ}.json`)
++  if (erreurs.length) console.log(`⚠️ ${erreurs.length} erreurs de page : ${erreurs.slice(0, 3).join(' | ')}`)
++} finally {
++  await nav.close()
++}
+diff --git a/src/modes.js b/src/modes.js
+index e989654..f467407 100644
+--- a/src/modes.js
++++ b/src/modes.js
+@@ -37,23 +37,32 @@ import {
+ // porte la loi mesurée par Adrien (un cran = ×√2), le franchissement de niveau
+ // sans table, et le changement d'unités qui rend ce franchissement invisible.
+ // ⚠️ **`modes.js` N'IMPORTE PAS `flags.js`** : il ne connaît le régime que par le
+ // crochet `hooks.zoomContinu()`, comme `globe.js` ne connaît `globeContinu` que
+ // par son constructeur.
+ import {
+   PAS_CRAN,
+   PAS_NIVEAU,
+   facteurCran,
+   franchissement,
+-  poseApresNiveau,
++  // ⛔ **`poseApresNiveau` N'EST PLUS IMPORTÉE ICI — Tâche R4.**
++  // `poseFranchissement` l'appelle pour son compte et fait EN PLUS le
++  // ré-ancrage sur la nouvelle cible. Garder les deux imports laisserait deux
++  // façons d'écrire le même geste, dont une qui rouvre le saut de 10°.
+   distancePourAltitudeFond,
+   niveauDArrivee,
++  // LA POSE — Tâche R4. Les deux lois vivent là-bas pour la même raison que les
++  // précédentes : elles se vérifient sous node. Et celle du franchissement prend
++  // les DEUX cibles, donc elle ne PEUT plus mélanger les repères — voir ses
++  // §4 bis et §4 ter, qui portent le relevé image par image.
++  poseFranchissement,
++  poseFonduArrivee,
+ } from './monde/zoom-continu.js'
+ 
+ // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
+ // preventDefault() sur plusieurs branches ; côté tactile, le vrai événement a
+ // déjà été traité au-dessus (c'est le pincement reconnu qui décide), donc ces
+ // branches n'ont plus rien à annuler.
+ const NOOP = () => {}
+ 
+ // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
+ // Every stop on the way down lands on a matching real-terrain block instead of
+@@ -143,20 +152,46 @@ const ORB_ALT_MIN = ALT_PLANCHER_ORBITALE_M / ORBITAL_M_PER_UNIT
+ // coasts over many notches (Adrien: "au moins 20 crans"). A notch is small on
+ // purpose; the momentum (ZOOM_TAU) is what gives the long, smooth glide. The
+ // glide CLAMPS at the zone's near/far limit and never crosses a level on its
+ // own — a FRESH scroll while already pinned at the limit steps to the next
+ // level (Adrien: "le zoom s'arrête au max de la zone, on re-scroll pour passer").
+ const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast stretches far
+ const ZOOM_VEL_MAX = 1.3 // caps a fast burst
+ const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
+ const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRESH gesture
+ 
++// ══════════ LA DURÉE DU BALAYAGE DE POSE — Tâche R4 ═════════════════════════
++//
++// ⚠️ **ELLE SE DÉRIVE D'UN BUDGET PAR IMAGE, ELLE NE SE CHOISIT PAS AU GOÛT.**
++// La plongée doit balayer `90° − atan(18/19) = 46,551°` (le §4 ter de
++// `monde/zoom-continu.js` porte le relevé). Avec la quadratique adoucie aux deux
++// bouts, la vitesse de pointe vaut DEUX fois la moyenne : le plus grand pas d'une
++// image à l'autre vaut donc `2 × 46,551 / (durée × 60)` degrés à 60 Hz.
++//
++//   | durée | pas de pointe à 60 Hz |
++//   | 0,5 s | 3,1° — encore un à-coup |
++//   | 1,1 s | **1,41°** |
++//   | 2,0 s | 0,78° — mais la caméra tient la main une seconde de trop |
++//
++// **1,1 s**, donc : c'est la plus courte qui tienne le pas de pointe sous 1,5°
++// par image, l'ordre de grandeur d'un mouvement de caméra qu'on lit au lieu de
++// le subir. Le test ⑪ de `test/zoom-continu.test.js` mesure ce pas et refuse
++// au-delà de 3°.
++//
++// ⚠️ **ET LE PIRE CAS EST BORNÉ, QUEL QUE SOIT LE DÉBIT D'IMAGES** : `main.js`
++// écrête le pas de temps à `Math.min(dtBrut, 0,05)`. Une image lente ne consomme
++// donc jamais plus de 50 ms de balayage, soit `84,6 °/s × 0,05 = 4,23°` au pire.
++// Mesuré au banc sur une image de 118 ms : **4,12°** — le plafond, atteint. Le
++// balayage s'y étire en temps réel (1,592 s relevés pour 1,1 s de courbe) au
++// lieu de sauter, et c'est exactement le compromis qu'on veut ici.
++const DUREE_FONDU_POSE_S = 1.1
++
+ // ══════════ LE BUDGET DU NIVEAU VAUT EXACTEMENT UN CRAN — Tâche 2 bis ═══════
+ //
+ // the zone's own zoom budget (log-distance) — the glide CLAMPS here, it does not
+ // run to the physical near/far stop; a fresh re-scroll at the limit steps a level.
+ //
+ // ⚠️ **IL VALAIT 1,2 EN ENTRÉE ET 0,55 EN SORTIE, ET CES DEUX CHIFFRES SONT
+ // DEVENUS FAUX LE JOUR OÙ `_rescale` A CESSÉ DE TÉLÉPORTER.** Tant que chaque
+ // traversée d'étage reposait la caméra au point de présentation, le budget du
+ // niveau n'avait aucune conséquence géométrique : le cran effaçait tout. Depuis
+ // que l'altitude métrique est CONSERVÉE au cran (décision d'Adrien du
+@@ -256,20 +291,21 @@ export class Modes {
+     this.busy = false
+     this.locked = false // embed « zone de test » : molette neutralisée (voir wheel)
+     this.travel = null // great-circle glide tween
+     this._surfCam = { near: camera.near, far: camera.far }
+     this._zoomVel = 0 // surface inertial dolly velocity (log-dist units/s)
+     this._zoomNdc = new THREE.Vector2() // cursor NDC of the last wheel notch
+     this._zoomPivot = null // world point the coast zooms toward (last valid)
+     this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
+     this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
+     this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
++    this._fonduPose = null // le balayage nadir → oblique de la plongée — voir _armerFonduPose
+ 
+     this._buildDom()
+ 
+     // orbital zoom is proportional to altitude (Google-Earth feel) — we take
+     // over the wheel entirely while in orbit
+     domElement.addEventListener('wheel', (e) => this._zoomGesture(e), { passive: false })
+ 
+     // LE DOIGT emprunte le MÊME escalier que la molette. Un pincement n'est pas
+     // traduit en dolly : gestes.js le convertit en crans de molette, et ils entrent
+     // par _zoomGesture — donc mêmes paliers de relief, mêmes butées, même élan.
+@@ -333,42 +369,67 @@ export class Modes {
+   // ferait clignoter la planète entière à chaque cran.
+   //
+   // En suivant l'emprise image par image, la conversion tombe sur la MÊME image
+   // que le changement, **quel qu'en soit l'auteur** : cran, plongée, vol,
+   // template, ou l'arrivée du MNT derrière la fenêtre (écart mesuré 6,9·10⁻⁵ à
+   // z12, 3,5 % à z5 — un vrai changement d'unité, pas du bruit).
+   //
+   // ⚠️ **ET C'EST UNE CONVERSION D'UNITÉS, PAS UNE REPOSITION.** L'invariant est
+   // `camY × emprise`, c'est-à-dire l'altitude que la caméra de FOND occupe. La
+   // pente traverse inchangée : l'angle de vue de l'utilisateur est gardé.
+-  _suivreEmprise() {
++  //
++  // ⛔ **ET LA PENTE NE TRAVERSAIT PAS — 10,4° DE PERDUS AU CRAN z3 → z4,
++  // MESURÉS À L'ÉCRAN — Tâche R4.** La phrase ci-dessus était juste tant que la
++  // CIBLE ne bougeait pas ; or `_rescale` écrit la visée du nouveau bloc AVANT
++  // d'appeler ce suiveur, et la direction se relisait alors sur le couple
++  // dépareillé `caméra(repère d'avant) − cible(repère d'après)`. Le relevé image
++  // par image est dans le §4 bis de `monde/zoom-continu.js`.
++  //
++  // ➡️ **`cibleAvant` EST LA RÉPARATION, ET C'EST LE SEUL ARGUMENT.** Quand
++  // l'appelant sait que la cible vient de changer de repère, il donne
++  // l'ANCIENNE : la direction se lit sur le couple accordé, et la caméra se
++  // repose sur la nouvelle cible le long de cette direction-là. Sans argument,
++  // le comportement est celui d'avant, au caractère près — c'est le chemin par
++  // image, où rien n'a bougé de repère.
++  //
++  // ⚠️ **AVEC `cibleAvant`, ON REPOSE MÊME À EMPRISE ÉGALE**, et ce n'est pas
++  // une prudence : pendant l'`await` du chargement, le suiveur PAR IMAGE a pu
++  // voir passer la nouvelle emprise et l'avoir déjà convertie. Sortir sur
++  // `avant === emprise` laisserait alors la caméra ancrée sur l'ancienne cible,
++  // c'est-à-dire exactement le défaut, une image plus tard.
++  _suivreEmprise(cibleAvant = null) {
+     const emprise = this.hooks.empriseBlocM?.()
+     const avant = this._empriseVue
+     if (!(emprise > 0)) { this._empriseVue = null; return }
+     this._empriseVue = emprise
+-    if (!this._continu() || this.mode !== 'surface' || !(avant > 0) || avant === emprise) return
++    if (!this._continu() || this.mode !== 'surface') return
++    if (!(avant > 0) && !cibleAvant) return
++    if (avant === emprise && !cibleAvant) return
+     const c = this.controls
+     const cible = c.target
+-    _zoomDir.copy(this.camera.position).sub(cible)
+-    const norme = _zoomDir.length()
+-    if (!(norme > 1e-6)) return
+-    _zoomDir.multiplyScalar(1 / norme)
+-    if (Math.abs(_zoomDir.y) < 1e-3) return // vue rasante : la pente ne porte plus rien
+-    const pose = poseApresNiveau({
+-      camY: this.camera.position.y,
+-      pente: _zoomDir.y,
+-      empriseAvant: avant,
++    const pose = poseFranchissement({
++      camera: this.camera.position,
++      cibleAvant: cibleAvant ?? cible,
++      cibleApres: cible,
++      // ⚠️ **SANS EMPRISE MÉMORISÉE, ON RÉ-ANCRE SANS CONVERTIR** — Tâche R4.
++      // Le ré-ancrage sur la nouvelle cible et la conversion d'unités sont deux
++      // gestes distincts qui tombent au même endroit ; ignorer le second n'est
++      // pas une raison de sauter le premier, sans quoi la caméra resterait
++      // accrochée à une cible qui n'existe plus. `emprise / emprise = 1` :
++      // l'altitude traverse à l'identique, ce qui est exactement juste ici.
++      empriseAvant: avant > 0 ? avant : emprise,
+       empriseApres: emprise,
+-      yCible: cible.y,
++      distanceMin: c.minDistance,
++      distanceMax: c.maxDistance,
+     })
+-    const borne = THREE.MathUtils.clamp(pose.distanceCible, c.minDistance, c.maxDistance)
+-    this.camera.position.copy(cible).addScaledVector(_zoomDir, borne)
++    if (!pose) return // caméra sur la cible, ou visée rasante : rien à reposer
++    this.camera.position.set(pose.x, pose.y, pose.z)
+     c.update()
+   }
+ 
+   // Le niveau d'arrivée, DÉDUIT de l'altitude de fond — sans table de paliers.
+   _niveauDArrivee(altM) {
+     const empriseAuZoom = this.hooks.empriseBlocMAuZoom
+     const span = this.hooks.coteBloc?.()
+     if (typeof empriseAuZoom !== 'function' || !(span > 0)) return null
+     return niveauDArrivee({
+       altM,
+@@ -394,21 +455,26 @@ export class Modes {
+   // ⛔ **C'EST LE GESTE QUE LE DÉPÔT DEMANDAIT À L'UTILISATEUR DE FAIRE.** Le
+   // glissé butait sur le budget du niveau, rendait la main, et il fallait
+   // **re-défiler** pour franchir (`atInLimit` → `_refine`). Adrien : *« vire
+   // absolument ton système de saut de niveau !!! »*
+   //
+   // Ici le budget n'est plus une butée mais un COMPTEUR : dès qu'il vaut un
+   // niveau plein, on franchit, et le compteur repart de son reste. L'hystérésis
+   // est celle de la troncature (`franchissement`), donc symétrique et sans
+   // seuil à régler.
+   _franchirSiBesoin() {
+-    if (!this._continu() || this.busy || this.travel || this._diveTween) return
++    // ⚠️ **ET PAS PENDANT LE BALAYAGE DE POSE — Tâche R4.** Un franchissement
++    // écrit une nouvelle cible et repose la caméra ; lancé au milieu du
++    // balayage, il se battrait avec lui pour la même caméra, image par image.
++    // Le compteur de budget, lui, TRAVERSE : le niveau se franchit à l'image
++    // suivant la fin du balayage, sans rien perdre.
++    if (!this._continu() || this.busy || this.travel || this._diveTween || this._fonduPose) return
+     const { niveaux, reste } = franchissement(this._levelZoom, BUDGET_NIVEAU)
+     if (niveaux === 0) return
+     if (niveaux > 0) {
+       // ⚠️ **ON NE DÉPENSE LE BUDGET QUE SI LE NIVEAU EXISTE.** Au zoom fin il
+       // n'y a plus rien à affiner : laisser le compteur courir est CORRECT — il
+       // faudra le remonter d'autant pour élargir, et l'aller-retour reste
+       // symétrique. Le retrancher rendrait le retour asymétrique.
+       if (!this.hooks.getRefineTarget()) return
+       this._levelZoom = reste
+       this._refine()
+@@ -883,25 +949,93 @@ export class Modes {
+       // `_surfCam.near` reposait, mais elle est maintenant DÉDUITE.
+       this.camera.near = planProche(this.camera.position.y - this._solSous(arrival.target))
+       this.camera.updateProjectionMatrix()
+       this.controls.maxPolarAngle = Math.PI * 0.49
+       this.controls.rotateSpeed = 1 // orbital update scales it down to ~0.015
+       this.controls.enableZoom = false // surface zoom is our inertial dolly
+       this.controls.enablePan = true
+       this.controls.enabled = true
+       this.controls.update()
+       this.mode = 'surface'
++      // ══════ LE FONDU DE POSE — Tâche R4 ═══════════════════════════════════
++      //
++      // ⚠️ **APRÈS `this.mode = 'surface'`, ET C'EST OBLIGATOIRE** : `update`
++      // n'avance le fondu que dans la branche de surface. Armé avant, il
++      // resterait figé une image, ce qui remettrait exactement le claquement
++      // qu'il supprime — plus petit, donc plus difficile à voir.
++      this._armerFonduPose(arrival.target)
+     })
+     this.announce('FX ONLINE — SURFACE MODE ENGAGED')
+     this.busy = false
+   }
+ 
++  // ══════════ LE FONDU DE POSE DE LA PLONGÉE — Tâche R4 ═══════════════════
++  //
++  // **Adrien, 2026-08-23 :** *« J'ai toujours le problème de déplacement de la
++  // Terre quand je descends depuis l'orbite. »*
++  //
++  // ⛔ **LA PLONGÉE TOURNAIT LA CAMÉRA DE 46,55° EN UNE IMAGE**, mesuré au
++  // navigateur (`.banc/R4/descente.mjs`, images 345 → 346, altitude 5 977 km) :
++  // inclinaison au nadir local **0,000° → 46,548°**. En orbite la caméra vise
++  // le centre de la planète, donc le nadir, TOUJOURS ; en surface la pose
++  // d'arrivée est oblique (`PENTE_ARRIVEE = {y: 18, z: 19}` — et
++  // `90° − atan(18/19) = 46,551°`, l'écart relevé au centième près).
++  //
++  // ⚠️ **CE N'EST PAS UN BOGUE, C'EST LE PRODUIT** : la vue de trois quarts EST
++  // ShibuMap. Le défaut n'est pas la pose d'arrivée, c'est qu'on y arrive d'un
++  // coup. La plongée arrive donc dans la pose que l'orbite quittait — le nadir —
++  // et l'inclinaison balaie jusqu'à l'oblique. Adrien accepte la transition,
++  // il refuse le claquement.
++  //
++  // ⚠️ **L'ALTITUDE NE BOUGE PAS D'UN MÈTRE PENDANT LE BALAYAGE**, et c'est la
++  // condition pour ne pas rouvrir le défaut de la Tâche M par l'autre bout : la
++  // caméra tourne à `camera.position.y` CONSTANT, or `altitudeFondM` vaut
++  // `camY × emprise / span`. La loi est dans `monde/zoom-continu.js`, §4 ter.
++  //
++  // ⚠️ **ET `camY` SE RELIT À CHAQUE IMAGE, PAS UNE FOIS À L'ARMEMENT** : sous
++  // le drapeau le glissé inertiel court pendant le fondu (`_applyZoom` ignore
++  // `busy`). Figer `camY` annulerait la molette de l'utilisateur pendant une
++  // seconde entière — donc rendrait la main avec un saut, ce qu'on ferme ici.
++  _armerFonduPose(cible) {
++    this._fonduPose = null
++    if (!this._continu()) return
++    const direction = this.camera.position.clone().sub(cible)
++    if (!(direction.lengthSq() > 1e-6)) return
++    direction.normalize()
++    // ⚠️ **UNE ARRIVÉE DÉJÀ RASANTE N'A RIEN À BALAYER**, et le rayon horizontal
++    // `dy / tan θ` y explose. Même garde, même convention que `_suivreEmprise` :
++    // ne rien faire, jamais faire zéro.
++    if (!(direction.y > 1e-3)) return
++    // ⚠️ **ET UNE ARRIVÉE TROP BASSE NON PLUS** : à l'aplomb, la distance à la
++    // cible vaut `camY − yCible` ; sous `minDistance`, `controls.update()` la
++    // repousserait à chaque image et le fondu se battrait contre la butée.
++    if (!(this.camera.position.y - cible.y > this.controls.minDistance * 1.05)) return
++    this._fonduPose = { t: 0, cible: cible.clone(), direction }
++    this._avancerFonduPose(0)
++  }
++
++  // Une image de fondu. `e` est l'avancement DÉJÀ adouci.
++  _avancerFonduPose(e) {
++    const f = this._fonduPose
++    if (!f) return
++    const p = poseFonduArrivee({
++      cible: f.cible,
++      camY: this.camera.position.y,
++      direction: f.direction,
++      avancement: e,
++    })
++    if (!p) { this._fonduPose = null; return }
++    this.camera.position.set(p.x, p.y, p.z)
++    this.controls.target.copy(f.cible)
++    this.controls.update()
++  }
++
+   // surface → surface: reload the patch two zoom steps finer, centered on
+   // what the camera is looking at — the staircase down from a z8 dive
+   async _refine() {
+     if (this.mode !== 'surface' || this.busy) return
+     const next = this.hooks.getRefineTarget()
+     if (!next) return // already at fine scale
+     await this._rescale(next, 'REFINING')
+   }
+ 
+   // surface → surface the other way: widen the map two zoom steps before
+@@ -951,28 +1085,39 @@ export class Modes {
+     this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
+     try {
+       await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
+     } catch {
+       this.announce(`${verb} FAILED — HOLDING SCALE`)
+       this.busy = false
+       return
+     }
+     const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
+     const arrival = this._arrivalPose(next)
++    // ⚠️ **L'ANCIENNE CIBLE SE LIT ICI, ET PAS UNE LIGNE PLUS BAS — Tâche R4.**
++    // La ligne suivante la remplace par la visée du NOUVEAU bloc, exprimée dans
++    // le repère du nouveau bloc : la lire après, c'est lire un repère et une
++    // caméra qui ne sont plus dans le même monde. Mesuré : 10,4° de rotation au
++    // cran z3 → z4, et de 1,3° à 8,1° aux six suivants.
++    //
++    // ⛔ **ET `prevDir` NE POUVAIT PAS SERVIR ICI** : il est lu AVANT le
++    // chargement, alors que sous le drapeau le glissé inertiel continue de
++    // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
++    // direction est celle d'il y a quelques images, pas celle de maintenant.
++    const cibleAvant = continu ? this.controls.target.clone() : null
+     this.controls.target.copy(arrival.target)
+     // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
+     // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
+     // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport
+     // des EMPRISES, alors que `poseCranContinu` prend le rapport des échelles
+     // VERTICALES — lequel porte l'exagération, et c'est LUI l'accrochage (jusqu'à
+     // ×2 au cran z4 → z5 avec la table de paliers du dépôt).
+-    if (continu) { this._suivreEmprise(); this.busy = false; return }
++    if (continu) { this._suivreEmprise(cibleAvant); this.busy = false; return }
+     const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+     // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
+     // comparer : on retombe sur la pose d'arrivée, qui est le comportement
+     // d'avant l'escalier continu — jamais sur une distance inventée.
+     const facteur = echelleAvant > 0 && echelleApres > 0 ? echelleApres / echelleAvant : null
+     const dist =
+       facteur && Math.abs(dir.y) > 1e-3
+         ? poseCranContinu({ camY: camYAvant, pente: dir.y, facteurEchelle: facteur, yCible: arrival.target.y })
+             .distanceCible
+         : arrival.pos.distanceTo(arrival.target)
+@@ -1272,20 +1417,38 @@ export class Modes {
+         const e = dv.t < 0.5 ? 2 * dv.t * dv.t : 1 - ((-2 * dv.t + 2) ** 2) / 2
+         this.camera.position.lerpVectors(dv.from, dv.toPos, e)
+         this.controls.target.lerpVectors(dv.fromT, dv.toT, e)
+         this.controls.update()
+         if (dv.t >= 1) {
+           this._diveTween = null
+           this.controls.enabled = true
+           this._loadDive(dv.target)
+         }
+       }
++      // ══════ LE BALAYAGE DE POSE DE LA PLONGÉE — Tâche R4 ══════════════════
++      //
++      // ⚠️ **APRÈS `_applyZoom`, ET L'ORDRE EST LA MOITIÉ DU GESTE.** Le glissé
++      // pose la DISTANCE (donc `camY`, donc l'altitude), le balayage pose
++      // l'ANGLE en relisant le `camY` que le glissé vient d'écrire. Dans l'autre
++      // ordre, le glissé repousserait la caméra le long de la direction
++      // intermédiaire et l'angle serait celui de l'image d'avant.
++      //
++      // ⚠️ **LA COURBE EST CELLE DU TWEEN DE CLIC**, la même quadratique
++      // adoucie aux deux bouts : deux courbes différentes pour deux mouvements
++      // de caméra du même fichier seraient deux sensations à tenir d'accord.
++      if (this._fonduPose) {
++        const f = this._fonduPose
++        f.t = Math.min(1, f.t + dt / DUREE_FONDU_POSE_S)
++        const e = f.t < 0.5 ? 2 * f.t * f.t : 1 - ((-2 * f.t + 2) ** 2) / 2
++        this._avancerFonduPose(e)
++        if (f.t >= 1) this._fonduPose = null
++      }
+       this.altM = this.hooks.surfaceCamAltMeters()
+     }
+ 
+     this.altModeEl.textContent = this.mode === 'orbital' ? 'ORBITAL' : 'SURFACE'
+     this.altValueEl.textContent =
+       this.altM >= 100000
+         ? `${(this.altM / 1000).toFixed(0)} km`
+         : this.altM >= 10000
+           ? `${(this.altM / 1000).toFixed(1)} km`
+           : `${Math.max(0, Math.round(this.altM))} m`
+diff --git a/src/monde/zoom-continu.js b/src/monde/zoom-continu.js
+index 5702121..4f2afa7 100644
+--- a/src/monde/zoom-continu.js
++++ b/src/monde/zoom-continu.js
+@@ -148,20 +148,150 @@ export function camYApresNiveau({ camY, empriseAvant, empriseApres }) {
+ 
+ // La pose complète : la même chose, plus la distance à la cible qui va avec.
+ // `pente` est le `y` normalisé de la direction cible → caméra ; elle TRAVERSE le
+ // franchissement inchangée (l'angle de vue de l'utilisateur est gardé, c'était
+ // la bonne moitié de v48).
+ export function poseApresNiveau({ camY, pente, empriseAvant, empriseApres, yCible = 0 }) {
+   const y = camYApresNiveau({ camY, empriseAvant, empriseApres })
+   return { camY: y, distanceCible: (y - yCible) / pente, pente }
+ }
+ 
++// ══════════ 4 bis. LA CIBLE CHANGE DE REPÈRE, ELLE AUSSI — Tâche R4 ═════════
++//
++// ⛔ **`poseApresNiveau` PROMET QUE « LA PENTE TRAVERSE INCHANGÉE », ET LE
++// DÉPÔT LA CHANGEAIT — DE 1,3° À 10,4° PAR FRANCHISSEMENT, MESURÉ À L'ÉCRAN.**
++//
++// Le relevé, image par image, d'une descente de 60 000 km au sol
++// (`.banc/R4/descente.mjs`, croisement z3 → z4, images 651 → 652) :
++//
++//   | image | caméra                     | cible                      | inclinaison |
++//   | 651   | (−2,229 ; 23,821 ; 25,157) | (−2,229 ; −0,156 ; −0,153) | 46,548°     |
++//   | 652   | (−8,418 ; 44,628 ; 38,989) | ( 4,814 ; −0,297 ;  8,949) | **36,154°** |
++//
++// **La cible saute de 9,1 unités en z, en UNE image.** C'est normal : le bloc
++// d'après a sa propre origine, et `_cibleVisee` rend le MÊME point géographique
++// dans le NOUVEAU repère. Ce qui ne l'est pas, c'est que `_rescale` écrivait
++// cette cible-là **avant** de reposer la caméra, et que la direction était
++// ensuite relue sur le couple dépareillé
++// `caméra(repère d'avant) − cible(repère d'après)`. La pente qu'on croyait
++// conserver était déjà fausse quand on la lisait.
++//
++// ⚠️ **C'EST LA SIXIÈME FOIS SUR CE CHANTIER QU'UNE GRANDEUR JUSTE EST EXPRIMÉE
++// DANS LE MAUVAIS REPÈRE**, et c'est pourquoi la loi vit ici plutôt que dans
++// `modes.js` : elle prend les DEUX cibles, donc elle ne PEUT pas mélanger les
++// repères — l'erreur devient impossible à écrire au lieu d'être interdite par
++// un commentaire.
++//
++// La direction se lit sur `caméra − cibleAvant` (tous deux dans le repère
++// d'avant), l'altitude se convertit par le rapport des emprises, et la caméra
++// se repose sur `cibleApres` (repère d'après) **le long de cette direction-là**.
++//
++// Rend `null` quand la géométrie ne porte rien : caméra sur la cible, ou visée
++// rasante (`|pente| < penteMin`) — dans ce dernier cas la distance
++// `(camY − yCible) / pente` explose, et c'est déjà la garde que `_suivreEmprise`
++// portait en clair. **Un `null` veut dire « ne repose pas », jamais « repose à
++// zéro ».**
++export function poseFranchissement({
++  camera,
++  cibleAvant,
++  cibleApres,
++  empriseAvant,
++  empriseApres,
++  distanceMin = 0,
++  distanceMax = Infinity,
++  penteMin = 1e-3,
++} = {}) {
++  if (!camera || !cibleAvant || !cibleApres) return null
++  const dx = camera.x - cibleAvant.x
++  const dy = camera.y - cibleAvant.y
++  const dz = camera.z - cibleAvant.z
++  const norme = Math.hypot(dx, dy, dz)
++  if (!(norme > 1e-6)) return null
++  const pente = dy / norme
++  if (!(Math.abs(pente) > penteMin)) return null
++  const camY = camYApresNiveau({ camY: camera.y, empriseAvant, empriseApres })
++  const brute = (camY - cibleApres.y) / pente
++  if (!Number.isFinite(brute)) return null
++  const d = Math.min(Math.max(brute, distanceMin), distanceMax)
++  return {
++    x: cibleApres.x + (dx / norme) * d,
++    y: cibleApres.y + (dy / norme) * d,
++    z: cibleApres.z + (dz / norme) * d,
++    camY,
++    distanceCible: d,
++    pente,
++  }
++}
++
++// ══════════ 4 ter. LE FONDU DE POSE DE LA PLONGÉE — Tâche R4 ════════════════
++//
++// ⛔ **LA PLONGÉE TOURNAIT LA CAMÉRA DE 46,55° EN UNE IMAGE**, et c'est le
++// « déplacement de la Terre » qu'Adrien filme en descendant de l'orbite. Mesuré
++// (`.banc/R4/descente.mjs`, images 345 → 346, altitude 5 977 km) : inclinaison
++// au nadir local **0,000° → 46,548°**, cible (0,0,0) → la visée du bloc, le tout
++// entre deux images consécutives.
++//
++// ⚠️ **CE N'EST PAS UN BOGUE DE REPÈRE, ET C'EST POURQUOI ON NE « CORRIGE » PAS
++// LA POSE.** En orbite la caméra vise le centre de la planète : sa visée EST le
++// nadir local, à toutes les altitudes (mesuré : 0,000° sur toute la portion
++// orbitale). En surface, la pose d'arrivée de ShibuMap est oblique —
++// `PENTE_ARRIVEE = {y: 18, z: 19}`, soit `90° − atan(18/19) = 46,551°` du nadir,
++// ce qui est **exactement** l'écart relevé. La vue de trois quarts EST le
++// produit ; l'annuler serait un autre chantier, et pas celui-ci.
++//
++// **Ce qui est réparable, c'est qu'elle soit posée en UNE image.** Adrien
++// accepte la transition — « si je dézoome en scrollant, alors là tu peux faire
++// réapparaître le reste » — il refuse le claquement. La plongée arrive donc AU
++// NADIR, c'est-à-dire dans la pose exacte que l'orbite quittait, puis
++// l'inclinaison balaie jusqu'à la pose d'arrivée.
++//
++// ⚠️ **C'EST L'ANGLE QU'ON INTERPOLE, PAS LA POSITION**, et l'altitude en
++// dépend : la caméra tourne à **`camY` CONSTANT** autour de la cible, donc
++// `altitudeFondM = camY × emprise / span` ne bouge pas d'un mètre pendant tout
++// le balayage. Interpoler la position aurait gardé `camY` elle aussi (les deux
++// bouts sont à la même hauteur), mais aurait fait passer la caméra par une
++// corde — donc accéléré puis ralenti l'angle sans aucune raison.
++//
++// La géométrie, en une ligne : à élévation `θ` au-dessus de l'horizontale et à
++// hauteur `dy = camY − yCible` au-dessus de la cible, le rayon horizontal vaut
++// `dy / tan θ`. À `θ = 90°` il est nul (caméra à l'aplomb), à `θ = atan(18/19)`
++// il vaut `dy × 19/18` — la pose d'arrivée, au bit près.
++//
++// `avancement` est DÉJÀ adouci par l'appelant : cette loi est géométrique, la
++// courbe d'accompagnement est de la plomberie. Rend `null` quand la direction
++// d'arrivée ne porte pas d'élévation exploitable (visée rasante, caméra sous la
++// cible) — même convention que `poseFranchissement`.
++//
++// `direction` est le vecteur cible → caméra de la pose d'ARRIVÉE ; il n'a pas
++// besoin d'être unitaire, il est normalisé ici.
++export function poseFonduArrivee({ cible, camY, direction, avancement = 1, penteMin = 1e-3 } = {}) {
++  if (!cible || !direction || !Number.isFinite(camY)) return null
++  const dy = camY - cible.y
++  if (!(dy > 0)) return null
++  const norme = Math.hypot(direction.x, direction.y, direction.z)
++  if (!(norme > 1e-6)) return null
++  const sinFin = direction.y / norme
++  if (!(sinFin > penteMin)) return null
++  const elevFin = Math.asin(Math.min(1, sinFin))
++  const e = Math.min(1, Math.max(0, avancement))
++  // du nadir (π/2) vers l'élévation d'arrivée
++  const elevation = Math.PI / 2 + (elevFin - Math.PI / 2) * e
++  const t = Math.tan(elevation)
++  const r = Math.abs(t) > 1e-9 ? dy / t : 0
++  // l'azimut est celui de la direction d'arrivée ; à `e = 0` le rayon est nul,
++  // donc il n'a aucun effet — la caméra est à l'aplomb et n'a pas d'azimut.
++  const hn = Math.hypot(direction.x, direction.z)
++  const ax = hn > 1e-9 ? direction.x / hn : 0
++  const az = hn > 1e-9 ? direction.z / hn : 0
++  return { x: cible.x + ax * r, y: camY, z: cible.z + az * r, elevation }
++}
++
+ // ══════════ 5. LA PLONGÉE QUI NE SAUTE PAS ══════════════════════════════════
+ //
+ // ⚠️ **`_posePlongee` CONSERVAIT, LUI AUSSI, LA MAUVAISE ALTITUDE**, et
+ // `loi-altitude.js` le savait : *« le CHAMP VISUEL, lui, saute encore d'un
+ // facteur `exagération(z)` […] C'est une question, pas un oubli. »* Sous
+ // `?terre=unique` la question a une réponse, parce qu'il n'y a plus deux mondes
+ // à raccorder mais un seul : **l'altitude de fond est CONTINUE à la traversée**,
+ // puisque de l'autre côté c'est la même planète.
+ //
+ // `camY` qui rend exactement `altM` d'altitude de fond sur un bloc d'emprise
+diff --git a/test/zoom-continu.test.js b/test/zoom-continu.test.js
+index edda86a..2ab66f2 100644
+--- a/test/zoom-continu.test.js
++++ b/test/zoom-continu.test.js
+@@ -21,20 +21,22 @@ import path from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ 
+ import {
+   PAS_CRAN,
+   PAS_NIVEAU,
+   EXAGERATION_UNIQUE,
+   facteurCran,
+   franchissement,
+   camYApresNiveau,
+   poseApresNiveau,
++  poseFranchissement,
++  poseFonduArrivee,
+   camYPourAltitudeFond,
+   distancePourAltitudeFond,
+   niveauDArrivee,
+   profilDescenteFond,
+ } from '../src/monde/zoom-continu.js'
+ import { sautsDuProfil, empriseBlocM, distanceArrivee, PENTE_ARRIVEE_Y, Y_CIBLE } from '../src/loi-altitude.js'
+ import { altitudeFondM } from '../src/monde/frontiere-rendu.js'
+ import { ORBITAL_M_PER_UNIT } from '../src/geo.js'
+ import { STEP_IN, STEP_OUT } from '../src/modes.js'
+ 
+@@ -365,39 +367,45 @@ test('⑥ le glissé ne se fait plus BORNER par le budget du niveau', () => {
+   // neutralisées sous le drapeau — c'est le « re-scroll pour passer » qui meurt
+   assert.match(SRC_MODES, /const atInLimit = !continu &&/)
+   assert.match(SRC_MODES, /const atOutLimit = !continu &&/)
+ })
+ 
+ test('⑥ la conversion d’unités tombe sur la MÊME image que le changement', () => {
+   // ⚠️ **LE DÉFAUT MESURÉ QUE ÇA FERME** : `largeurBlocM()` est divisée par deux
+   // UNE IMAGE avant que la caméra ne suive — onze bascules du seuil du socle au
+   // lieu d'une. Le suiveur est donc appelé EN TÊTE d'`update`, avant que
+   // `majSeuilSocle()` et `majCameraFond()` ne lisent quoi que ce soit.
+-  assert.match(SRC_MODES, /_suivreEmprise\(\) \{/)
++  // ⚠️ **LA SIGNATURE PORTE MAINTENANT `cibleAvant` — Tâche R4.** Voir la
++  // section ⑪ : sans l'ancienne cible, la direction se relisait sur le couple
++  // dépareillé `caméra(repère d'avant) − cible(repère d'après)`, et le
++  // franchissement tournait la caméra de 10,4°, mesurés au navigateur.
++  assert.match(SRC_MODES, /_suivreEmprise\(cibleAvant = null\) \{/)
+   assert.match(SRC_MODES, /update\(dt\) \{[\s\S]{0,700}?this\._suivreEmprise\(\)/)
+-  const suiv = SRC_MODES.slice(SRC_MODES.indexOf('  _suivreEmprise() {'))
+-  assert.match(suiv.slice(0, suiv.indexOf('\n  }\n')), /poseApresNiveau/)
++  const suiv = SRC_MODES.slice(SRC_MODES.indexOf('  _suivreEmprise(cibleAvant = null) {'))
++  assert.match(suiv.slice(0, suiv.indexOf('\n  }\n')), /poseFranchissement/)
+   // et `main.js` appelle bien `modes.update` avant les deux lecteurs d'altitude
+   const iUpdate = SRC_MAIN.indexOf('modes.update(dt)')
+   assert.ok(iUpdate > 0 && iUpdate < SRC_MAIN.indexOf('  majSeuilSocle()'))
+   assert.ok(iUpdate < SRC_MAIN.indexOf('  majCameraFond()'))
+ })
+ 
+ test('⑥ le franchissement ne remet PAS l’élan à zéro sous le drapeau', () => {
+   // `_resetZoom()` tuait l'inertie à chaque cran : le glissé repartait de zéro,
+   // et c'est la moitié de la sensation d'accrochage.
+   const bloc = SRC_MODES.slice(SRC_MODES.indexOf('  async _rescale(next, verb'))
+   const corps = bloc.slice(0, bloc.indexOf('\n  }\n'))
+   assert.match(corps, /if \(!continu\) this\._resetZoom\(\)/)
+   // ⚠️ et le cran ne repose PAS la caméra lui-même : il rend la main au suiveur
+   // d'unités, seul écrivain de la conversion.
+-  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(\); this\.busy = false; return \}/)
++  // ⚠️ **ET IL LUI PASSE L'ANCIENNE CIBLE — Tâche R4** : c'est la seule chose
++  // que le suiveur ne peut pas retrouver seul une fois la cible réécrite.
++  assert.match(corps, /if \(continu\) \{ this\._suivreEmprise\(cibleAvant\); this\.busy = false; return \}/)
+   // ⚠️ **LA FORME D'APPEL, PAS LA MENTION** : le commentaire au-dessus nomme
+   // `poseCranContinu` pour dire pourquoi on ne l'emploie plus. L'APPEL, lui, est
+   // après le retour anticipé — donc hors du chemin continu.
+   assert.ok(corps.indexOf('poseCranContinu({') > corps.indexOf('if (continu) {'))
+   // et le glissé n'est plus gelé pendant le chargement
+   assert.match(SRC_MODES, /\(!this\.busy \|\| this\._continu\(\)\) && Math\.abs\(this\._zoomVel\)/)
+ })
+ 
+ test('⑥ l’exagération est FIXE sous le drapeau, donc la planète ne se recharge plus', () => {
+   // ⚠️ **C'EST LA RÉPONSE EXACTE À LA QUESTION D'ADRIEN** (« pourquoi toute la
+@@ -555,21 +563,21 @@ function domDePacotille() {
+     e.setAttribute = () => {}
+     e.addEventListener = () => {}
+     e.querySelector = () => el()
+     return e
+   }
+   const corps = el()
+   globalThis.document = { createElement: () => el(), body: corps, addEventListener() {} }
+   return corps
+ }
+ 
+-async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326 } = {}) {
++async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326, viseeMobile = false } = {}) {
+   domDePacotille()
+   const THREE = await import('three')
+   const { Modes } = await import('../src/modes.js')
+   const camera = new THREE.PerspectiveCamera(33, 16 / 9, 0.5, 1400)
+   const etat = { emprise, zoomCharge: [], loadSurface: 0 }
+   const controls = {
+     target: new THREE.Vector3(0, Y_CIBLE, 0),
+     minDistance: 6, maxDistance: 150, enabled: true, maxPolarAngle: 0,
+     rotateSpeed: 1, enableZoom: false, enablePan: true,
+     getDistance() { return camera.position.distanceTo(this.target) },
+@@ -583,20 +591,26 @@ async function machine({ continu = true, emprise = 1e6, span = 56, lat = 45.8326
+     empriseBlocMAuZoom: (z) => empriseBlocM({ zoom: z, lat }),
+     coteBloc: () => span,
+     getFineZoom: () => 15,
+     surfaceMaxDistance: () => 150,
+     surfaceCamAltMeters: () => 0,
+     getSurfaceLatLon: () => ({ lat, lon: 6.86 }),
+     setSurfaceVisible() {}, setEffectsEnabled() {},
+     getRefineTarget: () => ({ lat, lon: 6.86, zoom: 12 }),
+     getCoarsenTarget: () => ({ lat, lon: 6.86, zoom: 10 }),
+     async loadSurface(_lat, _lon, zoom) { etat.loadSurface++; etat.zoomCharge.push(zoom); etat.emprise /= 2 },
++    // ⚠️ **LA VISÉE DU LIEU DÉPLACE LA CIBLE, ET C'EST CE QUE LA PRODUCTION FAIT**
++    // — Tâche R4. `main.js` rend le point géographique visé dans le repère du
++    // bloc COURANT ; d'un niveau au suivant, ce même point change donc de
++    // coordonnées. Sans ce crochet, la cible reste à l'origine et le saut
++    // d'orientation du franchissement est structurellement invisible.
++    ...(viseeMobile ? { viseeDuLieu: () => ({ x: 4.814 + etat.loadSurface, z: 8.949 - etat.loadSurface }) } : {}),
+   }
+   const m = new Modes({ camera, controls, globe, domElement, hooks })
+   m.mode = 'surface'
+   return { m, camera, controls, etat, THREE }
+ }
+ 
+ test('⑨ `_altitudeFondM` est `camY × emprise / span`, et rien d’autre', async () => {
+   const { m, camera } = await machine({ emprise: 1e6, span: 56 })
+   camera.position.set(0, 40, 0)
+   assert.equal(m._altitudeFondM(), (40 * 1e6) / 56)
+@@ -727,10 +741,185 @@ test('⑩ les trois crochets d’emprise lisent le MÊME couple que la caméra d
+   // `majCameraFond()` passe `extentMeters: largeurBlocM()` et `span: TERRAIN_SIZE`
+   // à la similitude ; les crochets doivent lire exactement ce couple-là.
+   assert.match(SRC_MAIN, /empriseBlocM: \(\) => \(params\.source === 'real' \? largeurBlocM\(\) : 0\)/)
+   assert.match(SRC_MAIN, /coteBloc: \(\) => TERRAIN_SIZE/)
+   assert.match(SRC_MAIN, /empriseBlocMAuZoom: \(zoom, lat = params\.demLat\) => empriseBlocM\(\{ zoom, lat \}\)/)
+   const fond = SRC_MAIN.slice(SRC_MAIN.indexOf('const pose = poseFond({'))
+   const corps = fond.slice(0, fond.indexOf('})'))
+   assert.match(corps, /extentMeters: largeur/)
+   assert.match(corps, /span: TERRAIN_SIZE/)
+ })
++
++// ══════════════════════════════════════════════════════════════════════════
++// ⑪ LA POSE — Tâche R4, « LA TERRE NE DOIT NI BOUGER NI SE RECHARGER »
++//
++// **Adrien, 2026-08-23, vidéo de 39 s à l'appui :** *« J'ai toujours le problème
++// de déplacement de la Terre quand je descends depuis l'orbite. »*
++//
++// ⚠️ **LA TÂCHE M AVAIT MESURÉ L'ALTITUDE, ET ELLE AVAIT RAISON : L'ALTITUDE NE
++// SAUTE PAS.** Ce qui saute, c'est l'ORIENTATION — une grandeur qu'aucune des
++// mesures d'altitude de ce fichier ne peut voir, puisqu'une caméra qui bascule
++// du nadir à l'oblique sans bouger d'un mètre garde son altitude ET son rapport
++// d'altitude d'une image à l'autre.
++//
++// Relevé image par image dans le navigateur (`.banc/R4/descente.mjs`, descente
++// de 60 000 km au sol, drapeau levé), inclinaison au nadir LOCAL :
++//
++//   | image | événement             | inclinaison       |
++//   | 346   | orbite → surface      | 0,000° → 46,548°  |
++//   | 652   | franchissement z3→z4  | 46,548° → 36,154° |
++//   | 1098  | franchissement z5→z6  | 34,52°  → 37,09°  |
++//   | 1984  | franchissement z9→z10 | 45,92°  → 54,05°  |
++//   | 2090  | NAISSANCE DU CROP     | 54,047° → 54,047° |
++//
++// ⚠️ **LA DERNIÈRE LIGNE EST CELLE QUI FIXE LE PÉRIMÈTRE** : la naissance du
++// crop ne touche PAS à la caméra, pas d'un millième de degré. Le brief de la
++// tâche l'attribuait au crop ; la mesure dit que ce sont la PLONGÉE et les
++// FRANCHISSEMENTS. Les deux sont réparés ici, le crop n'y est pour rien.
++// ══════════════════════════════════════════════════════════════════════════
++
++const inclinaisonDeg = (cam, cible) => {
++  const dx = cam.x - cible.x
++  const dy = cam.y - cible.y
++  const dz = cam.z - cible.z
++  return (Math.acos(dy / Math.hypot(dx, dy, dz)) * 180) / Math.PI
++}
++
++test('⑪ la pose de franchissement garde l’inclinaison, quel que soit le saut de cible', () => {
++  // le relevé du navigateur, rejoué : la cible saute de 9,1 unités en z
++  const camera = { x: -2.229, y: 23.821, z: 25.157 }
++  const cibleAvant = { x: -2.229, y: -0.156, z: -0.153 }
++  const cibleApres = { x: 4.814, y: -0.297, z: 8.949 }
++  const avant = inclinaisonDeg(camera, cibleAvant)
++  assert.ok(Math.abs(avant - 46.548) < 0.01, `relevé ${avant.toFixed(3)}° au lieu de 46,548°`)
++  const p = poseFranchissement({
++    camera,
++    cibleAvant,
++    cibleApres,
++    empriseAvant: 1e6,
++    empriseApres: 5e5,
++    distanceMin: 6,
++    distanceMax: 150,
++  })
++  const apres = inclinaisonDeg(p, cibleApres)
++  assert.ok(Math.abs(apres - avant) < 1e-9, `l’inclinaison a bougé de ${(apres - avant).toFixed(4)}°`)
++  // et l'altitude de fond traverse : camY est multipliée par le rapport des emprises
++  assert.ok(Math.abs(p.camY / (camera.y * 2) - 1) < 1e-12)
++})
++
++test('⑪ MUTATION — lire la direction sur la cible D’APRÈS rouvre le saut de 10°', () => {
++  // ⚠️ **SANS CETTE MUTATION, L’ASSERTION CI-DESSUS SERAIT UNE TAUTOLOGIE.**
++  // C'est le geste EXACT du dépôt d'avant R4 : `_rescale` écrivait la nouvelle
++  // cible, puis `_suivreEmprise` relisait la direction sur le couple dépareillé.
++  const camera = { x: -2.229, y: 23.821, z: 25.157 }
++  const cibleAvant = { x: -2.229, y: -0.156, z: -0.153 }
++  const cibleApres = { x: 4.814, y: -0.297, z: 8.949 }
++  const faux = poseFranchissement({
++    camera,
++    cibleAvant: cibleApres, // ⛔ la lecture d'avant : la cible du NOUVEAU repère
++    cibleApres,
++    empriseAvant: 1e6,
++    empriseApres: 5e5,
++    distanceMin: 6,
++    distanceMax: 150,
++  })
++  const ecart = Math.abs(inclinaisonDeg(faux, cibleApres) - inclinaisonDeg(camera, cibleAvant))
++  assert.ok(ecart > 9, `la loi d’avant ne dévie que de ${ecart.toFixed(2)}° — le relevé en donne 10,4`)
++})
++
++test('⑪ le fondu de pose part du NADIR et finit sur la pose d’arrivée, à camY constant', () => {
++  const cible = { x: 3, y: Y_CIBLE, z: -7 }
++  const camY = 44
++  // la direction d'arrivée du dépôt : PENTE_ARRIVEE = { y: 18, z: 19 }
++  const n = Math.hypot(18, 19)
++  const direction = { x: 0, y: 18 / n, z: 19 / n }
++  const d0 = poseFonduArrivee({ cible, camY, direction, avancement: 0 })
++  // à l'aplomb : la caméra est exactement au-dessus de la cible
++  assert.ok(Math.abs(d0.x - cible.x) < 1e-9 && Math.abs(d0.z - cible.z) < 1e-9)
++  assert.equal(d0.y, camY)
++  const d1 = poseFonduArrivee({ cible, camY, direction, avancement: 1 })
++  // à l'arrivée : la pose OBLIQUE, celle que `_arrivalPose` produit
++  const dist = (camY - cible.y) / direction.y
++  assert.ok(Math.abs(d1.x - (cible.x + direction.x * dist)) < 1e-9)
++  assert.ok(Math.abs(d1.z - (cible.z + direction.z * dist)) < 1e-9)
++  assert.ok(Math.abs(d1.y - camY) < 1e-9)
++  // l'inclinaison balaie de 0° à 46,55° SANS jamais reculer, et `camY` ne bouge
++  let precedent = -1
++  for (let i = 0; i <= 40; i++) {
++    const p = poseFonduArrivee({ cible, camY, direction, avancement: i / 40 })
++    assert.equal(p.y, camY, 'le fondu a changé l’altitude')
++    const incl = inclinaisonDeg(p, cible)
++    assert.ok(incl >= precedent - 1e-9, 'l’inclinaison est revenue en arrière')
++    precedent = incl
++  }
++  assert.ok(Math.abs(precedent - 46.551) < 0.01, `arrivée à ${precedent.toFixed(3)}° au lieu de 46,551°`)
++})
++
++test('⑪ une visée rasante ou une caméra sous la cible ne rendent RIEN, jamais zéro', () => {
++  const cible = { x: 0, y: 0, z: 0 }
++  assert.equal(poseFonduArrivee({ cible, camY: 40, direction: { x: 0, y: 0, z: 1 } }), null)
++  assert.equal(poseFonduArrivee({ cible, camY: -3, direction: { x: 0, y: 1, z: 1 } }), null)
++  assert.equal(
++    poseFranchissement({ camera: { x: 0, y: 0, z: 10 }, cibleAvant: cible, cibleApres: cible, empriseAvant: 1, empriseApres: 1 }),
++    null
++  )
++})
++
++test('⑪ BRANCHEMENT — un franchissement ne tourne PAS la caméra, visée mobile comprise', async () => {
++  // ⚠️ **LA VISÉE MOBILE EST TOUT LE TEST.** Sans crochet `viseeDuLieu`, la
++  // cible reste à l'origine d'un niveau à l'autre et le défaut est invisible :
++  // c'est exactement pourquoi il a survécu à `npm test`. La production, elle,
++  // rend le point géographique visé dans le repère du NOUVEAU bloc — donc une
++  // cible qui bouge de plusieurs unités à chaque franchissement.
++  const { m, camera, controls } = await machine({ emprise: 1e6, viseeMobile: true })
++  camera.position.set(-2.229, 23.821, 25.157)
++  controls.target.set(-2.229, -0.156, -0.153)
++  const incl = () => inclinaisonDeg(camera.position, controls.target)
++  const avant = incl()
++  await m._refine()
++  const apres = incl()
++  assert.ok(Math.abs(controls.target.z + 0.153) > 1, 'la cible n’a pas bougé : le test ne mord sur rien')
++  assert.ok(Math.abs(apres - avant) < 1e-6, `la caméra a tourné de ${(apres - avant).toFixed(3)}°`)
++})
++
++test('⑪ BRANCHEMENT — la plongée arrive AU NADIR puis balaie jusqu’à la pose oblique', async () => {
++  const { m, camera, controls } = await machine({ emprise: 1e6, span: 56 })
++  m.mode = 'orbital'
++  m.altM = 500000
++  m._empriseVue = null
++  const incl = () => inclinaisonDeg(camera.position, controls.target)
++  await m._dive({ altM: 8000, zoom: null })
++  assert.equal(m.mode, 'surface')
++  assert.ok(incl() < 1e-6, `la plongée arrive à ${incl().toFixed(2)}° au lieu du nadir`)
++  const altArrivee = m._altitudeFondM()
++  // le balayage : on avance le fondu jusqu'au bout, et l'altitude de fond ne
++  // bouge pas d'un mètre en chemin
++  let plusGrandPas = 0
++  let precedent = incl()
++  for (let i = 0; i < 400 && m._fonduPose; i++) {
++    m.update(1 / 60)
++    plusGrandPas = Math.max(plusGrandPas, Math.abs(incl() - precedent))
++    precedent = incl()
++    assert.ok(Math.abs(m._altitudeFondM() / altArrivee - 1) < 1e-9, 'le fondu a fait bouger l’altitude de fond')
++  }
++  assert.equal(m._fonduPose, null, 'le fondu ne s’est jamais terminé')
++  assert.ok(Math.abs(incl() - 46.551) < 0.05, `la pose finale vaut ${incl().toFixed(3)}° au lieu de 46,551°`)
++  // ⚠️ **LE CRITÈRE D'ADRIEN, CHIFFRÉ** : plus aucun pas d'image à image ne
++  // ressemble au saut de 46,55° relevé au navigateur.
++  assert.ok(plusGrandPas < 3, `le plus grand pas vaut encore ${plusGrandPas.toFixed(2)}° par image`)
++})
++
++test('⑪ DRAPEAU BAISSÉ — la plongée pose la vue oblique tout de suite, comme avant', async () => {
++  const { m, camera, controls } = await machine({ continu: false, emprise: 1e6, span: 56 })
++  m.mode = 'orbital'
++  m.altM = 500000
++  await m._dive({ altM: 8000, zoom: null })
++  const incl = inclinaisonDeg(camera.position, controls.target)
++  // ⚠️ **46,46° ET NON 46,551°, ET CE N'EST PAS UNE TOLÉRANCE MOLLE.** Hors
++  // drapeau, `_posePlongee` rend `arrival.pos`, c'est-à-dire `_ARRIVAL_DIR × d`
++  // — une position ABSOLUE, pas un décalage depuis la cible. La cible, elle, est
++  // à `Y_CIBLE = −0,3`, et ces 0,3 unité valent exactement les 0,09° d'écart. Ce
++  // chiffre est le relevé du dépôt AVANT R4 : il grave que le régime hors
++  // drapeau n'a pas bougé d'un centième.
++  assert.ok(Math.abs(incl - 46.46) < 0.02, `hors drapeau, la plongée arrive à ${incl.toFixed(3)}°`)
++  assert.equal(m._fonduPose ?? null, null, 'un fondu de pose s’est armé hors du régime continu')
++})
