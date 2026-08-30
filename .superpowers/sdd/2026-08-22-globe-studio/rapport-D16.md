@@ -663,3 +663,118 @@ exception — et pas l'inverse. »*
 Cinq des douze lignes ci-dessus en dépendent directement (`ground-info`,
 `traffic`, `boats`, les plans de cinéma, l'autofocus). **C'est par là qu'il faut
 chiffrer D16-b, pas couche par couche.**
+
+---
+
+# D16 ter — LA VUE GARDE L'AXE DE L'ORBITE, DANS LES DEUX SENS
+
+**Statut : ✅ livré, mesuré, testé. La bascule est DÉPLACÉE, pas lissée.**
+
+> **Adrien :** *« Je vois toujours un énorme déplacement entre orbite et surface mode. **Je veux garder la vue comme en orbite quand je fais la transition.** »*
+
+## Ce que la mesure montrait, et qui lui donne raison
+
+R4 avait **étalé** la bascule de 46,548° sur ~1,9 s au lieu d'une image. Mais elle partait **toujours à la traversée** (`.banc/D16/avant34.json`) :
+
+| | image | altitude | inclinaison |
+|---|---|---|---|
+| traversée orbite → surface | n80 | **5 917 907 m** | 0,07° |
+| 1re image inclinée > 1° | **n87** | **5 885 549 m** | 1,14° |
+| naissance du crop | n903 | 32 130 m | **45,94°** — déjà oblique |
+
+➡️ **Toute la descente, de 5 885 km au sol, se faisait en vue de trois quarts.** ⛔ **Étaler n'est pas supprimer**, et c'est exactement ce qu'il refuse.
+
+## « Arriver au bloc » — le seul nombre que D16 ter laissait ouvert
+
+**Trois candidats.** Le premier — la naissance du crop (32 274,3 m) — est **celui qu'Adrien refuse** : c'est là que la bascule tombait. Le troisième — l'altitude finale — est un seuil de plus, franchi en plein geste.
+
+➡️ **Retenu : `veilleCrop.repos`**, qui vaut **`crop posé ET vue au repos`** — le **LIEU** et le **MOMENT** dans un seul booléen, alimenté par le point unique de `branchement-crop.js`, à la même image que le seuil du socle et l'estompage.
+
+⚡ **Il n'ajoute AUCUN nombre au dépôt** : le seuil de repos (`10⁻⁴` sur `|Δ ln distance|`, pris 4,7 fois sous le pic du geste le plus doux) et son hystérésis (30 images) sont ceux de la Tâche N, mesurés ; la naissance du crop est celle du seuil.
+
+⚡ **Et c'est le plus TARD des trois**, et le seul qui ne soit pas une altitude qu'on franchit sans le vouloir : **c'est l'utilisateur qui lâche la molette.**
+
+**Mesuré** : la bascule tombe **5 558 ms après la dernière molette**, sur 213 images — dont **4,8 s de glissé inertiel encore en cours** et **0,5 s d'hystérésis**. ➡️ **Elle tombe donc 0,5 s après que la vue cesse réellement de bouger.**
+
+⚠️ **Ce délai a coûté une correction d'instrument** : la sonde attendait 2,5 s après la dernière molette. **Mesuré : ce n'est pas assez** — l'altitude descendait encore de 23 109 à 22 736 m et `auRepos` restait faux sur les 150 images. Une sonde qui s'arrête là ne peut pas dater l'arrivée. L'attente est maintenant réglable (`--attente`).
+
+## Le résultat — descente
+
+`.banc/D16/apres34.json`, 1 889 images, 0 erreur de page :
+
+| | avant | après |
+|---|---|---|
+| traversée | 5 917 907 m, 0,07° | 5 901 817 m, **0,00°** |
+| naissance du crop | 32 130 m, **45,94°** | 32 169 m, **0,00°** |
+| **arrivée sur le bloc** | — | **n1057, 22 245 m** |
+| 1re image inclinée > 1° | **5 885 549 m** | **22 245 m** |
+| fin de la bascule | — | n1117, 46,12° |
+
+⚡ **Inclinaison MAXIMALE entre la traversée et l'arrivée, sur 971 images : 0,000 057°.**
+La vue garde **exactement** l'axe de l'orbite pendant toute la descente. La bascule est passée de **5 885 km à 22 245 m — 265 fois plus bas.**
+
+**Et elle est douce à son nouvel emplacement** — 1 093 ms sur 60 images :
+
+| grandeur, pendant la bascule | valeur |
+|---|---|
+| MAX inclinaison par image | **1,5000°** — exactement le plafond de R4 |
+| MAX rapport d'altitude de fond | 1,000142 — l'altitude ne bouge pas |
+| MAX écart d'image | **1,67** — sous le p99 des images ordinaires |
+| MAX déplacement relatif du fond | 2,23 · 10⁻⁴ |
+
+## Le résultat — remontée, l'autre moitié de la plainte
+
+⛔ **Mesurée juste après : elle claquait toujours, exactement autant.** La vue restait oblique jusqu'à l'orbite et `enterOrbit` la remettait au nadir d'un coup.
+
+**La règle est symétrique, et c'est la même phrase : la vue de trois quarts appartient au BLOC.** On la prend en arrivant dessus, on la rend en le quittant. Le signal est le miroir de l'arrivée — **`veilleCrop.pose`**, le crop lui-même, un signal de **LIEU**. Il tombe vers 40 km, très au-dessous des ~33 000 km où `enterOrbit` prend la main.
+
+`.banc/D16/nadir-remontee.json`, 1 147 images, 0 erreur :
+
+| à l'image de sortie d'orbite | avant | après |
+|---|---|---|
+| rotation de visée du fond | **45,159°** | **0,882°** |
+| inclinaison de la caméra du bloc | **46,548°** | **0,000°** |
+| déplacement relatif du fond | **0,6627** | **0,0161** |
+| écart d'image | 6,44 | **0,65** |
+
+| MAX de tout le volet | avant | après |
+|---|---|---|
+| rotation de visée | 45,159° | **1,5000°** |
+| déplacement relatif | 0,66272 | **0,021588** |
+
+⚡ **Le 1,5000° restant est le plafond du balayage VOULU**, pas une rupture : c'est le retour au nadir lui-même, et la caméra du bloc tourne d'autant. ➡️ **Il ne reste aucune rupture de CAMÉRA, dans un sens comme dans l'autre.**
+
+## La forme que la contrainte a dictée
+
+⚠️ **`_franchirSiBesoin` refuse de franchir un niveau tant qu'un balayage court.** Garder un `_fonduPose` armé pendant toute la descente aurait **bloqué tous les crans** — la descente ne se serait jamais affinée. L'attente vit donc dans son propre drapeau, `_attenteTroisQuarts`, et **un test vérifie que `_fonduPose` reste nul pendant 300 images d'attente**.
+
+⚠️ **L'azimut est celui de l'utilisateur, pas celui de `_ARRIVAL_DIR`.** La bascule tombe maintenant à la FIN de la descente, où l'utilisateur a pu tourner autour du bloc. On ne reprend de la pose d'arrivée que son **ÉLÉVATION** — les 46,548° qui SONT le produit.
+
+**Un seul balayage, deux sens** : même loi, même plafond, `e` court toujours de 0 à 1 — c'est l'avancement passé à la loi qu'on retourne, pas la mécanique.
+
+## ⛔ CE QUI EMPIRE, ET JE LE PUBLIE
+
+**La naissance du crop est PLUS visible au nadir qu'en trois quarts**, parce que le crop y occupe plus d'écran :
+
+| | trois quarts | **nadir** |
+|---|---|---|
+| écart d'image à la naissance du crop | 17,61 | **27,02** |
+| l'image suivante (bascule d'éclairage uniforme, `dLum` = `dImg`) | 1,23 | **52,31** |
+
+C'est la **rupture ④** du catalogue, une rupture de **contenu**, hors du périmètre de cette tâche — **mais elle est désormais la plus grosse chose à l'écran.** La mort du crop, elle, ne bouge pas (45,40 → 45,73, dispersion de session).
+
+## Fichiers touchés
+
+- `src/modes.js` — `_attendreLeBloc` (la traversée pose le nadir), `_armerBasculeTroisQuarts`, `_armerRetourNadir`, le double sens du balayage, les deux fronts dans `update`, l'oubli dans `enterOrbit`
+- `src/main.js` — les deux crochets : `arriveeSurLeBloc` (`veilleCrop.repos`) et `surLeBloc` (`veilleCrop.pose`)
+- `test/zoom-continu.test.js` — le test ⑪ **change de contrat** (il verrouillait le geste de R4, qu'Adrien vient d'abroger), **+2 tests** : l'oubli au retour en orbite, et le retour au nadir avec son plafond
+- `scripts/sonde-d16.mjs` — plus de chaîne de paramètres (le mode sphère est le défaut), attente de fin réglable, relevé de `veilleCrop.pose` / `.repos` / de l'attente
+
+**Tests : 4 308 / 0 échec · audit 221 = 221.**
+
+## Réserves
+
+1. ⚠️ **Un seul poste, un seul lieu, un seul geste** (molette d'un trait). **Le clic sur le globe n'est pas mesuré** avec la bascule déplacée.
+2. ⚠️ **5 558 ms entre la dernière molette et la bascule.** 0,5 s après l'arrêt réel, mais 4,8 s de glissé avant. **Je ne sais pas si Adrien trouvera ce délai juste** — c'est un réglage de produit, et il n'y a qu'un chiffre à bouger (`IMAGES_CALME`).
+3. ⚠️ **Le retour au nadir occupe `_fonduPose` ~1 s**, pendant laquelle aucun cran ne se franchit. Le budget traverse (R4), donc rien n'est perdu — **mais je n'ai pas mesuré le retard que ça met sur le premier cran de la remontée.**
+4. ⚠️ **`regle-D17.md` n'existe pas dans cet arbre.** Je prends la consigne « il n'y a pas de production » telle qu'elle m'a été transmise, sans avoir pu la lire.
