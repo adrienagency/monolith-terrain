@@ -580,40 +580,71 @@ test('⑥ ter la veille EXIGE son globe et son contexte', () => {
   assert.throws(() => creerVeilleCrop({ globe: globeFactice() }), TypeError)
 })
 
-// ══════════ ⑦ LE DRAPEAU — LA PRODUCTION NE BASCULE PAS ═════════════════════
+// ══════════ ⑦ LE DRAPEAU — LA PRODUCTION BASCULE, ET C'EST LA COMMANDE ══════
 
-test('⑦ `terreUnique` est FALSE par défaut — le socle est en production', async () => {
+test('⑦ `terreUnique` est TRUE par défaut — le mode sphère EST le démarrage', async () => {
+  // ⚠️ **CE TEST DISAIT L'INVERSE JUSQU'AU 2026-08-30, ET IL AVAIT RAISON À
+  // L'ÉPOQUE** : « shibumap.com sert le socle plat : le défaut ne bascule pas
+  // ici ». Adrien a tranché — « installe le mode sphère comme le mode par
+  // défaut, pour qu'on commence directement en mode sphère au chargement ». La
+  // garantie « drapeau baissé, la production est rigoureusement inchangée »
+  // est ABROGÉE de sa main : shibumap.com sert désormais la sphère.
   const { FLAGS } = await import('../src/flags.js')
-  assert.equal(FLAGS.terreUnique, false, 'shibumap.com sert le socle plat : le défaut ne bascule pas ici')
+  assert.equal(FLAGS.terreUnique, true, 'shibumap.com sert la sphère : le défaut bascule ici, et c’est voulu')
 })
 
 test('⑦ bis `terreUniqueActive()` EXIGE la frontière de rendu', async () => {
   // ⚠️ Sans la passe de fond, le globe n'est pas dessiné en mode surface : un
   // crop creusé dans une planète qu'on ne dessine pas ne montrerait rien.
-  const { terreUniqueActive } = await import('../src/flags.js')
+  //
+  // ⛔ **CETTE GARDE SE TESTAIT PAR L'ABSENCE DE PARAMÈTRE, ET L'ABSENCE SIGNIFIE
+  // MAINTENANT L'INVERSE.** `?terre=unique` seul rendait `false` parce que
+  // `frontiereRendu` était éteint par défaut ; depuis qu'il est levé, la même
+  // ligne rend `true` — POUR LA BONNE RAISON, mais elle ne prouve plus rien. La
+  // garde est donc évaluée contre une frontière **explicitement éteinte**.
+  // Sans cette réécriture, une garde vivante devenait un test décoratif.
+  const { terreUniqueActive, FLAGS } = await import('../src/flags.js')
   const avant = globalThis.location
-  globalThis.location = { search: '?terre=unique' }
-  assert.equal(terreUniqueActive(), false, '`?terre=unique` seul ne doit rien allumer')
-  globalThis.location = { search: '?terre=unique&frontiere=1' }
-  assert.equal(terreUniqueActive(), true)
-  globalThis.location = { search: '?frontiere=1' }
-  assert.equal(terreUniqueActive(), false, 'sans paramètre, c’est le défaut du drapeau qui décide')
-
-  // ⚠️ **L'ÉCHAPPATOIRE NE SE TESTE QUE CONTRE UN DÉFAUT VRAI, ET LA PREMIÈRE
-  // CAMPAGNE DE MUTATION L'A MONTRÉ** : avec `FLAGS.terreUnique === false`,
-  // supprimer la ligne `?terre=deux` ne change RIEN — la valeur inconnue retombe
-  // sur le défaut, qui est faux de toute façon. Le test ne mordait pas. C'est
-  // pourtant la ligne qui comptera **le jour où le défaut passera à true**, et
-  // c'est exactement ce jour-là qu'on voudra pouvoir couper depuis l'adresse.
-  const { FLAGS } = await import('../src/flags.js')
   const defaut = FLAGS.terreUnique
+  const q = (s) => { globalThis.location = { search: s } }
   try {
+    // ① LA GARDE DE DÉPENDANCE — elle, elle n'a pas bougé.
+    q('?terre=unique&frontiere=0')
+    assert.equal(terreUniqueActive(), false, '`?terre=unique` ne doit rien allumer sans la frontière')
+    q('?terre=unique&frontiere=crans')
+    assert.equal(terreUniqueActive(), false, 'et `?frontiere=crans` la coupe pareillement')
+    q('?terre=unique&frontiere=1')
+    assert.equal(terreUniqueActive(), true)
+
+    // ② LE DÉFAUT, LU SUR LA VALEUR RENDUE — sans aucun paramètre.
+    q('')
+    assert.equal(terreUniqueActive(), true, 'sans paramètre, c’est le défaut du drapeau qui décide — et il est levé')
+    q('?frontiere=0')
+    assert.equal(terreUniqueActive(), false, 'la garde prime sur le défaut levé')
+
+    // ③ ⚠️ **L'ÉCHAPPATOIRE NE SE TESTE QUE CONTRE UN DÉFAUT CONTRAIRE, ET LA
+    //    PREMIÈRE CAMPAGNE DE MUTATION L'A MONTRÉ** : avec
+    //    `FLAGS.terreUnique === false`, supprimer la ligne `?terre=deux` ne
+    //    changeait RIEN — la valeur retombait sur un défaut faux de toute façon.
+    //    ⛔ **LE BASCULEMENT DU DÉFAUT A RETOURNÉ LE PROBLÈME, IL NE L'A PAS
+    //    RÉSOLU** : c'est maintenant `?terre=unique` qui retomberait sur un
+    //    défaut vrai et ne mordrait plus. Les DEUX branches sont donc exercées,
+    //    chacune contre le réglage de défaut qui la rend seule responsable du
+    //    résultat.
+    FLAGS.terreUnique = false
+    q('?frontiere=1')
+    assert.equal(terreUniqueActive(), false, 'défaut à false : la frontière ne suffit pas')
+    q('?terre=unique&frontiere=1')
+    assert.equal(terreUniqueActive(), true, '`?terre=unique` doit ALLUMER un défaut éteint')
+    q('?terre=1&frontiere=1')
+    assert.equal(terreUniqueActive(), true, '`?terre=1` aussi')
+
     FLAGS.terreUnique = true
-    globalThis.location = { search: '?frontiere=1' }
+    q('?frontiere=1')
     assert.equal(terreUniqueActive(), true, 'défaut à true : la frontière suffit')
-    globalThis.location = { search: '?terre=deux&frontiere=1' }
+    q('?terre=deux&frontiere=1')
     assert.equal(terreUniqueActive(), false, '`?terre=deux` doit COUPER un défaut allumé')
-    globalThis.location = { search: '?terre=0&frontiere=1' }
+    q('?terre=0&frontiere=1')
     assert.equal(terreUniqueActive(), false, '`?terre=0` aussi')
   } finally {
     FLAGS.terreUnique = defaut

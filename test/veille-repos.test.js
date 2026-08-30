@@ -768,8 +768,11 @@ test('⑦ APRÈS : plus une seule URL hors crop n’est demandée', async () => 
 })
 
 test('⑦ le drapeau ÉTEINT rend le parcours d’avant, tuile pour tuile', async () => {
-  // ⚠️ La garde de `uCropOn`, `uHabOn`, `uMerRampeOn` — et la consigne D5 : la
-  // production ne bouge pas d'un bit tant que personne ne lève l'interrupteur.
+  // ⚠️ La garde de `uCropOn`, `uHabOn`, `uMerRampeOn` — et la consigne D5 : le
+  // parcours du globe ne bouge pas d'un bit tant que le crop seul est baissé.
+  // ⚡ Le drapeau de production est LEVÉ depuis le 2026-08-30 (mode sphère au
+  // démarrage) ; ce test ne lit aucun défaut, il pose `poserCropSeul(false)` à
+  // la main — c'est le chemin `?terre=deux`, et il doit rester intact.
   const { globe, camera } = await globeAuBloc()
   globe.update(camera, 0.016)
   const a = bilan(globe)

@@ -603,13 +603,56 @@ test('⑧e MUTATION — réintroduire une reconstruction tue ⑧b', async () => 
   assert.throws(() => assert.equal(t.mesh.geometry.attributes.position.array, avant))
 })
 
-test('⑧f LE DRAPEAU EST ÉTEINT, et sans lui la fenêtre n\'existe même pas', async () => {
-  const { FLAGS } = await import('../src/flags.js')
-  assert.equal(FLAGS.globeContinu, false, 'le branchement ne part pas en production tant qu\'Adrien ne l\'a pas vu')
+test('⑧f LE DRAPEAU EST LEVÉ — et sans lui la fenêtre n\'existe toujours pas', async () => {
+  const { FLAGS, globeContinuActif } = await import('../src/flags.js')
+  // ⚠️ **CE TEST DISAIT « LE BRANCHEMENT NE PART PAS EN PRODUCTION TANT
+  // QU'ADRIEN NE L'A PAS VU ». Adrien l'a vu, et il a tranché le 2026-08-30** :
+  // « installe le mode sphère comme le mode par défaut, pour qu'on commence
+  // directement en mode sphère au chargement ». La fenêtre bornée part donc en
+  // production, et `shibumap.com` ne sert plus le socle plat.
+  assert.equal(FLAGS.globeContinu, true, 'le mode sphère est le démarrage : la fenêtre bornée part en production')
+
+  // ⚠️ **LA GARDE, ELLE, N'A PAS BOUGÉ D'UN POUCE, ET C'EST CE QUE CE TEST
+  // GARDE DEPUIS TOUJOURS** : le chemin SANS drapeau — c'est-à-dire
+  // `?globe=crans` — doit rester EXACTEMENT celui d'avant. `terrainDeBanc(false)`
+  // le rejoue, et il ne dépend d'aucun défaut : c'est un booléen passé à la main.
   const { t, p } = await terrainDeBanc(false)
   t.setDem(demBouchon(64, 20)); t.rebuild(p)
   assert.equal(t.fenetreBornee, null, 'la fenêtre a été fabriquée sans le drapeau')
-  assert.equal(t.mesh.geometry.drawRange.count, Infinity, 'le chemin de production ne borne rien')
+  assert.equal(t.mesh.geometry.drawRange.count, Infinity, 'le chemin `?globe=crans` ne borne rien')
+
+  // ⛔ **L'ÉCHAPPATOIRE D'ADRESSE DE `globeContinuActif` N'ÉTAIT ÉVALUÉE NULLE
+  // PART** — aucun test du dépôt n'appelait cette fonction, ni avec ni sans
+  // `location`. Inverser ses deux branches ne faisait rougir personne. C'est le
+  // drapeau RACINE des sept : c'est lui qui commande le démarrage en sphère, et
+  // c'est par `?globe=crans` qu'on revient à la production d'avant. Les deux
+  // branches sont exercées ci-dessous, chacune contre le défaut CONTRAIRE —
+  // une branche ne mord jamais contre le défaut qui lui donne déjà raison.
+  const avant = globalThis.location
+  const defaut = FLAGS.globeContinu
+  const q = (s) => { globalThis.location = { search: s } }
+  try {
+    q('')
+    assert.equal(globeContinuActif(), true, 'adresse nue : le globe continu démarre')
+    q('?globe=crans')
+    assert.equal(globeContinuActif(), false, '`?globe=crans` doit COUPER un défaut allumé')
+    q('?globe=0')
+    assert.equal(globeContinuActif(), false, '`?globe=0` aussi')
+    q('?globe=bidon')
+    assert.equal(globeContinuActif(), true, 'une valeur inconnue retombe sur le drapeau nu')
+    FLAGS.globeContinu = false
+    q('')
+    assert.equal(globeContinuActif(), false, 'défaut éteint : rien ne l’allume tout seul')
+    q('?globe=continu')
+    assert.equal(globeContinuActif(), true, '`?globe=continu` doit ALLUMER un défaut éteint')
+    q('?globe=1')
+    assert.equal(globeContinuActif(), true, '`?globe=1` aussi')
+  } finally {
+    FLAGS.globeContinu = defaut
+    if (avant === undefined) delete globalThis.location
+    else globalThis.location = avant
+  }
+
   // ⚠️ et `main.js` pose bien ce booléen — sinon le drapeau ne protégerait rien
   const code = sansCommentaires(lire('src/main.js'))
   assert.ok(/params\.globeContinu\s*=\s*globeContinuActif\(\)/.test(code), '`main.js` ne pose plus `params.globeContinu`')
@@ -924,18 +967,65 @@ test('⑩h `main.js` BRANCHE LE CROCHET, ET IL PASSE PAR R3 ET PAR `majHauteurs`
   assert.equal(/from ['"]\.\/monde\/flux-terrain\.js['"]/.test(t), false, '`terrain.js` importe le flux : c\'est le cycle qui ne casse qu\'en production')
 })
 
-test('⑩i LE DRAPEAU EST ÉTEINT, ET IL EXIGE `?globe=continu`', async () => {
+test('⑩i LE DRAPEAU EST LEVÉ, ET IL EXIGE `?globe=continu` — ÉVALUÉ', async () => {
   const { FLAGS, socleQuadtreeActif } = await import('../src/flags.js')
   // ⚠️ **UN RÉGIME MESURÉ FAUX NE PART PAS SOUS LE DRAPEAU QU'ON DEMANDE À
-  // ADRIEN D'OUVRIR** — c'est la discipline de la Tâche 6 bis A, et la mesure
-  // qui l'exige ici est la BATHYMÉTRIE : 642 m (Nice) à 961 m (La Réunion)
-  // d'écart moyen en mer, le fond marin lu à zéro. Voir `flags.js`.
-  assert.equal(FLAGS.socleQuadtree, false, 'le socle quadtree ne part pas en production tant que la mer est plate')
-  assert.equal(FLAGS.globeContinu, false)
-  // sans `globe=continu` il n'y a pas de fenêtre à remplir : la fonction le dit
-  // elle-même, et pas seulement par convention.
+  // ADRIEN D'OUVRIR** — c'était la discipline de la Tâche 6 bis A, et la mesure
+  // qui l'exigeait ici était la BATHYMÉTRIE : 642 m (Nice) à 961 m (La Réunion)
+  // d'écart moyen en mer, le fond marin lu à zéro. **La Tâche 6 sexies a fermé
+  // cette mesure-là** (`remplirHauteurs` fusionne `fuseBathymetry` ; 3,2 m à
+  // Nice z12, 2,1 m à La Réunion z12), et Adrien a demandé le mode sphère au
+  // démarrage le 2026-08-30. Le drapeau est donc LEVÉ. Les réserves qui restent
+  // ne sont plus la mer : elles sont écrites au drapeau, dans `flags.js`.
+  assert.equal(FLAGS.socleQuadtree, true, 'le socle quadtree part en production : la mer n’est plus plate')
+  assert.equal(FLAGS.globeContinu, true, 'et la fenêtre bornée avec lui — c’est le mode sphère au chargement')
   assert.equal(typeof socleQuadtreeActif, 'function')
-  assert.equal(socleQuadtreeActif(), false, 'les deux drapeaux sont éteints : la fonction doit rendre faux sous node')
+
+  // ⛔ **LA GARDE `?globe=continu` ÉTAIT GARDÉE PAR LE TEXTE SOURCE — ET C'EST
+  // EXACTEMENT LA CLASSE DE DÉFAUT LA PLUS CHÈRE DE CE CHANTIER** : une
+  // `assert.ok(/…/.test(src))` reste verte tant que la ligne existe, même si
+  // elle n'est jamais exécutée. L'`assert.equal(socleQuadtreeActif(), false)`
+  // d'à côté ne la sauvait pas : il passait parce que les DEUX drapeaux étaient
+  // éteints, donc sans jamais distinguer laquelle des deux causes agissait.
+  // Maintenant que les deux sont levés, la garde est ÉVALUÉE, et elle est la
+  // seule chose qui puisse encore rendre `false`.
+  const avant = globalThis.location
+  const defaut = FLAGS.socleQuadtree
+  const q = (s) => { globalThis.location = { search: s } }
+  try {
+    // ① la garde de dépendance, contre un `?globe` EXPLICITEMENT éteint
+    q('?socle=quadtree&globe=crans')
+    assert.equal(socleQuadtreeActif(), false, '`?globe=crans` doit couper le socle quadtree')
+    q('?socle=quadtree&globe=0')
+    assert.equal(socleQuadtreeActif(), false, '`?globe=0` aussi')
+    q('?globe=crans')
+    assert.equal(socleQuadtreeActif(), false, 'la garde prime sur le défaut levé')
+
+    // ② le défaut, lu sur la VALEUR RENDUE, sans aucun paramètre
+    q('')
+    assert.equal(socleQuadtreeActif(), true, 'adresse nue : les deux drapeaux levés, le socle quadtree démarre')
+
+    // ③ les DEUX branches de l'échappatoire, chacune contre le défaut CONTRAIRE
+    //    — une branche ne mord jamais contre le défaut qui lui donne déjà raison.
+    q('?globe=continu&socle=mnt')
+    assert.equal(socleQuadtreeActif(), false, '`?socle=mnt` doit COUPER un défaut allumé')
+    q('?globe=continu&socle=0')
+    assert.equal(socleQuadtreeActif(), false, '`?socle=0` aussi')
+    FLAGS.socleQuadtree = false
+    q('?globe=continu')
+    assert.equal(socleQuadtreeActif(), false, 'défaut éteint : `?globe=continu` seul ne l’allume pas')
+    q('?globe=continu&socle=quadtree')
+    assert.equal(socleQuadtreeActif(), true, '`?socle=quadtree` doit ALLUMER un défaut éteint')
+    q('?globe=continu&socle=1')
+    assert.equal(socleQuadtreeActif(), true, '`?socle=1` aussi')
+  } finally {
+    FLAGS.socleQuadtree = defaut
+    if (avant === undefined) delete globalThis.location
+    else globalThis.location = avant
+  }
+
+  // la même chose écrite dans le source — gardée EN PLUS de l'évaluation, jamais
+  // à sa place : elle nomme la ligne qu'un relecteur doit retrouver.
   const src = lire('src/flags.js')
   assert.ok(/socleQuadtreeActif\(\)\s*\{\s*\n?\s*if \(!globeContinuActif\(\)\) return false/.test(src), 'le socle quadtree ne dépend plus de la fenêtre bornée')
   // ⚠️ et `main.js` ne pose le crochet QUE derrière ce drapeau — sinon
@@ -1286,14 +1376,23 @@ test('⑫c `main.js` — `loadSurface` N\'ATTEND PLUS le MNT, et le MNT continue
   assert.ok(/const gen = _generationMNT/.test(fb), 'le numero de vol n\'est plus capture avant le premier await')
 })
 
-test('⑫d LE VOL EXIGE LE SOCLE QUADTREE, ET SON DRAPEAU EST ÉTEINT', async () => {
+test('⑫d LE VOL EXIGE LE SOCLE QUADTREE, ET SON DRAPEAU EST LEVÉ', async () => {
   const { FLAGS, socleQuadtreeActif } = await import('../src/flags.js')
   // ⚠️ **SANS LE QUADTREE, UN BLOC SANS MNT SE PEINDRAIT AU RELIEF PROCÉDURAL**
   // — du bruit qui n'a rien à voir avec le lieu (c'est le témoin ⑩a). Le vol ne
-  // part donc pas sous `?globe=continu` seul, et le drapeau du quadtree reste
-  // fermé tant que la mer y est plate (Tâche 6 sexies).
-  assert.equal(FLAGS.socleQuadtree, false)
-  assert.equal(socleQuadtreeActif(), false)
+  // part donc pas sous `?globe=continu` seul : c'est `VOL_SANS_ATTENTE` qui
+  // porte la garde, et elle reste intacte.
+  //
+  // ⛔ **CE QUE LE BASCULEMENT DU 2026-08-30 CHANGE ICI, ET IL FAUT LE DIRE :
+  // LE VOL SANS ATTENTE PART MAINTENANT EN PRODUCTION.** Le commentaire d'avant
+  // annonçait un drapeau « fermé tant que la mer y est plate » ; la mer n'est
+  // plus plate depuis la Tâche 6 sexies (écart moyen tombé de 615 m à 3,2 m à
+  // Nice z12), et Adrien a demandé la sphère au démarrage. Ce que la Tâche 6
+  // sexies laissait ouvert reste ouvert et n'a PAS été mesuré à nouveau ici :
+  // le coût par image du raffinement `render()` compris, le pic mémoire des
+  // `fetchAndBuildDem` concurrents, et rien sur un portable. Voir `flags.js`.
+  assert.equal(FLAGS.socleQuadtree, true, 'le socle quadtree part en production avec le mode sphère')
+  assert.equal(socleQuadtreeActif(), true, 'adresse nue : le vol sans attente est armé')
   const code = sansCommentaires(lire('src/main.js'))
   assert.ok(/const VOL_SANS_ATTENTE = socleQuadtreeActif\(\)/.test(code), 'le vol ne depend plus du drapeau du socle quadtree')
   const i = code.indexOf('function volPossible')

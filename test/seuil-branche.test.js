@@ -406,3 +406,63 @@ test('la seconde garde a sa raison : sans emprise, `altitudeCadrageM` change de 
   assert.match(corps, /terrain\.heightToFeet\(camera\.position\.y\) \/ 3\.28084/,
     'la branche de repli existe toujours — c’est elle que la garde évite')
 })
+
+// ══════════ LE DRAPEAU — LEVÉ, SA GARDE ET SON ÉCHAPPATOIRE, ÉVALUÉES ═══════
+//
+// ⛔ **CE BLOC N'EXISTAIT PAS, ET C'ÉTAIT UN TROU MESURÉ** : au 2026-08-30,
+// `grep -rn 'FLAGS.seuilSocle' test/` ne rendait RIEN. Le fichier lisait le
+// CÂBLAGE de `main.js` (par le texte source) mais jamais la valeur rendue par
+// `seuilSocleActif()`. Mettre le défaut à `false`, inverser les deux branches
+// de l'échappatoire, ou SUPPRIMER LA GARDE DE DÉPENDANCE ne faisait rougir
+// aucun des 4 293 tests.
+
+test('le drapeau `seuilSocle` est LEVÉ par défaut — le socle s’efface en altitude au chargement', async () => {
+  const { FLAGS } = await import('../src/flags.js')
+  assert.equal(FLAGS.seuilSocle, true,
+    'le mode sphère est le démarrage : au-dessus du seuil, c’est la Terre qu’on voit, plus le bloc')
+})
+
+test('⛔ `seuilSocleActif()` EXIGE la frontière de rendu — la garde, ÉVALUÉE', async () => {
+  // ⚠️ **LA GARDE NE SE TESTE PLUS PAR L'ABSENCE DE PARAMÈTRE.** Sans la passe
+  // de fond, au-dessus du seuil il n'y aurait pas la Terre derrière le socle,
+  // il n'y aurait RIEN. Tant que `frontiereRendu` était éteint par défaut, un
+  // `?seuil=1` nu suffisait à montrer la garde ; depuis qu'il est levé, la même
+  // ligne rend `true` — pour la bonne raison, mais elle ne prouve plus rien. La
+  // garde s'exerce donc contre une frontière **explicitement éteinte**.
+  const { FLAGS, seuilSocleActif } = await import('../src/flags.js')
+  const avant = globalThis.location
+  const defaut = FLAGS.seuilSocle
+  const q = (s) => { globalThis.location = { search: s } }
+  try {
+    // ① la garde de dépendance
+    q('?seuil=1&frontiere=0')
+    assert.equal(seuilSocleActif(), false, '`?seuil=1` ne doit rien allumer sans la frontière')
+    q('?seuil=1&frontiere=crans')
+    assert.equal(seuilSocleActif(), false, 'et `?frontiere=crans` la coupe pareillement')
+    q('?seuil=1&frontiere=1')
+    assert.equal(seuilSocleActif(), true)
+
+    // ② le défaut, lu sur la VALEUR RENDUE
+    q('')
+    assert.equal(seuilSocleActif(), true, 'adresse nue : le seuil du socle est armé')
+    q('?frontiere=0')
+    assert.equal(seuilSocleActif(), false, 'la garde prime sur le défaut levé')
+
+    // ③ les DEUX branches de l'échappatoire, chacune contre le défaut CONTRAIRE
+    q('?frontiere=1&seuil=toujours')
+    assert.equal(seuilSocleActif(), false, '`?seuil=toujours` doit COUPER un défaut allumé')
+    q('?frontiere=1&seuil=0')
+    assert.equal(seuilSocleActif(), false, '`?seuil=0` aussi')
+    FLAGS.seuilSocle = false
+    q('?frontiere=1')
+    assert.equal(seuilSocleActif(), false, 'défaut éteint : la frontière ne suffit pas')
+    q('?frontiere=1&seuil=altitude')
+    assert.equal(seuilSocleActif(), true, '`?seuil=altitude` doit ALLUMER un défaut éteint')
+    q('?frontiere=1&seuil=1')
+    assert.equal(seuilSocleActif(), true, '`?seuil=1` aussi')
+  } finally {
+    FLAGS.seuilSocle = defaut
+    if (avant === undefined) delete globalThis.location
+    else globalThis.location = avant
+  }
+})

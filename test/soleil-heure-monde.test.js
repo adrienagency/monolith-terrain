@@ -236,26 +236,58 @@ test('① sans lieu ni cycle, elle rend null plutôt qu un vecteur inventé', ()
 
 // ══════════ ② LE DRAPEAU — LEVÉ ET BAISSÉ, ET SES DEUX BRANCHES ════════════
 
-test('② le drapeau existe, il est BAISSÉ par défaut, et il a son échappatoire', () => {
-  assert.equal(FLAGS.soleilHeureMonde, false, 'la production ne bouge pas')
+test('② le drapeau existe, il est LEVÉ par défaut, et il a son échappatoire', () => {
+  // ⚠️ **LE DÉFAUT A BASCULÉ LE 2026-08-30, ET C'EST UNE COMMANDE D'ADRIEN** :
+  // « installe le mode sphère comme le mode par défaut, pour qu'on commence
+  // directement en mode sphère au chargement ». La garantie que toute la
+  // campagne a tenue — « drapeau baissé, la production est rigoureusement
+  // inchangée » — est donc ABROGÉE : la production DOIT changer.
+  assert.equal(FLAGS.soleilHeureMonde, true, 'le mode sphère est le démarrage : la planète lit l’heure du monde')
   assert.equal(typeof soleilHeureMondeActif, 'function')
   // sous node il n'y a pas de `location` : la fonction doit rendre le drapeau nu.
-  assert.equal(soleilHeureMondeActif(), false)
+  assert.equal(soleilHeureMondeActif(), true)
 })
 
-test('② ⛔ LES DEUX BRANCHES DE L ÉCHAPPATOIRE, EXERCÉES', () => {
+test('② ⛔ LES DEUX BRANCHES DE L ÉCHAPPATOIRE, EXERCÉES CONTRE LE DÉFAUT CONTRAIRE', () => {
   // ⛔ **UNE MUTATION A SURVÉCU AU TOUR 1** : `?soleil=camera` LEVAIT le drapeau
   // et `?soleil=heure` le baissait, tests au vert — parce que ni l'une ni
   // l'autre branche n'était jamais parcourue sous node. C'est pourtant le levier
   // par lequel Adrien est censé essayer le drapeau.
-  assert.equal(soleilHeureMondeActif('?soleil=heure'), true)
-  assert.equal(soleilHeureMondeActif('?soleil=1'), true)
-  assert.equal(soleilHeureMondeActif('?soleil=camera'), false)
-  assert.equal(soleilHeureMondeActif('?soleil=0'), false)
-  // une valeur inconnue, ou une autre clé, rendent le drapeau nu.
-  assert.equal(soleilHeureMondeActif('?soleil=bidon'), FLAGS.soleilHeureMonde)
-  assert.equal(soleilHeureMondeActif('?autre=heure'), FLAGS.soleilHeureMonde)
-  assert.equal(soleilHeureMondeActif(''), FLAGS.soleilHeureMonde)
+  //
+  // ⛔ **ET LE BASCULEMENT DU DÉFAUT A DÉPLACÉ CE TROU, IL NE L'A PAS FERMÉ.**
+  // Une branche d'échappatoire NE MORD QUE CONTRE LE DÉFAUT CONTRAIRE : avec
+  // `FLAGS.soleilHeureMonde === true`, supprimer `if (… 'heure') return true`
+  // ne change RIEN — la valeur retombe sur un défaut vrai de toute façon, et le
+  // test reste vert pour la mauvaise raison. La version d'avant comparait de
+  // surcroît à `FLAGS.soleilHeureMonde` lui-même, ce qui ne peut pas rougir.
+  // Chaque branche est donc exercée ici AVEC LE DRAPEAU FORCÉ À L'INVERSE.
+  const defaut = FLAGS.soleilHeureMonde
+  try {
+    // ① défaut ÉTEINT — c'est la branche qui ALLUME qui doit mordre.
+    FLAGS.soleilHeureMonde = false
+    assert.equal(soleilHeureMondeActif('?soleil=heure'), true, '`?soleil=heure` doit ALLUMER un défaut éteint')
+    assert.equal(soleilHeureMondeActif('?soleil=1'), true, '`?soleil=1` aussi')
+    assert.equal(soleilHeureMondeActif('?soleil=camera'), false)
+    assert.equal(soleilHeureMondeActif('?soleil=0'), false)
+    // une valeur inconnue, ou une autre clé, retombent sur le drapeau nu.
+    assert.equal(soleilHeureMondeActif('?soleil=bidon'), false)
+    assert.equal(soleilHeureMondeActif('?autre=heure'), false)
+    assert.equal(soleilHeureMondeActif(''), false)
+
+    // ② défaut ALLUMÉ — c'est la branche qui COUPE qui doit mordre, et c'est
+    //    celle-là qui compte aujourd'hui : c'est le levier par lequel Adrien
+    //    revient à la production d'avant depuis l'adresse.
+    FLAGS.soleilHeureMonde = true
+    assert.equal(soleilHeureMondeActif('?soleil=camera'), false, '`?soleil=camera` doit COUPER un défaut allumé')
+    assert.equal(soleilHeureMondeActif('?soleil=0'), false, '`?soleil=0` aussi')
+    assert.equal(soleilHeureMondeActif('?soleil=heure'), true)
+    assert.equal(soleilHeureMondeActif('?soleil=1'), true)
+    assert.equal(soleilHeureMondeActif('?soleil=bidon'), true)
+    assert.equal(soleilHeureMondeActif('?autre=heure'), true)
+    assert.equal(soleilHeureMondeActif(''), true)
+  } finally {
+    FLAGS.soleilHeureMonde = defaut
+  }
 })
 
 test('② QUI POSE LE SOLEIL — la polarité est du code, plus une négation dans main.js', () => {

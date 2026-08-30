@@ -647,7 +647,7 @@ test('⑨ `_suivreEmprise` convertit la caméra le jour où l’emprise change �
   assert.ok(Math.abs(p.y / p.length() - 0.8944) < 0.01)
 })
 
-test('⑨ `_suivreEmprise` NE FAIT RIEN hors du régime continu — la production ne bouge pas', async () => {
+test('⑨ `_suivreEmprise` NE FAIT RIEN hors du régime continu — le régime cranté est intact', async () => {
   const { m, camera, etat } = await machine({ continu: false, emprise: 1e6 })
   camera.position.set(0, 40, 20)
   m._suivreEmprise()

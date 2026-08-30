@@ -271,7 +271,7 @@ test('③ l’état de repos du monde n’est écrit qu’UNE fois', () => {
 
 // ═══════════ ④ LE BRANCHEMENT — LA FAIBLESSE RÉCURRENTE DU CHANTIER ═════════
 
-test('④ le drapeau existe, il est OFF, et il exige `terre unique` — ÉVALUÉ', async () => {
+test('④ le drapeau existe, il est LEVÉ, et il exige `terre unique` — ÉVALUÉ', async () => {
   // ⛔ **CE QUI A CRÉÉ CE TEST.** Sa version précédente ne faisait que du
   // `assert.match` sur le TEXTE de `flags.js`, sous un commentaire qui annonçait
   // « La garde, ÉVALUÉE ». La campagne de mutation de la relecture a montré que
@@ -279,47 +279,66 @@ test('④ le drapeau existe, il est OFF, et il exige `terre unique` — ÉVALUÉ
   // survivaient, dont le passage du DÉFAUT DE PRODUCTION à `true`.
   // ⚠️ Le dépôt portait pourtant le patron exact trente lignes plus loin —
   // `crop-branche` ⑦ bis — et il est recopié ici, échappatoire comprise.
+  //
+  // ⛔ **ET CE QUI L'A RÉÉCRIT LE 2026-08-30 : LE DÉFAUT A BASCULÉ.** Adrien a
+  // demandé le mode sphère au démarrage, les sept drapeaux sont levés. Les
+  // gardes de dépendance ci-dessous se testaient par l'ABSENCE de paramètre
+  // (`?planete=eclairee` seul, sans `?terre=unique`, sans `?frontiere=1`) — et
+  // l'absence signifie maintenant l'INVERSE. Laissées telles quelles, elles
+  // seraient restées VERTES POUR LA MAUVAISE RAISON : des décorations. Elles
+  // sont réécrites contre des paramètres **explicitement éteints**.
   const { planeteEclaireeActive, FLAGS } = await import('../src/flags.js')
   const avant = globalThis.location
   const defaut = FLAGS.planeteEclairee
   const q = (s) => { globalThis.location = { search: s } }
   try {
-    // ① LE DÉFAUT DE PRODUCTION EST OFF — et ça se lit sur la VALEUR RENDUE.
+    // ① LE DÉFAUT DE PRODUCTION EST ON — et ça se lit sur la VALEUR RENDUE.
     q('?terre=unique&frontiere=1')
-    assert.equal(planeteEclaireeActive(), false, 'le défaut de production doit rester OFF')
+    assert.equal(planeteEclaireeActive(), true, 'le défaut de production allume la planète')
+    // ⚠️ **ET SANS AUCUN PARAMÈTRE AUSSI** : c'est ça, littéralement, « commencer
+    //    en mode sphère au chargement ». C'est la seule ligne de ce fichier qui
+    //    décrive ce qu'Adrien voit en ouvrant shibumap.com.
+    q('')
+    assert.equal(planeteEclaireeActive(), true, 'adresse nue : la planète est éclairée au chargement')
 
-    // ② `?planete=eclairee` (et `=1`) l'allume — la branche existe et le nom du
-    //    paramètre d'adresse est le bon.
-    q('?terre=unique&frontiere=1&planete=eclairee')
-    assert.equal(planeteEclaireeActive(), true, '`?planete=eclairee` doit allumer')
-    q('?terre=unique&frontiere=1&planete=1')
-    assert.equal(planeteEclaireeActive(), true, '`?planete=1` doit allumer')
+    // ② `?planete=nue` (et `=0`) COUPE — c'est la branche qui mord aujourd'hui,
+    //    et c'est le levier de retour à la production d'avant.
+    q('?terre=unique&frontiere=1&planete=nue')
+    assert.equal(planeteEclaireeActive(), false, '`?planete=nue` doit COUPER')
+    q('?terre=unique&frontiere=1&planete=0')
+    assert.equal(planeteEclaireeActive(), false, '`?planete=0` aussi')
 
-    // ③ ⚠️ **LA GARDE `terre unique`, ÉVALUÉE POUR DE BON.** Sans
+    // ③ ⚠️ **LES DEUX GARDES, ÉVALUÉES CONTRE UN PARAMÈTRE ÉTEINT.** Sans
     //    `poserLoiMonde`, `uMppFacteur` vaut 0 et le pas du gradient retombe au
     //    TEXEL — le scintillement que la Tâche K a fermé.
-    q('?planete=eclairee&frontiere=1')
+    q('?planete=eclairee&frontiere=1&terre=deux')
     assert.equal(planeteEclaireeActive(), false, 'sans `terre unique`, rien ne s’allume')
-    q('?planete=eclairee&terre=unique')
+    q('?planete=eclairee&frontiere=1&terre=0')
+    assert.equal(planeteEclaireeActive(), false, 'et `?terre=0` la coupe pareillement')
+    q('?planete=eclairee&terre=unique&frontiere=0')
     assert.equal(planeteEclaireeActive(), false, 'sans la frontière de rendu non plus')
+    q('?planete=eclairee&terre=unique&frontiere=crans')
+    assert.equal(planeteEclaireeActive(), false, 'et `?frontiere=crans` la coupe pareillement')
 
-    // ④ ⚠️ **L'ÉCHAPPATOIRE NE SE TESTE QUE CONTRE UN DÉFAUT VRAI**, et c'est la
-    //    leçon que `crop-branche` ⑦ bis a déjà payée sur ce chantier : avec
-    //    `FLAGS.planeteEclairee === false`, supprimer la ligne `?planete=nue` ne
-    //    change RIEN — la valeur retombe sur un défaut faux de toute façon.
-    //    C'est pourtant la ligne qui comptera **le jour où le drapeau sera levé**,
-    //    et c'est exactement ce jour-là qu'on voudra pouvoir couper depuis
-    //    l'adresse : le noteur demande cette levée dans le même mouvement que
-    //    `terreUnique`.
+    // ④ ⚠️ **L'ÉCHAPPATOIRE NE SE TESTE QUE CONTRE LE DÉFAUT CONTRAIRE**, et
+    //    c'est la leçon que `crop-branche` ⑦ bis a déjà payée sur ce chantier.
+    //    ⛔ Le basculement du défaut l'a RETOURNÉE : hier c'était `?planete=nue`
+    //    qui ne mordait pas (défaut faux) ; aujourd'hui c'est
+    //    `?planete=eclairee` qui retomberait sur un défaut vrai. Chaque branche
+    //    est donc exercée avec le drapeau forcé à l'inverse.
+    FLAGS.planeteEclairee = false
+    q('?terre=unique&frontiere=1')
+    assert.equal(planeteEclaireeActive(), false, 'défaut à false : `terre unique` ne suffit pas')
+    q('?terre=unique&frontiere=1&planete=eclairee')
+    assert.equal(planeteEclaireeActive(), true, '`?planete=eclairee` doit ALLUMER un défaut éteint')
+    q('?terre=unique&frontiere=1&planete=1')
+    assert.equal(planeteEclaireeActive(), true, '`?planete=1` aussi')
+
     FLAGS.planeteEclairee = true
     q('?terre=unique&frontiere=1')
     assert.equal(planeteEclaireeActive(), true, 'défaut à true : `terre unique` suffit')
-    q('?terre=unique&frontiere=1&planete=nue')
-    assert.equal(planeteEclaireeActive(), false, '`?planete=nue` doit COUPER un défaut allumé')
-    q('?terre=unique&frontiere=1&planete=0')
-    assert.equal(planeteEclaireeActive(), false, '`?planete=0` aussi')
     // et la garde `terre unique` tient même défaut levé
-    q('?frontiere=1')
+    q('?frontiere=1&terre=deux')
     assert.equal(planeteEclaireeActive(), false, 'la garde `terre unique` prime sur le défaut')
   } finally {
     FLAGS.planeteEclairee = defaut

@@ -94,13 +94,19 @@ const PORTES_SANS_PEAGE = {
   // ⚠️ **EXEMPTION ÉCRITE, ET ELLE PORTE UNE CONTRAINTE ASSUMÉE** (Tâche 6
   // quinquies du plan « globe continu »). `socleRaffine` réécrit le relief de la
   // FENÊTRE BORNÉE quand des tuiles fines du quadtree atterrissent. Elle
-  // n'existe que derrière `?globe=continu` (`FLAGS.globeContinu`, ÉTEINT) et ne
+  // n'existe que derrière `?globe=continu` (`FLAGS.globeContinu`) et ne
   // touche qu'au bloc central. Les dalles voisines, elles, continuent de lire le
   // MNT : sous ce drapeau le centre lit le quadtree et les voisines le MNT, donc
   // la jointure ne tient que parce que les deux servent la MÊME source depuis
-  // z12 (Tâche 4 alpha). C'est une contrainte du régime expérimental, pas du
-  // produit — et elle est écrite ici plutôt que découverte à l'écran.
-  socleRaffine: 'globe continu (drapeau éteint) : la fenêtre bornée est le bloc CENTRAL et elle seule ; les voisines gardent le MNT, et les deux servent la même source depuis z12',
+  // z12 (Tâche 4 alpha).
+  //
+  // ⚡ **CE DRAPEAU EST LEVÉ DEPUIS LE 2026-08-30** (mode sphère au démarrage).
+  // Cette ligne disait « FLAGS.globeContinu, ÉTEINT » et concluait : « c'est une
+  // contrainte du régime expérimental, pas du produit ». ⛔ **Le régime
+  // expérimental EST le produit maintenant**, et la contrainte de jointure
+  // ci-dessus s'applique donc au chargement, pour tout le monde. Elle est
+  // écrite ici plutôt que découverte à l'écran.
+  socleRaffine: 'globe continu (drapeau LEVÉ depuis le 2026-08-30) : la fenêtre bornée est le bloc CENTRAL et elle seule ; les voisines gardent le MNT, et les deux servent la même source depuis z12',
 }
 
 // ③ Sites où `terrain.mapUniforms` est cédé en bloc. La clé est un fragment

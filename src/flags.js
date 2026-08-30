@@ -2,6 +2,44 @@
 // production. OFF (false) means: skip the module's initialisation AND its UI
 // section, so there are no orphan controllers and no empty panels. The
 // feature's code stays in the repo — flip the flag to true to bring it back.
+//
+// ════════════════════════════════════════════════════════════════════════════
+// ⚡ 2026-08-30 — LE MODE SPHÈRE EST DEVENU LE MODE DE DÉMARRAGE
+// ════════════════════════════════════════════════════════════════════════════
+//
+// > **Adrien** : « Installe le mode sphère comme le mode par défaut, pour qu'on
+// > commence directement en mode sphère au chargement. »
+//
+// ⛔ **CECI ABROGE LA GARANTIE QUE TOUT LE CHANTIER A TENUE** — « drapeau
+// baissé, la production est rigoureusement inchangée ». Ce n'est plus un
+// objectif : le comportement au chargement DEVAIT changer, c'est la commande.
+// Sept drapeaux sont levés d'un coup, et ils forment une chaîne :
+//
+//   `globeContinu` → `socleQuadtree`      (le socle exige la fenêtre bornée)
+//   `frontiereRendu` → `seuilSocle`       (le seuil exige la passe de fond)
+//                   → `terreUnique`       (le crop exige la passe de fond)
+//                                → `planeteEclairee` (exige `terre unique`)
+//   `soleilHeureMonde`                    (n'exige rien)
+//
+// **RESTENT ÉTEINTS, ET C'EST DÉLIBÉRÉ** : `fenetreContinue` (l'emprise 3×3,
+// c'est le `f3=0` de l'adresse de travail), `suiviHelico`, `exagContinue`.
+//
+// ⚠️ **CE QUE ÇA CHANGE POUR QUI LIT LES COMMENTAIRES CI-DESSOUS.** Les
+// paragraphes « OFF, et voici pourquoi » de ces sept drapeaux ont été réécrits
+// à cette date : ils disaient tous une chose qui est devenue fausse. En
+// revanche **les TABLEAUX DE MESURE sont laissés intacts**, y compris quand
+// leur colonne s'appelle « production » : elle désigne le régime d'AVANT le
+// basculement, c'est-à-dire `?globe=crans`. Une mesure ne se réécrit pas parce
+// qu'un défaut a bougé — elle se date. C'est le cas ici pour
+// `socleQuadtreeActif()` et `exagContinueActive()`.
+//
+// ⚠️ **ET LES ÉCHAPPATOIRES ONT CHANGÉ DE SENS UTILE.** Jusqu'ici le levier qui
+// comptait était celui qui ALLUME (`?terre=unique`) ; c'est maintenant celui
+// qui COUPE (`?terre=deux`, `?globe=crans`, `?frontiere=0`, `?seuil=0`,
+// `?socle=mnt`, `?planete=nue`, `?soleil=camera`) — c'est par lui qu'on
+// retrouve le régime d'avant sans toucher au code. Les tests exercent
+// désormais CHAQUE branche contre le défaut CONTRAIRE : une branche ne mord
+// jamais contre le défaut qui lui donne déjà raison.
 export const FLAGS = {
   // v39: back on — the wave engine is now the shared "ocean-waves" random
   // spectrum (ocean-lab repo), with a Sea toggle in the Effects panel, OFF by
@@ -43,21 +81,25 @@ export const FLAGS = {
   suiviHelico: false,
 
   // LE GLOBE CONTINU — le tri spatial du quadtree (plan « globe continu »,
-  // Tâche 4). OFF par défaut, et ce n'est pas une précaution de style : les
-  // trois corrections qu'il ouvre (horizon géométrique, frustum, crédit)
-  // changent l'emprise parcourue par `_traverse` d'un ordre de grandeur, donc
-  // le trafic et le contenu de l'écran. Elles atterrissent dans le dépôt
-  // derrière ce drapeau le temps que le bloc quadtree (4 quater, 4 alpha) soit
-  // complet.
+  // Tâche 4).
+  //
+  // ⚡ **LEVÉ LE 2026-08-30 — C'EST LE DRAPEAU RACINE DU MODE SPHÈRE.** Il
+  // disait jusque-là : « OFF par défaut, et ce n'est pas une précaution de
+  // style : les trois corrections qu'il ouvre (horizon géométrique, frustum,
+  // crédit) changent l'emprise parcourue par `_traverse` d'un ordre de
+  // grandeur, donc le trafic et le contenu de l'écran. Elles atterrissent dans
+  // le dépôt derrière ce drapeau le temps que le bloc quadtree (4 quater,
+  // 4 alpha) soit complet. » **Ces trois corrections sont désormais le régime
+  // de démarrage**, et le trafic qu'elles changent est celui de tout le monde.
   //
   // ⚠️ `src/globe.js` N'IMPORTE PAS CE FICHIER — délibérément. Le lecteur est
   // `src/main.js`, qui construit le globe et lui passe un simple booléen
   // (`params.globeContinu`). Un drapeau posé ici sans ce câblage ne
   // protégerait rien.
   //
-  // S'essaie par l'adresse sans rien reconstruire : `?globe=continu`. Et
-  // `?globe=crans` le coupe, pour le jour où le défaut passera à true.
-  globeContinu: false,
+  // `?globe=crans` (ou `?globe=0`) le coupe et rend le régime d'avant le
+  // basculement ; `?globe=continu` le rallume si le défaut redescendait un jour.
+  globeContinu: true,
 
   // L'EXAGÉRATION VERTICALE CONTINUE — décision 14, Tâche 6 bis.
   //
@@ -85,9 +127,17 @@ export const FLAGS = {
   //
   // ⚠️ **CE BLOCAGE-LÀ EST LEVÉ DEPUIS LA TÂCHE 6 sexies (2026-08-21) :
   // `remplirHauteurs` FUSIONNE la bathymétrie.** Les chiffres d'après sont sous
-  // `socleQuadtreeActif()`, à côté de ceux d'avant. **Le drapeau reste éteint
-  // pour d'autres raisons, et elles y sont écrites** — ce n'est plus la mer.
-  socleQuadtree: false,
+  // `socleQuadtreeActif()`, à côté de ceux d'avant.
+  //
+  // ⚡ **ET LE DRAPEAU EST LEVÉ DEPUIS LE 2026-08-30** — il disait « le drapeau
+  // reste éteint pour d'autres raisons, et elles y sont écrites ». Adrien a
+  // demandé le mode sphère au démarrage ; ces raisons ne le retiennent plus,
+  // mais **elles ne sont pas résolues pour autant et restent écrites sous
+  // `socleQuadtreeActif()`** : le coût par image du raffinement n'est pas
+  // chronométré `render()` compris, le pic mémoire des `fetchAndBuildDem`
+  // concurrents n'est pas mesuré, et rien n'a été mesuré sur un portable.
+  // `?socle=mnt` (ou `?socle=0`) rend le socle au MNT si l'une d'elles mord.
+  socleQuadtree: true,
 
   // LA FRONTIÈRE DE RENDU — Tâche 1b bis du plan « globe continu ».
   //
@@ -101,11 +151,19 @@ export const FLAGS = {
   // regarder tourner sous `?globe=crans` — c'est-à-dire contre le régime de
   // PRODUCTION, seul point de comparaison honnête.
   //
-  // ⚠️ **OFF, ET LA RAISON EST ÉCRITE DANS LE PLAN AVANT DE L'ÊTRE ICI :** c'est
-  // la seule tâche du chantier dont le plan dise qu'*elle ne peut pas être
-  // livrée à l'aveugle*. `src/main.js` n'est chargé par aucun test, et l'Étape 5
-  // de la tâche — **regarder tourner, avec Adrien** — n'est pas faite. Ce qui
-  // est prouvé l'est par `readPixels` sur une image forcée, pas par un œil.
+  // ⚡ **LEVÉ LE 2026-08-30.** Il disait : « **OFF, ET LA RAISON EST ÉCRITE
+  // DANS LE PLAN AVANT DE L'ÊTRE ICI :** c'est la seule tâche du chantier dont
+  // le plan dise qu'*elle ne peut pas être livrée à l'aveugle*. `src/main.js`
+  // n'est chargé par aucun test, et l'Étape 5 de la tâche — **regarder tourner,
+  // avec Adrien** — n'est pas faite. » ⚠️ **CETTE RÉSERVE-LÀ N'EST PAS LEVÉE
+  // PAR UNE MESURE, ELLE EST LEVÉE PAR ADRIEN** : c'est lui qui a demandé le
+  // mode sphère au démarrage. Ce qui est prouvé dans le dépôt l'est toujours
+  // par `readPixels` sur une image forcée, pas par un œil.
+  //
+  // ⚠️ **ET C'EST LE DRAPEAU DONT DEUX AUTRES DÉPENDENT** : `seuilSocle` et
+  // `terreUnique` le lisent en garde. Le couper à l'adresse (`?frontiere=0`)
+  // les éteint tous les trois d'un coup — c'est le levier le plus court pour
+  // revenir au bloc plat.
   //
   // ⚠️ **CE QUI RESTE VISIBLEMENT OUVERT, MESURÉ (voir `frontiere-rendu.js`) :**
   // le bloc est PLAT, la planète est ronde ; à z4 le bord du bloc surplombe la
@@ -114,7 +172,7 @@ export const FLAGS = {
   // d'Adrien, pas un réglage à trouver.**
   //
   // `?frontiere=1` l'essaie, `?frontiere=0` le coupe.
-  frontiereRendu: false,
+  frontiereRendu: true,
 
   // LE SEUIL DU SOCLE — Tâche 3 du plan « globe continu », BRANCHÉE.
   //
@@ -142,8 +200,19 @@ export const FLAGS = {
   // mourir au dolly (à z10 : naissance à 88,6 unités de distance, mort à
   // 110,8), et c'est exactement le geste continu qu'Adrien décrit.
   //
-  // `?seuil=1` l'essaie, `?seuil=0` le coupe.
-  seuilSocle: false,
+  // ⚡ **LEVÉ LE 2026-08-30**, avec les six autres du mode sphère. C'est lui qui
+  // décide ce qu'Adrien voit au chargement selon d'où il regarde : sous 32 274 m
+  // le socle est là, au-dessus c'est la planète. Sans lui, le mode sphère
+  // poserait un socle devant la Terre entière à Z5 — le défaut même qu'Adrien a
+  // signalé le 2026-08-21, capture à l'appui.
+  //
+  // ⛔ **SA GARDE `?frontiere=1` NE SE TESTE PLUS PAR L'ABSENCE DE PARAMÈTRE** :
+  // la frontière est levée, donc l'absence vaut « allumée ». Elle s'exerce
+  // contre `?frontiere=0`, explicitement — voir `test/seuil-branche.test.js`.
+  //
+  // `?seuil=0` (ou `?seuil=toujours`) le coupe et rend le socle à tous les
+  // zooms ; `?seuil=1` le rallume si le défaut redescendait un jour.
+  seuilSocle: true,
 
   // UNE SEULE TERRE — Tâche I du plan « terre unique », LE BRANCHEMENT.
   //
@@ -160,20 +229,31 @@ export const FLAGS = {
   // planète** — découpe, parois, habillage, rampe, mer — et l'estompage suit la
   // même altitude. Au-dessus du seuil, le crop est retiré et on voit la Terre.
   //
-  // ⚠️ **OFF, ET LE DÉFAUT NE BASCULE PAS DANS CETTE TÂCHE : LE SOCLE ACTUEL EST
-  // EN PRODUCTION SUR shibumap.com.** Ce que le crop montre aujourd'hui est
-  // encore loin du socle, et c'est écrit dans le compte rendu de la tâche plutôt
-  // que caché ici : les arêtes du bloc sont vives (Tâche B), les jupes des tuiles
-  // pendent sous lui (Tâche E), les raccords de niveaux du quadtree font des
-  // arêtes droites dans les alentours (Tâche G), et la mer part SANS bathymétrie
-  // (voir `contexteCrop` dans `main.js`, qui dit pourquoi).
+  // ⚡ **LEVÉ LE 2026-08-30 — ET C'EST CE DRAPEAU QUI PORTE LA COMMANDE.** Il
+  // disait, mot pour mot : « **OFF, ET LE DÉFAUT NE BASCULE PAS DANS CETTE
+  // TÂCHE : LE SOCLE ACTUEL EST EN PRODUCTION SUR shibumap.com.** » ⛔ **C'EST
+  // FAUX DEPUIS QU'ADRIEN A TRANCHÉ** : « installe le mode sphère comme le mode
+  // par défaut, pour qu'on commence directement en mode sphère au chargement ».
+  // Le crop dans la planète EST ce qu'on voit au chargement.
+  //
+  // ⚠️ **CE QUE LE CROP MONTRE N'A PAS CHANGÉ POUR AUTANT, ET C'ÉTAIT ÉCRIT
+  // ICI AVANT LE BASCULEMENT — ça le reste** : les arêtes du bloc sont vives
+  // (Tâche B), les jupes des tuiles pendent sous lui (Tâche E), les raccords de
+  // niveaux du quadtree font des arêtes droites dans les alentours (Tâche G),
+  // et la mer part SANS bathymétrie (voir `contexteCrop` dans `main.js`, qui
+  // dit pourquoi). Le basculement du défaut ne répare aucun des quatre : il les
+  // met sous les yeux d'Adrien, ce qui est exactement ce qu'il demande.
   //
   // ⚠️ **IL EXIGE `?frontiere=1`, ET C'EST LA MÊME RAISON QUE `seuilSocle`** :
   // sans la passe de fond, le globe n'est PAS dessiné en mode surface. Creuser
   // un crop dans une planète qu'on ne dessine pas ne montrerait rien du tout.
+  // ⛔ **CETTE GARDE NE SE TESTE PLUS PAR L'ABSENCE DE `?frontiere`** : la
+  // frontière est levée, donc l'absence vaut « allumée ». Elle s'exerce contre
+  // `?frontiere=0`, explicitement — voir `crop-branche` ⑦ bis.
   //
-  // `?terre=unique` l'essaie, `?terre=deux` (ou `?terre=0`) le coupe.
-  terreUnique: false,
+  // `?terre=deux` (ou `?terre=0`) le coupe et rend le bloc plat ;
+  // `?terre=unique` le rallume si le défaut redescendait un jour.
+  terreUnique: true,
 
   // LA PLANÈTE NE DOIT PLUS JAMAIS ÊTRE NUE — règle D15, Tâche R6.
   //
@@ -193,11 +273,16 @@ export const FLAGS = {
   // texture ancrée au monde rendrait un gradient plus fin que le pixel en vue
   // orbitale — c'est-à-dire le scintillement que la Tâche K a fermé.
   //
-  // ⚠️ **OFF, ET LE DÉFAUT NE BASCULE PAS ICI** : `terreUnique` est encore OFF,
-  // donc ce drapeau ne pourrait rien allumer en production de toute façon.
+  // ⚡ **LEVÉ LE 2026-08-30, EN MÊME TEMPS QUE `terreUnique`.** Il disait :
+  // « **OFF, ET LE DÉFAUT NE BASCULE PAS ICI** : `terreUnique` est encore OFF,
+  // donc ce drapeau ne pourrait rien allumer en production de toute façon. »
+  // ⛔ Les deux ont basculé ensemble — c'est exactement ce que la ligne
+  // anticipait sans oser l'écrire, et le noteur l'avait demandé dans le même
+  // mouvement. La planète porte donc son ombrage de relief et son niveau de mer
+  // partout, dès le chargement. `?planete=nue` (ou `?planete=0`) la redénude.
   //
   // `?planete=eclairee` l'essaie, `?planete=nue` le coupe.
-  planeteEclairee: false,
+  planeteEclairee: true,
   // L'HEURE DE LA PLANÈTE — Tâche R7 du chantier « une seule Terre ».
   //
   // ⛔ **LA PLANÈTE NE LIT PAS L'HEURE : ELLE LIT LA CAMÉRA.** `main.js` repose
@@ -214,13 +299,17 @@ export const FLAGS = {
   // replacé dans son repère, **au lieu** du vecteur caméra. Les deux côtés du
   // seuil rendent alors la même heure.
   //
-  // ⚠️ **OFF, ET CE N'EST PAS UNE PRÉCAUTION DE STYLE.** Le soleil de caméra est
-  // un CHOIX validé avec Adrien pour la vue orbitale — « un soleil fixe à la
-  // scène n'éclairait qu'un hémisphère : la moitié des continents restait à
-  // jamais dans la nuit ». Le lever rend à la planète son terminateur vrai :
-  // **à 03h22 la vue orbitale devient nocturne**, ce qui est juste, mais ce
-  // n'est plus la vue qu'Adrien a validée. C'est à lui de trancher, pas à cette
-  // tâche.
+  // ⚡ **LEVÉ LE 2026-08-30 — ET C'EST BIEN ADRIEN QUI A TRANCHÉ.** Ce drapeau
+  // disait : « **OFF, ET CE N'EST PAS UNE PRÉCAUTION DE STYLE.** Le soleil de
+  // caméra est un CHOIX validé avec Adrien pour la vue orbitale — “un soleil
+  // fixe à la scène n'éclairait qu'un hémisphère : la moitié des continents
+  // restait à jamais dans la nuit”. […] C'est à lui de trancher, pas à cette
+  // tâche. » Il a tranché en demandant le mode sphère au démarrage.
+  //
+  // ⚠️ **CE QUE ÇA IMPLIQUE N'A PAS CHANGÉ, ET IL FAUT LE GARDER SOUS LES
+  // YEUX** : le lever rend à la planète son terminateur vrai, donc **à 03h22 la
+  // vue orbitale devient nocturne**. C'est juste, et c'est visible.
+  // `?soleil=camera` (ou `?soleil=0`) rend le soleil de caméra d'avant.
   //
   // ⚠️ **IL N'EXIGE RIEN** — ni `?frontiere=1` ni `?terre=unique`. Le défaut
   // qu'il corrige vit dans la boucle d'image du globe, qui tourne dès qu'il y a
@@ -228,7 +317,7 @@ export const FLAGS = {
   // horaire.
   //
   // `?soleil=heure` l'essaie, `?soleil=camera` (ou `?soleil=0`) le coupe.
-  soleilHeureMonde: false,
+  soleilHeureMonde: true,
 }
 
 // LA PLANÈTE ÉCLAIRÉE — règle D15, Tâche R6. ⚠️ **ELLE EXIGE `terre unique`**,

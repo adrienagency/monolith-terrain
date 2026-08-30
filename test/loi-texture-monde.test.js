@@ -515,7 +515,7 @@ test('⑤g ter LA LATITUDE DE L’ANCRE EST TRANSMISE, JAMAIS FORCÉE À L’ÉQ
     'une seconde écriture force la latitude à 0 ailleurs dans le branchement')
 })
 
-test('⑤h HORS DRAPEAU, la loi est RETIRÉE — la production ne bouge pas', () => {
+test('⑤h HORS DRAPEAU, la loi est RETIRÉE — le régime d un ?terre=deux est intact', () => {
   const i = MAIN.indexOf('function majLoiTextureMonde()')
   const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))
   assert.ok(

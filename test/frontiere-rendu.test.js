@@ -317,3 +317,55 @@ test('l’écart plan tangent / sphère est celui du tableau de l’en-tête, au
   assert.ok(Math.abs(surplombM - attendu[10]) / attendu[10] < 0.03,
     `surplomb mesuré ${surplombM.toFixed(1)} m, attendu ${attendu[10]} m`)
 })
+
+// ══════════ LE DRAPEAU — LEVÉ, ET SON ÉCHAPPATOIRE ÉVALUÉE ══════════════════
+//
+// ⛔ **CE BLOC N'EXISTAIT PAS, ET C'ÉTAIT UN TROU MESURÉ** : au 2026-08-30,
+// `grep -rn 'FLAGS.frontiereRendu' test/` ne rendait RIEN, et
+// `frontiereRenduActive` n'était importée par aucun test du dépôt. Mettre le
+// défaut à `false`, ou inverser les deux branches de son échappatoire, ne
+// faisait rougir aucun des 4 293 tests. C'est exactement le trou qui avait
+// laissé passer quatre mutations sur `planeteEclaireeActive`.
+//
+// ⚠️ Et il ne coûtait rien tant que le drapeau était éteint. Il coûte maintenant :
+// `frontiereRendu` est le drapeau dont DEUX autres dépendent (`terreUnique` et
+// `seuilSocle` le lisent en garde), et il est levé au démarrage.
+
+test('le drapeau `frontiereRendu` est LEVÉ par défaut — la passe de fond part au chargement', async () => {
+  const { FLAGS } = await import('../src/flags.js')
+  assert.equal(FLAGS.frontiereRendu, true,
+    'le mode sphère est le démarrage : sans la passe de fond, la Terre n’est pas dessinée derrière le socle')
+})
+
+test('⛔ LES DEUX BRANCHES DE L ÉCHAPPATOIRE `?frontiere`, EXERCÉES CONTRE LE DÉFAUT CONTRAIRE', async () => {
+  // ⚠️ Une branche d'échappatoire NE MORD QUE CONTRE LE DÉFAUT CONTRAIRE :
+  // défaut à `true`, supprimer `if (… 'fond') return true` ne change rien, la
+  // valeur retombe sur un défaut vrai. Chaque branche est donc exercée avec le
+  // drapeau forcé à l'inverse.
+  const { FLAGS, frontiereRenduActive } = await import('../src/flags.js')
+  const avant = globalThis.location
+  const defaut = FLAGS.frontiereRendu
+  const q = (s) => { globalThis.location = { search: s } }
+  try {
+    q('')
+    assert.equal(frontiereRenduActive(), true, 'adresse nue : la frontière de rendu est active')
+    q('?frontiere=crans')
+    assert.equal(frontiereRenduActive(), false, '`?frontiere=crans` doit COUPER un défaut allumé')
+    q('?frontiere=0')
+    assert.equal(frontiereRenduActive(), false, '`?frontiere=0` aussi')
+    q('?frontiere=bidon')
+    assert.equal(frontiereRenduActive(), true, 'une valeur inconnue retombe sur le drapeau nu')
+
+    FLAGS.frontiereRendu = false
+    q('')
+    assert.equal(frontiereRenduActive(), false, 'défaut éteint : rien ne l’allume tout seul')
+    q('?frontiere=fond')
+    assert.equal(frontiereRenduActive(), true, '`?frontiere=fond` doit ALLUMER un défaut éteint')
+    q('?frontiere=1')
+    assert.equal(frontiereRenduActive(), true, '`?frontiere=1` aussi')
+  } finally {
+    FLAGS.frontiereRendu = defaut
+    if (avant === undefined) delete globalThis.location
+    else globalThis.location = avant
+  }
+})
