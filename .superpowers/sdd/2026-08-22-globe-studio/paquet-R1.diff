@@ -1,0 +1,1471 @@
+=== COMMITS ===
+559a548 tache R1 ② : les boutons du bas repondaient a la question du maillage plat
+64c90db tache R1 ① : le repos surveillait l altitude, or incliner la vue c est baisser l altitude
+
+=== STAT ===
+ package.json                    |   2 +-
+ src/main.js                     | 162 ++++++++++++++++++++++++++++++++-----
+ src/monde/branchement-crop.js   |  60 ++++++++++----
+ src/monde/veille-repos.js       | 172 ++++++++++++++++++++++++++++++----------
+ src/monde/visibilite-surface.js |  68 ++++++++++++++++
+ test/crop-branche.test.js       |  34 ++++++--
+ test/seuil-branche.test.js      |   8 +-
+ test/veille-repos.test.js       | 115 +++++++++++++++++++++++----
+ test/visibilite-surface.test.js | 160 +++++++++++++++++++++++++++++++++++++
+ 9 files changed, 680 insertions(+), 101 deletions(-)
+
+=== DIFF ===
+diff --git a/package.json b/package.json
+index fc541ba..2eb7555 100644
+--- a/package.json
++++ b/package.json
+@@ -11,21 +11,21 @@
+     "build:places": "node scripts/build-places.mjs",
+     "build:mapcells": "node scripts/build-map-cells.mjs",
+     "build:watertiles": "node scripts/build-water-tiles.mjs",
+     "build:laketiles": "node scripts/build-world-lake-tiles.mjs",
+     "build:bathytiles": "node scripts/build-bathy-tiles.mjs",
+     "build:sol": "node scripts/build-occupation-sol.mjs",
+     "build:solmonde": "node scripts/build-occupation-sol.mjs --bbox -180,-60,180,84 --zmin 8 --zmax 9 --zone Monde --paralleles 32 --reprendre",
+     "build:canopee": "node scripts/build-canopee.mjs",
+     "build:canopeemonde": "node scripts/build-canopee.mjs --bbox -180,-60,180,84 --zmin 8 --zmax 9 --zone Monde --paralleles 32 --reprendre",
+     "build:geofr": "node scripts/fetch-geo-fr.mjs",
+-    "test": "node --test test/paiement.test.js test/compte-session.test.js test/compte-panne-liste.test.js test/compte-config.test.js test/compte-connexion.test.js test/compte-app.test.js test/comptes-cohesion.test.js test/compte-suppression.test.js test/garde-deploiement.test.js test/paiement-compte.test.js test/print-page.test.js test/export-cadrage.test.js test/export-dpi.test.js test/sonde-materielle.test.js test/affiche-tirage.test.js test/affiche-nettete.test.js test/affiche-mots.test.js test/affiche-ecran.test.js test/plancher-ui.test.js test/export-effets.test.js test/export-traits.test.js test/export-plafond.test.js test/export-pavage.test.js test/compositeur-affiche.test.js test/pdf-affiche.test.js test/coffre-affiche.test.js test/plafond-unites-texture.test.js test/geo.test.js test/clouds-sim.test.js test/boot-gate.test.js test/background.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/landmark-frame.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/sea-mask.test.js test/mer-cuisson.test.js test/region-mask.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js test/history.test.js test/shortcuts.test.js test/river-width.test.js test/place-scale.test.js test/tile-index.test.js test/tile-loader.test.js test/tuiles-plafond.test.js test/water-layer.test.js test/share-link.test.js test/race-edit.test.js test/race-regie.test.js test/race-proprietaire.test.js test/sea-vendor.test.js test/sea-options.test.js test/store-catalog.test.js test/race-model.test.js test/transports.test.js test/relief-grade.test.js test/shuffle-pool.test.js test/bathy.test.js test/bathy-sources.test.js test/terrain-analysis.test.js test/dem-source.test.js test/dem-load.test.js test/ui-theme.test.js test/aerial-layer.test.js test/arch.test.js test/daycycle.test.js test/gpx-layers.test.js test/share-page.test.js test/sun-disc.test.js test/text-label.test.js test/templates-user.test.js test/publish-map.test.js test/fleet.test.js test/goto-frame.test.js test/geo-fr.test.js test/peak-mask.test.js test/region-grid.test.js test/region-skirt-floor.test.js test/damier-reseau.test.js test/damier-memoire.test.js test/route-entry.test.js test/route-waypoints.test.js test/grid-template.test.js test/detail-noise.test.js test/terrain-jobs.test.js test/globe-reseau.test.js test/peak-labels.test.js test/globe-eviction.test.js test/globe-precision.test.js test/globe-profondeur.test.js test/globe-source.test.js test/viewport-aspect.test.js test/export-presets.test.js test/atelier-steps.test.js test/gestes.test.js test/light-gain.test.js test/light-switches.test.js test/warmup.test.js test/hub-sas.test.js test/perf-gouverneur.test.js test/palier-machine.test.js test/geo-cells.test.js test/export-credit-bathy.test.js test/carte-ombre.test.js test/camera-shots.test.js test/drone-cam.test.js test/accueil.test.js test/dem-quant.test.js test/dem-emprise.test.js test/fenetre-course.test.js test/fenetre-centrage.test.js test/fenetre-elan.test.js test/detail-emprise.test.js test/grid-normals.test.js test/mer-emprise.test.js test/fenetre-clip.test.js test/fenetre-coin-exposant.test.js test/atlas-champs.test.js test/hints.test.js test/fenetre-reglage.test.js test/fenetre-finesse.test.js test/aides.test.js test/boutons-camera.test.js test/pilote.test.js test/poursuite.test.js test/gardien.test.js test/nuit.test.js test/nuit-recalage.test.js test/escalier-surface.test.js test/escalier-zoom.test.js test/occupation-sol.test.js test/reglages-couches.test.js test/canopee.test.js test/canopee-cuisson.test.js test/bathy-cuisson.test.js test/garde-plans-eau.test.js test/cloud-volume.test.js test/templates-livres.test.js test/socle-matiere.test.js test/carnet-course.test.js test/ruban-trace.test.js test/logo-course.test.js test/lissage.test.js test/course-bar.test.js test/gpx-largeur.test.js test/suivi-relance.test.js test/casse-titre.test.js test/vue-ensemble.test.js test/animations.test.js test/clic-ruban.test.js test/damier-carre.test.js test/damier-palier.test.js test/damier-hauteur.test.js test/damier-bords.test.js test/damier-clip-surface.test.js test/damier-mer.test.js test/damier-mer-runtime.test.js test/damier-nuit.test.js test/race-lecture.test.js test/xss-course.test.js test/damier-uniformes.test.js test/damier-cadre.test.js test/damier-eau-reseau.test.js test/bibliotheque-origine.test.js test/comptes-defense.test.js test/camera-continue.test.js test/seuil-branche.test.js test/seuil-socle.test.js test/flux-terrain.test.js test/descente-bornee.test.js test/audit-solide.test.js test/fenetre-bornee.test.js test/fenetre-branchee.test.js test/voile-whiteout.test.js test/voile-loading.test.js test/frontiere-rendu.test.js test/crop-sphere.test.js test/crop-parois.test.js test/exageration-globe.test.js test/crop-habillage.test.js test/crop-rampe.test.js test/mer-sphere.test.js test/estompage-terre.test.js test/crop-branche.test.js test/fond-crop.test.js test/loi-texture-monde.test.js test/echelle-continue.test.js test/veille-repos.test.js test/zoom-continu.test.js test/crop-naturel.test.js test/crop-eclairage.test.js test/maillage-tuile.test.js test/ecume-mer.test.js test/atlas-normales.test.js",
++    "test": "node --test test/paiement.test.js test/compte-session.test.js test/compte-panne-liste.test.js test/compte-config.test.js test/compte-connexion.test.js test/compte-app.test.js test/comptes-cohesion.test.js test/compte-suppression.test.js test/garde-deploiement.test.js test/paiement-compte.test.js test/print-page.test.js test/export-cadrage.test.js test/export-dpi.test.js test/sonde-materielle.test.js test/affiche-tirage.test.js test/affiche-nettete.test.js test/affiche-mots.test.js test/affiche-ecran.test.js test/plancher-ui.test.js test/export-effets.test.js test/export-traits.test.js test/export-plafond.test.js test/export-pavage.test.js test/compositeur-affiche.test.js test/pdf-affiche.test.js test/coffre-affiche.test.js test/plafond-unites-texture.test.js test/geo.test.js test/clouds-sim.test.js test/boot-gate.test.js test/background.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/landmark-frame.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/sea-mask.test.js test/mer-cuisson.test.js test/region-mask.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js test/history.test.js test/shortcuts.test.js test/river-width.test.js test/place-scale.test.js test/tile-index.test.js test/tile-loader.test.js test/tuiles-plafond.test.js test/water-layer.test.js test/share-link.test.js test/race-edit.test.js test/race-regie.test.js test/race-proprietaire.test.js test/sea-vendor.test.js test/sea-options.test.js test/store-catalog.test.js test/race-model.test.js test/transports.test.js test/relief-grade.test.js test/shuffle-pool.test.js test/bathy.test.js test/bathy-sources.test.js test/terrain-analysis.test.js test/dem-source.test.js test/dem-load.test.js test/ui-theme.test.js test/aerial-layer.test.js test/arch.test.js test/daycycle.test.js test/gpx-layers.test.js test/share-page.test.js test/sun-disc.test.js test/text-label.test.js test/templates-user.test.js test/publish-map.test.js test/fleet.test.js test/goto-frame.test.js test/geo-fr.test.js test/peak-mask.test.js test/region-grid.test.js test/region-skirt-floor.test.js test/damier-reseau.test.js test/damier-memoire.test.js test/route-entry.test.js test/route-waypoints.test.js test/grid-template.test.js test/detail-noise.test.js test/terrain-jobs.test.js test/globe-reseau.test.js test/peak-labels.test.js test/globe-eviction.test.js test/globe-precision.test.js test/globe-profondeur.test.js test/globe-source.test.js test/viewport-aspect.test.js test/export-presets.test.js test/atelier-steps.test.js test/gestes.test.js test/light-gain.test.js test/light-switches.test.js test/warmup.test.js test/hub-sas.test.js test/perf-gouverneur.test.js test/palier-machine.test.js test/geo-cells.test.js test/export-credit-bathy.test.js test/carte-ombre.test.js test/camera-shots.test.js test/drone-cam.test.js test/accueil.test.js test/dem-quant.test.js test/dem-emprise.test.js test/fenetre-course.test.js test/fenetre-centrage.test.js test/fenetre-elan.test.js test/detail-emprise.test.js test/grid-normals.test.js test/mer-emprise.test.js test/fenetre-clip.test.js test/fenetre-coin-exposant.test.js test/atlas-champs.test.js test/hints.test.js test/fenetre-reglage.test.js test/fenetre-finesse.test.js test/aides.test.js test/boutons-camera.test.js test/pilote.test.js test/poursuite.test.js test/gardien.test.js test/nuit.test.js test/nuit-recalage.test.js test/escalier-surface.test.js test/escalier-zoom.test.js test/occupation-sol.test.js test/reglages-couches.test.js test/canopee.test.js test/canopee-cuisson.test.js test/bathy-cuisson.test.js test/garde-plans-eau.test.js test/cloud-volume.test.js test/templates-livres.test.js test/socle-matiere.test.js test/carnet-course.test.js test/ruban-trace.test.js test/logo-course.test.js test/lissage.test.js test/course-bar.test.js test/gpx-largeur.test.js test/suivi-relance.test.js test/casse-titre.test.js test/vue-ensemble.test.js test/animations.test.js test/clic-ruban.test.js test/damier-carre.test.js test/damier-palier.test.js test/damier-hauteur.test.js test/damier-bords.test.js test/damier-clip-surface.test.js test/damier-mer.test.js test/damier-mer-runtime.test.js test/damier-nuit.test.js test/race-lecture.test.js test/xss-course.test.js test/damier-uniformes.test.js test/damier-cadre.test.js test/damier-eau-reseau.test.js test/bibliotheque-origine.test.js test/comptes-defense.test.js test/camera-continue.test.js test/seuil-branche.test.js test/seuil-socle.test.js test/flux-terrain.test.js test/descente-bornee.test.js test/audit-solide.test.js test/fenetre-bornee.test.js test/fenetre-branchee.test.js test/voile-whiteout.test.js test/voile-loading.test.js test/frontiere-rendu.test.js test/crop-sphere.test.js test/crop-parois.test.js test/exageration-globe.test.js test/crop-habillage.test.js test/crop-rampe.test.js test/mer-sphere.test.js test/estompage-terre.test.js test/crop-branche.test.js test/fond-crop.test.js test/loi-texture-monde.test.js test/echelle-continue.test.js test/veille-repos.test.js test/zoom-continu.test.js test/crop-naturel.test.js test/crop-eclairage.test.js test/maillage-tuile.test.js test/ecume-mer.test.js test/atlas-normales.test.js test/visibilite-surface.test.js",
+     "build:emodnet": "node scripts/fetch-emodnet.mjs",
+     "build:bathyindex": "node scripts/build-bathy-index.mjs",
+     "verifie:dist": "node scripts/verifie-dist.mjs",
+     "deploy": "node scripts/garde-deploiement.mjs && npm run build:mapcells && npm run carte && npm run nettoie:dist && npx vite build && npm run verifie:dist && netlify deploy --prod --dir dist --site 74e18fe8-c86f-47ad-9807-479cd59f1d8c",
+     "cuire:fixtures-relief": "node scripts/cuire-fixtures-relief.mjs",
+     "controle:pdf": "node --max-old-space-size=4096 scripts/controle-pdf-affiche.mjs",
+     "inspecte:pdf": "node --max-old-space-size=6144 scripts/inspecte-pdf-affiche.mjs",
+     "build:volcans": "node scripts/build-volcans.mjs",
+     "carte": "node scripts/carte-ecosysteme.mjs",
+     "nettoie:dist": "node scripts/nettoie-dist.mjs",
+diff --git a/src/main.js b/src/main.js
+index 366ae54..1638e08 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -68,20 +68,31 @@ import { creerVeilleSocle } from './monde/veille-socle.js'
+ // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G. ⚠️ **PUR, ET C'EST LA CONDITION DE
+ // SA VÉRIFICATION** : la loi ne peut pas vivre ici, aucun test ne charge
+ // `main.js`. Voir `majEstompage` plus bas.
+ import { creerVeilleEstompage } from './monde/estompage-terre.js'
+ // UNE SEULE TERRE — Tâche I, LE BRANCHEMENT. ⚠️ **C'EST LE TROU DU PLAN**, et
+ // c'est Adrien qui l'a trouvé : les Tâches A à G posaient six méthodes sur le
+ // globe que PERSONNE n'appelait. La chaîne et son automate vivent dans un module
+ // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
+ // `main.js`, et l'état inter-images est ce qui se casse en silence.
+ import { creerVeilleCrop } from './monde/branchement-crop.js'
++// ══════ LES BOUTONS DU BAS — Tâche R1 ② ═══════════════════════════════
++//
++// > **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
++// > disparu (shuffle, affichage photographie aérienne...) »
++//
++// `poserVisibiliteSocle` bornait son entrée à faux sous le drapeau — ce qui est
++// juste pour le MAILLAGE du bloc plat — puis passait ce même booléen borné aux
++// trois boutons du bas, qui ne parlent pas du maillage mais de la vue. Deux
++// questions, un seul booléen. La loi vit dans un module pour la raison écrite
++// trois lignes plus haut : aucun test ne charge `main.js`.
++import { visibiliteSurface } from './monde/visibilite-surface.js'
+ // ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3 ════════════════════════════════
+ //
+ // > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
+ // > tuile du globe est une COULEUR NUE. »
+ //
+ // `irradianceAmbiante` est la LOI (module pur, vérifiable sous node) ;
+ // `coefAmbiante` est la MESURE (elle a besoin du renderer, donc elle vit à
+ // côté). ⚠️ **L'ambiante n'est pas une constante** : elle pèse 47 % de
+ // l'irradiance du socle et `applyBackground` peut remplacer
+ // `scene.environment` par un ciel HDRI — un nombre en dur serait devenu faux
+@@ -4066,20 +4077,40 @@ function altitudeCadrageM() {
+     return altitudeSurfaceM({
+       camY: camera.position.y,
+       extentMeters: largeur,
+       span: TERRAIN_SIZE,
+       exageration: lireExageration(params),
+     })
+   }
+   return terrain.heightToFeet(camera.position.y) / 3.28084
+ }
+ 
++// LA DISTANCE DE LA CAMÉRA À SA CIBLE — la grandeur du REPOS, Tâche R1.
++//
++// ⚠️ **CE N'EST PAS UNE SECONDE ALTITUDE, ET IL NE FAUT PAS LA CONVERTIR.** Le
++// §1 de `veille-repos.js` porte la mesure ; le §2 dit pourquoi l'unité est
++// indifférente : la veille du repos ne compare que des RAPPORTS (`|Δ ln|`).
++// Diviser par l'échelle du bloc ne changerait aucun de ses verdicts et
++// rebrancherait la grandeur sur `largeurBlocM()`, c'est-à-dire sur l'emprise du
++// bloc CHARGÉ — exactement ce dont on vient de la débrancher : mesuré le
++// 2026-08-23, une arrivée de MNT fait bouger l'altitude de `4,98 × 10⁻⁵` sans
++// qu'aucun geste ait eu lieu, et la distance de `0`.
++//
++// ⚠️ **ET C'EST LA CIBLE D'`OrbitControls`, PAS UN POINT AU SOL RECALCULÉ** :
++// c'est autour d'elle que tourne le cliquer-glisser, donc c'est d'elle que la
++// rotation garde la distance rigoureusement constante — `4,4 × 10⁻¹⁶` mesurés
++// sur quinze images de geste réel. Un autre point de référence rendrait la
++// grandeur sensible à l'orientation, et le défaut reviendrait par la fenêtre.
++function distanceCadrageM() {
++  return camera.position.distanceTo(controls.target)
++}
++
+ // ⚠️ LE SEUL LECTEUR DE `FLAGS.globeContinu` EST ICI (plan « globe continu »,
+ // Tâche 4 Étape 0). `src/globe.js` n'importe pas `flags.js` : il ne connaît
+ // qu'un booléen, passé par le constructeur. Sans cette ligne, le drapeau ne
+ // protégerait rien et le tri spatial atterrirait sur le globe de production.
+ // ⚠️ **MÊME CÂBLAGE POUR `exagContinue` (Tâche E)** : `globe.js` n'importe pas
+ // `flags.js` non plus, et sans cette ligne le globe garderait son exagération 18
+ // pour toujours — le facteur 6,4 contre le socle, et le bloc DEBOUT que la
+ // Tâche B a relevé à l'écran.
+ // ══════════ UNE SEULE TERRE — Tâche I, LE BRANCHEMENT ══════════════════════
+ //
+@@ -4554,38 +4585,52 @@ function majCameraFond() {
+ // redécouvre pas.
+ //
+ // ⚠️ **SOUS `terre unique`, `v` EST BORNÉ À FAUX, ET C'EST TOUT LE GESTE DE LA
+ // TÂCHE I.** Le bloc plat ne revient jamais : c'est un CROP dans la planète qui
+ // prend sa place. **On ne fabrique PAS une seconde liste** — ce fichier raconte
+ // cinq fois l'accident de la liste dupliquée —, on borne l'ENTRÉE de celle-ci,
+ // et `socleAffiche()` dit la même chose aux dix-sept sites qui la ré-affirment.
+ // Sans ça il y aurait encore DEUX Terres : le bloc plat est opaque et se dessine
+ // dans la passe de surface, donc APRÈS la passe de fond — il recouvrirait le
+ // crop en entier, et l'écran serait rigoureusement celui d'avant le chantier.
++// ⚠️ **ET LE BORNAGE NE DÉBORDE PAS SUR L'INTERFACE — Tâche R1 ②.** Adrien :
++// « Il me manque les boutons du bas en UI, ils ont disparu (shuffle, affichage
++// photographie aérienne...) ». Cette fonction confondait DEUX questions sous un
++// seul booléen : `v` répond à « le maillage du bloc plat est-il dessiné » — non,
++// sous le drapeau, à toutes les altitudes — mais les trois boutons du bas
++// répondent à « sommes-nous en vue de surface, devant un bloc », et là la
++// réponse est OUI : c'est simplement un autre bloc. Le commentaire qui vivait
++// sur la ligne d'`isoBtn` le disait lui-même — *« only makes sense over the
++// block »*. Il y a un bloc. La loi vit dans `monde/visibilite-surface.js`,
++// parce qu'aucun test de ce dépôt ne charge `main.js`.
+ function poserVisibiliteSocle(v) {
+-  if (terreUniqueBranchee) v = false
+-  terrain.mesh.visible = v
+-  labels.visible = v && params.labels
+-  hud3.group.visible = v
++  const vue = visibiliteSurface({ terreUnique: terreUniqueBranchee, surface: v })
++  terrain.mesh.visible = vue.socle
++  labels.visible = vue.socle && params.labels
++  hud3.group.visible = vue.socle
+   // GPX sprites draw with depthTest:false — hidden with the surface or
+   // they'd float on top of the planet
+-  gpxLayer.setVisible(v && params.gpxVisible)
+-  clouds.setVisible(v)
+-  plinth.setVisible(v && params.plinth && !params.regionMode)
+-  if (regionSkirt) regionSkirt.mesh.visible = v
+-  groundInfo.setVisible(v && params.groundInfo)
+-  traffic.setVisible(v)
+-  realWater?.setVisible(v && params.seaEnabled !== false) // cf. setSeaEnabled
+-  mapLayers.setSurfaceVisible(v)
+-  isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
+-  cineBtn?.setVisible(v)
+-  mapCorner?.setVisible(v) // cartography corner is surface-only too
++  gpxLayer.setVisible(vue.socle && params.gpxVisible)
++  clouds.setVisible(vue.socle)
++  plinth.setVisible(vue.socle && params.plinth && !params.regionMode)
++  if (regionSkirt) regionSkirt.mesh.visible = vue.socle
++  groundInfo.setVisible(vue.socle && params.groundInfo)
++  traffic.setVisible(vue.socle)
++  realWater?.setVisible(vue.socle && params.seaEnabled !== false) // cf. setSeaEnabled
++  mapLayers.setSurfaceVisible(vue.socle)
++  isoBtn?.setVisible(vue.boutons) // le raccourci isométrique n'a besoin que d'un bloc, pas du bloc PLAT
++  cineBtn?.setVisible(vue.boutons)
++  mapCorner?.setVisible(vue.boutons) // coin cartographie : de la surface, pas du maillage
++  // ⚠️ **ET `refreshOsmCredit` NE PREND PAS D'ARGUMENT, DONC RIEN À LUI FAIRE
++  // SUIVRE.** Elle relit l'état, dont `socleAffiche()`, qui rend faux sous le
++  // drapeau — et c'est JUSTE : le crédit GeoNames ne s'affiche que si les
++  // toponymes sont à l'écran, or `labels` suit `vue.socle` et reste éteint.
+   refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
+ }
+ 
+ // L'AUTOMATE, ET SA MÉMOIRE. ⚠️ `appliquer` n'est rappelé QUE sur changement :
+ // sans cette garde, quatorze calques seraient repassés à chaque image. L'état
+ // de départ décrit l'application au chargement — socle posé, mode surface —,
+ // donc **rien n'est appliqué tant que rien ne bouge** et un drapeau éteint
+ // laisse la production intacte.
+ //
+ // ⚠️ **SOUS `terre unique`, L'ÉTAT DE DÉPART DIT « PAS DE BLOC PLAT », ET C'EST
+@@ -4683,21 +4728,30 @@ function majSeuilSocle() {
+   // est éteint pour de bon — mais ferait deux compteurs de bascules pour un seul
+   // geste, et c'est exactement le genre d'écart qu'on met des soirées à lire.
+   if (terreUniqueBranchee) {
+     // ⚠️ **UNE SEULE LECTURE D'ALTITUDE, DEUX CONSOMMATEURS — Tâche K bis.** La
+     // veille du crop et l'échelle de couleur continue doivent décider sur la
+     // MÊME altitude à la MÊME image. Deux appels à `altitudeCadrageM()` seraient
+     // deux valeurs (la caméra bouge entre les deux dans la boucle de rendu ? non
+     // — mais le patron se recopie, et c'est ainsi que naissent les désaccords
+     // que ce chantier a payés trois fois). Une variable, deux lecteurs.
+     const alt = altitudeCadrageM()
+-    veilleCrop.maj(alt)
++    // ⚠️ **ET LA DISTANCE À CÔTÉ, LUE À LA MÊME IMAGE — Tâche R1.** Ce ne sont
++    // PAS deux lectures de la même grandeur : la naissance du crop et
++    // l'estompage demandent « à quelle distance du sol suis-je » (l'altitude),
++    // la veille du repos demande « l'utilisateur change-t-il d'échelle » (la
++    // distance). Deux questions, deux grandeurs — le §1 de `veille-repos.js`
++    // porte la mesure qui a réfuté le principe inverse. Ce qu'elles doivent
++    // partager, c'est l'IMAGE, et c'est pour cela qu'elles partent d'ici
++    // ensemble, en un seul appel.
++    const dist = distanceCadrageM()
++    veilleCrop.maj(alt, dist)
+     // ⚠️ **L'ÉCHELLE GLISSE ICI, ET NULLE PART AILLEURS.** `poserRampe` ANCRE
+     // (à l'arrêt, `pas²` points) ; cet appel-ci ÉVALUE la courbe (quatre
+     // cubiques) et pose les uniformes. Sans ancre il ne fait rien, donc rien
+     // tant que la chaîne du crop n'a pas pris.
+     globe?.majEchelleRampe(alt)
+     // ══════ L'HORLOGE DE LA COUCHE APPARENCE — Tâche P3 ═══════════════════
+     //
+     // ⚠️ **ELLE NE PASSE PAS PAR `CHAMPS_HABILLAGE`, ET C'EST UNE OBLIGATION** :
+     // `uFxTime` avance à chaque image (`terrain.js` : `uFxTime.value += dt ×
+     // speed`). Dans la liste surveillée, il mettrait `habillageDifferent` à vrai
+@@ -5260,21 +5314,36 @@ const veilleCrop = creerVeilleCrop({
+   globe: () => globe,
+   contexte: contexteCrop,
+   estompage: veilleEstompage,
+   // ⚠️ **LE REPOS ENTRE PAR LA MÊME PORTE QUE L'ESTOMPAGE — Tâche N.** Il
+   // commande deux choses qui doivent être vraies ensemble : l'estompage plein
+   // (les alentours ne s'affichent plus) et `globe.poserCropSeul` (le quadtree
+   // cesse de les parcourir, donc de les demander et de les mailler). Le
+   // relais est dans `branchement-crop.js`, pas ici : c'est lui qui sait si la
+   // chaîne est posée, et forcer l'estompage sans crop viderait l'écran.
+   repos: veilleRepos,
+-  masquerSocle: () => poserVisibiliteSocle(false),
++  // ⚠️ **IL PASSE `true`, ET CE N'EST PAS UNE FAUTE DE FRAPPE — Tâche R1 ②.**
++  // L'argument de `poserVisibiliteSocle` ne dit PAS « allume le bloc plat », il
++  // dit **« sommes-nous en vue de surface, devant un bloc »** — et ici la
++  // réponse est oui, c'est simplement un crop. Le maillage plat, lui, est
++  // éteint par le BORNAGE du drapeau (`monde/visibilite-surface.js`), pas par
++  // cet argument : sous `terre unique`, `vue.socle` vaut faux quoi qu'on passe.
++  //
++  // ⛔ **IL PASSAIT `false`, ET C'EST CE QUI A EFFACÉ LES BOUTONS DU BAS.**
++  // Adrien : « Il me manque les boutons du bas en UI, ils ont disparu (shuffle,
++  // affichage photographie aérienne...) ». Sous ce drapeau, `veilleSocle`
++  // n'applique JAMAIS — son seuil n'est pas nourri (`majSeuilSocle` sort avant
++  // `veilleSocle.maj`), donc son `auSeuil` reste au `socleAuDepart` faux et son
++  // `pose` ne change jamais. **Ce hook était donc le SEUL appelant de
++  // `poserVisibiliteSocle`, et il n'appelait qu'avec faux** : les trois boutons
++  // partaient à la première image de surface et rien ne les rallumait jamais.
++  masquerSocle: () => poserVisibiliteSocle(true),
+   // ⚠️ **SANS CETTE RÉSERVATION, LES PAROIS ET LA RAMPE REFUSENT POUR TOUJOURS,
+   // ET C'EST MESURÉ À L'ÉCRAN.** La Réunion z12, drapeau levé, **600 tuiles** de
+   // globe en cache : `globe.tuilesAvecHauteurs().length` rendait **0**, donc
+   // `couverture = 0`, donc `refus: 'couverture'` à chaque tentative. Ce n'est pas
+   // le réseau : `_buildMesh` RELÂCHE `t.heights` dès le maillage bâti (Tâche
+   // 4 sexies), **sauf pour les clés de `gardeHauteurs`** — et personne ne
+   // réservait l'emprise du crop. Les Tâches B, D et F ont toutes été vérifiées
+   // sur des hauteurs posées à la main : le manque ne pouvait se voir qu'ici.
+   //
+   // ⚠️ **MÊME APPEL, MÊMES ARGUMENTS QUE `hauteursDeFlux`**, et c'est ce qui les
+@@ -5343,20 +5412,34 @@ modes = new Modes({
+         camera.up.set(0, 1, 0)
+       }
+       // ══════ LE MODE ATTEINT ENFIN LA VEILLE DU CROP — Tâche K ter ═════════
+       //
+       // ⛔ **`veilleCrop.poserMode` N'ÉTAIT APPELÉE DE NULLE PART** : le crop
+       // restait posé en orbite, et la planète entière portait la rampe et le
+       // masque de côte du dernier bloc visité. Le relevé, le pourquoi ce n'est
+       // pas un seuil de plus, et pourquoi l'estompage n'a qu'UN écrivain sous ce
+       // drapeau : `src/monde/branchement-crop.js`, § « L'ORBITE RETIRE LE CROP ».
+       if (terreUniqueBranchee) {
++        // ⚠️ **ET LES BOUTONS DE SURFACE SUIVENT LE MODE ICI, PARCE QUE SOUS CE
++        // DRAPEAU PERSONNE D'AUTRE NE LE LEUR DIT — Tâche R1 ②.** `veilleSocle`
++        // n'applique jamais (son seuil n'est pas nourri), donc l'unique appelant
++        // de `poserVisibiliteSocle` est `masquerSocle`, et il ne parle qu'à
++        // l'ENTRÉE en surface. Sans cette ligne, les trois boutons du bas
++        // survivraient à l'orbite, où il n'y a plus de bloc du tout.
++        //
++        // ⚠️ **ET C'EST ICI, PAS DANS `poserVisibiliteSocle`, PARCE QUE
++        // `modes.mode` MENT ENCORE À CET INSTANT.** `modes.js` appelle ce hook
++        // AVANT d'écrire `this.mode` (`setSurfaceVisible(false)` puis
++        // `this.mode = 'orbital'`, et symétriquement au retour) : lire le mode
++        // depuis la fonction rendrait exactement l'état d'avant, dans les deux
++        // sens. `v`, lui, porte la transition qui est en train d'avoir lieu.
++        poserVisibiliteSocle(v)
+         veilleCrop.poserMode(v)
+         return
+       }
+       // ⚠️ **LE MODE PRIME SUR LE SEUIL** : en orbite le socle n'existe pas,
+       // quelle que soit l'altitude. Et c'est la veille qui applique, pour que
+       // les deux chemins (le mode et le seuil) ne puissent pas se contredire.
+       veilleSocle.poserMode(v)
+       // ⚠️ **ET LE MODE PRIME AUSSI SUR L'ESTOMPAGE, MAIS DANS L'AUTRE SENS.**
+       // La veille du socle GÈLE en orbite ; celle de l'estompage FORCE ZÉRO.
+       // Geler y laisserait la valeur de la dernière image de surface — donc une
+@@ -10633,20 +10716,41 @@ function molettePendantCadrageDamier(deltaY) {
+ }
+ // Bouton cinéma — MÊME MÉCANIQUE QUE LE BOUTON ISO (Adrien) : chaque clic passe
+ // au plan suivant, et un petit numéro apparaît au-dessus.
+ //
+ // Il remplace l'ancien interrupteur, qui tirait un mouvement au hasard parmi les
+ // six oscillations de camera-automation.js et le relançait toutes les 18 s.
+ // Adrien : « je veux de VRAIS mouvements de caméra […] pas des mouvements
+ // basiques comme on a jusqu'à présent ». Les sept crans (poursuite au ras du
+ // sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série
+ // aléatoire) vivent dans camera-shots.js ; le huitième clic arrête tout.
++// ⛔ **SOUS `?terre=unique`, CE BOUTON PLONGE LA CAMÉRA SOUS LE SOL ET VIDE
++// L'ÉCRAN — mesuré, Tâche R1 ②.** Relevé le 2026-08-23, drapeau levé, premier
++// plan (poursuite au ras du sol) : `camera.position.y = −7,29`,
++// `altitudeCadrageM() = −1 780 m`, **stable sur 7,5 s** — ce n'est pas un
++// transitoire. Écran entièrement vide : on est sous le crop, et l'estompage
++// vaut 1, donc il n'y a rien d'autre à voir.
++//
++// **La cause est dans la construction de `shots`, pas dans le plan** :
++// `sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0` — le champ de hauteurs
++// du BLOC PLAT, celui qui n'est plus dessiné. Sous le drapeau, la surface à
++// l'écran est le crop du globe, qui ne porte ni la même échelle verticale ni le
++// même zéro ; le « plancher » que `camera-shots.js` respecte scrupuleusement
++// (`plancher()`, `altitudeDeSecurite()`) est donc le plancher d'un autre monde.
++//
++// ⚠️ **C'EST RÉVERSIBLE** : `shots.stop()` — le huitième clic — rend la vue
++// intacte (vérifié : la caméra revient à `y = 77,1`, distance 145,5). Le bouton
++// n'est donc pas un piège sans issue, mais il ne montre rien de bon.
++// **À trancher avec Adrien** : donner un `sampleGround` de globe aux plans, ou
++// masquer ce bouton-là sous le drapeau. Il est laissé VISIBLE parce que la
++// tâche demandait de rendre les boutons du bas, et ce défaut-ci est écrit ici
++// plutôt que corrigé à l'aveugle dans `camera-shots.js`.
+ cineBtn = buildCineButton({
+   next: () => {
+     if (modes.mode !== 'surface' || modes.busy) return
+     // ⚠️ MÊME GESTE QU'`applyIsoView` : un plan de cinéma passe au ras du sol
+     // (poursuite, travelling, contre-plongée) et partirait avec le `near`
+     // desserré du cadrage du damier — ≈ 122 unités, c'est-à-dire tout le décor
+     // découpé devant la caméra pendant toute la durée du plan.
+     quitteCadrageDamier()
+     shots.next()
+   },
+@@ -10670,20 +10774,42 @@ isoBtn = buildIsoButton({
+   //    toucher au zoom géographique ;
+   //  — une seule case → il retrouve son comportement d'avant, au bit près :
+   //    chaque clic passe à la vue suivante (rotation orbitale).
+   flyIso: () => {
+     if (modeBoutonCamera() === 'ensemble' && cadreLeDamier()) return
+     applyIsoView(isoIndex + 1) // …qui rend d'abord la butée empruntée par le cadrage
+   },
+ })
+ 
+ // bottom-left cartography corner (Adrien) : aerial toggle · base · shuffle
++//
++// ⚠️ **SOUS `?terre=unique`, CE COIN N'AGIT QU'À MOITIÉ, ET C'EST MESURÉ —
++// Tâche R1 ②.** La Tâche R1 a rendu ces boutons visibles (ils avaient disparu),
++// mais visible n'est pas branché. Relevé à l'écran le 2026-08-23, drapeau levé
++// (`.banc/R1/boutons-R1.json`) :
++//
++//   · **shuffle MARCHE, et se voit** : l'encre du globe est passée de `000000` à
++//     `101d12` et la texture de rampe a changé d'`uuid` — le crop se repeint
++//     entièrement. ⚠️ **Mais c'est un agrégat** : `shuffleLook` repose aussi la
++//     mer (`waterRebuild`, `realWater`), la matière et les effets de surface,
++//     qui écrivent dans `terrain` et `realWater` — invisibles sous le drapeau.
++//     Le tirage a bien changé `seaSeed` 9 879 → 7 943 et `surfaceFx` 9 → 6 :
++//     cette moitié-là tourne dans le vide.
++//   · **l'aérien est INERTE, et pire que muet** : le clic coche le bouton et
++//     pose `terrain.mapUniforms.uAerialOn = 1` — c'est-à-dire sur le bloc plat,
++//     qui n'est pas dessiné. Le globe n'a AUCUN uniforme d'aérien (recherche sur
++//     ses 88 uniformes : zéro), et `refreshAerialCore` n'écrit que dans
++//     `terrain.setAerial`. ⛔ **Et le crédit de licence, lui, S'AFFICHE** :
++//     « Orthophotos © IGN · NASA GIBS » apparaît sous une image qui n'est pas à
++//     l'écran, alors que `refreshOsmCredit` documente l'obligation inverse deux
++//     fois (« only while it is »). **À trancher avec Adrien** : brancher
++//     l'aérien sur le globe, ou masquer ce bouton-là sous le drapeau.
+ mapCorner = buildMapCorner({
+   toggleAerial: () => { params.aerialEnabled = !params.aerialEnabled; refreshAerial(); refreshAll() },
+   resetBase: () => resetAll(),
+   shuffle: () => shuffleLook(),
+ })
+ mapCorner.setAerialActive(params.aerialEnabled && params.source === 'real')
+ 
+ let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight after a template/reset (declared before the panel build so registerBgRefresh isn't a TDZ access)
+ // shared by the Templates panel AND the Create panel — Templates needs the
+ // same template/reset/dark-mode methods Create used to hold before its
+@@ -11516,21 +11642,21 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
+   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+   // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Exposée pour la même raison que le
+   // reste de `__exp` : c'est le SEUL moyen de vérifier cette tâche, `main.js`
+   // n'étant chargé par aucun test. `majCameraFond` est appelable à la main pour
+   // forcer une image hors de la boucle rAF — c'est ainsi que la tâche a prouvé
+   // ce qu'elle dessine (`composer.render()` puis `readPixels`).
+   frontiereActive, sceneGlobe, camGlobe, majCameraFond,
+   // LE SEUIL DU SOCLE — Tâche 3 branchée, même raison : `main.js` n'est chargé
+   // par aucun test, et `veilleSocle.auSeuil` / `.bascules` sont ce qui se lit à
+   // l'écran pour vérifier qu'une descente ne fait QU'UNE bascule.
+-  veilleSocle, seuilSocleBranche, altitudeCadrageM,
++  veilleSocle, seuilSocleBranche, altitudeCadrageM, distanceCadrageM,
+   // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, exposé pour la même raison que
+   // les deux lignes ci-dessus : `main.js` n'est chargé par aucun test, et
+   // `veilleEstompage.valeur` est ce qui se lit à l'écran pour vérifier qu'une
+   // descente estompe la planète au lieu de la faire clignoter.
+   veilleEstompage,
+   // UNE SEULE TERRE — Tâche I, exposée pour la même raison que les trois blocs
+   // ci-dessus : `main.js` n'est chargé par aucun test, et `veilleCrop.pose`,
+   // `.refus`, `.bascules` et `.signature` sont **la seule façon de vérifier à
+   // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
+   // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
+diff --git a/src/monde/branchement-crop.js b/src/monde/branchement-crop.js
+index 333dbb5..4c3a4e7 100644
+--- a/src/monde/branchement-crop.js
++++ b/src/monde/branchement-crop.js
+@@ -521,24 +521,26 @@ export function poserChaineCrop(arg = {}) {
+  *   qui est pur. Appelé à la pose et à chaque reprise, jamais par image.
+  * @param {(() => void)|null} [arg.masquerSocle] ⚠️ **CE QUI FAIT QU'IL N'Y A PLUS
+  *   QU'UNE TERRE, ET SANS LUI IL Y EN A DEUX.** Le bloc plat est opaque et se
+  *   dessine APRÈS la passe de fond : laissé allumé, il recouvre le crop en
+  *   entier et l'écran est exactement celui d'avant le chantier — c'est ce que
+  *   l'Étape 6 a vu à la première image, `terrain.mesh.visible === true` avec
+  *   `uCropOn === 1`. Appelé **une fois par entrée en surface**, jamais par
+  *   image : la liste des calques qu'il touche en compte quatorze.
+  * @param {{maj:Function, oublier:Function}|null} [arg.repos] la veille du repos
+  *   (Tâche N, `veille-repos.js`). ⚠️ **ELLE EST NOURRIE ICI ET NULLE PART
+- *   AILLEURS, POUR LA MÊME RAISON QUE L'ESTOMPAGE** : trois automates qui
+- *   décident à la même image doivent décider sur la MÊME altitude. Absente, le
+- *   comportement est celui d'avant la Tâche N, au bit près — les alentours
+- *   restent dessinés au repos.
++ *   AILLEURS** : les automates qui décident à la même image doivent décider sur
++ *   la même IMAGE — pas, comme ce commentaire l'a soutenu jusqu'à la Tâche R1,
++ *   sur le même NOMBRE. Elle reçoit le second argument de `maj`, la DISTANCE
++ *   caméra↔cible, et non l'altitude : voir le §1 de `veille-repos.js`, qui
++ *   porte la mesure. Absente, le comportement est celui d'avant la Tâche N, au
++ *   bit près — les alentours restent dessinés au repos.
+  * @param {number} [arg.periodeReprise] en IMAGES — voir le §3
+  * @param {boolean} [arg.cropAuDepart] l'état de l'application au chargement
+  * @param {boolean} [arg.modeSurfaceAuDepart]
+  */
+ export function creerVeilleCrop({
+   globe,
+   contexte,
+   estompage = null,
+   repos = null,
+   masquerSocle = null,
+@@ -748,35 +750,48 @@ export function creerVeilleCrop({
+     // testée à vide**, exactement comme la garde `if (nom === 'crop') continue`
+     // de `reprendre`, dix lignes plus bas.
+     bascules++
+   }
+ 
+   // ⚠️ **LE CORPS DE `maj` VIT ICI POUR QU'IL N'Y AIT QU'UN SEUL POINT DE
+   // SORTIE — Tâche N.** Il en compte six (orbite, globe absent, seuil, contexte
+   // absent, pose, régime établi), et le repos doit être relayé sur TOUS : un
+   // `appliquerRepos` recopié six fois serait six branchements à tenir d'accord,
+   // c'est-à-dire la classe d'erreur que ce fichier existe pour fermer.
+-  function decider(altitudeEllipsoideM) {
++  function decider(altitudeEllipsoideM, distanceCibleM) {
+       // ⚠️ **L'ESTOMPAGE EST NOURRI MÊME EN ORBITE**, et le §6 de
+       // `estompage-terre.js` dit pourquoi : sa veille FORCE zéro hors surface,
+       // là où celle du socle GÈLE. La priver de l'image la laisserait sur la
+       // dernière valeur de surface — une planète effacée au moment précis où
+       // elle redevient le sujet.
+       estompage?.maj(altitudeEllipsoideM)
+       if (!modeSurface) return pose
++      // ⚠️ **LA VEILLE DU REPOS NE REÇOIT PAS L'ALTITUDE, ELLE REÇOIT LA
++      // DISTANCE — Tâche R1, ET C'EST MESURÉ.** Elle a reçu l'altitude jusqu'au
++      // 2026-08-23, et un simple cliquer-glisser d'inclinaison la faisait
++      // tomber de 17 624 m à 2 861 m à distance rigoureusement constante :
++      // `auRepos` basculait, et la planète entière se rallumait autour du crop
++      // sur un geste qui ne change aucune échelle. Le §1 de `veille-repos.js`
++      // porte la mesure et le raisonnement.
++      //
++      // ⚠️ **LES DEUX GRANDEURS ARRIVENT ENSEMBLE, ET CE N'EST PAS UN CONFORT** :
++      // l'estompage ci-dessus et le repos ici décident sur la MÊME image. Deux
++      // appels séparés depuis `main.js` seraient deux images pour un geste, et
++      // c'est la classe d'erreur que ce fichier existe pour fermer.
++      //
+       // ⚠️ **LA VEILLE DU REPOS N'EST NOURRIE QU'EN SURFACE, ET C'EST MESURÉ.**
+-      // En orbite, `altitudeCadrageM()` divise un `camera.position.y` orbital
+-      // par l'échelle du DERNIER bloc chargé : ce n'est pas une altitude, c'est
+-      // un résidu (`veille-socle.js`, §2). Lui donner cette image ferait un
+-      // écart énorme entre deux régimes, donc un « mouvement » à chaque
+-      // aller-retour d'orbite. `poserMode` lui fait oublier sa référence.
+-      auRepos = repos ? repos.maj(altitudeEllipsoideM) : false
++      // En orbite la caméra n'a plus de cible au sol : `controls.target` y est
++      // le centre de la planète et la distance devient un rayon orbital, d'une
++      // toute autre échelle. Lui donner cette image ferait un écart énorme
++      // entre deux régimes, donc un « mouvement » à chaque aller-retour
++      // d'orbite. `poserMode` lui fait oublier sa référence, dans les deux sens.
++      auRepos = repos ? repos.maj(distanceCibleM) : false
+       // ⚠️ **LE BLOC PLAT PART AVANT TOUTE DÉCISION D'ALTITUDE, ET C'EST VOULU.**
+       // Sous ce drapeau il n'a plus lieu d'exister à aucune altitude : le
+       // laisser vivre au-dessus du seuil remettrait un socle devant la planète
+       // entière — la capture d'Adrien à Z5, remise au goût du jour.
+       if (!socleMasque) { socleMasque = true; masquerSocle?.() }
+       const g = lireGlobe()
+       if (!g) return pose
+       const voulu = socleVisible({ altitudeEllipsoideM, visibleAvant: pose })
+       if (!voulu) {
+         if (pose) retirer(g)
+@@ -804,27 +819,38 @@ export function creerVeilleCrop({
+       // ⚠️ **LA FORME AVANT L'HABILLAGE, ET L'ORDRE COMPTE** : `poserHabillage`
+       // dérive sa marge de côte du crop POSÉ (`margeCoteDuCrop(this._crop)`).
+       // L'inverse la calculerait sur le repère d'avant le reformage.
+       rafraichirForme(g, ctx)
+       rafraichirHabillage(g, ctx)
+       return true
+   }
+ 
+   return {
+     /**
+-     * Une image. `altitudeEllipsoideM` est l'altitude géométrique de la caméra
+-     * au-dessus de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte
+-     * SANS `meanM`. Une altitude non finie conserve l'état, même contrat que
+-     * `socleVisible`.
++     * Une image, et DEUX grandeurs — voir le §1 de `veille-repos.js`.
++     *
++     * `altitudeEllipsoideM` est l'altitude géométrique de la caméra au-dessus
++     * de l'ellipsoïde — règle R1, celle que `loi-altitude.js` porte SANS
++     * `meanM`. Elle décide de la NAISSANCE du crop et nourrit l'estompage : ces
++     * deux-là demandent « à quelle distance du sol suis-je ». Une altitude non
++     * finie conserve l'état, même contrat que `socleVisible`.
++     *
++     * `distanceCibleM` est la distance de la caméra à `controls.target`. Elle
++     * nourrit la veille du REPOS, et elle seule : celle-ci demande
++     * « l'utilisateur change-t-il d'ÉCHELLE », ce qui n'est pas la même
++     * question. ⚠️ **Son unité est indifférente** — l'écart y est un rapport
++     * (`|Δ ln|`), donc unités du monde ou mètres au sol donnent le même nombre.
++     * Absente ou non finie, la veille du repos CONSERVE son état : le crop
++     * reste seul, ce qui est la panne la moins mauvaise (voir `veille-repos.js`).
+      */
+-    maj(altitudeEllipsoideM) {
+-      const r = decider(altitudeEllipsoideM)
++    maj(altitudeEllipsoideM, distanceCibleM) {
++      const r = decider(altitudeEllipsoideM, distanceCibleM)
+       // ⚠️ **APRÈS LA DÉCISION, JAMAIS AVANT.** `appliquerRepos` lit `pose` :
+       // évalué en tête, il jugerait sur l'image d'avant et le crop naîtrait
+       // toujours avec une image d'alentours dessinés.
+       appliquerRepos(lireGlobe())
+       return r
+     },
+ 
+     /**
+      * Le mode de `modes.js`. ⚠️ Il PRIME : en orbite la planète est le sujet,
+      * et une découpe dedans n'a plus aucun sens.
+diff --git a/src/monde/veille-repos.js b/src/monde/veille-repos.js
+index 33dbb58..3eca388 100644
+--- a/src/monde/veille-repos.js
++++ b/src/monde/veille-repos.js
+@@ -12,46 +12,122 @@
+ // zoom pour faire la transition. »
+ //
+ // Trois mots portent tout le poids : **« quand la vue est stabilisée »**. Il
+ // faut donc un critère de repos — et un critère de repos est un SEUIL, ce qui
+ // est exactement la classe d'objet que ce chantier a déjà payée : le seuil du
+ // socle a produit **onze bascules là où il en fallait une** (`main.js`,
+ // « ON NE DÉCIDE PAS PENDANT UN CRAN »). Ce fichier ne devine donc aucun de ses
+ // deux nombres : ils sortent de traces par image relevées dans l'application
+ // vivante, et les traces sont sur le disque.
+ //
+-// ══════════ 1. LA GRANDEUR SURVEILLÉE — L'ALTITUDE, ET ELLE SEULE ═══════════
+-//
+-// ⚠️ **PAS LA POSITION DE LA CAMÉRA, PAS SON ORIENTATION.** La consigne nomme
+-// le geste : « sauf si dézoom ou zoom ». Un panoramique et une orbite ne
+-// demandent RIEN de plus que le crop — le bloc reste le sujet, et ce qui est
+-// autour reste hors sujet. Seul un changement d'ÉCHELLE fait entrer les
+-// alentours dans le cadre. Surveiller la position ferait réapparaître la Terre
+-// autour à chaque glissement de souris, c'est-à-dire le battement que l'Étape 4
+-// de la tâche interdit.
+-//
+-// ⚠️ **ET C'EST LA MÊME ALTITUDE QUE LES DEUX AUTRES VEILLES** — l'altitude
+-// géométrique de la caméra au-dessus de l'ellipsoïde, règle R1 : dans `main.js`
+-// c'est `altitudeCadrageM()`, l'instrument que la Tâche 1b a purgé de
+-// `dem.meanM` exprès. Trois automates qui décident sur la même image doivent
+-// décider sur le même nombre.
++// ══════════ 1. LA GRANDEUR SURVEILLÉE — LA DISTANCE CAMÉRA↔CIBLE ════════════
++//
++// ⚠️ **PAS LA POSITION DE LA CAMÉRA, PAS SON ORIENTATION, ET PAS SON ALTITUDE
++// NON PLUS.** La consigne nomme le geste : « sauf si dézoom ou zoom ». Un
++// panoramique et une orbite ne demandent RIEN de plus que le crop — le bloc
++// reste le sujet, et ce qui est autour reste hors sujet. Seul un changement
++// d'ÉCHELLE fait entrer les alentours dans le cadre.
++//
++// ⛔ **CE MODULE A SURVEILLÉ L'ALTITUDE JUSQU'AU 2026-08-23, ET C'ÉTAIT LA
++// MAUVAISE GRANDEUR.** L'intention ci-dessus était déjà la bonne ; c'est
++// l'instrument qui la trahissait. `altitudeCadrageM()` est proportionnelle à
++// `camera.position.y` — et **incliner la vue, c'est précisément faire descendre
++// `camera.position.y` sans rien changer à l'échelle.** Le raisonnement qui
++// tenait ici (« surveiller la position ferait réapparaître la Terre à chaque
++// glissement de souris ») condamnait déjà l'altitude sans le voir : l'altitude
++// EST une composante de la position.
++//
++// **Adrien, 2026-08-23 :** « si je modifie la hauteur de la caméra SANS
++// SCROLLER et en me déplaçant, il ne faut pas que le reste de ce qui est autour
++// du socle réapparaisse. Si je dézoome EN SCROLLANT, alors là tu peux faire
++// réapparaître le reste. »
++//
++// ⚡ **LA MESURE — application vivante, `.banc/R1/mesure-R1.json`.** Un vrai
++// cliquer-glisser sur le canevas (PointerEvent réels : c'est OrbitControls qui
++// pilote, pas le banc), cible immobile, sous
++// `?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0` :
++//
++//   | grandeur | pic d'écart logarithmique | images au-dessus du seuil |
++//   |---|---|---|
++//   | altitude au-dessus de l'ellipsoïde | **3,86 × 10⁻¹** | **15 / 15** |
++//   | distance caméra → cible | **4,4 × 10⁻¹⁶** | **0 / 15** |
++//
++// L'altitude tombe de 17 624 m à 2 861 m pendant que la distance ne bouge pas
++// du seizième chiffre. `auRepos` basculait réellement de vrai à faux et la
++// planète entière se rallumait autour du crop. Sur 40 poses programmées à rayon
++// exactement constant, même verdict : `1,03 × 10⁻²` contre `2,2 × 10⁻¹⁶`.
++//
++// ⛔ **ET LE PRINCIPE QUI ÉTAIT ÉCRIT ICI EST FAUX — c'est lui, l'erreur de
++// fond** : *« trois automates qui décident sur la même image doivent décider
++// sur le même nombre. »* Non. Ils doivent décider sur la même IMAGE — c'est
++// pour cela que `branchement-crop.js` reste le seul point d'alimentation — mais
++// pas sur le même NOMBRE, parce qu'ils ne posent pas la même question.
++// L'estompage et le seuil du socle demandent **à quelle distance du sol
++// suis-je** : leur réponse est une altitude en mètres, et la règle R1 vaut pour
++// eux. Le repos demande **l'utilisateur change-t-il d'échelle** : sa réponse est
++// un rapport. Deux questions, deux grandeurs.
++//
++// ⚠️ **ET L'UNITÉ DE CELLE-CI EST INDIFFÉRENTE**, ce qui est la preuve qu'elle
++// n'est pas une altitude : l'écart est un `|Δ ln|`, donc un rapport. Unités du
++// monde ou mètres au sol donnent le même nombre à la même image. `main.js` la
++// lit donc telle quelle — `camera.position.distanceTo(controls.target)` — sans
++// conversion à tenir d'accord avec quoi que ce soit.
++//
++// ⚠️ **CE QUE LA DISTANCE FAIT MIEUX, EN PLUS DE L'ORBITE — mesuré.** Sur une
++// image où l'emprise du bloc change SANS aucun geste (l'arrivée du MNT derrière
++// la fenêtre bornée : `largeurBlocM()` passe de 6 835,77 à 6 835,43, cible
++// immobile, `modes.busy` faux), c'est **l'altitude qui bouge** — `4,98 × 10⁻⁵`,
++// parce qu'`altitudeCadrageM()` divise `camY` par une largeur qui vient de
++// changer — et **la distance qui ne bouge pas du tout** : `0`. La distance est
++// donc immunisée contre une classe de faux positifs que l'altitude subissait.
++//
++// ⚠️ **CE QUE LA DISTANCE FAIT MOINS BIEN, ET IL FAUT LE DIRE — mesuré aussi.**
++// Au franchissement d'un cran, `_suivreEmprise` (`modes.js`) repose la caméra
++// et `controls.target` saute : relevé **13,25 unités** de saut de cible, la
++// distance passant de 72,75 à 124,59 — un écart de `0,538` là où l'altitude,
++// continue par construction à cet instant, n'en fait que `0,364`. **Ce n'est
++// pas un faux positif** : un cran ne survient que pendant un zoom délibéré, et
++// les DEUX grandeurs franchissent le seuil à cette image. C'est un vrai positif
++// plus gros, pas un réveil de plus.
+ //
+ // ══════════ 2. L'ÉCART EST LOGARITHMIQUE ═══════════════════════════════════
+ //
+-// ⚠️ **`|Δ ln altitude|`, PAS `|Δ altitude|`.** Toute la descente de ce dépôt
+-// est GÉOMÉTRIQUE (`echelonsGeometriques`, `loi-altitude.js`), et l'estompage
+-// lui-même court sur le logarithme de l'altitude (`estompage-terre.js`, §3). Un
+-// seuil en mètres serait franchi par un frémissement à 3 000 km et jamais par un
+-// vrai zoom à 12 km : **un seuil par altitude, c'est-à-dire aucun seuil.**
++// ⚠️ **`|Δ ln d|`, PAS `|Δ d|`.** Toute la descente de ce dépôt est GÉOMÉTRIQUE
++// (`echelonsGeometriques`, `loi-altitude.js`), et l'estompage lui-même court sur
++// le logarithme de l'altitude (`estompage-terre.js`, §3). Un seuil en unités
++// serait franchi par un frémissement en haut de l'escalier et jamais par un vrai
++// zoom en bas : **un seuil par échelon, c'est-à-dire aucun seuil.**
++//
++// ⚠️ **ET C'EST CE §2 QUI REND L'UNITÉ INDIFFÉRENTE** (voir le §1) : un rapport
++// ne connaît pas les mètres. C'est aussi pour cela que le passage de l'altitude
++// à la distance n'a demandé AUCUN nouveau nombre — voir le §3.
+ //
+ // ══════════ 3. LES DEUX NOMBRES, ET D'OÙ ILS VIENNENT ══════════════════════
+ //
++// ⚠️ **CES DEUX NOMBRES ONT ÉTÉ CALIBRÉS SUR L'ALTITUDE ; ILS SURVIVENT TELS
++// QUELS AU CHANGEMENT DE GRANDEUR DU §1, ET CE N'EST PAS UNE ESPÉRANCE, C'EST
++// UNE MESURE.** Le seuil a été pris sous le pic du geste le plus doux — une
++// molette. Relevé le 2026-08-23 sur six crans de molette réels, cible immobile
++// (`.banc/R1/mesure-R1.json`, C) : à la MÊME image, l'altitude culmine à
++// `6,593 × 10⁻³` et la distance à `7,112 × 10⁻³` — **un rapport de 1,079** — et
++// les deux captent EXACTEMENT les mêmes images, **54 sur 54**. Le geste qui a
++// servi d'étalon rend donc le même ordre de grandeur sur l'une et sur l'autre :
++// `SEUIL_BOUGE_LOG` n'avait aucune raison de bouger, et il n'a pas bougé.
++//
++// ⚠️ **CES PICS-LÀ NE SE COMPARENT PAS AUX `4,67 × 10⁻⁴` CI-DESSOUS** : la
++// mesure du 2026-08-23 a été prise à ~25 images/s (le panneau navigateur de
++// session ne compositait pas, le moteur tournait sur son repli `setTimeout`),
++// contre 60 Hz pour celle du 2026-08-22. À cadence plus basse, chaque image
++// avance davantage, donc chaque écart est plus grand. **Ce qui se compare, et
++// c'est tout ce dont la décision avait besoin, c'est le RAPPORT des deux
++// grandeurs à la MÊME image.**
++//
+ // **Relevés le 2026-08-22 dans l'application vivante** (La Réunion,
+ // `?terre=unique&globe=continu&socle=quadtree&f3=0&frontiere=1&seuil=1`, 60 Hz,
+ // `fov = 33` lu en direct). Données brutes : `.banc/vues-N/AV-trace-*.json`,
+ // dépouillement : `.banc/hysterese-N.mjs` → `.banc/vues-N/hysterese-brut.json`.
+ //
+ //   · **AU REPOS STRICT, L'ÉCART VAUT EXACTEMENT ZÉRO** — pas mesuré dans
+ //     l'application vivante, ÉTABLI PAR CONSTRUCTION : deux altitudes
+ //     identiques donnent `ln(1) = 0`. `test/veille-repos.test.js` ③ (« au repos
+ //     STRICT ») rejoue ce raisonnement 3 216 fois de suite sur la MÊME constante
+ //     (une boucle synthétique, pas un relevé de 53 s à l'écran) — ce qui
+@@ -97,21 +173,21 @@
+ // de plus d'une demi-seconde entre deux salves fait recropper puis rouvrir. **Ce
+ // n'est pas un battement, c'est un aller-retour** — le compteur `bascules` le
+ // distingue, et le banc de l'Étape 4 le compte au lieu de l'espérer.
+ //
+ // ⚠️ **EN IMAGES, PAS EN MILLISECONDES**, exactement comme `periodeReprise` de
+ // `branchement-crop.js` : le module est pur, il n'a pas d'horloge. À 30 Hz le
+ // délai vaut donc une seconde, et c'est le bon sens — une machine qui rame a
+ // besoin de plus de repos, pas de moins.
+ 
+ /**
+- * L'écart minimal, par image, sur `|Δ ln altitude|`, au-dessus duquel on
++ * L'écart minimal, par image, sur `|Δ ln distance|`, au-dessus duquel on
+  * déclare que la vue BOUGE. Voir le §3 : mesuré, pas posé.
+  */
+ export const SEUIL_BOUGE_LOG = 1e-4
+ 
+ /**
+  * Le nombre d'images consécutives sous le seuil avant de redéclarer le repos.
+  * ⚠️ C'est l'hystérésis, et elle n'a qu'un sens — voir le §3.
+  */
+ export const IMAGES_CALME = 30
+ 
+@@ -125,82 +201,94 @@ export const IMAGES_CALME = 30
+  * plus.
+  *
+  * @param {object} [arg]
+  * @param {number} [arg.seuilBougeLog] voir `SEUIL_BOUGE_LOG`
+  * @param {number} [arg.imagesCalme] voir `IMAGES_CALME`
+  */
+ export function creerVeilleRepos({
+   seuilBougeLog = SEUIL_BOUGE_LOG,
+   imagesCalme = IMAGES_CALME,
+ } = {}) {
+-  let altPrecedente = null
++  let precedente = null
+   let calme = 0
+   let auRepos = true
+   let bascules = 0
+   let dernierEcart = 0
+ 
+   return {
+     /**
+-     * Une image. `altitudeEllipsoideM` est l'altitude géométrique de la caméra
+-     * au-dessus de l'ellipsoïde — règle R1, voir le §1.
++     * Une image. `distanceCible` est la distance de la caméra à
++     * `controls.target` — voir le §1, qui porte la mesure qui l'a choisie
++     * contre l'altitude.
++     *
++     * ⚠️ **SON UNITÉ EST INDIFFÉRENTE** : l'écart est un `|Δ ln|`, donc un
++     * rapport (§2). Unités du monde ou mètres au sol rendent le même nombre.
+      *
+-     * ⚠️ **UNE ALTITUDE NON FINIE, NULLE OU NÉGATIVE CONSERVE L'ÉTAT**, même
++     * ⚠️ **UNE DISTANCE NON FINIE, NULLE OU NÉGATIVE CONSERVE L'ÉTAT** — et
++     * c'est aussi ce qui arrive quand l'appelant ne la passe pas du tout. Même
+      * contrat que `socleVisible` et `estompageTerre` : elle ne peut pas être une
+      * raison de rallumer la Terre autour. Et un logarithme de zéro ferait
+      * `−Infinity`, donc un écart `Infinity`, donc un mouvement permanent —
+      * l'exact contraire de ce que la panne devrait produire.
+      *
+      * @returns {boolean} la vue est-elle au repos ?
+      */
+-    maj(altitudeEllipsoideM) {
+-      if (typeof altitudeEllipsoideM !== 'number' || !Number.isFinite(altitudeEllipsoideM) || altitudeEllipsoideM <= 0) {
++    maj(distanceCible) {
++      if (typeof distanceCible !== 'number' || !Number.isFinite(distanceCible) || distanceCible <= 0) {
+         return auRepos
+       }
+-      if (altPrecedente === null) {
++      if (precedente === null) {
+         // ⚠️ **LA PREMIÈRE IMAGE N'A PAS D'ÉCART, ET ON NE LUI EN INVENTE PAS
+-        // UN.** Prendre `0` pour altitude précédente ferait un écart infini à
++        // UN.** Prendre `0` pour valeur précédente ferait un écart infini à
+         // l'arrivée, donc un réveil garanti à chaque retour de l'orbite.
+-        altPrecedente = altitudeEllipsoideM
++        precedente = distanceCible
+         return auRepos
+       }
+-      const ecart = Math.abs(Math.log(altitudeEllipsoideM / altPrecedente))
+-      altPrecedente = altitudeEllipsoideM
++      const ecart = Math.abs(Math.log(distanceCible / precedente))
++      precedente = distanceCible
+       dernierEcart = ecart
+       if (ecart > seuilBougeLog) {
+         calme = 0
+         if (auRepos) { auRepos = false; bascules++ }
+         return auRepos
+       }
+       calme++
+       if (!auRepos && calme >= imagesCalme) { auRepos = true; bascules++ }
+       return auRepos
+     },
+ 
+     /**
+-     * Oublier l'altitude de référence.
++     * Oublier la distance de référence.
++     *
++     * ⚠️ **APPELÉ À CHAQUE CHANGEMENT DE MODE, ET C'EST INDISPENSABLE.** En
++     * orbite, `controls.target` n'est plus un point au sol : la distance qui en
++     * sort est un rayon orbital, d'une tout autre échelle. Sans oubli, la
++     * première image du retour en surface comparerait une distance de surface à
++     * ce rayon et déclarerait un mouvement énorme — les alentours s'allumeraient
++     * à chaque retour d'orbite, pour rien.
+      *
+-     * ⚠️ **APPELÉ QUAND ON QUITTE LA SURFACE, ET C'EST INDISPENSABLE.** En
+-     * orbite, `altitudeCadrageM()` divise un `camera.position.y` orbital par
+-     * l'échelle du DERNIER bloc chargé : le nombre qui en sort n'est pas une
+-     * altitude, c'est un résidu (`veille-socle.js`, §2). Sans oubli, la première
+-     * image du retour en surface comparerait une altitude à ce résidu et
+-     * déclarerait un mouvement énorme — les alentours s'allumeraient à chaque
+-     * retour d'orbite, pour rien.
++     * ⚠️ **ET C'EST CE QUI REND LA BASCULE DE MODE INOFFENSIVE, MESURÉ** :
++     * descente complète orbite → sol, 156 écarts relevés
++     * (`.banc/R1/mesure-R1.json`, F), **zéro bascule** de part et d'autre de la
++     * traversée. Une seule image sur 156 passe le seuil, à `1,07 ×` sa valeur,
++     * et elle vient de la CIBLE qui se pose (dégagement au sol) pendant que la
++     * caméra ne bouge pas — un aller-retour de trente images, exactement la
++     * réserve assumée du §3, pas un saut de régime.
+      *
+      * ⚠️ **IL N'OUBLIE PAS L'ÉTAT `auRepos`**, seulement la référence : le
+      * retour en surface se fait sur une caméra posée, donc au repos.
+      */
+     oublier() {
+-      altPrecedente = null
++      precedente = null
+       calme = 0
+     },
+ 
+     /** La vue est-elle au repos ? */
+     get auRepos() { return auRepos },
+     /** Combien d'images calmes de suite — pour les sondes et les bancs. */
+     get calme() { return calme },
+     /** Combien de fois le repos a basculé : c'est le compteur de battement. */
+     get bascules() { return bascules },
+-    /** Le dernier `|Δ ln altitude|` mesuré — pour les sondes et les bancs. */
++    /** Le dernier `|Δ ln distance|` mesuré — pour les sondes et les bancs. */
+     get dernierEcart() { return dernierEcart },
+   }
+ }
+diff --git a/src/monde/visibilite-surface.js b/src/monde/visibilite-surface.js
+new file mode 100644
+index 0000000..677610f
+--- /dev/null
++++ b/src/monde/visibilite-surface.js
+@@ -0,0 +1,68 @@
++// LA VISIBILITÉ DE SURFACE — Tâche R1 ② du plan « LE STUDIO SUR LE GLOBE »
++// (`docs/superpowers/plans/2026-08-22-globe-studio.md`).
++//
++// Module PUR : ni DOM, ni three.js, et il n'importe RIEN. Tout se vérifie sous
++// node (`test/visibilite-surface.test.js`).
++//
++// ══════════ POURQUOI CE FICHIER EXISTE ══════════════════════════════════════
++//
++// **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
++// disparu (shuffle, affichage photographie aérienne...) »
++//
++// ⛔ **`poserVisibiliteSocle` CONFONDAIT DEUX QUESTIONS SOUS UN SEUL BOOLÉEN.**
++// Elle borne son argument à faux sous `terre unique` — ce qui est JUSTE, et
++// c'est même tout le geste de la Tâche I : le maillage du bloc plat est opaque
++// et se dessine après la passe de fond, donc le laisser vivre remettrait une
++// seconde Terre par-dessus la première. Puis elle passait **ce même booléen
++// borné** aux trois boutons du bas, qui n'ont rien à voir avec ce maillage.
++//
++//   · `v` répond à **« le maillage du bloc plat est-il dessiné »** — sous le
++//     drapeau, la réponse est NON, à toutes les altitudes.
++//   · Les boutons répondent à **« sommes-nous en vue de surface, devant un
++//     bloc »** — sous le drapeau, la réponse est OUI. C'est simplement un
++//     autre bloc : un crop découpé dans la planète.
++//
++// Le commentaire posé à côté d'`isoBtn` le disait déjà lui-même — *« the
++// isometric shortcut only makes sense over the block »*. Il y a un bloc.
++//
++// ⚠️ **CE N'ÉTAIT PAS UNE EXCEPTION SILENCIEUSE, ET C'EST CE QUI L'A RENDUE
++// INVISIBLE À LA RELECTURE.** Les trois boutons sont construits sans condition
++// (`main.js`, `buildCineButton` / `buildIsoButton` / `buildMapCorner`) et sans
++// `try` : rien n'échouait, rien ne se plaignait. C'est la classe `.off`, qui
++// fait `display:none` (`src/ui/v28.css`), qui les effaçait — sur ordre.
++//
++// ⚠️ **ET C'EST POUR ÇA QUE LA LOI VIT ICI PLUTÔT QUE DANS `main.js`** : **aucun
++// test de ce dépôt ne charge `main.js`**. Une garde écrite là-bas ne serait
++// tenue que par des assertions d'expression régulière sur le texte source — et
++// ce chantier a déjà vu une mutation survivre à 4 082 tests derrière exactement
++// cette protection-là.
++
++/**
++ * Qui est visible en surface, et à quel titre.
++ *
++ * ⚠️ **UN SEUL POINT DE DÉCISION, DEUX RÉPONSES.** Rendre les deux ensemble est
++ * délibéré : deux fonctions séparées se rebrancheraient un jour l'une sur
++ * l'autre, et c'est précisément l'accident qu'on répare.
++ *
++ * @param {object} arg
++ * @param {boolean} arg.terreUnique le drapeau `?terre=unique` est-il branché —
++ *   c'est-à-dire le bloc plat a-t-il cédé la place à une découpe dans la
++ *   planète. ⚠️ **Il ne gouverne QUE le maillage**, jamais l'interface.
++ * @param {boolean} arg.surface sommes-nous en vue de surface, devant un bloc —
++ *   ce que l'automate du seuil décide, avant tout bornage.
++ * @returns {{socle: boolean, boutons: boolean}} `socle` pour le maillage du
++ *   bloc plat et les quatorze calques qui lui appartiennent ; `boutons` pour ce
++ *   qui ne dépend que d'être en vue de surface — le raccourci isométrique, les
++ *   plans de cinéma, et le coin cartographie (aérien · base · shuffle).
++ */
++export function visibiliteSurface({ terreUnique, surface }) {
++  const s = !!surface
++  return {
++    // ⚠️ **LE BORNAGE RESTE, ET IL N'EST PAS NÉGOCIABLE** : sans lui il y a deux
++    // Terres, et l'écran est rigoureusement celui d'avant le chantier.
++    socle: terreUnique ? false : s,
++    // ⚠️ **ET IL NE DÉBORDE PAS SUR L'INTERFACE.** Sous le drapeau, il y a un
++    // bloc devant nous — c'est un crop, mais c'en est un.
++    boutons: s,
++  }
++}
+diff --git a/test/crop-branche.test.js b/test/crop-branche.test.js
+index d6d5a2e..8e0d0fb 100644
+--- a/test/crop-branche.test.js
++++ b/test/crop-branche.test.js
+@@ -637,36 +637,46 @@ test('⑧ bis la veille du crop ET l’échelle de couleur lisent LA MÊME altit
+   // n'est plus seulement « lit-on le bon instrument » mais « les deux
+   // lisent-ils LA MÊME VALEUR à LA MÊME IMAGE ». Deux appels à
+   // `altitudeCadrageM()` côte à côte seraient verts sur l'ancienne assertion et
+   // rouvriraient exactement le désaccord que ce chantier a payé trois fois.
+   const i = SRC_MAIN.indexOf('function majSeuilSocle()')
+   assert.ok(i > 0)
+   const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n}', i))
+   const m = corps.match(/const (\w+) = altitudeCadrageM\(\)/)
+   assert.ok(m, 'l’altitude doit être lue UNE fois, dans une variable')
+   const v = m[1]
+-  assert.match(corps, new RegExp('veilleCrop\\.maj\\(' + v + '\\)'),
+-    'la veille du crop doit recevoir la variable, pas une seconde lecture')
++  // ⚠️ **ET DEPUIS LA TÂCHE R1, LA VEILLE DU CROP REÇOIT DEUX GRANDEURS** —
++  // l'altitude pour la naissance du crop et l'estompage, la DISTANCE pour le
++  // repos (voir le §1 de `veille-repos.js`, qui porte la mesure qui a réfuté le
++  // principe inverse). Ce qu'elles doivent partager n'est plus le NOMBRE mais
++  // l'IMAGE : les deux sont lues UNE fois dans cette branche, chacune dans sa
++  // variable, et partent ensemble en un seul appel.
++  const md = corps.match(/const (\w+) = distanceCadrageM\(\)/)
++  assert.ok(md, 'la distance doit être lue UNE fois, dans une variable')
++  assert.match(corps, new RegExp('veilleCrop\\.maj\\(' + v + ', ' + md[1] + '\\)'),
++    'la veille du crop doit recevoir les DEUX variables, pas une seconde lecture')
+   assert.match(corps, new RegExp('majEchelleRampe\\(' + v + '\\)'),
+-    'l’échelle de couleur doit recevoir LA MÊME variable')
++    'l’échelle de couleur doit recevoir LA MÊME variable d’altitude')
+   // un seul point d'alimentation pour chacun, sinon deux lois
+   assert.equal((SRC_MAIN.match(/veilleCrop\.maj\(/g) || []).length, 1)
+   assert.equal((SRC_MAIN.match(/majEchelleRampe\(/g) || []).length, 1)
+   // ⚠️ **ET LA BRANCHE `terre unique` NE LIT L'INSTRUMENT QU'UNE FOIS.** On
+   // retire les commentaires avant de compter — le corps en cite le nom, et une
+   // assertion qui compterait les citations serait rouge sur une correction de
+   // prose et verte sur une seconde lecture. (L'autre appel du corps est celui
+   // de `veilleSocle`, le chemin SANS drapeau, qui n'est pas de cette tâche.)
+   const code = corps.replace(/\/\/[^\n]*/g, '')
+   const branche = code.slice(code.indexOf('if (terreUniqueBranchee)'), code.indexOf('veilleSocle.maj('))
+   assert.equal((branche.match(/altitudeCadrageM\(\)/g) || []).length, 1,
+     'la branche `terre unique` doit lire l’altitude UNE seule fois')
++  assert.equal((branche.match(/distanceCadrageM\(\)/g) || []).length, 1,
++    'la branche `terre unique` doit lire la distance UNE seule fois')
+ })
+ 
+ test('⑧ ter le crop se décide APRÈS `modes.update` et AVANT le dessin', () => {
+   const iTick = SRC_MAIN.indexOf('\nfunction tick() {')
+   assert.ok(iTick > 0)
+   const iModes = SRC_MAIN.indexOf('modes.update(dt)', iTick)
+   const iSeuil = SRC_MAIN.indexOf('majSeuilSocle()', iTick)
+   const iRender = SRC_MAIN.indexOf('composer.render(dtAmb)', iTick)
+   assert.ok(iModes > 0 && iSeuil > iModes && iRender > iSeuil)
+   // et `majSeuilSocle` est bien le porteur des deux décisions
+@@ -676,27 +686,39 @@ test('⑧ ter le crop se décide APRÈS `modes.update` et AVANT le dessin', () =
+   assert.ok(corps.indexOf('modes?.busy') < corps.indexOf('veilleCrop.maj('),
+     'la garde du cran doit précéder la décision — sinon onze bascules au lieu d’une')
+ })
+ 
+ test('⑧ quater le bloc plat cède la place : `socleAffiche()` rend FAUX sous le drapeau', () => {
+   // ⚠️ **SANS ÇA, IL Y AURAIT ENCORE DEUX TERRES** — et c'est exactement ce
+   // qu'Adrien a signalé. Le bloc plat est opaque et se dessine dans la passe de
+   // surface, donc APRÈS la passe de fond : il recouvrirait le crop en entier.
+   assert.match(SRC_MAIN, /function socleAffiche\(\)\s*\{\s*if \(terreUniqueBranchee\) return false/)
+   // et la liste des calques reste UNIQUE — on borne son entrée, on ne la double pas
+-  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = v\b/g) || []
++  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = vue\.socle\b/g) || []
+   assert.equal(listes.length, 1)
+-  assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)\s*\{[\s\S]{0,400}?if \(terreUniqueBranchee\) v = false/)
++  // ⚠️ **LE BORNAGE A DÉMÉNAGÉ DANS `monde/visibilite-surface.js` — Tâche R1 ②**,
++  // et il n'a pas changé de sens : il vaut toujours pour le MAILLAGE. Ce qui a
++  // changé, c'est qu'il ne déborde plus sur les trois boutons du bas, qui ne
++  // parlent pas du maillage. Le module est PUR, donc la garde se vérifie
++  // désormais par le comportement (`test/visibilite-surface.test.js` ①②) au
++  // lieu d'une expression régulière — ici on ne garde que le câblage.
++  assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)\s*\{[\s\S]{0,1400}?const vue = visibiliteSurface\(\{ terreUnique: terreUniqueBranchee, surface: v \}\)/)
+   // ⚠️ **ET IL FAUT QUE QUELQU'UN L'APPELLE.** Borner `v` ne sert à rien si la
+   // fonction n'est jamais rappelée : c'est exactement ce qui s'est passé à la
+   // première image du drapeau levé. La veille du crop la rappelle, LA MÊME.
+-  assert.match(SRC_MAIN, /masquerSocle: \(\) => poserVisibiliteSocle\(false\)/)
++  // ⚠️ **ET IL L'APPELLE AVEC `true` DEPUIS LA TÂCHE R1 ②** : l'argument dit
++  // « sommes-nous en surface devant un bloc », pas « allume le bloc plat ». Le
++  // maillage est éteint par le BORNAGE du drapeau, quoi qu'on passe — ce que
++  // `test/visibilite-surface.test.js` ① prouve par le comportement. Passer
++  // `false` disait « nous ne sommes pas en surface », et c'est ce qui a effacé
++  // les trois boutons du bas.
++  assert.match(SRC_MAIN, /masquerSocle: \(\) => poserVisibiliteSocle\(true\)/)
+ })
+ 
+ test('⑧ quinquies l’estompage n’a QU’UN nourrisseur, drapeau levé ou baissé', () => {
+   // Sous `terre unique`, c'est `veilleCrop` qui relaie l'altitude à l'estompage :
+   // `majEstompage` doit donc rendre la main, sinon la même image l'applique deux
+   // fois et les deux compteurs de bascules divergent.
+   const i = SRC_MAIN.indexOf('function majEstompage()')
+   assert.ok(i > 0)
+   const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n}', i))
+   assert.match(corps, /terreUniqueBranchee/)
+diff --git a/test/seuil-branche.test.js b/test/seuil-branche.test.js
+index 7144d25..eecc80b 100644
+--- a/test/seuil-branche.test.js
++++ b/test/seuil-branche.test.js
+@@ -206,26 +206,30 @@ test('la veille est appelée DANS `tick()`, avant le dessin', () => {
+   // il est piloté par le mode, pas par le hasard : `modes.update` d'abord
+   const iModes = SRC_MAIN.indexOf('modes.update(dt)', iTick)
+   assert.ok(iModes > 0 && iAppel > iModes, 'le seuil se lit APRÈS `modes.update(dt)`')
+ })
+ 
+ test('UNE SEULE liste de calques — le socle et le mode orbital passent par la même', () => {
+   // ⚠️ **CE FICHIER RACONTE CINQ FOIS L'ACCIDENT DE LA LISTE DUPLIQUÉE** (voir
+   // le §0 du plan, et `entrerEnVol` : « une seconde liste aurait divergé au
+   // premier calque ajouté »). Le seuil ne fabrique donc PAS sa propre liste :
+   // il rappelle celle de `setSurfaceVisible`.
+-  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = v\b/g) || []
++  // ⚠️ **`vue.socle` DEPUIS LA TÂCHE R1 ②** — l'entrée est bornée par
++  // `visibiliteSurface`, la liste, elle, n'a pas bougé : toujours une seule.
++  const listes = SRC_MAIN.match(/terrain\.mesh\.visible = vue\.socle\b/g) || []
+   assert.equal(listes.length, 1, 'la liste des calques du socle doit être écrite UNE fois')
+   assert.match(SRC_MAIN, /function poserVisibiliteSocle\s*\(\s*v\s*\)/)
+   assert.match(SRC_MAIN, /creerVeilleSocle\(\s*\{\s*appliquer:\s*poserVisibiliteSocle/)
+   // et le hook de `modes.js` passe par la veille, pas par la liste en direct
+-  assert.match(SRC_MAIN, /setSurfaceVisible\s*\(v\)\s*\{[\s\S]{0,2000}?veilleSocle\.poserMode\(v\)/)
++  // (fenêtre élargie : la branche `terre unique` de ce hook porte maintenant le
++  // relais des boutons de surface — Tâche R1 ② — et son commentaire avec)
++  assert.match(SRC_MAIN, /setSurfaceVisible\s*\(v\)\s*\{[\s\S]{0,4000}?veilleSocle\.poserMode\(v\)/)
+ })
+ 
+ test('`main.js` lit le drapeau : la production garde son socle à tous les zooms', () => {
+   assert.match(SRC_MAIN, /import\s*\{[^}]*seuilSocleActif[^}]*\}\s*from\s*'\.\/flags\.js'/)
+   assert.match(SRC_MAIN, /function majSeuilSocle\(\)/)
+   // la garde est DANS `majSeuilSocle`, donc l'appel de `tick()` est inconditionnel
+   const i = SRC_MAIN.indexOf('function majSeuilSocle()')
+   const corps = SRC_MAIN.slice(i, i + 1400)
+   assert.match(corps, /seuilSocle/, 'sans drapeau, `majSeuilSocle` doit rendre la main tout de suite')
+ })
+diff --git a/test/veille-repos.test.js b/test/veille-repos.test.js
+index 73eaabe..f64dd06 100644
+--- a/test/veille-repos.test.js
++++ b/test/veille-repos.test.js
+@@ -342,105 +342,111 @@ function veilleEstompageFactice() {
+     poserRepos(v) { etat.repos = v; etat.poses++ },
+   }
+ }
+ 
+ test('⑥ le repos atteint SES DEUX destinataires, et sur la même image', () => {
+   // ⚠️ Séparés, on aurait un dessin sans coût ou un coût sans dessin — les deux
+   // moitiés du défaut que la tâche répare.
+   const g = globeDePapier()
+   const est = veilleEstompageFactice()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+-  veille.maj(ALT_BLOC)
++  veille.maj(ALT_BLOC, 145.5)
+   assert.equal(veille.pose, true, 'le crop n’est pas posé à l’altitude de test')
+   assert.equal(veille.repos, true, 'le repos n’est pas relayé')
+   assert.equal(g.cropSeul, true, '`poserCropSeul` n’a pas été appelée')
+   assert.equal(est.etat.repos, true, '`poserRepos` n’a pas été appelée')
+ })
+ 
+ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
+   // ⚠️ **CE N'EST PAS UNE PRUDENCE, C'EST LA LOI** : sans découpe, l'estompage
+   // plein efface la planète et ne met rien à la place — un écran vide.
+   const g = globeDePapier()
+   const est = veilleEstompageFactice()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+   // très au-dessus du seuil de mort : le socle, donc le crop, n'existe pas
+-  veille.maj(SEUIL_MORT_M * 4)
++  veille.maj(SEUIL_MORT_M * 4, 145.5)
+   assert.equal(veille.pose, false)
+   assert.equal(veille.repos, false, 'le repos est relayé sans crop')
+   assert.equal(g.cropSeul, null, '`poserCropSeul` appelée sans crop')
+   assert.equal(est.etat.repos, null, '`poserRepos` appelée sans crop')
+ })
+ 
+ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () => {
+   const g = globeDePapier()
+   const est = veilleEstompageFactice()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+-  veille.maj(ALT_BLOC)
++  // ⚠️ **LE GESTE SE JOUE SUR LA DISTANCE DEPUIS LA TÂCHE R1**, pas sur
++  // l'altitude : c'est elle que la veille du repos surveille (§1 du module).
++  const D = 145.5
++  veille.maj(ALT_BLOC, D)
+   assert.equal(g.cropSeul, true)
+   // un geste : une seule image suffit
+-  veille.maj(ALT_BLOC * Math.exp(SEUIL_BOUGE_LOG * 3))
++  const D2 = D * Math.exp(SEUIL_BOUGE_LOG * 3)
++  veille.maj(ALT_BLOC, D2)
+   assert.equal(g.cropSeul, false, 'le geste ne rallume pas les alentours')
+   assert.equal(veille.basculesRepos, 2)
+-  const alt = ALT_BLOC * Math.exp(SEUIL_BOUGE_LOG * 3)
+-  for (let i = 0; i < IMAGES_CALME; i++) veille.maj(alt)
++  for (let i = 0; i < IMAGES_CALME; i++) veille.maj(ALT_BLOC, D2)
+   assert.equal(g.cropSeul, true, 'la vue posée ne recroppe pas')
+   assert.equal(veille.basculesRepos, 3)
+ })
+ 
+ test('⑥ le relais ne réécrit RIEN tant que l’état ne change pas', () => {
+   const g = globeDePapier()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
+-  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC)
++  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC, 145.5)
+   assert.equal(g.posesCropSeul, 1, `${g.posesCropSeul} appels de \`poserCropSeul\` pour un seul état`)
+ })
+ 
+ test('⑥ l’ORBITE éteint le crop seul et fait OUBLIER l’altitude de référence', () => {
+   const g = globeDePapier()
+   const oublis = []
+   const repos = creerVeilleRepos()
+   const espion = { maj: (a) => repos.maj(a), oublier: () => { oublis.push(1); repos.oublier() } }
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: espion })
+-  veille.maj(ALT_BLOC)
++  veille.maj(ALT_BLOC, 145.5)
+   assert.equal(g.cropSeul, true)
+   veille.poserMode(false)
+   assert.equal(g.cropSeul, false, 'le crop seul survit à l’orbite')
+   assert.equal(oublis.length, 1, 'l’orbite ne fait pas oublier la référence')
+   // ⚠️ **DANS LES DEUX SENS** : ne l'oublier qu'à l'aller laisserait le retour
+   // comparer une altitude de surface au dernier résidu orbital.
+   veille.poserMode(true)
+   assert.equal(oublis.length, 2, 'le retour en surface ne fait pas oublier la référence')
+ })
+ 
+ test('⑥ l’ORBITE ne POLLUE PAS les compteurs de la veille du repos', () => {
+   // ⚠️ **CE N'EST PAS UN DÉTAIL DE COMPTABILITÉ.** `veilleRepos.bascules` est
+   // l'instrument par lequel on compte le BATTEMENT à l'écran ; nourri du résidu
+   // orbital, il compterait des réveils qui n'existent pas et le banc mentirait
+   // — la classe d'erreur que le §0 du plan énumère huit fois.
+   const g = globeDePapier()
+   const repos = creerVeilleRepos()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos })
+-  veille.maj(ALT_BLOC)
++  veille.maj(ALT_BLOC, 145.5)
+   const avant = repos.bascules
+   veille.poserMode(false)
+-  // le résidu orbital : `altitudeCadrageM()` y rend n'importe quoi, et il varie
+-  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC * (100 + i))
++  // ⚠️ **LE RÉSIDU ORBITAL SE JOUE SUR LA DISTANCE DEPUIS LA TÂCHE R1** : en
++  // orbite `controls.target` est le centre de la planète, la distance devient un
++  // rayon orbital et elle VARIE à chaque image. Nourrir une distance constante
++  // — ou pas de distance du tout — rendrait ce test vert sans rien lire.
++  for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC * (100 + i), 145.5 * (100 + i))
+   assert.equal(repos.bascules, avant, `la veille du repos a compté ${repos.bascules - avant} bascules en orbite`)
+   assert.equal(repos.dernierEcart, 0, 'la veille du repos a mesuré un écart sur un résidu orbital')
+ })
+ 
+ test('⑥ SANS veille de repos, le comportement est celui d’AVANT la tâche', () => {
+   // ⚠️ Le patron « on élargit, on ne change pas le défaut » — il existe six fois
+   // dans ce dépôt, et c'est la consigne D5 (le mode plat ne bouge pas).
+   const g = globeDePapier()
+   const est = veilleEstompageFactice()
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est })
+-  for (let i = 0; i < 100; i++) veille.maj(ALT_BLOC)
++  for (let i = 0; i < 100; i++) veille.maj(ALT_BLOC, 145.5)
+   assert.equal(veille.repos, false)
+   assert.equal(g.cropSeul, null, '`poserCropSeul` appelée sans veille de repos')
+   assert.equal(est.etat.poses, 0, '`poserRepos` appelée sans veille de repos')
+ })
+ 
+ test('⑥ le globe est LU à chaque image, jamais figé à la construction', () => {
+   // ⚠️ **C'EST LA FORME QUE `main.js` EMPLOIE, ET ELLE A UNE RAISON MESURÉE** :
+   // « `globe` EST DONNÉ PAR UNE FONCTION, PAS PAR SA VALEUR. Il est réassigné à
+   // la perte de contexte WebGL ; une référence figée survivrait à la
+   // réassignation et poserait le crop sur un globe mort, sans une erreur. » Le
+@@ -452,29 +458,29 @@ test('⑥ le globe est LU à chaque image, jamais figé à la construction', ()
+   // passaient le globe PAR SA VALEUR, où `lireGlobe()` et `globe` étaient le
+   // même objet — la faute était invisible sous la seule forme que la
+   // production n'emploie pas. ⚠️ **CE N'EST PLUS LE CAS** (relecture P2/N,
+   // constat groupé ⑤) : les huit autres appels à `creerVeilleCrop` de ce
+   // fichier passent désormais eux aussi `globe: () => g`, la forme réelle —
+   // ce test-ci reste le SEUL à faire vivre le globe DEUX FOIS (perte de
+   // contexte WebGL comprise), donc le seul indispensable, mais il n'est plus
+   // le seul rempart : n'importe lequel des neuf peut désormais mordre.
+   let vivant = globeDePapier()
+   const veille = creerVeilleCrop({ globe: () => vivant, contexte: ctxFactice, repos: creerVeilleRepos() })
+-  veille.maj(ALT_BLOC)
++  veille.maj(ALT_BLOC, 145.5)
+   assert.equal(vivant.cropSeul, true, 'le relais ne lit pas le globe à travers sa fonction')
+   // la perte de contexte : le globe est remplacé, et c'est le NOUVEAU qui doit
+   // recevoir la suite
+   const mort = vivant
+   vivant = globeDePapier()
+   veille.poserMode(false)
+   veille.poserMode(true)
+-  veille.maj(ALT_BLOC)
++  veille.maj(ALT_BLOC, 145.5)
+   assert.equal(vivant.cropSeul, true, 'le relais parle encore au globe d’avant')
+   assert.equal(mort.posesCropSeul, 1, 'le globe mort a reçu un ordre après sa mort')
+ })
+ 
+ test('⑥ bis LA DÉRIVATION DE `lireGlobe` NE FIGE RIEN — structurel, indépendant du test ci-dessus', () => {
+   // ⚠️ **CE TEST NE DÉPEND PAS DE CELUI D'AU-DESSUS.** Le constat groupé ⑤
+   // (`.superpowers/sdd/2026-08-22-globe-studio/constats-groupes.md`) relève
+   // qu'un seul test comportemental gardait « le globe est lu à chaque image » —
+   // fragile au premier refactor de CE test précis. Celui-ci lit le TEXTE de
+   // `creerVeilleCrop` (même patron que `test/loi-texture-monde.test.js` ⑤f/⑤g
+@@ -499,21 +505,21 @@ test('⑥ bis LA DÉRIVATION DE `lireGlobe` NE FIGE RIEN — structurel, indépe
+   const appels = src.match(/lireGlobe\(\)/g) || []
+   assert.ok(appels.length >= 3, `\`lireGlobe()\` n'est rappelé que ${appels.length} fois dans le fichier`)
+ })
+ 
+ test('⑥ un globe SANS `poserCropSeul` n’est pas une panne', () => {
+   // Même contrat que `poserFondCrop` (Tâche J bis) : ce module se vérifie sous
+   // node contre un globe de papier, qui ne porte que ce qu'il exerce.
+   const g = globeDePapier()
+   delete g.poserCropSeul
+   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
+-  assert.doesNotThrow(() => veille.maj(ALT_BLOC))
++  assert.doesNotThrow(() => veille.maj(ALT_BLOC, 145.5))
+   assert.equal(veille.repos, true)
+ })
+ 
+ // ═══════════════════════════════════════════════════════════════ ⑦ le globe
+ //
+ // ⚠️ **SUR UN VRAI QUADTREE, PAS SUR UNE MAQUETTE.** Le harnais est celui de
+ // `test/globe-eviction.test.js` : un DOM bouché, un réseau qui COMPTE, et une
+ // caméra complète (sans `projectionMatrix`, le tri spatial n'a rien à trier et
+ // le parcours mesuré serait l'ancien).
+ 
+@@ -817,10 +823,89 @@ test('⑧ la veille du repos est CONSTRUITE et BRANCHÉE dans `main.js`', () =>
+ 
+ test('⑧ la veille du repos est EXPOSÉE, comme les trois autres', () => {
+   assert.ok(/\n  veilleRepos,/.test(MAIN), '`veilleRepos` n’est pas dans `__exp` : rien ne se vérifie à l’écran')
+ })
+ 
+ test('⑧ `main.js` ne lit PAS l’altitude une seconde fois pour le repos', () => {
+   // ⚠️ **UNE SEULE LECTURE D'ALTITUDE, TROIS CONSOMMATEURS** — l'argument est
+   // déjà écrit deux fois dans `main.js`, et le chantier l'a payé trois fois.
+   assert.ok(!/veilleRepos\.maj\(/.test(MAIN), '`main.js` nourrit la veille du repos en direct : deux chemins pour un geste')
+ })
++
++// ══════════════════════ ⑨ LA GRANDEUR SURVEILLÉE — Tâche R1 ═════════════════
++//
++// **Adrien, 2026-08-23 :** « si je modifie la hauteur de la caméra SANS
++// SCROLLER et en me déplaçant, il ne faut pas que le reste de ce qui est autour
++// du socle réapparaisse. Si je dézoome EN SCROLLANT, alors là tu peux faire
++// réapparaître le reste. »
++//
++// La Tâche N avait choisi l'altitude au-dessus de l'ellipsoïde. Mesuré le
++// 2026-08-23 dans l'application vivante (`.banc/R1/mesure-R1.json`) : un vrai
++// cliquer-glisser d'inclinaison, cible immobile et distance rigoureusement
++// constante, fait tomber cette altitude de 17 624 m à 2 861 m — écart
++// logarithmique de pic `3,86 × 10⁻¹`, **15 images sur 15 au-dessus du seuil**,
++// et `auRepos` bascule réellement de vrai à faux. La distance caméra↔cible, à
++// la même image, bouge de `4,4 × 10⁻¹⁶` : le zéro de la machine.
++//
++// ⚠️ **CES DEUX TESTS MORDENT SUR LE COMPORTEMENT, PAS SUR LE TEXTE SOURCE.**
++// Une expression régulière sur `main.js` a déjà laissé survivre une mutation à
++// 4 082 tests sur ce chantier.
++
++test('⑨ une ALTITUDE qui s’effondre à DISTANCE CONSTANTE ne réveille pas la vue', () => {
++  // C'est l'orbite : l'inclinaison écrase `camera.position.y`, donc l'altitude,
++  // sans rien changer à l'échelle. Le crop doit rester seul.
++  const g = globeDePapier()
++  const est = veilleEstompageFactice()
++  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
++  const D = 145.5 // la distance relevée à l'écran, tenue constante par l'orbite
++  veille.maj(ALT_BLOC, D)
++  assert.equal(g.cropSeul, true, 'le crop seul n’est pas posé au départ')
++  const basculesAvant = veille.basculesRepos
++  // le profil MESURÉ : l'altitude divisée par 6,16 en quinze images
++  let alt = ALT_BLOC
++  for (let i = 0; i < 15; i++) {
++    alt *= Math.exp(-0.12) // bien au-delà du seuil, à chaque image
++    veille.maj(alt, D)
++  }
++  assert.equal(g.cropSeul, true, 'une orbite a rallumé les alentours — le défaut d’Adrien')
++  assert.equal(veille.basculesRepos, basculesAvant, `l’orbite a fait ${veille.basculesRepos - basculesAvant} bascules`)
++  assert.equal(est.etat.repos, true, 'l’estompage a reçu « la vue bouge » sur une orbite')
++})
++
++test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la vue', () => {
++  // C'est la molette : l'échelle change, les alentours doivent revenir DÈS la
++  // première image, sinon la transition commence par un trou.
++  const g = globeDePapier()
++  const est = veilleEstompageFactice()
++  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
++  veille.maj(ALT_BLOC, 145.5)
++  assert.equal(g.cropSeul, true)
++  // une seule image suffit — l'hystérésis est asymétrique À DESSEIN (§3)
++  veille.maj(ALT_BLOC, 145.5 * Math.exp(SEUIL_BOUGE_LOG * 3))
++  assert.equal(g.cropSeul, false, 'un dézoom n’a pas rendu la main aux alentours')
++  assert.equal(veille.basculesRepos, 2)
++  assert.equal(est.etat.repos, false, 'l’estompage n’a pas su que la vue bouge')
++})
++
++test('⑨ la molette ne demande PAS de changer `SEUIL_BOUGE_LOG` — c’est mesuré', () => {
++  // ⚠️ Le seuil a été calibré sur l'écart logarithmique d'ALTITUDE d'un cran de
++  // molette. Relevé le 2026-08-23 sur six crans réels, cible immobile
++  // (`.banc/R1/mesure-R1.json`, C) : l'altitude culmine à `6,593 × 10⁻³`, la
++  // distance à `7,112 × 10⁻³` — un rapport de **1,079** — et les deux captent
++  // EXACTEMENT les mêmes images, 54 sur 54. Le même seuil sert donc les deux.
++  const PIC_ALT = 6.592700138422678e-3
++  const PIC_DIST = 7.112215240894834e-3
++  assert.ok(PIC_DIST / PIC_ALT < 1.1, 'la distance ne rend plus le même ordre de grandeur que l’altitude')
++  // et le geste passe le seuil des deux côtés — un seuil qui le manquerait ne
++  // servirait à rien
++  assert.ok(PIC_ALT > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en altitude')
++  assert.ok(PIC_DIST > SEUIL_BOUGE_LOG, 'la molette ne franchit plus le seuil en distance')
++})
++
++test('⑨ `main.js` nourrit le repos avec la DISTANCE, sur la même image que l’altitude', () => {
++  // ⚠️ **UNE SEULE LECTURE DE CHAQUE GRANDEUR, ET LES DEUX À LA MÊME IMAGE** —
++  // même argument que la Tâche K bis, deux lignes plus haut dans `main.js`.
++  assert.ok(/function distanceCadrageM\(\)/.test(MAIN), '`distanceCadrageM` n’existe pas')
++  assert.ok(/veilleCrop\.maj\(alt, dist\)/.test(MAIN), 'la distance n’atteint pas la chaîne du crop')
++  assert.ok(/\n  veilleSocle, seuilSocleBranche, altitudeCadrageM, distanceCadrageM,/.test(MAIN),
++    '`distanceCadrageM` n’est pas exposée : rien ne se vérifie à l’écran')
++})
+diff --git a/test/visibilite-surface.test.js b/test/visibilite-surface.test.js
+new file mode 100644
+index 0000000..4b4c67c
+--- /dev/null
++++ b/test/visibilite-surface.test.js
+@@ -0,0 +1,160 @@
++// LES BOUTONS DU BAS — Tâche R1 ② du plan « LE STUDIO SUR LE GLOBE ».
++//
++// **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
++// disparu (shuffle, affichage photographie aérienne...) »
++//
++// ══════════ CE QUE CE FICHIER GARDE ════════════════════════════════════════
++//
++//   ① LA LOI — deux questions, deux réponses. Le bornage du drapeau tient sur
++//      le maillage du bloc plat, et **ne déborde pas** sur l'interface.
++//   ② LE COMPORTEMENT — un poseur de papier, câblé comme `main.js` l'est,
++//      rendu drapeau levé puis drapeau baissé. ⚠️ **Il MORD sur ce qui est
++//      posé aux calques et aux boutons, pas sur le texte source** : sur ce
++//      chantier, une mutation a survécu à 4 082 tests parce que la garde était
++//      une assertion d'expression régulière sur `main.js`.
++//   ③ LE CÂBLAGE DE `main.js` — lu, pas chargé (aucun test de ce dépôt ne
++//      charge `main.js`). Il ne prouve rien à lui seul ; il ferme la seule
++//      chose que ① et ② ne peuvent pas atteindre.
++
++import test from 'node:test'
++import assert from 'node:assert/strict'
++import { readFileSync } from 'node:fs'
++
++import { visibiliteSurface } from '../src/monde/visibilite-surface.js'
++
++const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
++
++// ══════════════════════════════════════════════════════════════════ ① la loi
++
++test('① DRAPEAU LEVÉ, en surface : le maillage plat est éteint, les boutons sont ALLUMÉS', () => {
++  const v = visibiliteSurface({ terreUnique: true, surface: true })
++  assert.equal(v.socle, false, 'le bloc plat revient — il y aurait DEUX Terres')
++  assert.equal(v.boutons, true, 'les boutons du bas ont disparu — le défaut d’Adrien')
++})
++
++test('① DRAPEAU LEVÉ, hors surface : tout s’éteint, boutons compris', () => {
++  // ⚠️ En orbite la planète EST le sujet : un raccourci isométrique « sur le
++  // bloc » n'a plus de bloc, et le coin cartographie n'a plus de carte.
++  const v = visibiliteSurface({ terreUnique: true, surface: false })
++  assert.equal(v.socle, false)
++  assert.equal(v.boutons, false, 'les boutons de surface survivent à l’orbite')
++})
++
++test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se confondent', () => {
++  // ⚠️ **C'EST LA GARANTIE QUE TOUT CE CHANTIER A TENUE JUSQU'ICI**, et elle
++  // vaut dans les deux sens : sans drapeau, `socle` et `boutons` sont le même
++  // booléen, celui d'avant la tâche, au bit près.
++  for (const surface of [true, false]) {
++    const v = visibiliteSurface({ terreUnique: false, surface })
++    assert.equal(v.socle, surface)
++    assert.equal(v.boutons, surface)
++  }
++})
++
++test('① les entrées molles sont ramenées à des booléens, pas propagées telles quelles', () => {
++  // ⚠️ `setVisible(undefined)` et `mesh.visible = undefined` ne sont pas des
++  // erreurs, ce sont des faux SILENCIEUX — et `visible = 0` casse three.js plus
++  // loin, pas ici. On borne au bord.
++  for (const e of [undefined, null, 0, '', NaN]) {
++    const v = visibiliteSurface({ terreUnique: false, surface: e })
++    assert.equal(v.socle, false); assert.equal(v.boutons, false)
++  }
++  for (const e of [1, 'oui', {}]) {
++    const v = visibiliteSurface({ terreUnique: false, surface: e })
++    assert.equal(v.socle, true); assert.equal(v.boutons, true)
++  }
++})
++
++// ═══════════════════════════════════════════════════════ ② le comportement
++
++// Le poseur de papier : câblé EXACTEMENT comme `poserVisibiliteSocle` l'est
++// dans `main.js` — les calques du bloc plat sur `socle`, les trois boutons sur
++// `boutons`. ⚠️ **Il ne recopie pas la LOI**, il la consomme : muter
++// `visibilite-surface.js` fait rougir ce test, ce qui est tout l'objet.
++function poseurDePapier(terreUnique) {
++  const etat = {
++    maillage: null, calques: {}, isoBtn: null, cineBtn: null, mapCorner: null,
++  }
++  return {
++    etat,
++    poser(v) {
++      const vue = visibiliteSurface({ terreUnique, surface: v })
++      etat.maillage = vue.socle
++      // un échantillon des quatorze calques qui APPARTIENNENT au bloc plat
++      etat.calques = { labels: vue.socle, nuages: vue.socle, socleBas: vue.socle, mer: vue.socle }
++      etat.isoBtn = vue.boutons
++      etat.cineBtn = vue.boutons
++      etat.mapCorner = vue.boutons
++    },
++  }
++}
++
++test('② DRAPEAU LEVÉ : `terrain.mesh.visible` reste FAUX pendant que les trois boutons s’affichent', () => {
++  const p = poseurDePapier(true)
++  p.poser(true) // l'automate du seuil dit « on est en surface, devant un bloc »
++  assert.equal(p.etat.maillage, false, 'le maillage du bloc plat est dessiné sous le drapeau')
++  for (const [nom, v] of Object.entries(p.etat.calques)) {
++    assert.equal(v, false, `le calque \`${nom}\` du bloc plat est allumé sous le drapeau`)
++  }
++  assert.equal(p.etat.isoBtn, true, 'le bouton isométrie est resté caché')
++  assert.equal(p.etat.cineBtn, true, 'le bouton cinéma est resté caché')
++  assert.equal(p.etat.mapCorner, true, 'le coin cartographie (aérien · base · shuffle) est resté caché')
++})
++
++test('② DRAPEAU BAISSÉ : rien ne change, boutons et maillage suivent le MÊME booléen', () => {
++  const p = poseurDePapier(false)
++  p.poser(true)
++  assert.deepEqual(
++    { m: p.etat.maillage, i: p.etat.isoBtn, c: p.etat.cineBtn, k: p.etat.mapCorner },
++    { m: true, i: true, c: true, k: true },
++  )
++  p.poser(false)
++  assert.deepEqual(
++    { m: p.etat.maillage, i: p.etat.isoBtn, c: p.etat.cineBtn, k: p.etat.mapCorner },
++    { m: false, i: false, c: false, k: false },
++  )
++})
++
++test('② l’ORBITE éteint les boutons, drapeau levé COMME baissé', () => {
++  for (const drapeau of [true, false]) {
++    const p = poseurDePapier(drapeau)
++    p.poser(false)
++    assert.equal(p.etat.isoBtn, false, `boutons allumés hors surface (drapeau ${drapeau})`)
++    assert.equal(p.etat.mapCorner, false)
++  }
++})
++
++// ═══════════════════════════════════════ ③ le câblage de `main.js`, LU
++
++test('③ `poserVisibiliteSocle` consomme la loi et ne borne plus rien elle-même', () => {
++  const i = MAIN.indexOf('function poserVisibiliteSocle(')
++  assert.ok(i > 0, '`poserVisibiliteSocle` a disparu ou changé de nom')
++  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))
++  const code = corps.replace(/\/\/[^\n]*/g, '') // le corps CITE le drapeau en prose
++  assert.ok(/const vue = visibiliteSurface\(\{ terreUnique: terreUniqueBranchee, surface: v \}\)/.test(code),
++    'la loi n’est pas appelée : le bornage est reparti en clair dans `main.js`')
++  // ⛔ **PLUS AUCUN SECOND BORNAGE.** C'est la ligne `if (terreUniqueBranchee) v = false`
++  // qui a effacé les boutons ; la laisser à côté de la loi ferait deux vérités.
++  assert.ok(!/terreUniqueBranchee/.test(code.replace(/visibiliteSurface\(\{[^}]*\}\)/, '')),
++    '`terreUniqueBranchee` est encore lu dans le corps, hors de l’appel à la loi')
++})
++
++test('③ les trois boutons reçoivent `vue.boutons`, le maillage reçoit `vue.socle`', () => {
++  const i = MAIN.indexOf('function poserVisibiliteSocle(')
++  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
++  assert.ok(/terrain\.mesh\.visible = vue\.socle/.test(corps), 'le maillage ne suit pas `vue.socle`')
++  for (const b of ['isoBtn', 'cineBtn', 'mapCorner']) {
++    assert.ok(new RegExp(b + '\\?\\.setVisible\\(vue\\.boutons\\)').test(corps),
++      `\`${b}\` ne suit pas \`vue.boutons\` — il est encore accroché au maillage`)
++  }
++  // et AUCUN des trois ne reçoit encore la grandeur du maillage
++  for (const b of ['isoBtn', 'cineBtn', 'mapCorner']) {
++    assert.ok(!new RegExp(b + '\\?\\.setVisible\\((v|vue\\.socle)\\)').test(corps),
++      `\`${b}\` reçoit encore la visibilité du bloc plat`)
++  }
++})
++
++test('③ `main.js` importe la loi plutôt que de la réécrire', () => {
++  assert.ok(/import \{ visibiliteSurface \} from '\.\/monde\/visibilite-surface\.js'/.test(MAIN),
++    'la loi n’est pas importée')
++})

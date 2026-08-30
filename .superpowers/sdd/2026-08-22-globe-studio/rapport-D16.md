@@ -211,3 +211,79 @@ la classe de défaut `1/k` (six occurrences, autofocus à ×130,4), la passe
 
 ⛔ **Je m'arrête ici et je rapporte, comme le brief l'ordonne** : le résultat de
 l'étape 2 change l'ampleur du reste, et l'arbitrage revient à Adrien.
+
+---
+
+# ÉTAPE ① — LA SORTIE D'ORBITE : DEUX DÉFAUTS, PAS UN
+
+**Statut : ✅ la moitié ALTITUDE est close. La moitié AXE est identifiée et laissée à D16 ter, délibérément.**
+
+## La décomposition, avant de toucher quoi que ce soit
+
+Image `n1030 → n1031` de `.banc/D16/ancre-fix-remontee.json` :
+
+| grandeur | avant → après, en UNE image |
+|---|---|
+| altitude de fond | **33 105 716 → 23 879 470 m** (×1,3864) |
+| inclinaison de `camGlobe` au nadir **local** | **6,570° → 0,000°** |
+| inclinaison de la caméra du **BLOC** | **46,548°** — la bascule de trois quarts, entière |
+| rotation de visée du fond | **45,132°** |
+| déplacement relatif du fond | **0,8138** |
+
+⚡ **C'est la réponse à la question posée : ni l'un ni l'autre, LES DEUX — et ils n'ont pas la même cause.**
+
+- La caméra de fond n'était déjà qu'à **6,570°** de son propre nadir : elle ne « bascule » quasiment pas. Les 45,132° de rotation de visée viennent de ce qu'elle **se téléporte à travers la sphère**, depuis là où le déport oblique la posait vers l'aplomb du lieu.
+- Et elle **tombe de 9 226 246 m** au passage.
+
+## (a) L'altitude — corrigée, et c'est une conversion de la classe `1/k`
+
+`_altitudeFondM()` rend `camY × emprise / span` : **le côté vertical du triangle**. La caméra de fond, elle, est à `√((R + k·camY)² + k²·r²)` du centre — le déport horizontal de la vue de trois quarts la pousse vers le haut. `enterOrbit` reposait la caméra à la jambe verticale **en croyant sortir « à l'altitude EXACTE »** : son propre commentaire dit avoir supprimé un recul de 15 % parce qu'« un 15 % de recul serait un saut, et c'est exactement ce qu'Adrien refuse ». **L'erreur valait +38,6 % — deux fois et demie le recul qu'il avait supprimé.**
+
+⚠️ **Le commentaire de `_altitudeFondM` dit « C'EST LA SEULE GRANDEUR DONT UN SAUT SE VOIT À L'ÉCRAN ». Ma mesure le contredit** : ce n'est pas l'altitude de la caméra qui rend, c'est sa projection verticale. Je n'ai PAS renommé la fonction — `zoom-continu.js` bâtit son invariant dessus — mais le nom ment, et c'est à dire.
+
+**Mesuré après** (`.banc/D16/sortie-fix1.json`, même geste, même instrument) :
+
+| | avant ancre | ancre seule | **+ altitude de sortie** |
+|---|---|---|---|
+| rapport d'altitude à l'image de sortie | 1,3783 | 1,3864 | **1,0063** ⚡ |
+| MAX rapport d'altitude du volet | 1,3783 | 1,3864 | **1,0196** |
+| déplacement relatif à la sortie | 0,8467 | 0,8138 | **0,6627** |
+| `dImg` à l'image de sortie | 8,76 | 8,31 | **6,36** |
+| rotation de visée | 47,668° | 45,132° | 45,186° |
+
+**1,0063 est le pas de zoom ORDINAIRE de ses voisines** (n1028–n1030 rendent 1,0064 / 1,0062 / 1,0062) : l'altitude ne saute plus du tout.
+
+⚠️ **La rotation de visée ne bouge pas — 45,132 → 45,186° — et c'était prévu.** Je publie la valeur la moins favorable : elle a légèrement AUGMENTÉ.
+
+## (b) L'axe — pas touché, et c'est une décision
+
+Les 45° restants **sont** la bascule de 46,548° vue par l'autre bout : sur cette image, `dIncl` de la caméra du bloc vaut **exactement 46,548°**. D16 ter dit de la **déplacer**, pas de l'étaler. ⛔ **La lisser ici serait exactement le réflexe que le brief interdit.** Elle tombe à l'étape 5.
+
+## ⚡ UNE VALIDATION CROISÉE QUE JE N'AI PAS CHERCHÉE
+
+Le test que j'ai écrit calcule le rapport en **arithmétique pure** : `(√((R+a)² + (a/pente)²) − R) / a`. À **30 km d'altitude** il rend **×1,0026** — exactement le chiffre que l'inventaire avait relevé **AU NAVIGATEUR** pour le balayage de pose près du sol (« l'effet s'éteint près du sol : à 30 km le même balayage rend ×1,0026 »).
+
+➡️ **La rupture ② (+32,6 % du balayage) et la moitié altitude de la rupture ⑥ sont LA MÊME FORMULE** : Pythagore sur le déport oblique. Deux mesures indépendantes, à quatre décimales. **Et elles ont la même cure : le nadir.**
+
+## Fichiers touchés
+
+- `src/main.js` — crochet `altitudeFondRenduM` (lit `camGlobe.position.length()`, **pas une septième formule** à tenir d'accord avec `poseFond`) ; import d'`ORBITAL_M_PER_UNIT`
+- `src/modes.js` — `enterOrbit` demande l'altitude rendue, **avec repli** sur l'ancien chemin hors frontière : drapeau baissé, rien ne change
+- `test/frontiere-rendu.test.js` — ⑨ la jambe verticale n'est pas l'altitude
+- `test/camera-continue.test.js` — le branchement, y compris **le repli**
+
+**Tests : 4 298 / 0 échec · audit 221 = 221.**
+
+## Réserves de l'étape ①
+
+1. ⚠️ **La rotation de visée a AUGMENTÉ de 0,054°** (45,132 → 45,186°). C'est sous la dispersion de session, mais je publie la valeur défavorable.
+2. ⚠️ **Le déplacement relatif reste à 0,6627.** Il ne descendra pas sans le nadir : à 45°, deux points séparés de 37° d'arc sur la sphère sont à `2·sin(18,5°)` l'un de l'autre, quoi qu'on fasse de l'altitude.
+3. ⚠️ **Sortir plus haut de 38,6 % rapproche la porte de replongée.** `_diveArmed` l'interdit, et `entryAltM` reste borné par `MAX_ALT_M`. **Non mesuré sur un aller-retour rapide.**
+
+---
+
+# MES TROIS NON-REPRODUITS — ce que j'ai essayé, pour que le suivant ne reparte pas de zéro
+
+1. **Le balayage à +32,6 %.** ⚠️ **Non isolé chez moi.** Sur mes descentes à la molette, le balayage et la descente courent ensemble : j'ai relevé **×1,0619 avant / ×1,0599 après** sur la fenêtre où la caméra du bloc tourne au plafond, **et cette fenêtre est contaminée** — mon filtre `dVisee > 1,4°` attrape aussi l'image de traversée à 111°. **L'inventaire l'a isolé avec le scénario `clic` (aucune molette pendant la séquence) : c'est par là qu'il faut passer.** ⚡ **Mais je n'ai plus besoin de la mesure pour en connaître la cause** : l'arithmétique du test ⑨ la reproduit à quatre décimales (×1,0026 à 30 km).
+2. **Le gel de 1 849,7 ms à la naissance du crop.** ⚠️ **Non reproduit.** Mon MAX `dt` vaut **438,8 ms** (descente avec ancre) et **392,3 ms** (ligne de base), sur cinq sessions complètes. L'inventaire lui-même donne **1 849,7 ms** dans une session et **429,3 ms** dans une autre, au même endroit : **c'est intermittent**, pas absent. ⛔ **Un phénomène intermittent non reproduit n'est pas un phénomène absent.** Ce que je n'ai PAS essayé et qu'il faudrait : répéter la naissance du crop seule, une vingtaine de fois, cache HTTP froid.
+3. **La borne théorique ≈ 21° de la rupture ③.** ⚠️ **Pas encore cherchée.** Ma correction supprime la CAUSE (l'ancre calée sur la grille) et non une valeur ; mais tant que je n'ai pas exhibé un lieu qui approche 21° avant, je ne peux pas transformer le résultat en garantie.
