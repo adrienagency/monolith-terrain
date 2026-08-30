@@ -135,9 +135,16 @@ revendique donc aucune amélioration ni aucune dégradation là-dessus.**
    **11,863 était le pire**.
 2. ⚠️ **`assietteCrop()` garde le centre du bloc comme ancre du crop**, à dessein :
    c'est une empreinte GÉOGRAPHIQUE, pas une pose de caméra. Le désaccord entre
-   les deux est du second ordre. **Vérifié à l'image, pas seulement au calcul —
-   voir plus bas.**
-3. ⚠️ **La remontée n'est pas encore mesurée** avec la correction.
+   les deux est du second ordre. **Vérifié À L'IMAGE, pas seulement au calcul** :
+   la sonde a rejoué la descente en capturant l'écran tous les six crans
+   (), comparée image par image à la même descente sur
+   le dépôt non modifié (, captures de l'inventaire).
+   À 4 171 km d'altitude, les étiquettes de villes du globe sont **au même
+   pixel**, le limbe de la planète et le tracé des côtes sont au même endroit à
+   quelques pixels près. **Aucun décalage constant** — la signature qu'une
+   mauvaise ancre laisse, et que la sonde à pixels avait déjà attrapée une fois
+   (28 px sur 562, cités dans ).
+3. ✅ **La remontée EST mesurée** — voir la section suivante.
 4. ⚠️ **Le balayage de pose (+32,6 %) n'est PAS traité par cette étape** et ne
    pouvait pas l'être : il vient de `poseFonduArrivee`, pas de l'ancre.
 
