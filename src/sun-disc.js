@@ -66,6 +66,21 @@ export class SunDisc {
       opacity: 0,
     })
     this.sprite = new THREE.Sprite(this.material)
+    // ⚡ **LA POSE DANS L'ESPACE DU BLOC, GARDÉE À PART — Tâche D16-a.**
+    //
+    // ⛔ **CE SPRITE EST LE SEUL CLIENT DE LA SECONDE PASSE DE RENDU, ET C'EST
+    // MESURÉ.** Sous `?terre=unique`, en mode surface, l'inventaire de la scène
+    // ne rend **qu'UN objet visible porteur de géométrie : celui-ci**
+    // (`.banc/D16/scene2.json`). La passe de surface dessine **0 triangle sur
+    // 60,4 % des images** et 168 au pire, contre **129 122 en médiane** pour la
+    // passe de fond — **0,059 %**.
+    //
+    // Il est donc dessiné dans la scène du GLOBE, et `main.js` y transporte sa
+    // pose par la même similitude qui transporte la caméra. On garde ici les
+    // valeurs d'ORIGINE, en unités de bloc : sans elles, la pose transportée
+    // écraserait son propre point de départ à la première image.
+    this.positionBloc = new THREE.Vector3()
+    this.echelleBloc = 15
     this.sprite.scale.setScalar(15)
     this.sprite.visible = false
     this.sprite.renderOrder = 5 // behind the map overlays, in front of the sky
@@ -87,8 +102,10 @@ export class SunDisc {
     // buffer is what turns bloom into an actual solar flare; low sun boosts
     // less (the drown-out must stay gentle).
     this.material.color.set(colorHex).multiplyScalar(1.6 + 1.9 * opacity)
-    this.sprite.scale.setScalar(13 + 9 * (1 - opacity)) // swells and hazes as it sinks
-    this.sprite.position.copy(dir).setLength(DISTANCE)
+    this.echelleBloc = 13 + 9 * (1 - opacity) // swells and hazes as it sinks
+    this.sprite.scale.setScalar(this.echelleBloc)
+    this.positionBloc.copy(dir).setLength(DISTANCE)
+    this.sprite.position.copy(this.positionBloc)
   }
 
   setVisible(v) {

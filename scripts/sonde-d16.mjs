@@ -594,8 +594,14 @@ try {
           parents: (() => { const c = []; for (let p = o.parent; p; p = p.parent) c.push(p.name || p.type); return c.slice(0, 3).join('<') })(),
         })
       })
+      // ⚡ **ET LE NOM DES ENFANTS — la carte de D16-b se fait avec ça.** Un
+      // « Group(14) » ne dit pas ce qu'il faudra reloger ; « Group(14) : labels,
+      // peaks, … », si.
       const racines = window.__exp.scene.children.map((c) => ({
-        nom: c.name || c.type, visible: c.visible, enfants: c.children.length,
+        nom: c.name || c.type,
+        visible: c.visible,
+        enfants: c.children.length,
+        dedans: c.children.slice(0, 8).map((x) => x.name || x.type).join(', '),
       }))
       return {
         mode: window.__exp.modes?.mode,

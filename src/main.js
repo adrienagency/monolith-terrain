@@ -4,8 +4,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import {
   EffectComposer,
   RenderPass,
+  ClearPass, // la chaîne `?terre=deux` s'en sert encore — voir le bloc « UNE SEULE PASSE »
   EffectPass,
-  ClearPass, // Tache 1b bis : l'effacement de PROFONDEUR entre les deux passes
   DepthOfFieldEffect,
   VignetteEffect,
   NoiseEffect,
@@ -2287,7 +2287,7 @@ async function assureAoPass() {
   aoEnAttente = import('n8ao')
     .then(({ N8AOPostPass }) => {
       if (aoPass) return aoPass // une autre demande a gagné la course
-      const p = new N8AOPostPass(scene, camera, ...evenSize())
+      const p = new N8AOPostPass(sceneDeRendu(), cameraDeRendu(), ...evenSize())
       configureAoPass(p)
       // ⚠️ INDEX 1, ET PAS `addPass(p)` TOUT COURT. La passe doit rester juste
       // derrière le RenderPass et devant tout le reste — c'était sa place quand
@@ -2418,20 +2418,47 @@ syncAoColor()
 //
 // Everything reads params first and the live objects second, so the app
 // behaves identically whether or not the pass exists yet.
+// ⚡ **LA CAMÉRA QUI REND, POUR LES PASSES BÂTIES PLUS TARD — Tâche D16-a.**
+//
+// La profondeur du tampon est écrite par la caméra de la passe de fond. Un effet
+// d'écran qui la linéarise avec les `near`/`far` d'une AUTRE caméra se trompe
+// d'espace — c'est la classe de défaut `1/k` de ce chantier. Les passes déjà
+// bâties sont recalées d'un coup par `composer.setMainCamera` ; celles qui
+// naissent à la demande (profondeur de champ, occlusion ambiante) passent par ici.
+//
+// ⚠️ **LE `try` N'EST PAS UNE PARESSE.** `frontiereActive` et `camGlobe` sont
+// déclarés en `const` **plus bas dans ce fichier** ; `setDofEnabled` est appelée
+// une fois AVANT cette ligne-là (bokeh éteint par défaut, donc sans effet — mais
+// un modèle ou un lien partagé peut l'allumer au démarrage). Lire une `const`
+// avant son initialisation lève une `ReferenceError` : on retombe alors sur la
+// caméra principale, c'est-à-dire le comportement du dépôt, et le bloc
+// `frontiereActive` plus bas recale ce qui aurait été bâti trop tôt.
+function cameraDeRendu() {
+  try { return fusionDesPasses && camGlobe ? camGlobe : camera } catch { return camera }
+}
+function sceneDeRendu() {
+  try { return fusionDesPasses && sceneGlobe ? sceneGlobe : scene } catch { return scene }
+}
+
 let dof = null
 let dofPass = null
 function ensureDof() {
   if (dofPass) return dofPass
-  dof = new DepthOfFieldEffect(camera, {
+  // ⚠️ **LA CAMÉRA PASSE PAR UNE VARIABLE, ET CE N'EST PAS UN STYLE.**
+  // `test/export-effets.test.js` dérive la chaîne d'effets en lisant CE FICHIER
+  // avec `new EffectPass\(([^)]*)\)` : un appel de fonction en premier argument
+  // arrêterait la lecture à sa parenthèse fermante et l'effet disparaîtrait du
+  // classement — en silence, avec un test vert. (Trouvé en rouge, pas relu.)
+  const camEffets = cameraDeRendu()
+  dof = new DepthOfFieldEffect(camEffets, {
     focusDistance: 0.02,
     focalLength: 0.06,
     bokehScale: params.bokehScale,
     height: 720,
   })
   // drive the circle-of-confusion in world units so focus params are intuitive
-  dof.cocMaterial.worldFocusDistance = params.focusDistance
-  dof.cocMaterial.worldFocusRange = params.focusRange
-  dofPass = new EffectPass(camera, dof)
+  poserMiseAuPoint() // ⚠️ la conversion `1/k` vit là-bas, et nulle part ailleurs
+  dofPass = new EffectPass(camEffets, dof)
   // BEFORE the final colour/tonemap pass — DoF belongs in linear HDR
   composer.addPass(dofPass, composer.passes.length - 1)
   return dofPass
@@ -4560,16 +4587,101 @@ class PasseFond extends RenderPass {
   }
 }
 
+// ══════ UNE SEULE PASSE, UNE SEULE CAMÉRA — TÂCHE D16-a ═════════════════
+//
+// ⛔ **CE QUI ÉTAIT ICI, ET POURQUOI ÇA N'Y EST PLUS. À LIRE AVANT DE LE
+// REMETTRE « par prudence ».**
+//
+// Le dépôt enchaînait TROIS passes : ① le fond (`sceneGlobe`, `camGlobe`),
+// ② `new ClearPass(false, true, false)` — **qui remet la profondeur à 1,0
+// partout** — et ③ la surface (`scene`, `camera`), qui n'effaçait plus rien.
+// La ② existait parce que le bloc et le globe vivaient dans deux espaces dont
+// les profondeurs ne sont pas comparables.
+//
+// ⚡ **MESURÉ : SOUS `?terre=unique`, LA PASSE ③ DESSINE UN SPRITE DE SOLEIL, ET
+// RIEN D'AUTRE.**
+//
+//   · 969 images de surface, appels de dessin comptés sur `renderer.info.render`
+//     autour de chaque passe (`.banc/D16/passes1.json`) :
+//       – **60,4 % des images : 0 appel, 0 triangle** ;
+//       – les 39,6 % restantes : **168 triangles au pire** ;
+//       – la passe de fond, en face : **129 122 triangles en médiane, 286 246 au MAX**.
+//     Soit **0,059 % des triangles**, au pire.
+//   · Inventaire de la scène du bloc (`.banc/D16/scene2.json`) : **un seul objet
+//     visible porteur de géométrie**, un `Sprite`/`SpriteMaterial` en
+//     `depthWrite: false` — `SunDisc`. Le maillage du bloc, le socle, les
+//     toponymes, les nuages, le trafic, la mer, l'eau et les lieux sont **tous
+//     éteints**, à toutes les altitudes (`monde/visibilite-surface.js` l'écrit
+//     déjà : « sous le drapeau, la réponse est NON »).
+//
+// ⛔ **ET CE QUE ÇA COÛTAIT : LE FLOU D'ARRIÈRE-PLAN, ENTIÈREMENT.** La ② mettait
+// la profondeur à 1,0 et la ③ n'écrivait plus aucune profondeur (le sprite est
+// en `depthWrite: false`) : **le tampon valait 1,0 sur toute l'image.** Mesuré au
+// pixel, mise au point balayée de 0,5 à 400 (`scripts/sonde-flou-focus.mjs`,
+// `.banc/D16/flou-avant.json`) :
+//
+//   | configuration | pixels changés sur 1 024 000 |
+//   |---|---|
+//   | `production` (une passe) | jusqu'à **248 229** (24,24 %) |
+//   | `?frontiere=1&terre=deux` (le bloc est encore dessiné) | jusqu'à **220 422** (21,53 %) |
+//   | **`?terre=unique`** | **0**, aux sept réglages |
+//
+//   Témoin (deux rendus au même réglage) : **0 pixel** dans les trois cas.
+//
+// ⚠️ **L'ARGUMENT ÉCRIT QUI JUSTIFIAIT TOUT ÇA VAUT 0,173 %.** L'en-tête de
+// `monde/frontiere-rendu.js` disait qu'un `far` unique reviendrait à « dégrader
+// [le] tampon de profondeur [du bloc] pour rien ». La résolution de profondeur à
+// la distance `z` vaut `z²(f−n) / (n·f·(2ᵇ−1))` : dès que `f ≫ n` elle ne
+// dépend plus de `f` du tout. **Desserrer `far` ×1 448 coûte +0,173 % ; diviser
+// `near` par deux coûte +99,7 %.** Les deux chiffres sont dans
+// `test/frontiere-rendu.test.js` ⑪, avec le relevé image par image du rapport
+// `far/near` niveau par niveau.
+//
+// ➡️ **Le sprite part donc dans la scène du globe, et les deux passes n'en font
+// plus qu'une.**
+//
+// ⛔ **ET LA FUSION NE VAUT QUE SOUS `?terre=unique` — TROUVÉ EN MESURANT, PAS
+// EN RELISANT.** Sous `?frontiere=1&terre=deux`, le maillage du bloc est ENCORE
+// DESSINÉ par la passe de surface : la supprimer là aussi faisait disparaître le
+// bloc. Mesuré au PSNR entre la même vue avant et après, bokeh éteint :
+//
+//   | configuration | PSNR avant/après |
+//   |---|---|
+//   | `production` (témoin : code inchangé) | **44,88 dB** — le plancher de bruit de session |
+//   | `?terre=unique` | **45,71 dB** — au niveau du témoin : rien n'a bougé |
+//   | `?terre=deux` avec la fusion appliquée à tort | **17,80 dB** — le bloc avait disparu |
+//
+// **Le critère n'est donc pas « y a-t-il deux passes » mais « la seconde
+// dessine-t-elle quelque chose »**, et la réponse ne dépend que de `terre=unique`.
+const fusionDesPasses = frontiereActive && terreUniqueBranchee
 if (frontiereActive) {
   const passeFond = new PasseFond(sceneGlobe, camGlobe)
   passeFond.skipShadowMapUpdate = true
-  // ① le fond : il efface (couleur ET profondeur) et peint le ciel + la planète
   composer.addPass(passeFond, 0)
-  // ② la profondeur seule — la couleur du fond survit, la profondeur repart à 1
-  composer.addPass(new ClearPass(false, true, false), 1)
-  // ③ la surface n'efface plus rien et ne repeint plus le ciel
-  passeSurface.clearPass.enabled = false
-  passeSurface.ignoreBackground = true
+  if (!fusionDesPasses) {
+    // `?terre=deux` : le bloc est encore là, on garde la chaîne du dépôt —
+    // effacement de PROFONDEUR entre les deux passes, surface sans effacement
+    // ni fond. Le flou y répond déjà (mesuré : jusqu'à 220 422 pixels).
+    composer.addPass(new ClearPass(false, true, false), 1)
+    passeSurface.clearPass.enabled = false
+    passeSurface.ignoreBackground = true
+  }
+}
+if (fusionDesPasses) {
+  // ⚠️ **`enabled = false` ET PAS `removePass`** : la chaîne est indexée à la
+  // main ailleurs dans ce fichier (`composer.addPass(p, 1)` pour l'occlusion
+  // ambiante, `composer.passes.length - 1` pour la profondeur de champ). Retirer
+  // une passe décalerait ces index en silence. Une passe désactivée est sautée
+  // par `postprocessing` : elle ne coûte rien et ne dérange personne.
+  passeSurface.enabled = false
+  // le seul client réel de la passe supprimée (voir le bloc ci-dessus)
+  sceneGlobe.add(sunDisc.sprite)
+  // ⚡ **ET LES EFFETS LISENT MAINTENANT LA BONNE CAMÉRA.** La profondeur du
+  // tampon est celle de `camGlobe` ; un effet qui la linéariserait avec les
+  // `near`/`far` de la caméra du bloc se tromperait d'espace — c'est exactement
+  // la classe de défaut `1/k` que cette tâche existe pour supprimer.
+  composer.setMainCamera(camGlobe)
+  if (dof) dof.mainCamera = camGlobe
 }
 
 // LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
@@ -4616,6 +4728,11 @@ function majCameraFond() {
   else camGlobe.clearViewOffset()
   if (modes?.mode === 'orbital') {
     // RÉGIME ORBITAL — recopie. La passe ① redevient le rendu d'aujourd'hui.
+    // ⚠️ Les deux espaces coïncident : le sprite garde sa pose de bloc telle quelle.
+    if (fusionDesPasses) {
+      sunDisc.sprite.position.copy(sunDisc.positionBloc)
+      sunDisc.sprite.scale.setScalar(sunDisc.echelleBloc)
+    }
     camGlobe.position.copy(camera.position)
     camGlobe.quaternion.copy(camera.quaternion)
     camGlobe.near = camera.near
@@ -4672,6 +4789,68 @@ function majCameraFond() {
   camGlobe.far = plans.far
   camGlobe.updateProjectionMatrix()
   camGlobe.updateMatrixWorld()
+  // ⚡ **LE DISQUE SOLAIRE TRAVERSE PAR LA MÊME SIMILITUDE QUE LA CAMÉRA —
+  // Tâche D16-a, et c'est ce qui rend le déplacement NEUTRE À L'IMAGE.**
+  //
+  // Une similitude conserve les angles : si l'on transporte la caméra ET le
+  // sprite par la MÊME transformation, la direction apparente et la taille
+  // apparente sont **inchangées par construction**. Ce n'est donc pas un
+  // réglage à trouver ; c'est une identité, et le banc de pixels la vérifie.
+  //
+  // ⚠️ **UNE SEULE CHOSE CHANGE, ET ELLE VA DANS LE BON SENS** : le sprite est
+  // en `depthTest: true`. Avant, le `ClearPass` avait remis la profondeur à 1,0
+  // juste avant lui — **rien ne pouvait donc l'occulter**. Maintenant il est
+  // testé contre la profondeur de la planète, dans le MÊME espace : un soleil
+  // passé derrière le limbe se cache, au lieu de flotter par-dessus.
+  if (!fusionDesPasses) { _kFond = pose.k; return } // `?terre=deux` : le sprite reste dans la scène du bloc
+  const poseSoleil = poseFond({
+    lat: ancre.lat,
+    lon: ancre.lon,
+    origineBloc: [ancreXZ.x, 0, ancreXZ.z],
+    positionBloc: [sunDisc.positionBloc.x, sunDisc.positionBloc.y, sunDisc.positionBloc.z],
+    quaternionBloc: _IDENTITE, // un sprite fait toujours face à la caméra
+    extentMeters: largeur,
+    span: TERRAIN_SIZE,
+  })
+  sunDisc.sprite.position.set(poseSoleil.position[0], poseSoleil.position[1], poseSoleil.position[2])
+  sunDisc.sprite.scale.setScalar(sunDisc.echelleBloc * pose.k)
+  _kFond = pose.k
+}
+const _IDENTITE = [0, 0, 0, 1]
+
+// ══════ LA LONGUEUR QUI TRAVERSE — TÂCHE D16-a, LA CLASSE `1/k` ════════════
+//
+// ⛔ **UNE LONGUEUR MESURÉE DANS L'ESPACE DU BLOC ET CONSOMMÉE PAR LA CAMÉRA QUI
+// REND EST FAUSSE D'UN FACTEUR `1/k`** — et `1/k` va de ≈ 4,5 à z3 à ≈ 3 700 à
+// z16. C'est la classe de défaut la plus fréquente de ce chantier.
+//
+// ⚡ **ET LA FUSION DES PASSES VIENT DE LA RENDRE VISIBLE AU LIEU DE MUETTE.**
+// Tant que la profondeur était effacée, la mise au point du flou pouvait valoir
+// n'importe quoi : **0 pixel sur 1 024 000 changeaient** (`.banc/D16/flou-avant.json`).
+// Maintenant que la profondeur est vraie, une mise au point exprimée en unités
+// de bloc et lue en unités de globe met le point à `1/k` fois trop loin.
+//
+// ⚠️ **CE FACTEUR NE DISPARAÎTRA QU'AVEC LA SIMILITUDE ELLE-MÊME (D16-b).** Il
+// n'est pas supposé : c'est **le `k` que `poseFond` vient de rendre**, mémorisé
+// à l'image où elle l'a calculé. Hors frontière de rendu il vaut 1 et toutes les
+// lignes ci-dessous redeviennent celles du dépôt, au bit près.
+let _kFond = 1
+// ⚠️ **MÊME `try` QUE `cameraDeRendu`, ET POUR LA MÊME RAISON** : `setDofEnabled`
+// est appelée une fois AVANT la déclaration de `frontiereActive`. Lire une
+// `const` avant son initialisation lève une `ReferenceError` ; on rend alors 1,
+// c'est-à-dire le comportement du dépôt, et la première image recale.
+function facteurFond() {
+  try {
+    return fusionDesPasses && modes?.mode === 'surface' && _kFond > 0 ? _kFond : 1
+  } catch { return 1 }
+}
+// La mise au point, convertie à UN SEUL endroit. Sept sites l'écrivaient ; ils
+// passent tous par ici, sans quoi le prochain qui s'ajoute oublierait le facteur.
+function poserMiseAuPoint(distanceBloc = params.focusDistance, porteeBloc = params.focusRange) {
+  if (!dof) return
+  const f = facteurFond()
+  if (distanceBloc != null) dof.cocMaterial.worldFocusDistance = distanceBloc * f
+  if (porteeBloc != null) dof.cocMaterial.worldFocusRange = porteeBloc * f
 }
 
 // ══════════ LE SEUIL DU SOCLE — Tâche 3 du plan, BRANCHÉE ══════════════════
@@ -6458,7 +6637,7 @@ function applyUserTemplate(tmpl) {
   // camera lens / depth-of-field / shadow look
   if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
   if (params.bokehScale != null) { if (dof) dof.bokehScale = params.bokehScale; setDofEnabled(params.bokehEnabled && params.bokehScale > 0) }
-  if (params.focusRange != null && dof) dof.cocMaterial.worldFocusRange = params.focusRange
+  if (params.focusRange != null && dof) poserMiseAuPoint(null, params.focusRange)
   if (params.shadowMode) applyShadowMode()
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
@@ -6859,7 +7038,7 @@ function shuffleLook() {
     params.focusRange = Math.round(rnd(14, 34))
   }
   setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
-  if (dof) { dof.bokehScale = params.bokehScale; dof.cocMaterial.worldFocusRange = params.focusRange }
+  if (dof) { dof.bokehScale = params.bokehScale; poserMiseAuPoint(null, params.focusRange) }
 
   // 6) FOND + SOCLE par théorie des couleurs (Adrien) : un schéma élégant
   //    (complémentaire / split / analogue / triadique / mono), contraste bas ou
@@ -9410,7 +9589,7 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
     camera.zoom = sauve.zoom
     params.autoFocus = sauve.autoFocus
     params.focusDistance = sauve.focusDistance
-    if (dof) dof.cocMaterial.worldFocusDistance = sauve.focusDistance
+    if (dof) poserMiseAuPoint(sauve.focusDistance, null)
     if (sauve.view?.enabled) {
       const v = sauve.view
       camera.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height)
@@ -9514,7 +9693,7 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
     params.focusDistance = camera.position.distanceTo(
       new THREE.Vector3(pointNet.x, pointNet.y, pointNet.z)
     )
-    if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
+    if (dof) poserMiseAuPoint(params.focusDistance, null)
   }
   return { restaurer }
 }
@@ -12382,7 +12561,7 @@ function tick() {
   // ensureDof). params.focusDistance keeps tracking either way, and
   // ensureDof() seeds the material from it, so nothing is lost while it
   // does not exist.
-  if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
+  if (dof) poserMiseAuPoint(params.focusDistance, null)
 
   // `half` = le demi-BLOC (l'échelle du bateau), `bord` = où l'eau s'arrête :
   // le bloc, ou l'emprise 3×3 entière en mode continu. Les confondre aurait

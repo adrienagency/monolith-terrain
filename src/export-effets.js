@@ -100,10 +100,26 @@ export const CLASSEMENT_EFFETS = {
     raison:
       "Ce n'est pas un effet d'écran non plus : c'est le rendu de la PLANÈTE derrière la tuile, avec sa propre caméra. Son cadrage suit celui de la caméra principale — `majCameraFond` recopie `camera.view` (le décalage posé par composeDecalage) sur `camGlobe`, sans quoi chaque tuile de l'affiche rendrait la vue entière du globe.",
   },
+  // ⛔ **`ClearPass` NE SURVIT QUE SOUS `?terre=deux` — Tâche D16-a, et elle ne doit
+  // pas revenir sans lire ceci.** Elle effaçait la PROFONDEUR entre la passe de
+  // fond et celle de surface, parce que les deux vivaient dans des espaces dont
+  // les profondeurs ne sont pas comparables. Mesuré : sous `?terre=unique` la
+  // passe de surface dessinait **0 triangle sur 60,4 % des images** et **un
+  // sprite de soleil** sur les autres, pendant que le tampon de profondeur
+  // restait à 1,0 partout — donc **0 pixel sur 1 024 000** quand la mise au
+  // point du flou balayait 0,5 → 400, contre 248 229 en production. Le sprite
+  // est parti dans la scène du globe ; les deux passes n'en font plus qu'une.
+  // Le raisonnement complet et les traces sont dans `src/main.js`, au bloc
+  // « UNE SEULE PASSE, UNE SEULE CAMÉRA ».
+  //
+  // ⚠️ **ELLE RESTE CLASSÉE PARCE QU'ELLE RESTE DANS LA CHAÎNE SOUS
+  // `?frontiere=1&terre=deux`**, où le maillage du bloc est encore dessiné et où
+  // les deux profondeurs doivent donc encore être séparées. Elle disparaîtra
+  // avec ce drapeau-là, pas avant.
   ClearPass: {
     categorie: RENDU,
     raison:
-      "Elle n'écrit aucune couleur : elle efface la seule PROFONDEUR entre la passe de fond et celle de la surface, pour que le bloc se dessine par-dessus la planète sans que leurs tampons de profondeur — qui ne sont pas dans le même espace — se mélangent. Rien à recouvrir, rien à neutraliser : elle est identique d'une tuile à l'autre par construction.",
+      "Elle n'écrit aucune couleur : elle efface la seule PROFONDEUR entre la passe de fond et celle de la surface, pour que le bloc se dessine par-dessus la planète sans que leurs tampons de profondeur — qui ne sont pas dans le même espace — se mélangent. Rien à recouvrir, rien à neutraliser : elle est identique d'une tuile à l'autre par construction. ⚠️ Sous ?terre=unique elle n'est plus dans la chaîne : la passe de surface n'y dessinait qu'un sprite de soleil, et l'effacement rendait le flou d'arrière-plan inerte (0 pixel sur 1 024 000).",
   },
 
   // ── ① Par pixel : rien à faire ──────────────────────────────────────────

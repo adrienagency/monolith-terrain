@@ -550,3 +550,59 @@ test('enterOrbit sort à l’altitude de la CAMÉRA DE FOND, pas à sa jambe ver
   assert.match(SRC_MAIN, /altitudeFondRenduM: \(\) =>/)
   assert.match(SRC_MAIN, /camGlobe\.position\.length\(\) - R_GLOBE\) \* ORBITAL_M_PER_UNIT/)
 })
+
+// ══════ D16-a : UNE SEULE PASSE, ET SEULEMENT LÀ OÙ ELLE EST LÉGITIME ════════
+//
+// ⛔ **MESURÉ : SOUS `?terre=unique`, LA PASSE DE SURFACE DESSINE UN SPRITE DE
+// SOLEIL, ET RIEN D'AUTRE.** 969 images de surface, appels comptés sur
+// `renderer.info.render` autour de chaque passe : **0 triangle sur 60,4 % des
+// images**, 168 au pire sur les autres, contre **129 122 en médiane** pour la
+// passe de fond — **0,059 %**. L'inventaire de la scène ne rend qu'**un** objet
+// visible porteur de géométrie : le `Sprite` de `SunDisc`.
+//
+// ⛔ **ET CE QUE ÇA COÛTAIT : LE FLOU, ENTIÈREMENT.** Le `ClearPass` remettait la
+// profondeur à 1,0 et le sprite est en `depthWrite: false` — le tampon valait
+// donc 1,0 partout. Mesuré au pixel : **0 sur 1 024 000** aux sept réglages,
+// contre 248 229 en production. Après la fusion : **151 243 au pic**, avec la
+// MÊME FORME que production (0 → 138 768 → 151 243 → 63 598 → 9 078).
+//
+// ⚠️ **ET LE PIÈGE QUE LA MESURE A ATTRAPÉ** : sous `?frontiere=1&terre=deux` le
+// maillage du bloc est ENCORE DESSINÉ. Fusionner là aussi le faisait disparaître
+// (PSNR 17,80 dB contre un plancher de bruit de 44,88). **La fusion suit
+// `terre=unique`, pas `frontiere`.**
+test('la fusion des passes suit `terre=unique`, JAMAIS la seule frontière', () => {
+  assert.match(SRC_MAIN, /const fusionDesPasses = frontiereActive && terreUniqueBranchee/,
+    'la porte de la fusion doit exiger les DEUX drapeaux')
+  // la chaîne `?terre=deux` garde son effacement de profondeur et sa passe de surface
+  assert.match(SRC_MAIN, /if \(!fusionDesPasses\) \{[\s\S]*?new ClearPass\(false, true, false\)[\s\S]*?passeSurface\.clearPass\.enabled = false/,
+    '`?terre=deux` doit garder ClearPass ET la passe de surface')
+  // et la fusion, elle, éteint la passe de surface et déplace le seul objet qu'elle dessinait
+  assert.match(SRC_MAIN, /if \(fusionDesPasses\) \{[\s\S]*?passeSurface\.enabled = false[\s\S]*?sceneGlobe\.add\(sunDisc\.sprite\)/,
+    'la fusion doit éteindre la passe de surface ET reloger le sprite du soleil')
+  // ⚠️ **ET LES EFFETS DOIVENT SUIVRE LA CAMÉRA QUI ÉCRIT LA PROFONDEUR**, sans
+  // quoi le flou linéariserait la profondeur avec les plans d'une autre caméra.
+  assert.match(SRC_MAIN, /composer\.setMainCamera\(camGlobe\)/)
+})
+
+test('la mise au point passe par UN SEUL site — la conversion `1/k` ne peut pas être oubliée', () => {
+  // ⛔ **UNE LONGUEUR DE BLOC LUE PAR UNE CAMÉRA DE GLOBE EST FAUSSE D'UN FACTEUR
+  // `1/k`**, et `1/k` vaut **130,4** au lieu de démarrage (mesuré :
+  // `k = 0,007 667`, `.banc/D16/flou-apres2.json`) — exactement le facteur que la
+  // tâche du flou avait relevé sur l'autofocus. Sept sites écrivaient la mise au
+  // point ; ils passent tous par `poserMiseAuPoint`.
+  const ecrituresDirectes = [...SRC_MAIN.matchAll(/worldFocus(?:Distance|Range)\s*=/g)]
+  assert.equal(ecrituresDirectes.length, 2,
+    `il ne doit rester QUE les deux écritures de poserMiseAuPoint, trouvé ${ecrituresDirectes.length}`)
+  const corps = corpsDe(SRC_MAIN, 'function poserMiseAuPoint(distanceBloc = params.focusDistance, porteeBloc = params.focusRange) {')
+  assert.match(corps, /const f = facteurFond\(\)/)
+  assert.match(corps, /worldFocusDistance = distanceBloc \* f/)
+  // ⚠️ **LA PORTÉE AUSSI EST UNE LONGUEUR**, et l'oublier suffit à tout annuler :
+  // épinglée à 23 unités de bloc, elle vaut 1 465 km en unités de globe — vingt
+  // fois la profondeur de la scène. Mesuré : le balayage ne rendait plus que
+  // **2 000 pixels** au lieu de 151 243.
+  assert.match(corps, /worldFocusRange = porteeBloc \* f/)
+  // et le facteur ne s'applique QUE là où la similitude existe
+  const cf = corpsDe(SRC_MAIN, 'function facteurFond() {')
+  assert.match(cf, /fusionDesPasses && modes\?\.mode === 'surface'/)
+  assert.match(cf, /catch \{ return 1 \}/, 'le repli hors drapeau doit rendre 1, pas planter')
+})
