@@ -684,7 +684,18 @@ export class Modes {
     // plongée sans y retomber ; la porte est maintenant géométrique et
     // `_diveArmed` suffit à ne pas replonger. Un 15 % de recul serait un saut,
     // et c'est exactement ce qu'Adrien refuse.
-    if (entryAltM == null && this._continu()) entryAltM = this._altitudeFondM()
+    // ⚡ **L'ALTITUDE DE SORTIE EST CELLE DE LA CAMÉRA QUI REND, PAS SA JAMBE
+    // VERTICALE — Tâche D16, étape ①.** `_altitudeFondM()` vaut `camY × emprise /
+    // span` ; la caméra de fond, elle, est plus haut de tout le déport horizontal
+    // de la vue de trois quarts. **Mesuré à la sortie d'orbite : 33 105 716 m
+    // contre 23 879 470 m — la caméra PLONGEAIT de 9 226 246 m en une image**,
+    // alors que le commentaire ci-dessus revendique une sortie « à l'altitude
+    // EXACTE » et a supprimé un recul de 15 % pour cela.
+    // ⚠️ `altitudeFondRenduM` rend `null` hors frontière de rendu : le chemin
+    // d'avant reprend alors au bit près.
+    if (entryAltM == null && this._continu()) {
+      entryAltM = this.hooks.altitudeFondRenduM?.() ?? this._altitudeFondM()
+    }
     if (entryAltM == null) {
       // pop out just above the block's own altitude; a coarse z4 continental
       // block (~7 500 km up) hands over above the 8 000 km globe gate

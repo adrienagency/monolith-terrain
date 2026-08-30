@@ -41,7 +41,7 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -5755,6 +5755,25 @@ modes = new Modes({
     // déjà `altitudeCadrageM()` et `majCameraFond()`. Deux conventions d'échelle
     // dans le même fichier divergeraient en silence.
     coteBloc: () => TERRAIN_SIZE,
+    // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
+    // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
+    // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à
+    // `√((R + k·camY)² + k²·r²)` du centre — le déport horizontal `r` de la vue de
+    // trois quarts la POUSSE VERS LE HAUT.
+    //
+    // ⛔ **MESURÉ, À LA SORTIE D'ORBITE : 33 105 716 m contre 23 879 470 m rendus
+    // par `_altitudeFondM()` — +38,6 %, soit 9 226 246 m.** `enterOrbit` sortait
+    // donc à une altitude qu'il croyait « exacte » (son commentaire dit
+    // expressément avoir supprimé un recul de 15 % parce qu'« un 15 % de recul
+    // serait un saut ») en se trompant de **deux fois et demie ce recul-là**.
+    //
+    // ⚠️ **UNE SEULE SOURCE DE VÉRITÉ, ET C'EST LA CAMÉRA ELLE-MÊME.** On ne
+    // réécrit pas la formule ici — ce serait une septième conversion à tenir
+    // d'accord avec `poseFond`. On lit la position que `majCameraFond` vient de
+    // poser. Hors frontière, il n'y a pas de caméra de fond : on rend `null` et
+    // `enterOrbit` retombe sur son chemin d'avant, au bit près.
+    altitudeFondRenduM: () =>
+      frontiereActive && camGlobe ? (camGlobe.position.length() - R_GLOBE) * ORBITAL_M_PER_UNIT : null,
     // ⚡ **LE RÉGIME CONTINU — LU UNE FOIS, PASSÉ PAR UNE FONCTION.** `modes.js`
     // n'importe pas `flags.js` ; sans cette ligne, tout le travail de la Tâche M
     // serait du code qui ne s'exécute jamais, et c'est **la faiblesse récurrente

@@ -525,3 +525,28 @@ test('LE TROISIÈME APPELANT DE chargeRacines EST POSÉ — le piège silencieux
   // il est idempotent : sans quoi le filet doublerait les 1 401 Ko
   assert.match(SRC_MAIN, /if \(racinesGlobeDemandees\) return/)
 })
+
+// ══════ LA SORTIE D'ORBITE REND LA VRAIE ALTITUDE — D16, ÉTAPE ① ══════════
+//
+// ⛔ **MESURÉ À L'ÉCRAN, AVANT CORRECTION : la caméra PLONGEAIT de 9 226 246 m
+// en UNE image en sortant vers l'orbite** — 33 105 716 m rendus contre
+// 23 879 470 m reposés, soit ×1,3864. Après correction, la même image rend
+// **×1,0063**, c'est-à-dire le pas de zoom ordinaire de ses voisines.
+//
+// La cause est une conversion de la classe `1/k` : `_altitudeFondM()` est le
+// côté VERTICAL du triangle, pas le rayon. `test/frontiere-rendu.test.js` ⑥ le
+// démontre en arithmétique pure ; ici on vérifie le BRANCHEMENT, parce que
+// `main.js` n'est chargé par aucun test.
+test('enterOrbit sort à l’altitude de la CAMÉRA DE FOND, pas à sa jambe verticale', () => {
+  const corps = corpsDe(SRC_MODES, '  async enterOrbit(entryAltM = null) {')
+  assert.match(corps, /this\.hooks\.altitudeFondRenduM\?\.\(\)/,
+    'enterOrbit doit demander l’altitude RENDUE')
+  // ⚠️ **ET LE REPLI DOIT SURVIVRE** : hors frontière de rendu il n’y a pas de
+  // caméra de fond, et le chemin d’avant doit reprendre au bit près.
+  assert.match(corps, /\?\? this\._altitudeFondM\(\)/,
+    'le repli sur _altitudeFondM doit rester, sans quoi le drapeau baissé change')
+  // et main.js doit fournir le crochet, lu sur la caméra QUI REND — pas sur une
+  // septième formule à tenir d’accord avec `poseFond`
+  assert.match(SRC_MAIN, /altitudeFondRenduM: \(\) =>/)
+  assert.match(SRC_MAIN, /camGlobe\.position\.length\(\) - R_GLOBE\) \* ORBITAL_M_PER_UNIT/)
+})

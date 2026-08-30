@@ -428,3 +428,65 @@ function mondeVersLatLon(emprise) {
   const mN = mY(emprise.nord), mS = mY(emprise.sud)
   return { lat: Math.atan(Math.sinh((mN + mS) / 2)) * R2D, lon: emprise.ouest + large / 2 }
 }
+
+// ══════════ ⑩ L'ALTITUDE DE LA CAMÉRA QUI REND — TÂCHE D16, ÉTAPE ① ═════
+//
+// ⛔ **`altitudeFondM` N'EST PAS L'ALTITUDE DE LA CAMÉRA DE FOND, ET SON NOM
+// MENT.** Elle rend `camY × emprise / span` : le côté VERTICAL du triangle. La
+// caméra, elle, est à `√((R + k·camY)² + k²·r²)` du centre — le déport
+// horizontal `r` de la vue de trois quarts la pousse vers le haut.
+//
+// ⚠️ **CE N'EST PAS UNE FINESSE : `enterOrbit` REMETTAIT LA CAMÉRA À CETTE
+// ALTITUDE-LÀ EN SORTANT.** Mesuré à l'écran, sur la remontée de référence :
+// **33 105 716 m rendus contre 23 879 470 m annoncés — la caméra plongeait de
+// 9 226 246 m en UNE image**, alors que le commentaire d'`enterOrbit` revendique
+// une sortie « à l'altitude EXACTE » et a retiré un recul de 15 % pour cela.
+// Le défaut est **deux fois et demie** le recul qu'il avait supprimé.
+test('altitudeFondM est la JAMBE VERTICALE, pas l’altitude de la caméra de fond', () => {
+  const span = TERRAIN_SIZE
+  const LAT = -21.115, LON = 55.536
+  // la vue de trois quarts du produit : `PENTE_ARRIVEE = { y: 18, z: 19 }`
+  const pente = 18 / 19
+  for (const { extentMeters, camY } of [
+    { extentMeters: 4.4e6, camY: 40 }, // continental, là où la sortie d’orbite tombe
+    { extentMeters: 1.1e6, camY: 40 },
+    { extentMeters: 27309, camY: 40 }, // z12
+  ]) {
+    const deport = camY / pente // le déport horizontal de la vue de trois quarts
+    const p = poseFond({
+      lat: LAT, lon: LON, quaternionBloc: [0, 0, 0, 1], extentMeters, span,
+      positionBloc: [0, camY, deport], origineBloc: [0, 0, 0],
+    })
+    const rendue = (vec(p.position).length() - R_GLOBE) * ORBITAL_M_PER_UNIT
+    const jambe = altitudeFondM({ camY, extentMeters, span })
+    assert.ok(rendue > jambe, 'la caméra de fond est TOUJOURS plus haut que la jambe verticale')
+    const k = facteurEchelle({ extentMeters, span })
+    // l’excès se calcule d’avance : c’est le théorème de Pythagore, rien d’autre
+    const attendu = (Math.hypot(R_GLOBE + k * camY, k * deport) - R_GLOBE) * ORBITAL_M_PER_UNIT
+    assert.ok(Math.abs(rendue - attendu) / attendu < 1e-12, 'la pose ne suit pas Pythagore')
+  }
+  // ⚡ **ET L’ÉCART NE DÉPEND QUE DE L’ALTITUDE** — ni de `camY`, ni de
+  // l’emprise séparément : `k·camY` est l’altitude en unités de globe, et
+  // `k·déport` vaut `k·camY / pente`. C’est pour ça que personne ne l’a vu tant
+  // que les bancs partaient de 1 600 km : énorme en haut, nul en bas.
+  const rapport = (altVerticaleM) => {
+    const a = altVerticaleM / ORBITAL_M_PER_UNIT
+    return ((Math.hypot(R_GLOBE + a, a / pente) - R_GLOBE) * ORBITAL_M_PER_UNIT) / altVerticaleM
+  }
+  // ⛔ **LE POINT DE FONCTIONNEMENT MESURÉ** : la sortie d’orbite tombait à
+  // 23 879 470 m de jambe verticale, pour 33 105 716 m rendus — ×1,386.
+  assert.ok(Math.abs(rapport(23879470) - 1.386) < 0.01,
+    `à la sortie d’orbite l’écart doit valoir ×1,386 — mesuré ×${rapport(23879470).toFixed(4)}`)
+  assert.ok(rapport(1600000) > 1.05, 'à 1 600 km l’écart dépasse encore +5 %')
+  // ⚡ **ET À 30 km IL VAUT ×1,0026 — le chiffre que l’inventaire D16 avait
+  // relevé À L’ÉCRAN pour le balayage de pose près du sol (« l’effet s’éteint
+  // près du sol : à 30 km le même balayage rend ×1,0026 »). Deux mesures
+  // indépendantes, la sienne au navigateur et celle-ci en arithmétique pure,
+  // tombent sur les mêmes quatre décimales.
+  assert.ok(Math.abs(rapport(30000) - 1.0026) < 0.0005,
+    `à 30 km l’écart doit valoir ×1,0026 — mesuré ×${rapport(30000).toFixed(4)}`)
+  // et l’écart CROÎT avec l’altitude, il ne fait pas de bosse
+  for (const [bas, haut] of [[30000, 1600000], [1600000, 12000000], [12000000, 60000000]]) {
+    assert.ok(rapport(haut) > rapport(bas), `l’écart devrait croître de ${bas} à ${haut} m`)
+  }
+})
