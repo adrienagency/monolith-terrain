@@ -140,3 +140,67 @@ revendique donc aucune amélioration ni aucune dégradation là-dessus.**
 3. ⚠️ **La remontée n'est pas encore mesurée** avec la correction.
 4. ⚠️ **Le balayage de pose (+32,6 %) n'est PAS traité par cette étape** et ne
    pouvait pas l'être : il vient de `poseFonduArrivee`, pas de l'ancre.
+
+## LE SENS INVERSE — vérifié aussi, et les cinq franchissements y tombent pareil
+
+L'inventaire dit les cinq franchissements **symétriques**. Vérifié sur SA propre
+trace (`remontee1`, volet `remontee`) : 11,863 / 6,117 / 2,935 / 1,435 / 0,710°,
+aux mêmes millièmes qu'à l'aller. Puis remesuré avec la correction
+(`.banc/D16/ancre-fix-remontee.json`, 1 195 images, 0 erreur de page) :
+
+| volet `remontee` | **avant** | **après** |
+|---|---|---|
+| franchissements (5 valeurs) | 11,863 / 6,117 / 2,935 / 1,435 / 0,710° | ⚡ **aucun — tous sous 0,5°** |
+| p99 rotation de visée du fond | 0,000° | 0,01025° |
+| MAX rotation de visée du fond | **47,668°** (sortie d'orbite) | **45,132°** (sortie d'orbite) |
+| MAX déplacement relatif du fond | 0,84669 | 0,81375 |
+| MAX `dImg` | 57,600 (mort du crop) | 57,075 (mort du crop) |
+
+➡️ **La correction d'ancre est symétrique**, comme la rupture qu'elle ferme.
+➡️ **Ce qui reste au sommet des deux sens n'est plus la même chose** : ce n'est
+plus un franchissement de niveau, c'est **la sortie d'orbite** (`enterOrbit`,
+`src/modes.js:704-727`), qui téléporte la caméra sur
+`latLonToSphere(lat, lon, R + orbAlt)` puis `lookAt(0,0,0)` **dans la même
+image**. Elle n'a jamais été traitée : R4 n'a lissé QUE la plongée.
+
+---
+
+# ⚡ CE QUE L'ÉTAPE 2 CHANGE POUR LA SUITE — à arbitrer par Adrien
+
+**La commande « une seule caméra » n'est pas remise en cause : c'est un ordre.**
+Mais l'argument de MESURE qui la soutenait le plus fort vient de tomber, et je le
+dis parce que la consigne l'exige.
+
+**Ce que la réécriture n'a plus à aller chercher** — la pire rupture de la
+descente (11,863° + 13 % de déplacement en une image) et sa jumelle de remontée
+sont **déjà fermées, par 6 lignes et un paramètre par défaut**, tests à l'appui.
+
+**Ce qui reste, et que l'ancre ne touche pas** — classé par ce que j'ai mesuré,
+du plus gros au plus petit, dans les DEUX sens :
+
+| # | rupture | ma mesure après l'ancre | ce qu'il faut pour la fermer |
+|---|---|---|---|
+| ⑤ | mort du crop (remontée) | `dImg` **57,08** en une image | le crop, pas la caméra |
+| ① | traversée orbite → surface | `dImg` **28,80** (axe 0,192°, échelle 1,0000) | **un changement de SCÈNE**, pas de caméra |
+| ⑥ | sortie d'orbite | **45,132°** en une image | `enterOrbit` — cher mais LOCAL |
+| ④ | naissance du crop | `dImg` **15,72**, dt **438,8 ms** | le crop |
+| ② | balayage de pose | non isolé chez moi (voir réserve) | D16 ter, étape 5 |
+| ⑦ | clic sur le globe | non remesuré | `plongeDepuisGlobe` |
+| ⑨ | rotation de veille orbitale | non remesurée | **une décision d'Adrien** |
+
+⚠️ **Trois des quatre plus grosses ruptures restantes ne sont PAS des ruptures de
+caméra** : ce sont des changements de contenu (le crop qui s'allume, le crop qui
+s'éteint, la scène qui bascule). **Une caméra unique ne les ferme pas toute
+seule** — c'est le §4.2 de l'inventaire, qui l'avait déjà dit pour ①.
+
+**Ce que la réécriture apporte toujours, et je ne le retire pas** :
+la classe de défaut `1/k` (six occurrences, autofocus à ×130,4), la passe
+`ClearPass` et le flou d'arrière-plan inerte, et **l'ordre d'Adrien lui-même**.
+
+**Coût recompté chez moi, sur l'arbre d'aujourd'hui** (l'inventaire donnait
+52 / 55 / 191 / 78) : **49** branchements `mode === 'orbital'|'surface'` ·
+**57** sites `camGlobe`/`poseFond`/`sceneGlobe`/`plansFond` dans **9 fichiers** ·
+**191** `TERRAIN_SIZE` · **79** `R_GLOBE`/`ORBITAL_M_PER_UNIT`.
+
+⛔ **Je m'arrête ici et je rapporte, comme le brief l'ordonne** : le résultat de
+l'étape 2 change l'ampleur du reste, et l'arbitrage revient à Adrien.
