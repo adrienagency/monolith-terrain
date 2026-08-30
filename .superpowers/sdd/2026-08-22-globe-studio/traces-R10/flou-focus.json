@@ -1,0 +1,338 @@
+{
+ "date": "2026-08-30T07:51:35.689Z",
+ "port": 5535,
+ "seuil": 4,
+ "distances": [
+  0.5,
+  100,
+  130,
+  142.26,
+  160,
+  200,
+  400
+ ],
+ "configs": [
+  {
+   "nom": "production",
+   "url": "http://localhost:5535/",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "etat": {
+    "passes": [
+     "RenderPass",
+     "EffectPass",
+     "EffectPass"
+    ],
+    "socleVisible": true,
+    "terreUnique": false,
+    "frontiere": false,
+    "distanceCamera": 145.5,
+    "near": 0.5,
+    "far": 290,
+    "bokehScale": 16,
+    "focusRange": 23
+   },
+   "gl": {
+    "erreurs": [
+     1282
+    ],
+    "INVALID_OPERATION": 1282,
+    "input": {
+     "depthBuffer": true,
+     "depthTexture": null
+    },
+    "output": {
+     "depthBuffer": true,
+     "depthTexture": {
+      "type": 1015,
+      "format": 1026
+     }
+    }
+   },
+   "mesure": {
+    "taille": [
+     1280,
+     800
+    ],
+    "lignes": [
+     {
+      "de": 0.5,
+      "a": "TÉMOIN (même réglage, second rendu)",
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 100,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0.001,
+      "max": 1
+     },
+     {
+      "de": 0.5,
+      "a": 130,
+      "pixels": 175049,
+      "pct": 17.095,
+      "moyen": 4.16,
+      "max": 163
+     },
+     {
+      "de": 0.5,
+      "a": 142.26,
+      "pixels": 248345,
+      "pct": 24.252,
+      "moyen": 5.013,
+      "max": 148
+     },
+     {
+      "de": 0.5,
+      "a": 160,
+      "pixels": 91224,
+      "pct": 8.909,
+      "moyen": 2.047,
+      "max": 139
+     },
+     {
+      "de": 0.5,
+      "a": 200,
+      "pixels": 9883,
+      "pct": 0.965,
+      "moyen": 0.466,
+      "max": 115
+     },
+     {
+      "de": 0.5,
+      "a": 400,
+      "pixels": 4,
+      "pct": 0,
+      "moyen": 0.1,
+      "max": 6
+     }
+    ]
+   },
+   "captures": [
+    "production-focus-0_5.png",
+    "production-focus-142_26.png",
+    "production-bokeh-off.png"
+   ]
+  },
+  {
+   "nom": "frontiere",
+   "url": "http://localhost:5535/?terre=deux&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee&soleil=heure",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "etat": {
+    "passes": [
+     "PasseFond",
+     "ClearPass",
+     "RenderPass",
+     "EffectPass",
+     "EffectPass"
+    ],
+    "socleVisible": true,
+    "terreUnique": false,
+    "frontiere": true,
+    "distanceCamera": 145.5,
+    "near": 0.5,
+    "far": 290,
+    "bokehScale": 16,
+    "focusRange": 23
+   },
+   "gl": {
+    "erreurs": [
+     1282
+    ],
+    "INVALID_OPERATION": 1282,
+    "input": {
+     "depthBuffer": true,
+     "depthTexture": null
+    },
+    "output": {
+     "depthBuffer": true,
+     "depthTexture": {
+      "type": 1015,
+      "format": 1026
+     }
+    }
+   },
+   "mesure": {
+    "taille": [
+     1280,
+     800
+    ],
+    "lignes": [
+     {
+      "de": 0.5,
+      "a": "TÉMOIN (même réglage, second rendu)",
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 100,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0.001,
+      "max": 1
+     },
+     {
+      "de": 0.5,
+      "a": 130,
+      "pixels": 150630,
+      "pct": 14.71,
+      "moyen": 4.051,
+      "max": 164
+     },
+     {
+      "de": 0.5,
+      "a": 142.26,
+      "pixels": 200909,
+      "pct": 19.62,
+      "moyen": 4.725,
+      "max": 147
+     },
+     {
+      "de": 0.5,
+      "a": 160,
+      "pixels": 98581,
+      "pct": 9.627,
+      "moyen": 2.255,
+      "max": 129
+     },
+     {
+      "de": 0.5,
+      "a": 200,
+      "pixels": 45781,
+      "pct": 4.471,
+      "moyen": 1.188,
+      "max": 116
+     },
+     {
+      "de": 0.5,
+      "a": 400,
+      "pixels": 2,
+      "pct": 0,
+      "moyen": 0.159,
+      "max": 5
+     }
+    ]
+   },
+   "captures": [
+    "frontiere-focus-0_5.png",
+    "frontiere-focus-142_26.png",
+    "frontiere-bokeh-off.png"
+   ]
+  },
+  {
+   "nom": "terre-unique",
+   "url": "http://localhost:5535/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee&soleil=heure",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "etat": {
+    "passes": [
+     "PasseFond",
+     "ClearPass",
+     "RenderPass",
+     "EffectPass",
+     "EffectPass"
+    ],
+    "socleVisible": false,
+    "terreUnique": true,
+    "frontiere": true,
+    "distanceCamera": 145.5,
+    "near": 0.5,
+    "far": 290,
+    "bokehScale": 16,
+    "focusRange": 23
+   },
+   "gl": {
+    "erreurs": [
+     1282
+    ],
+    "INVALID_OPERATION": 1282,
+    "input": {
+     "depthBuffer": true,
+     "depthTexture": null
+    },
+    "output": {
+     "depthBuffer": true,
+     "depthTexture": {
+      "type": 1015,
+      "format": 1026
+     }
+    }
+   },
+   "mesure": {
+    "taille": [
+     1280,
+     800
+    ],
+    "lignes": [
+     {
+      "de": 0.5,
+      "a": "TÉMOIN (même réglage, second rendu)",
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 100,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 130,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 142.26,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 160,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 200,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0,
+      "max": 0
+     },
+     {
+      "de": 0.5,
+      "a": 400,
+      "pixels": 0,
+      "pct": 0,
+      "moyen": 0.089,
+      "max": 4
+     }
+    ]
+   },
+   "captures": [
+    "terre-unique-focus-0_5.png",
+    "terre-unique-focus-142_26.png",
+    "terre-unique-bokeh-off.png"
+   ]
+  }
+ ]
+}

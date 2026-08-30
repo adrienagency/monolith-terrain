@@ -1,0 +1,178 @@
+{
+ "date": "2026-08-30T07:58:47.390Z",
+ "port": 5535,
+ "configs": [
+  {
+   "nom": "production",
+   "url": "http://localhost:5535/",
+   "msParImage": 17.12,
+   "autoFocusParDefaut": true,
+   "socleVisible": true,
+   "terreUnique": false,
+   "suivi": [
+    {
+     "x": 0.5,
+     "y": 0.15,
+     "focus": 142.256,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.3,
+     "focus": 159.39,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.45,
+     "focus": 144.119,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.6,
+     "focus": 134.354,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.75,
+     "focus": 130.434,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.15,
+     "y": 0.5,
+     "focus": 130.434,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.85,
+     "y": 0.5,
+     "focus": 130.434,
+     "camDist": 145.5,
+     "cameraImmobile": true
+    }
+   ],
+   "etendueSuivi": 28.956,
+   "ciel": {
+    "avant": 144.113,
+    "apres": 144.113,
+    "gardeLaDerniere": true,
+    "apresSortie": 144.113
+   },
+   "amortissement": {
+    "depart": 56.903,
+    "cible": 142.257,
+    "t63": 116.5,
+    "t90": 283.2,
+    "t95": 350.5,
+    "arrivee": 142.256
+   },
+   "similitude": {
+    "k": null,
+    "distanceAutofocus": 142.257,
+    "equivalentGlobe": null,
+    "rapport": null
+   },
+   "coutMarche": {
+    "appels": 20000,
+    "usParAppel": 24.74,
+    "tauxDeTouche": 0.313,
+    "noteMethode": "CPU pur — aucune file GPU au milieu, le temps de pendule EST le coût"
+   }
+  },
+  {
+   "nom": "terre-unique",
+   "url": "http://localhost:5535/?terre=unique&frontiere=1&seuil=1&globe=continu&socle=quadtree&f3=0&planete=eclairee&soleil=heure",
+   "msParImage": 16.82,
+   "autoFocusParDefaut": true,
+   "socleVisible": false,
+   "terreUnique": true,
+   "suivi": [
+    {
+     "x": 0.5,
+     "y": 0.15,
+     "focus": 30.593,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.3,
+     "focus": 27.159,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.45,
+     "focus": 24.798,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.6,
+     "focus": 22.288,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.5,
+     "y": 0.75,
+     "focus": 21.004,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.15,
+     "y": 0.5,
+     "focus": 19.332,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    },
+    {
+     "x": 0.85,
+     "y": 0.5,
+     "focus": 30.089,
+     "camDist": 26.4,
+     "cameraImmobile": true
+    }
+   ],
+   "etendueSuivi": 11.261,
+   "ciel": {
+    "avant": 24.799,
+    "apres": 32.683,
+    "gardeLaDerniere": false,
+    "apresSortie": 32.683
+   },
+   "amortissement": {
+    "depart": 9.439,
+    "cible": 23.597,
+    "t63": 117.1,
+    "t90": 283.4,
+    "t95": 349.8,
+    "arrivee": 23.595
+   },
+   "similitude": {
+    "k": 0.0076671,
+    "distanceAutofocus": 23.597,
+    "equivalentGlobe": 0.1809,
+    "rapport": 130.4
+   },
+   "coutMarche": {
+    "appels": 20000,
+    "usParAppel": 1.06,
+    "tauxDeTouche": 1,
+    "noteMethode": "CPU pur — aucune file GPU au milieu, le temps de pendule EST le coût"
+   }
+  }
+ ]
+}
