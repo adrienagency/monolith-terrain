@@ -4241,6 +4241,23 @@ function distanceCadrageM() {
 // `globe.js` pour le relevé et pour ce que ça coûte quand le MNT ne vient pas.
 globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee, cropAttendu: terreUniqueBranchee, planeteEclairee: planeteEclaireeBranchee })
 
+// ══════════ LES COULEURS DU BLOC SUR TOUTE LA SPHÈRE — Tâche R11 ═══════════
+//
+// > **Adrien :** « Les couleurs et le style du bloc devraient s'appliquer à tout
+// > le mode sphère. »
+//
+// ⚠️ **UN SEUL BRANCHEMENT, ET C'EST LE PORTEUR D'UNIFORME, PAS SA VALEUR.**
+// `terrain.rebuildRamp` recuit le LUT depuis QUATRE endroits et libère à chaque
+// fois la texture d'avant ; passer `.value` ici aurait fait pointer le globe sur
+// une texture morte au premier changement de palette. Le globe relit le porteur
+// par image (`_majRampeMonde`) : il n'y a rien à re-brancher ailleurs.
+//
+// ⛔ **ET IL N'EST PAS SOUS `terreUniqueBranchee`.** Ce n'est pas un morceau de
+// crop : c'est l'état de repos du MONDE, celui qui vaut précisément quand AUCUN
+// crop ne vit. Le mettre sous le drapeau du crop l'aurait éteint là où il est le
+// seul à parler.
+globe.poserRampeMonde(terrain.mapUniforms.uRampTex)
+
 // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
 //
 // ⚠️ **C'EST CE CROCHET QUI TUE L'ATTENTE.** Jusqu'ici le socle attendait qu'un

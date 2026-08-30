@@ -45,6 +45,9 @@ import {
   PLANCHER_AMPLITUDE_UNITES,
   PAS_MESURE,
   RAMPE_MONDE,
+  GRADE_MONDE,
+  HYPSO_MONDE_M,
+  histogrammeDesQuantiles,
   plancherRampeDuCrop,
   plancherAmplitudeM,
   mesurerRelief,
@@ -56,6 +59,8 @@ import { unitesEnMetres, margeCoteM, MARGE_COTE_UNITES } from '../src/monde/habi
 import { repereCrop, latLonDeLocal, localCrop, dansCrop } from '../src/monde/crop-sphere.js'
 import { Globe } from '../src/globe.js'
 import { creerEchelleContinue } from '../src/monde/echelle-continue.js'
+import { gradeForDem, quantileFromHistogram } from '../src/relief-grade.js'
+import { NATUREL_MONDE } from '../src/monde/naturel-crop.js'
 
 const SRC_GLOBE = new URL('../src/globe.js', import.meta.url)
 const SRC_TERRAIN = new URL('../src/terrain.js', import.meta.url)
@@ -859,5 +864,139 @@ test('⑥a aucune décision de CADRAGE ne lit l’échelle de la rampe', () => {
 test('⑥b `rampe-crop.js` n’importe rien qui décide d’un cadrage', () => {
   const src = readFileSync(new URL('../src/monde/rampe-crop.js', import.meta.url), 'utf8')
     const imports = [...src.matchAll(/\bfrom '([^']+)'/g)].map((m) => m[1])
-  assert.deepEqual(imports.sort(), ['./crop-sphere.js', './habillage-crop.js'])
+  // ⚠️ **ON ÉLARGIT, ON NE REMPLACE PAS** (règle des listes du §0). `relief-grade.js`
+  // est entré avec la Tâche R11 (`GRADE_MONDE`), et il est admissible pour une
+  // raison VÉRIFIÉE juste en dessous, pas par confiance : il n'importe RIEN, et
+  // il ne rend que des réglages d'APPARENCE (`mapTint`, `heightContrast`,
+  // `heightPivot`, `slopeTint`). Aucune décision de cadrage ne peut en sortir.
+  assert.deepEqual(imports.sort(), ['../relief-grade.js', './crop-sphere.js', './habillage-crop.js'])
+  const grade = readFileSync(new URL('../src/relief-grade.js', import.meta.url), 'utf8')
+  assert.equal([...grade.matchAll(/from '([^']+)'/g)].length, 0, 'relief-grade.js doit rester une feuille')
+  // ⚠️ **LES MÊMES NOMS QUE ⑥a, ET PAS DES MOTS DE PROSE.** Une première version
+  // cherchait « altitude » et « distance » : `relief-grade.js` en parle dans ses
+  // commentaires (« contraste d'altitude », « les altitudes émergées ») et le test
+  // échouait sur du français. Ce qui compte est ce qu'il LIT.
+  assert.ok(
+    !/uLandBas|uLandMax|uOceanDepth|uReliefBas|uPlancherRampeM|rampe-crop|seuil-socle|descente-bornee|camera|controls/.test(grade),
+    'relief-grade.js touche à une grandeur de cadrage — R1 est rompue',
+  )
+})
+
+
+// ══════════ ⑦ LE GRADE DU MONDE — Tâche R11 ════════════
+
+test('⑦a l’histogramme à trois pics rend EXACTEMENT les trois quantiles', () => {
+  // ⚠️ **CE N'EST PAS UNE APPROXIMATION, ET C'EST CE QUI AUTORISE À NE PAS
+  // RECOPIER LA RÈGLE DE CADRAGE.** `gradeForDem` ne lit que `q = 0,08`, `0,5`
+  // et `0,92` ; si l'histogramme les rend au pas de quantification près, le
+  // grade rendu est celui des quantiles MESURÉS.
+  const minM = RAMPE_MONDE.terreBas - RAMPE_MONDE.creux
+  const maxM = RAMPE_MONDE.terreHaut
+  const h = histogrammeDesQuantiles(HYPSO_MONDE_M, minM, maxM)
+  const pas = (maxM - minM) / h.length
+  for (const [q, cible] of [[0.08, HYPSO_MONDE_M.p08], [0.5, HYPSO_MONDE_M.p50], [0.92, HYPSO_MONDE_M.p92]]) {
+    const lu = quantileFromHistogram(h, minM, maxM, q, 0)
+    assert.ok(Math.abs(lu - cible) <= pas, `q=${q} : ${lu} au lieu de ${cible} (pas ${pas})`)
+  }
+  // trois pics, et rien d'autre : une masse ailleurs déplacerait les quantiles
+  assert.equal([...h].filter((v) => v > 0).length, 3)
+})
+
+test('⑦b GRADE_MONDE est celui de `gradeForDem`, dans l’échelle du NUANCEUR', () => {
+  // ⛔ **L'ÉCHELLE EST LE PIÈGE, ET IL EST SILENCIEUX.** Le nuanceur indexe
+  // `natRampT` sur `hNormRelief`, normalisé sur `[terreBas − creux ; terreHaut]`
+  // — le FOND MARIN COMPRIS. Un grade calculé sur les seules terres rendrait
+  // `pivot ≈ 0,085` et peindrait la planète avec le haut de la rampe.
+  const minM = RAMPE_MONDE.terreBas - RAMPE_MONDE.creux
+  const maxM = RAMPE_MONDE.terreHaut
+  const attendu = gradeForDem({ minM, maxM, histogram: histogrammeDesQuantiles(HYPSO_MONDE_M, minM, maxM) })
+  assert.equal(GRADE_MONDE.heightContrast, attendu.heightContrast)
+  assert.equal(GRADE_MONDE.heightPivot, attendu.heightPivot)
+  // le pivot vit au-dessus du plancher de `natPlancherPivot` dans cette échelle,
+  // sinon le plancher prendrait la main et le grade mesuré ne servirait à rien
+  const hNormMer = (0 - minM) / (maxM - minM)
+  assert.ok(GRADE_MONDE.heightPivot > Math.min(Math.max(hNormMer, 0), 0.95) + 0.02)
+})
+
+const globeNu = () => Object.assign(Object.create(Globe.prototype), {
+  // ⚠️ **UN GLOBE DE PAPIER, PAS UN VRAI — le patron de `crop-habillage.test.js`**
+  // (`Globe.prototype.X.call` sur un objet minimal). Le constructeur réel appelle
+  // `rebuildRamp`, qui touche le DOM : sous node il lèverait avant la première
+  // assertion, et ce test-ci ne parle QUE des quatre uniformes de la loi.
+  _crop: null,
+  _rampeMonde: null,
+  uniforms: {
+    uRampCrop: { value: null },
+    uRampCropOn: { value: 0 },
+    uHeightContrast: { value: NATUREL_MONDE.heightContrast },
+    uHeightPivot: { value: NATUREL_MONDE.heightPivot },
+  },
+})
+const poserMonde = (g, p) => g.poserRampeMonde(p)
+const majMonde = (g) => g._majRampeMonde()
+
+test('⑦c `poserRampeMonde` : sans porteur, le globe est celui d’avant AU BIT PRÈS', () => {
+  // ⚠️ **MÊME DISCIPLINE QUE `uCropOn: 0` ET `uHabOn: 0`** : tant que personne
+  // ne branche le LUT, `uRampCropOn` vaut 0 et les deux curseurs valent
+  // `NATUREL_MONDE`. C'est ce qui garantit que la Tâche R11 ne change RIEN sur
+  // les chemins qui ne l'appellent pas — les bancs, les tests, un globe nu.
+  const g = globeNu()
+  const u = g.uniforms
+  poserMonde(g, null)
+  assert.equal(u.uRampCropOn.value, 0)
+  assert.equal(u.uRampCrop.value, null)
+
+  // ⛔ **LE PORTEUR, PAS LA VALEUR** : `terrain.rebuildRamp` LIBÈRE la texture
+  // et en pose une neuve depuis quatre sites. On vérifie donc que le globe suit
+  // le remplacement sans être re-branché.
+  const porteur = { value: { faux: 'lut A' } }
+  poserMonde(g, porteur)
+  assert.equal(u.uRampCropOn.value, 1)
+  assert.equal(u.uRampCrop.value, porteur.value)
+  assert.equal(u.uHeightContrast.value, GRADE_MONDE.heightContrast)
+  assert.equal(u.uHeightPivot.value, GRADE_MONDE.heightPivot)
+
+  porteur.value = { faux: 'lut B' }
+  majMonde(g)
+  assert.equal(u.uRampCrop.value, porteur.value)
+
+  // et l'aller-retour rend l'état d'avant, bit à bit
+  poserMonde(g, null)
+  assert.equal(u.uRampCropOn.value, 0)
+  assert.equal(u.uRampCrop.value, null)
+  assert.ok(Object.is(u.uHeightContrast.value, NATUREL_MONDE.heightContrast))
+  assert.ok(Object.is(u.uHeightPivot.value, NATUREL_MONDE.heightPivot))
+})
+
+test('⑦d le crop garde la main tant qu’il vit', () => {
+  // ⚠️ **SANS CETTE GARDE, LE MONDE ÉCRASERAIT LE BLOC À CHAQUE IMAGE.**
+  // `_majRampeMonde` tourne dans `update()` ; si elle ne sortait pas sur
+  // `this._crop`, elle reposerait `GRADE_MONDE` par-dessus le grade du crop,
+  // soixante fois par seconde, et le bloc perdrait son cadrage local.
+  const g = globeNu()
+  const u = g.uniforms
+  poserMonde(g, { value: { faux: 'lut' } })
+  g._crop = { cx: 0, cy: 0, demi: 1 }
+  u.uHeightContrast.value = 3
+  u.uHeightPivot.value = 0.15
+  majMonde(g)
+  assert.equal(u.uHeightContrast.value, 3)
+  assert.equal(u.uHeightPivot.value, 0.15)
+})
+
+test('⑦e `retirerHabillage` rend la loi du MONDE, pas le neutre — quand elle est branchée', () => {
+  // ⛔ **C'EST ICI QUE LES DEUX MONDES D'ADRIEN SE SÉPARAIENT** : `retirerHabillage`
+  // éteignait `uRampCropOn`, donc la sphère repassait à la loi linéaire de la
+  // rampe 1D pendant que le bloc indexait `natRampT` sur le LUT 2D.
+  const src = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
+  const i = src.indexOf('retirerHabillage() {')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 6000)
+  // l'analyse part TOUJOURS (12 Mo par MNT 1536²) ; le LUT, lui, est celui du socle
+  assert.match(corps, /u\.uAnalysis\.value = null/)
+  assert.match(corps, /u\.uAnalysisOn\.value = 0/)
+  assert.match(corps, /this\._rampeMonde\?\.value/)
+  // ⛔ et le voile NE suit PAS : `natVoile` lit `length(qCrop)`, une distance au
+  // centre d'un crop qui n'existe plus
+  assert.match(corps, /u\.uHazeAmt\.value = NATUREL_MONDE\.hazeAmt/)
 })
