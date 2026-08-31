@@ -186,6 +186,20 @@ try {
           // d'après coup, qui interroge un globe dont les hauteurs ont pu être
           // relâchées entre-temps.
           poseur: { points: e.mapLayers.water._poseur?.points ?? null, refus: e.mapLayers.water._poseur?.refus ?? null },
+          // ══════ « UN NOMBRE SUFFIRAIT-IL POUR LES TOPONYMES ? » ═══════════
+          //
+          // La carte de D16 annonce cinq couches dependantes de la brique, et la
+          // tache voisine en a trouve UNE qui l'etait a tort (le cartouche est
+          // pose sur la BASE, un plan unique). On verifie donc au lieu de croire :
+          // l'ETENDUE des altitudes de sol sous les noms retenus. Un nombre
+          // unique ne suffit que si cette etendue est nulle.
+          etendueNoms: (() => {
+            const p = e.mapLayers.places._poseur
+            const es = e.mapLayers.places._entries
+            if (!p || !es.length) return null
+            const hs = es.map((x) => p.metresDe ? p.metresDe(p.hauteur(x.bloc.x, x.bloc.z)) : p.hauteur(x.bloc.x, x.bloc.z))
+            return { n: hs.length, minM: Math.round(Math.min(...hs)), maxM: Math.round(Math.max(...hs)) }
+          })(),
         }
       })
       ligne.lieu = lieu.nom
@@ -193,6 +207,8 @@ try {
       const nom = `${ETIQ}-${cle}-z${z}.png`
       await page.screenshot({ path: path.join(SORTIE, nom) })
       const d = ligne.drape
+      const en = ligne.etendueNoms
+      console.log(`   sol sous les noms : ${en ? `${en.n} noms, de ${en.minM} a ${en.maxM} m (etendue ${en.maxM - en.minM} m)` : '—'}`)
       console.log(`   poseur : ${ligne.poseur.points} sommets, ${ligne.poseur.refus} repliés sur le bloc`)
       console.log(`${lieu.nom} z${z} → water ${ligne.water.objets} obj (${ligne.water.scene}, vis=${ligne.water.visible}) · places ${ligne.places.objets} obj, ${ligne.nomsVisibles} lisibles · drapé ${d ? `n=${d.n} med ${d.medM} m, p95 ${d.p95M} m, max ${d.maxM} m, sans couverture ${d.sansCouverture}` : '—'} · ${ligne.msRebuild} ms`)
     }

@@ -249,6 +249,61 @@ lui, ne sort pas du bruit de session** — je ne l'annonce donc pas comme un gai
 
 ---
 
+# ⚡ « WATER ET PLACES EN ONT-ILS VRAIMENT BESOIN ? » — VÉRIFIÉ, PAS SUPPOSÉ
+
+La tâche voisine (D16-c) a trouvé que la carte de D16 se trompait sur
+`ground-info` : le cartouche est posé sur la BASE, **un nombre, pas un champ de
+hauteurs**. Consigne reçue : ne pas câbler d'échantillonneur à une couche qui
+n'en a pas besoin. **J'ai mesuré les deux miennes plutôt que de raisonner.**
+
+**`water` — oui, et ce n'est même pas discutable.** Les rivières suivent le sol
+point par point ; et les lacs, plats par nature, tirent leur NIVEAU de la
+**médiane des altitudes de sol sous leurs sommets** (`waterLevelOf`) — donc
+d'un champ, pas d'un nombre. **519 404 sommets échantillonnés à z6.**
+
+**`places` — oui, et voici le chiffre.** Un nom est ancré à l'altitude du sol de
+SA ville (`groundY + CLEARANCE`), pas à une hauteur fixe. Étendue des altitudes
+de sol sous les noms retenus, relevée dans la page (`.banc/D16b/rebase.json`) :
+
+| | noms lisibles | sol, min → max | **étendue** |
+|---|---|---|---|
+| Chamonix z10 | 10 | 379 → 1 056 m | **677 m** |
+| Chamonix z6 | 12 | 3 → 530 m | **527 m** |
+| Amazonie z6 | 6 | 9 → 89 m | 80 m |
+| Chamonix z12 | 2 | 1 031 → 1 038 m | 7 m |
+
+➡️ **Une altitude unique mettrait un nom jusqu'à 677 m au-dessus ou au-dessous
+de sa ville** à Chamonix z10. Un nombre ne suffit pas.
+
+⚡ **ET DE TOUTE FAÇON, JE N'AI ÉCRIT AUCUN ÉCHANTILLONNEUR DE RELIEF.**
+`sol-globe.js` **appelle** `globe.hauteurDessinee`, qui existait déjà. Même si
+une des deux couches n'en avait pas eu besoin, il n'y aurait pas eu de dette :
+il n'y a pas de second champ de hauteurs dans le dépôt, et il n'y en aura pas.
+
+---
+
+# ⛔ LE PIÈGE DE LA VEILLE JAMAIS NOURRIE — je ne suis pas tombé dedans, et voici pourquoi
+
+D16-c a perdu un tour sur `veilleSocle.visible`, **jamais mise à jour sous
+`terre unique`** — un état figé à faux ressemble exactement à une couche cachée.
+
+**Je n'ai pas eu à choisir de prédicat : j'ai réutilisé l'écrivain existant.**
+`poserVisibiliteSocle(v)` est appelée par `masquerSocle` (entrée en surface) ET
+par le relais de mode ; j'y ai seulement fait lire `vue.carto` au lieu de
+`vue.socle`. **Mesuré `visible = true` dans les 8 couples lieu × zoom** du relevé
+`final.json`, plus les 2 lacs et les 6 relevés de couverture.
+
+⚡ **ET LE PRÉDICAT `globe.baseYCrop != null` AURAIT ÉTÉ FAUX POUR CETTE
+COUCHE-CI** — mesuré, pas supposé : à **z6, `veilleCrop.pose` vaut `false`**
+(`avant.json` et `final.json`, Chamonix comme Amazonie) et **c'est exactement
+l'image qu'Adrien demande** — l'Europe entière avec ses fleuves, ou le bassin
+amazonien avec le limbe de la planète. Un prédicat « s'il y a une base, il y a
+un bloc » aurait éteint la carto **là où la Terre entière est justement
+visible**. Le cartouche est posé SUR la base et a raison de la suivre ; la
+cartographie est posée sur la SPHÈRE et suit la vue.
+
+---
+
 # ⚠️ DEUX CHOSES QUE LA CARTE DE D16 DIT ET QUE LA MESURE CONTREDIT
 
 ⛔ **① « `places` — le globe a déjà les siens (`peak-labels`, villes). » FAUX,
@@ -290,17 +345,46 @@ pour un chiffre déductible. La raison est écrite dans son en-tête.
 
 ---
 
+# ⚡ UN DÉFAUT TROUVÉ DANS LA GARDE PARTAGÉE, EN REBASANT SUR D16-c
+
+Le compte des lecteurs de `visibilite-surface.test.js` — **la seule garde de
+CLASSE de `poserVisibiliteSocle`** — comptait avec
+`new RegExp('vue\.' + n, 'g')`, **sans borne de mot**. D16-c a introduit
+`vue.cartouche`, D16-b introduit `vue.carto` : ⛔ **`compte('carto')` rendait 2
+pour un seul lecteur**, parce que `vue.carto` est un préfixe de
+`vue.cartouche`.
+
+**Deux champs dont l'un préfixe l'autre suffisaient à rendre ce compte
+silencieusement faux** — et c'est lui qui doit rougir quand un calque change de
+grandeur. Une `` le répare, et le commentaire dit pourquoi.
+
+⚡ **ET LE COMPTE DE `vue.socle` TOMBE À NEUF, PAS À DIX.** Les deux tâches l'ont
+chacune fait descendre de un (D16-c : `groundInfo` → `cartouche` ; D16-b :
+`mapLayers` → `carto`) et chacune a écrit `10` de son côté. **La fusion des deux
+donne 9**, et le test le dit maintenant explicitement.
+
+---
+
 # Commits
+
+Rebasés sur `regroupement` (par-dessus D16-c, `8c09a4f`).
 
 | | |
 |---|---|
-| `df8b4fd` | **étapes 1 + 2** — la brique et son test rouge |
-| `3b8db58` | **étape 3** — `water` et `places` relogées dans la scène du globe |
-| `4b6489a` | **étapes 4 + 6** — le plancher reste à 12, le coût est chiffré |
+| `26adc81` | **étapes 1 + 2** — la brique et son test rouge |
+| `425f9d2` | **étape 3** — `water` et `places` relogées dans la scène du globe |
+| `a979631` | **étapes 4 + 6** — le plancher reste à 12, le coût est chiffré |
+
+⚠️ **Conflits résolus, tous les trois dans le partage de `visibiliteSurface`** :
+`cartouche` (D16-c) et `carto` (D16-b) coexistent, la ligne `test` de
+`package.json` porte les deux tests neufs, et le compte des lecteurs est refait
+à neuf. **Rien d'autre ne s'est croisé** : D16-c n'a touché ni `water`, ni
+`places`, ni `layer-manager`.
 
 # Tests
 
-**4 327 / 0 échec · audit 222 = 222** (base 4 313 + 14 de `sol-globe.test.js`).
+**4 340 / 0 échec · audit 223 = 223**, après rebase sur `regroupement`
+(4 326 chez D16-c + 14 de `sol-globe.test.js`).
 
 # Fichiers touchés
 
@@ -320,8 +404,9 @@ pour un chiffre déductible. La raison est écrite dans son en-tête.
 - `src/main.js` — `poserScene(sceneGlobe)`, `setCamera(camGlobe)`, le fabricant
   de poseur, `vue.carto`
 - `test/sol-globe.test.js` — **NEUF**, 14 tests
-- `test/visibilite-surface.test.js` — la quatrième réponse ; le compte des
-  lecteurs passe de 11 à 10 sur `vue.socle`, **expressément**
+- `test/visibilite-surface.test.js` — la **cinquième** réponse (`cartouche` de
+  D16-c reste) ; le compte des lecteurs de `vue.socle` passe à **9**,
+  expressément, et **la borne de mot qui manquait au compteur**
 - `test/fenetre-branchee.test.js` — le seizième `lireExageration`, légitime :
   le poseur doit lire la MÊME exagération que `_makeDemSampler`
 - `scripts/sonde-carto.mjs`, `scripts/sonde-overpass.mjs`,
