@@ -1341,9 +1341,25 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et
   // `.banc/P12/e1-pas-mer.js`). Le plancher d'un texel, lui, reste des DEUX
   // côtés — c'est le seul qui protège d'une différence prise plus fin que la
   // donnée. ⚠️ La loi elle-même est EXÉCUTÉE par `test/fond-crop.test.js` ⑩d.
-  assert.match(bloc, /float pas = fondMarin \? \(1\.0 \/ uTilePx\) : max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
+  // ⚡ **ET DEPUIS LA TÂCHE R17, LA BRANCHE MER PREND LA CELLULE DU CHAMP, PAS
+  // LE TEXEL DU MNT.** P12 avait raison de sortir le fond de l'empreinte et
+  // s'est arrêtée un cran trop tôt : le texel du MNT vaut le SIXIÈME de la
+  // maille du champ (0,6667/256 contre 6/384 demi-côtés de crop), donc le
+  // nuanceur dérivait une bilinéaire au sixième de sa cellule et n'en rendait
+  // que la FACETTE. Mesuré au banc R17 sur le fond nu, au large : pic
+  // d'autocorrélation à 6 px pour une cellule mesurée à 3,237 px, amplitude
+  // normalisée 0,3133 → **0,0195** une fois le pas porté à la cellule (le
+  // socle, la cible : 0,0471). ⚠️ La loi elle-même est EXÉCUTÉE par
+  // `test/fond-marin-pas.test.js`, dans les DEUX sens de la garde.
+  assert.match(bloc, /float pasChamp = uFondPasQ \/ max\(qParUv, 1e-9\);/)
+  assert.match(bloc, /float pas = fondMarin \? max\(1\.0 \/ uTilePx, pasChamp\) : max\(1\.0 \/ uTilePx, pasEmpreinte\);/)
   assert.equal((bloc.match(/1\.0 \/ uTilePx/g) || []).length, 2,
     'le plancher du texel doit rester sur les DEUX branches')
+  assert.match(FRAG_CUIT, /uniform float uFondPasQ;/)
+  // ⛔ **ET LE PAS EST CALCULÉ APRÈS LA MONNAIE**, sinon il ne peut pas être
+  // exprimé dans la cellule du champ : c'est l'ORDRE qui porte la loi.
+  assert.ok(bloc.indexOf('float qParUv =') >= 0 && bloc.indexOf('float qParUv =') < bloc.indexOf('float pasChamp ='),
+    'le pas du fond marin est calcule avant la monnaie qCrop/uv : il ne peut pas la lire')
   // ⑥ ⛔ LE DÉCALAGE DE `qCrop` SUIT L'UV, ET LE SIGNE DU NORD EST RETOURNÉ.
   // `uv.y` croît vers le NORD (`1 - v` dans `_buildMesh`) quand le `y` de
   // Mercator croît vers le SUD. Le signe perdu, le fond marin serait lu de

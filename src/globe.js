@@ -1186,6 +1186,17 @@ uniform sampler2D uFondChamp;  // R : altitude du fond du crop, en unites locale
 uniform float uFondOn;
 uniform float uFondPortee;     // en demi-cotes de crop — la demi-largeur du champ
 uniform float uFondMetres;     // metres par unite locale : l'inverse de l'echelle
+// ⚡ LA CELLULE DU CHAMP, EN DEMI-COTES DE CROP — Tache R17.
+//
+// C'est le pas AUQUEL le champ a ete cuit : 2 x uFondPortee demi-cotes de crop
+// divises par CHAMP_FOND intervalles. Le gradient de la normale fine s'en sert
+// pour deriver le fond marin A LA MAILLE DU CHAMP et non six fois plus fin — la
+// demonstration chiffree est au point d'appel.
+//
+// ⚠️ ZERO PAR DEFAUT, ET C'EST LE DEPOT AU BIT PRES : max(1/uTilePx, 0) rend
+// exactement 1/uTilePx, le pas de la Tache P12. Meme garde et meme raison que
+// uFondOn, uCropOn et uMppFacteur.
+uniform float uFondPasQ;
 
 // ══════ LA COLORISATION NATURELLE DU SOCLE — Tache P2 ══════════════════════
 //
@@ -1977,13 +1988,49 @@ void main() {
     // dx = 1 entre 0,793 et 0,841 pour un pas de x0 a x2 (socle 0,030), aucune
     // signature de parite : la loi de P10 est invariante par construction, ce
     // n'est pas son pas qui la tenait.
-    float pas = fondMarin ? (1.0 / uTilePx) : max(1.0 / uTilePx, pasEmpreinte);
-
     // ⚠️ ET qCrop SUIT L'UV, PARCE QUE hauteurEchant LIT LES DEUX. uv.x va vers
     // l'EST (mercator x croissant) ; uv.y va vers le NORD, donc vers un mercator
     // y DECROISSANT — c'est le « 1 - v » de _buildMesh. Le signe moins est ce
     // retournement, et lui seul.
+    //
+    // ⚠️ IL EST CALCULE AVANT LE PAS DEPUIS LA TACHE R17 : le pas du fond marin
+    // est exprime dans l'unite de qCrop (la cellule du champ), et il faut cette
+    // monnaie-la pour le ramener en UV.
     float qParUv = uUvParMonde / max(uCropDemi, 1e-9);
+
+    // ══════ ⚡ ET SOUS L'EAU, LE PAS EST CELUI DU CHAMP — Tache R17 ═════════
+    //
+    // ⛔ P12 A EU RAISON DE SORTIR LE FOND DE L'EMPREINTE, ET S'EST ARRETEE UN
+    // CRAN TROP TOT. Son argument est le bon : « ce champ-la est MAGNIFIE, pas
+    // minifie : il n'a aucun detail sous le pixel, donc il n'y a rien a
+    // filtrer ». Mais elle a repose le pas sur le TEXEL DU MNT, qui n'est pas la
+    // maille du champ — il en est le SIXIEME.
+    //
+    // ⚠️ LA CONVERSION, ECRITE, ET C'EST LA CLASSE DE DEFAUT LA PLUS FREQUENTE
+    // DE CE CHANTIER : une maille de champ vaut 2 x uFondPortee / CHAMP_FOND
+    // demi-cotes de crop, soit 6/384 = 0,015625 ; un texel de MNT vaut
+    // qParUv / uTilePx demi-cotes, soit 0,6667/256 = 0,0026042. **Le rapport
+    // vaut 6,0** — le nuanceur derivait donc une bilineaire au SIXIEME de sa
+    // cellule, ce qui ne peut rendre qu'une chose : la FACETTE de la bilineaire,
+    // constante a l'interieur de chaque cellule et cassee a chaque bord. C'est
+    // le « fond marbre de plaques sombres » que la relecture de R5 a vu, et la
+    // periodicite mesuree au banc R17 le nomme : pic a 4 px pour une cellule de
+    // champ mesuree a 3,24 px, avec ses harmoniques a 6 et 10.
+    //
+    // ⚡ ET LE SOCLE NE FAIT PAS AUTREMENT : ses normales sont celles de
+    // computeVertexNormals sur SA grille (771 sommets, 35,58 m), c'est-a-dire
+    // une derivee prise A LA MAILLE, jamais a l'interieur d'une cellule. C'est
+    // le meme defaut, et le meme remede, que loadBathyPatch documente deja
+    // pour le socle : « agrandir une tuile z8 par drawImage se faisait en
+    // bilineaire, dont la pente casse a chaque bord de cellule ».
+    //
+    // ⚠️ max ET NON UN CHOIX : un champ plus fin que le texel du MNT (personne
+    // ne le pose aujourd'hui) doit retomber sur le texel, jamais descendre
+    // au-dessous — c'est le plancher de P10, et il ne bouge pas.
+    float pasChamp = uFondPasQ / max(qParUv, 1e-9);
+    float pas = fondMarin
+      ? max(1.0 / uTilePx, pasChamp)
+      : max(1.0 / uTilePx, pasEmpreinte);
     vec2 dqU = vec2(qParUv * pas, 0.0);
     vec2 dqV = vec2(0.0, -qParUv * pas);
     float dhU = hauteurEchant(vUv + vec2(pas, 0.0), qCrop + dqU)
@@ -3116,6 +3163,10 @@ export class Globe {
       uFondOn: { value: 0 },
       uFondPortee: { value: PORTEE_CROP },
       uFondMetres: { value: 1 },
+      // ⚠️ **`uFondPasQ` PART À ZÉRO, ET C'EST LE DÉPÔT AU BIT PRÈS** — Tâche
+      // R17. Le nuanceur en fait `max(1 / uTilePx, 0)`, c'est-à-dire le pas de
+      // P12. `_poserTextureFond` l'écrit avec la cellule réelle du champ.
+      uFondPasQ: { value: 0 },
 
       // LA COLORISATION NATURELLE — Tâche P2.
       //
@@ -5147,14 +5198,33 @@ export class Globe {
    * @param {number} [arg.portee] en demi-côtés de crop
    * @param {number} [arg.couvertureMin] au-dessous, on refuse (0 = jamais)
    * @param {boolean} [arg.exigerBathy] refuse tant que la nappe n'a pas fusionné
+   * @param {number} [arg.champN] intervalles du champ — `CHAMP_FOND` par défaut.
+   *   ⚠️ **IL N'EXISTE QUE POUR ÊTRE MESURÉ, ET AUCUN APPELANT DU PRODUIT NE LE
+   *   POSE.** Ce que le banc R17 en a mesuré, et il ne dit pas « rien » : sur le
+   *   MNT du socle sous −25 m de fond (1 248 016 nœuds, La Réunion z12), le
+   *   détail perdu par un pas de **214 m** — celui du champ — vaut **1,371 m en
+   *   moyenne** ; à **71 m** (soit `champN = 1152`) il vaut **0,468 m**. Monter
+   *   la résolution rachète donc **0,90 m de relief moyen** dans un fond qui
+   *   descend à 3 437 m, **pour ×8,96 la mémoire** (290 → 2 597 Kio de texture,
+   *   579 → 5 193 Kio de champ) et un temps de pose doublé.
+   *   ⛔ **Et ça ne répare PAS le défaut visible** : la grille de plaques du fond
+   *   marin ne venait pas de la résolution mais du PAS DU GRADIENT — voir
+   *   `uFondPasQ`. À `champN = 1152` avec l'ancien pas, la grille est seulement
+   *   rendue SOUS-PIXEL au cadrage large (1,079 px) et elle revient dès qu'on
+   *   approche (`.banc/R17/R17-REU-zoom3-*`).
+   *   ⛔ **ET IL NE REBÂTIT PAS LES MAILLAGES À LUI SEUL** : `cleFond`
+   *   (`monde/fond-crop.js`) ne porte pas la résolution du champ, donc changer
+   *   `champN` sans changer le repère laisse `_cleFondPosee` inchangée. Un banc
+   *   qui balaie cette valeur doit vider `_cleFondPosee` lui-même — c'est ce que
+   *   `.banc/R17/r17-c-pas.js` fait, et il dit pourquoi.
    * @returns {{refus:string|null, couverture:number, bathy:boolean, profMaxM:number, rebati:number}}
    */
-  poserFondCrop({ remplir = null, portee = PORTEE_CROP, couvertureMin = 0, exigerBathy = false } = {}) {
+  poserFondCrop({ remplir = null, portee = PORTEE_CROP, couvertureMin = 0, exigerBathy = false, champN = null } = {}) {
     const vide = { refus: null, couverture: 0, bathy: false, profMaxM: 0, rebati: 0 }
     if (!this._crop) return { ...vide, refus: 'crop' }
     if (typeof remplir !== 'function') return { ...vide, refus: 'remplir' }
     const p = Number.isFinite(portee) && portee > 0 ? portee : PORTEE_CROP
-    const N = CHAMP_FOND // 384, comme le champ de la mer — voir la constante
+    const N = Number.isFinite(champN) && champN > 0 ? Math.round(champN) : CHAMP_FOND
     const cote = N + 1
     const emprise = empriseCalotte(this._crop, p)
     const valeurs = new Float32Array(cote * cote)
@@ -5195,6 +5265,11 @@ export class Globe {
     u.uFondChamp.value = null
     u.uFondOn.value = 0
     u.uFondMetres.value = 1
+    // ⚠️ **ET LE PAS RETOMBE À ZÉRO — Tâche R17**, pour la même raison que
+    // `uFondMetres` revient à 1 : un pas laissé derrière ferait dériver le
+    // gradient d'une grille de champ que plus personne ne lit. À zéro, le
+    // nuanceur rend `max(1 / uTilePx, 0)`, c'est-à-dire le pas du dépôt.
+    u.uFondPasQ.value = 0
     return this._refaireMaillagesDuFond()
   }
 
@@ -5225,6 +5300,23 @@ export class Globe {
     u.uFondOn.value = 1
     u.uFondPortee.value = fond.portee
     u.uFondMetres.value = 1 / echelle
+    // ⚡ **LA CELLULE DU CHAMP, ET ELLE EST DÉRIVÉE DE CE CHAMP-CI — Tâche R17.**
+    //
+    // ⚠️ **LA CONVERSION, ÉCRITE, PARCE QUE C'EST LA CLASSE DE DÉFAUT LA PLUS
+    // FRÉQUENTE DE CE CHANTIER.** `qCrop` se mesure en DEMI-CÔTÉS DE CROP ; le
+    // champ couvre `2 × fond.portee` demi-côtés sur `fond.cote − 1` INTERVALLES
+    // (385 nœuds, 384 intervalles). Une cellule vaut donc
+    // `2 × portee / (cote − 1)` demi-côtés — à `portee = 3` et
+    // `CHAMP_FOND = 384`, **0,015625**, soit **214,01 m de sol** à La Réunion
+    // z12 (relevé au banc R17). Le nuanceur la reconvertit en UV par `qParUv`.
+    //
+    // ⛔ **ELLE SE DÉRIVE DU CHAMP POSÉ, JAMAIS DES CONSTANTES.** `poserFondCrop`
+    // accepte une `portee` et un `champN` : deux écritures jumelles — l'une ici,
+    // l'autre depuis `PORTEE_CROP` et `CHAMP_FOND` — divergeraient au premier
+    // appelant qui passe autre chose, et le gradient dériverait alors d'une
+    // grille qui n'est pas celle qu'il lit. C'est la cicatrice que `terrain.js`
+    // documente, et `test/fond-marin-pas.test.js` ⑤ la balaie sur les deux axes.
+    u.uFondPasQ.value = (2 * fond.portee) / Math.max(1, fond.cote - 1)
   }
 
   /**
