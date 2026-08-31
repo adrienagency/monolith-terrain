@@ -153,6 +153,25 @@ export function waterLevelOf(heights) {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
 }
 
+// ══════════ LE CHRONOMÈTRE DU CALQUE — Tâche R14 ═══════════════════════════
+//
+// ⚠️ **« ÇA PREND DE LA MÉMOIRE » N'EST PAS UN DIAGNOSTIC**, et « la
+// reconstruction bloque » non plus. Ces postes existent pour dire OÙ part le
+// temps d'une reconstruction ; `scripts/sonde-eau-memoire.mjs` les relit dans
+// la page vivante. C'est le même instrument avant et après une optimisation,
+// ce qui est la condition pour comparer deux chiffres.
+//
+// Le coût de l'instrument est borné par construction : `clipAll` chronomètre
+// par LISTE d'anneaux (deux appels, pas deux par anneau) et le remplissage par
+// POLYGONE, jamais par sommet.
+// ⚠️ Il y avait un poste `normales` : il mesurait `computeVertexNormals()`, que
+// la même tâche a retiré (voir `buildFilledRing`). Un compteur qui ne peut plus
+// qu'afficher zéro ne reste pas — le relevé d'avant (`.banc/R14/memoire-avant.json`)
+// le porte encore, et c'est là qu'on lit ce qu'il valait.
+export const chronoEau = { sources: 0, projection: 0, decoupe: 0, traits: 0, triangulation: 0, drapage: 0, fusion: 0, total: 0 }
+const _mnt = () => (typeof performance !== 'undefined' ? performance.now() : 0)
+function _remiseChrono() { for (const k of Object.keys(chronoEau)) chronoEau[k] = 0 }
+
 // `flat`: lakes pass true — a lake is a LEVEL PLANE, so every vertex gets the
 // part's single water level. Draping each vertex at terrain height (the old
 // behaviour, still right for rivers, which genuinely follow the ground) made
@@ -160,16 +179,24 @@ export function waterLevelOf(heights) {
 // reported as "on voit les lacs a travers les montagnes". Flat, the same
 // overlap disappears INTO the slope and the terrain occludes it — which is
 // what a real shore does.
-function _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = false) {
+// Exporté sous `buildFilledRing` pour les tests : c'est LE constructeur du poste
+// dominant du calque (voir `.superpowers/sdd/.../rapport-R14.md` — 89 % des
+// octets et 90 % du temps de reconstruction à Chamonix z6), et la seule façon
+// d'épingler ce qu'il met dans une géométrie sans monter une scène entière.
+export function buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = false) {
   if (!part?.outer || part.outer.length < 4) return null
+  let _t = _mnt()
   const outerPts = latlonToWorldPts(part.outer, dem, latLonToWorld)
   if (outerPts.length < 3) return null
   const holePts = (part.holes || [])
     .filter((h) => h.length >= 4)
     .map((h) => latlonToWorldPts(h, dem, latLonToWorld))
     .filter((h) => h.length >= 3)
+  chronoEau.projection += _mnt() - _t
 
+  _t = _mnt()
   const clippedTris = triangulateAndClip(outerPts, holePts, outline)
+  chronoEau.triangulation += _mnt() - _t
   if (!clippedTris.length) return null
 
   // ⚠️ **ON GARDE LES SOMMETS EN COORDONNÉES DE BLOC JUSQU'AU BOUT.** Le
@@ -178,6 +205,7 @@ function _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = fa
   // posé « à plat » sur le globe est un lac à RAYON constant, pas à Y constant.
   // On pose donc en dernier, une fois le niveau choisi — c'est aussi ce qui
   // laisse la marge `0.06` en unités de bloc, sans conversion ici.
+  _t = _mnt()
   const bloc = []
   const index = []
   for (const poly of clippedTris) {
@@ -204,7 +232,7 @@ function _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = fa
     for (const p of open) bloc.push({ x: p.x, z: p.z, y: poseur.hauteur(p.x, p.z) + 0.06 })
     for (let k = 1; k < open.length - 1; k++) index.push(base, base + k, base + k + 1)
   }
-  if (!index.length) return null
+  if (!index.length) { chronoEau.drapage += _mnt() - _t; return null }
   if (flat) {
     // one level for the whole part — collected from the heights already draped
     const level = waterLevelOf(bloc.map((b) => b.y))
@@ -215,7 +243,27 @@ function _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = fa
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geo.setIndex(index)
-  geo.computeVertexNormals()
+  chronoEau.drapage += _mnt() - _t
+  // ⛔ **PAS DE `computeVertexNormals()` ICI — Tâche R14, et c'est le poste
+  // dominant de la mémoire du calque.** Il remplissait un attribut `normal` de
+  // 12 octets par sommet que **AUCUN des deux matériaux de remplissage ne
+  // lit** : `_fillMaterial` est un `MeshBasicMaterial` (il ne s'éclaire pas),
+  // et le nuanceur de lac (`lake-material.js`) prend sa normale EN DUR dans le
+  // fragment — « flat normal, by design » — son nuanceur de sommets ne lit que
+  // `position`.
+  //
+  // MESURÉ dans la page vivante (`scripts/sonde-eau-memoire.mjs`, mode sphère,
+  // Chamonix z6) : 451 485 sommets de remplissage, donc **5,42 Mo d'un attribut
+  // que personne ne regarde — 38 % de tout ce que le calque tenait**.
+  //
+  // ⚠️ **CE N'EST PAS DE LA MÉMOIRE GPU, ET LE DIRE SERAIT FAUX.** three.js ne
+  // téléverse que les attributs ACTIFS du programme compilé ; `normal` ne l'est
+  // pour aucun des deux matériaux, il ne franchissait donc jamais le pilote.
+  // C'est de la mémoire de TAS, tenue par la géométrie sur le fil principal —
+  // exactement ce qu'Adrien voit grandir.
+  //
+  // ➡️ Le jour où un matériau de remplissage s'éclaire vraiment, c'est ici que
+  // la normale revient — et `test/eau-remplissage.test.js` le dira.
   return geo
 }
 
@@ -263,8 +311,10 @@ function _coupeALaFenetre(mat, plans) {
 // plus grande que l'emprise est grande.
 function _meshFusionne(geos, material, renderOrder) {
   if (!geos.length) return null
+  const _t = _mnt()
   const geo = geos.length === 1 ? geos[0] : mergeGeometries(geos, false)
   if (geos.length > 1) for (const g of geos) g.dispose()
+  chronoEau.fusion += _mnt() - _t
   if (!geo) return null
   const mesh = new THREE.Mesh(geo, material)
   mesh.renderOrder = renderOrder
@@ -303,7 +353,7 @@ function flatRingsOf(g) {
 
 // Polygon "parts" — `{ outer, holes }` — for FILL rendering, preserving
 // GeoJSON polygon structure so holes can be excluded correctly (see
-// _buildFilledRing / triangulateAndClip). A `Polygon` is one part; a
+// buildFilledRing / triangulateAndClip). A `Polygon` is one part; a
 // `MultiPolygon` is several independent parts, each with its own holes.
 // Non-polygon geometry (lines) can't be filled and yields nothing.
 function polygonPartsOf(g) {
@@ -498,6 +548,8 @@ export class WaterLayer {
   // source est locale. Le calque d'eau ne partage pas cette propriété.
   async rebuild({ dem, terrain, params }) {
     const id = ++this._buildId
+    _remiseChrono()
+    const _tDebut = _mnt()
     this._clear()
     if (!params.waterEnabled || !dem || params.source !== 'real') { this.usingOsm = false; this.loading = false; return }
     const bounds = patchBounds(dem)
@@ -616,6 +668,9 @@ export class WaterLayer {
     // "© OpenStreetMap contributors" credit — refreshOsmCredit() in main.js
     // reads this flag.
     this.usingOsm = osmOk || tileOk || worldLakeOk
+    // Tout ce qui précède est du CHARGEMENT (réseau, décodage JSON, découpe à
+    // l'emprise) ; tout ce qui suit est de la GÉOMÉTRIE. La frontière est ici.
+    chronoEau.sources = _mnt() - _tDebut
 
     // ══════════ MODE CONTINU : ON TAILLE SUR L'EMPRISE, LE GPU COUPE ═════════
     //
@@ -655,7 +710,7 @@ export class WaterLayer {
     const plans = fpEmprise && !poseur.globe ? terrain.plansFenetre() : null
     const insideBlock = makeInsideBlock(fp)
     // Computed once per rebuild (depends only on fp) and shared by every
-    // filled-ring build below — see _buildFilledRing / triangulateAndClip.
+    // filled-ring build below — see buildFilledRing / triangulateAndClip.
     const outline = blockOutline(fp)
     // La résolution du calque, pas celle de la fenêtre (voir le constructeur).
     // `buildLineSegments` la COPIE dans chaque matériau : aucun partage de
@@ -667,7 +722,22 @@ export class WaterLayer {
     // in both themes — "en bleu assez visible" — while still respecting the
     // existing dark-mode ink flip.
     const lakeInk = params.darkMode ? '#63d1ff' : '#0f6fd6'
-    const clipAll = (ringList) => { const runs = []; for (const r of ringList) { const pts = latlonToWorldPts(r, dem, latLonToWorld); runs.push(...clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6)) } return runs }
+    // ⚠️ **DEUX PASSES, ET C'EST LE CHRONOMÈTRE QUI L'IMPOSE.** Projeter puis
+    // découper anneau par anneau ne permet de chronométrer qu'en payant deux
+    // relevés PAR ANNEAU — des dizaines de milliers de relevés dont le coût
+    // entrerait dans le chiffre qu'on cherche à lire. En deux passes, c'est
+    // quatre relevés par LISTE. Le résultat est identique : `clipPolylineToBlock`
+    // ne lit rien d'autre que les points de son propre anneau.
+    const clipAll = (ringList) => {
+      let t = _mnt()
+      const projetes = ringList.map((r) => latlonToWorldPts(r, dem, latLonToWorld))
+      chronoEau.projection += _mnt() - t
+      t = _mnt()
+      const runs = []
+      for (const pts of projetes) runs.push(...clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6))
+      chronoEau.decoupe += _mnt() - t
+      return runs
+    }
 
     // LineSegments2 batches one width per draw call, so per-feature width
     // variation means bucketing river rings by rounded on-screen width (1
@@ -687,7 +757,9 @@ export class WaterLayer {
     ]
     for (const g of groups) {
       if (!g.runs.length) continue
+      const _tT = _mnt()
       const obj = buildLineSegments(g.runs, poseur, { color: g.color, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
+      chronoEau.traits += _mnt() - _tT
       obj.traverse((o) => { if (o.material) { o.material.opacity = params.waterOpacity ?? 0.9; _coupeALaFenetre(o.material, plans) } })
       this.group.add(obj)
     }
@@ -709,7 +781,7 @@ export class WaterLayer {
         _coupeALaFenetre(areaMaterial, plans)
         const geos = []
         for (const part of areaParts) {
-          const geo = _buildFilledRing(part, dem, poseur, outline, fp, insideBlock)
+          const geo = buildFilledRing(part, dem, poseur, outline, fp, insideBlock)
           if (geo) geos.push(geo)
         }
         const mesh = _meshFusionne(geos, areaMaterial, 17)
@@ -746,14 +818,18 @@ export class WaterLayer {
           // la fusion vient APRÈS : chaque part reçoit d'abord son propre niveau
           // d'eau (waterLevelOf, la médiane de ses altitudes drapées). Fusionner
           // avant aurait mis Annecy et le Léman au même niveau.
-          const geo = _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, true)
+          const geo = buildFilledRing(part, dem, poseur, outline, fp, insideBlock, true)
           if (geo) geos.push(geo)
         }
         const mesh = _meshFusionne(geos, lakeMaterial, LAKE_RENDER_ORDER)
         if (mesh) this.group.add(mesh)
       }
     }
+    chronoEau.total = _mnt() - _tDebut
   }
+  // La décomposition de la DERNIÈRE reconstruction (voir `chronoEau`) — c'est
+  // par là que la sonde la lit dans la page vivante.
+  get chrono() { return { ...chronoEau } }
   setVisible(v) { this.group.visible = v }
   setOpacity(v) {
     this.group.traverse((o) => {

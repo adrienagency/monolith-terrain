@@ -48,7 +48,20 @@ function seg(pos, color, widthPx, renderOrder, resolution) {
   const mat = new LineMaterial({ color: new THREE.Color(color), linewidth: widthPx, transparent: true, depthTest: true, depthWrite: false, worldUnits: false })
   mat.resolution.copy(resolution)
   const l = new LineSegments2(geo, mat)
-  l.computeLineDistances()
+  // ⛔ **PAS DE `computeLineDistances()` — Tâche R14.** Il posait
+  // `instanceDistanceStart` / `instanceDistanceEnd`, soit **8 octets par
+  // segment**, que `LineMaterial` ne lit QUE sous `USE_DASH` — c'est-à-dire
+  // quand `dashed` vaut vrai, ce qu'aucun trait du site ne demande (`dashed`
+  // n'est écrit nulle part dans `src/`).
+  //
+  // ⚡ **CE N'EST PAS UNE DÉDUCTION, C'EST UNE LECTURE.**
+  // `scripts/sonde-eau-attributs.mjs` interroge le programme COMPILÉ dans la
+  // page vivante : `LineMaterial` réclame `instanceEnd, instanceStart,
+  // position, uv`, et la géométrie en portait deux de plus. Coût relevé à
+  // Chamonix z6, 67 630 segments : **0,52 Mo de tas** pour rien.
+  //
+  // ➡️ Le jour où un trait devient pointillé, cet appel revient ici — et
+  // `test/eau-remplissage.test.js` le dira.
   l.renderOrder = renderOrder
   return l
 }
