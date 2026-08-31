@@ -429,6 +429,12 @@ function globeNu({ crop = null, fond = null, exageration = EXAGERATION } = {}) {
     uFondOn: { value: 0 },
     uFondPortee: { value: 3 },
     uFondMetres: { value: 1 },
+    // ⚠️ **LE BOUCHON DOIT PORTER CE QUE LE CONSTRUCTEUR PORTE — Tâche R17.**
+    // `_poserTextureFond` écrit désormais la CELLULE du champ, en demi-côtés de
+    // crop, pour que le gradient de la normale fine dérive à la maille et non
+    // au sixième de maille. Un bouchon en retard sur le constructeur ne fait pas
+    // rougir la loi : il fait rougir le bouchon.
+    uFondPasQ: { value: 0 },
   }
   return {
     uniforms: u,
@@ -891,28 +897,51 @@ test('⑩d ⛔ `fondMarin` EST RELEVÉ AVANT LE GRAIN — le grain change le SIG
   assert.ok(g(1, 0) < 0, 'le grain doit pouvoir faire passer une hauteur positive sous zéro')
 })
 
-test('⑩e le PAS du gradient, EXÉCUTÉ : la mer prend le texel, la terre l’empreinte', () => {
+test('⑩e le PAS du gradient, EXÉCUTÉ : la mer prend LA CELLULE DU CHAMP, la terre l’empreinte', () => {
   // ⚡ **PAS UNE ASSERTION DE CHAÎNE : ON ÉVALUE LA LOI.** On extrait la ligne du
   // nuanceur et on la fait tourner — c'est la seule façon de tuer une mutation
   // qui échangerait les deux branches, ou qui retirerait le plancher du texel de
   // l'une des deux.
-  const ligne = FRAG_GLOBE.match(/float pas = (.+);/)
-  assert.ok(ligne, 'la ligne du pas a disparu du nuanceur')
-  const js = ligne[1].replace(/\bmax\(/g, 'Math.max(')
+  //
+  // ⛔ **CE TEST VERROUILLAIT LA LOI DE P12 (« la mer prend le texel »), ET LA
+  // TÂCHE R17 L'A REMPLACÉE.** P12 avait raison de sortir le fond marin de
+  // l'empreinte d'écran, et s'est arrêtée un cran trop tôt : sous l'eau la
+  // hauteur vient du champ cuit, dont la maille vaut SIX texels de MNT
+  // (`2 × PORTEE_CROP / CHAMP_FOND = 6/384` demi-côtés de crop, contre
+  // `qParUv / uTilePx = 0,6667/256`). Dériver au sixième d'une bilinéaire ne
+  // rend que sa FACETTE — la grille de plaques sombres que la relecture de R5 a
+  // vue et que le banc R17 a mesurée (pic à 6 px pour une cellule de 3,237 px,
+  // amplitude 0,3133 → 0,0195 une fois le pas porté à la cellule, socle 0,0471).
+  // **Ce qui ne change pas, et que ce test continue de garder : le plancher du
+  // texel, sur les DEUX branches, et le fait que les deux branches diffèrent.**
+  const bloc = FRAG_GLOBE.match(/float pasChamp = (.+);\s*\n\s*float pas = ([\s\S]+?);/)
+  assert.ok(bloc, 'la loi du pas a disparu du nuanceur, ou ne lit plus la cellule du champ')
+  const js = (bloc[1] + '|' + bloc[2]).replace(/\bmax\(/g, 'Math.max(')
+  const [expChamp, expPas] = js.split('|')
   // eslint-disable-next-line no-new-func
-  const pas = new Function('fondMarin', 'uTilePx', 'pasEmpreinte', `return ${js};`)
+  const pas = new Function('fondMarin', 'uTilePx', 'pasEmpreinte', 'uFondPasQ', 'qParUv',
+    `const pasChamp = ${expChamp}; return ${expPas};`)
+  // la monnaie du cadrage de référence : 3 tuiles z12, donc `qCrop` par unité
+  // d'uv = (1/2^12) / (1,5/2^12) = 2/3.
+  const Q = 2 / 3
   for (const uTilePx of [256, 512]) {
     const texel = 1 / uTilePx
-    // ⛔ sous l'eau : le texel, quelle que soit l'empreinte
+    const cellule = 6 / 384 // 2 × PORTEE_CROP / CHAMP_FOND, en demi-côtés de crop
+    const attendu = Math.max(texel, cellule / Q)
+    // ⛔ sous l'eau : la cellule du champ, quelle que soit l'empreinte
     for (const e of [0, texel / 2, texel, 4 * texel, 40 * texel]) {
-      assert.equal(pas(true, uTilePx, e), texel, `mer, uTilePx=${uTilePx}, empreinte=${e}`)
+      assert.equal(pas(true, uTilePx, e, cellule, Q), attendu, `mer, uTilePx=${uTilePx}, empreinte=${e}`)
     }
+    // ⛔ et SANS champ posé (`uFondPasQ = 0`), la mer retombe sur le texel : le
+    // dépôt d'avant R17, au bit près.
+    assert.equal(pas(true, uTilePx, 40 * texel, 0, Q), texel,
+      'sans fond posé, la mer doit retrouver le pas de P12')
     // ⛔ sur terre : le PLUS GRAND des deux, jamais moins que le texel
-    assert.equal(pas(false, uTilePx, 0), texel, 'sans uMppFacteur, la terre retombe sur le texel')
-    assert.equal(pas(false, uTilePx, texel / 2), texel, 'le texel est un PLANCHER')
-    assert.equal(pas(false, uTilePx, 4 * texel), 4 * texel, 'l’empreinte l’emporte quand elle est plus grande')
+    assert.equal(pas(false, uTilePx, 0, cellule, Q), texel, 'sans uMppFacteur, la terre retombe sur le texel')
+    assert.equal(pas(false, uTilePx, texel / 2, cellule, Q), texel, 'le texel est un PLANCHER')
+    assert.equal(pas(false, uTilePx, 4 * texel, cellule, Q), 4 * texel, 'l’empreinte l’emporte quand elle est plus grande')
     // ⚡ et les deux branches DIFFÈRENT là où ça compte — sinon la loi serait morte
-    assert.ok(pas(true, uTilePx, 4 * texel) < pas(false, uTilePx, 4 * texel),
+    assert.notEqual(pas(true, uTilePx, 4 * texel, cellule, Q), pas(false, uTilePx, 4 * texel, cellule, Q),
       'les deux branches rendent le même pas : la bascule ne sert à rien')
   }
 })
