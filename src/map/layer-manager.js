@@ -10,11 +10,36 @@ import { PlacesLayer } from './places-layer.js'
 // vieil appel à 'roads' est simplement ignoré, sans erreur.
 export class MapLayers {
   constructor(scene, camera = null) {
-    this.water = new WaterLayer(scene)
-    this.places = new PlacesLayer(scene, camera)
+    this.water = new WaterLayer()
+    this.places = new PlacesLayer(camera)
     this._layers = { water: this.water, places: this.places }
     this._surfaceVisible = true
+    this._scene = null
+    this.poserScene(scene)
   }
+  // ══════════ LE POINT UNIQUE DE RATTACHEMENT — Tâche D16-b, cause ① ════════
+  //
+  // ⛔ **LES CALQUES SE RATTACHAIENT EUX-MÊMES, ET À LA MAUVAISE SCÈNE.**
+  // `scene.add(this.group)` dans chaque constructeur visait la scène du BLOC
+  // PLAT ; la Tâche D16-a a supprimé la passe qui la dessine. Les rivières et
+  // les toponymes n'étaient pas cachés — ils étaient dessinés dans un tampon
+  // que plus personne ne regarde.
+  //
+  // ⚠️ **UN SEUL ÉCRIVAIN, ET IL DÉPLACE PLUTÔT QU'IL N'AJOUTE.** Deux appels
+  // (la construction, puis le relogement de `main.js` quand `sceneGlobe`
+  // existe) laisseraient sinon deux parents et deux dessins du même groupe.
+  poserScene(scene) {
+    if (!scene || scene === this._scene) return
+    for (const l of Object.values(this._layers)) {
+      l.group.parent?.remove(l.group)
+      scene.add(l.group)
+    }
+    this._scene = scene
+  }
+  // LE FABRICANT DE POSEUR — ce qui décide, à chaque reconstruction, si la
+  // géométrie atterrit sur la dalle plate ou sur la sphère de relief. La loi
+  // vit dans `monde/sol-globe.js` ; `main.js` n'apporte que les objets vivants.
+  poserFabricantDePoseur(fn) { for (const l of Object.values(this._layers)) l.poserFabricantDePoseur?.(fn) }
   // null-safe: places.refresh()/declutter fall back to "show everything" until
   // a camera is set
   setCamera(camera) { this.places.setCamera?.(camera) }

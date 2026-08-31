@@ -88,6 +88,10 @@ try {
   await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe && window.__exp?.mapLayers,
     { timeout: 90000, polling: 100 })
   await dodo(6000)
+  // ⚠️ **LE SAS D'ACCUEIL COUVRE L'ÉCRAN.** « Echap — explorer librement » :
+  // sans ça, toutes les captures montrent le voile et pas la carte.
+  await page.keyboard.press('Escape')
+  await dodo(2500)
 
   for (const cle of CLES) {
     const lieu = LIEUX[cle]
@@ -95,6 +99,19 @@ try {
     for (const z of ZOOMS) {
       await page.evaluate(async (a) => { await window.__exp.modes.flyTo(a.lat, a.lon, a.z) }, { ...lieu, z })
       await dodo(ATTENTE)
+      // ⚠️ **UNE POSE DE CADRAGE, IDENTIQUE À TOUS LES ZOOMS.** `flyTo` laisse la
+      // caméra où sa descente la dépose — bas, et pas au même endroit d'un zoom
+      // à l'autre : les captures ne seraient pas comparables. On repose donc la
+      // vue à trois quarts au-dessus du centre du bloc, en unités de BLOC ; la
+      // similitude (`majCameraFond`) la transporte vers le globe toute seule.
+      await page.evaluate(() => {
+        const e = window.__exp
+        e.controls.target.set(0, 0, 0)
+        e.camera.position.set(0, 58, 58)
+        e.controls.update()
+        e.majCameraFond?.()
+      })
+      await dodo(1800)
       // reconstruction CHRONOMÉTRÉE, côté page : c'est du CPU (fetch + cuisson)
       const ligne = await page.evaluate(async () => {
         const e = window.__exp
@@ -117,13 +134,55 @@ try {
           water: { objets: compte(w.group), enfants: w.group.children.length, visible: w.group.visible, scene: nomScene(w.group), osm: !!w.usingOsm },
           places: { objets: compte(p.group), enfants: p.group.children.length, visible: p.group.visible, scene: nomScene(p.group) },
           cropPose: !!e.veilleCrop?.pose,
+          // ══════ LE CONTRÔLE QUI DIT SI L'EAU FLOTTE ═══════════════════════
+          //
+          // Pour un échantillon de sommets du calque d'eau : leur distance à la
+          // SURFACE DESSINÉE du globe, en mètres. Une rivière posée vaut
+          // quelques dizaines de mètres (la marge `offset`) ; une rivière
+          // drapée sur le mauvais champ de hauteurs, des centaines ou des
+          // milliers. ⚠️ **C'est ce chiffre, pas l'œil, qui attrape la classe
+          // de défaut « conversion d'espace ».**
+          drape: (() => {
+            const R = 100, UPM = R / 6371000
+            const liste = e.globe.tuilesAvecHauteurs?.() ?? []
+            if (!liste.length) return null
+            const ech = UPM * (e.globe.exaggeration ?? 1)
+            const ecarts = []
+            let sansCouverture = 0
+            const v = new (e.scene.constructor === Object ? Object : Object)()
+            e.mapLayers.water.group.traverse((o) => {
+              const pos = o.geometry?.attributes?.position ?? o.geometry?.attributes?.instanceStart
+              if (!pos) return
+              const n = pos.count ?? 0
+              for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 40))) {
+                const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
+                const r = Math.hypot(x, y, z)
+                if (!(r > 1)) continue
+                const lat = Math.asin(y / r) * 180 / Math.PI
+                const lon = Math.atan2(x, z) * 180 / Math.PI
+                const h = e.globe.hauteurDessinee(lat, lon, liste)
+                if (h == null) { sansCouverture++; continue }
+                ecarts.push((r - (R + h * ech)) / ech)
+              }
+            })
+            if (!ecarts.length) return { n: 0, sansCouverture }
+            ecarts.sort((a, b) => a - b)
+            const q = (f) => ecarts[Math.min(ecarts.length - 1, Math.floor(f * ecarts.length))]
+            return {
+              n: ecarts.length, sansCouverture,
+              minM: Math.round(ecarts[0]), medM: Math.round(q(0.5)),
+              p95M: Math.round(q(0.95)), maxM: Math.round(ecarts[ecarts.length - 1]),
+            }
+          })(),
+          nomsVisibles: e.mapLayers.places._entries.filter((x) => x.sprite.visible).length,
         }
       })
       ligne.lieu = lieu.nom
       releve.lignes.push(ligne)
       const nom = `${ETIQ}-${cle}-z${z}.png`
       await page.screenshot({ path: path.join(SORTIE, nom) })
-      console.log(`${lieu.nom} z${z} → water ${ligne.water.objets} obj (${ligne.water.scene}, vis=${ligne.water.visible}, osm=${ligne.water.osm}) · places ${ligne.places.objets} obj (${ligne.places.scene}, vis=${ligne.places.visible}) · ${ligne.msRebuild} ms`)
+      const d = ligne.drape
+      console.log(`${lieu.nom} z${z} → water ${ligne.water.objets} obj (${ligne.water.scene}, vis=${ligne.water.visible}) · places ${ligne.places.objets} obj, ${ligne.nomsVisibles} lisibles · drapé ${d ? `n=${d.n} med ${d.medM} m, p95 ${d.p95M} m, max ${d.maxM} m, sans couverture ${d.sansCouverture}` : '—'} · ${ligne.msRebuild} ms`)
     }
   }
 } finally {

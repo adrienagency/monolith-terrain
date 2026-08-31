@@ -163,7 +163,16 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // naître à la bonne échelle plutôt que sauter à la première image, et
   // `majExageration`, l'entrée que `syncExagToZoom` appelle. Les quatre autres
   // lignes n'ont pas bougé d'un caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5, 'src/globe.js': 2 }
+  // ⚠️ **ET LE SEIZIÈME EST ARRIVÉ AVEC LA TÂCHE D16-b, ET C'EST EXACTEMENT
+  // POUR CETTE RAISON-LÀ QU'IL PASSE PAR ICI.** Le poseur des calques de
+  // carte (`mapLayers.poserFabricantDePoseur`, `main.js`) convertit les mètres
+  // du globe en unités de bloc : `(span / extentMeters) × exagération`. C'est
+  // la formule de `terrain._makeDemSampler`, et elle DOIT lire la même
+  // exagération que lui — une valeur figée y poserait les rivières et les
+  // toponymes à une autre altitude que le relief qu'ils drapent, au facteur
+  // `exagAvant / exagApres`. Le compte de `main.js` passe de 5 à 6, EN PLACE ;
+  // les quatre autres lignes n'ont pas bougé d'un caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 6, 'src/globe.js': 2 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))

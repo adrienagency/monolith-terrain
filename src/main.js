@@ -87,6 +87,16 @@ import { creerVeilleCrop } from './monde/branchement-crop.js'
 // questions, un seul booléen. La loi vit dans un module pour la raison écrite
 // trois lignes plus haut : aucun test ne charge `main.js`.
 import { visibiliteSurface } from './monde/visibilite-surface.js'
+// ══════ LA CARTOGRAPHIE SUR LA SPHÈRE — Tâche D16-b ═══════════════════════
+//
+// > **Adrien :** « Je souhaite avoir la cartographie qui s'affiche sur la Terre
+// > entière. »
+//
+// La brique commune de la tâche : l'échantillonneur de sol en espace GLOBE.
+// ⚠️ **CE N'EST PAS UN SECOND ÉCHANTILLONNEUR DE RELIEF** — `globe.hauteurDessinee`
+// existe depuis la Tâche P11 ; ce module est l'ADAPTATEUR bloc ↔ globe, et il
+// porte les deux seules conversions d'espace de ce branchement.
+import { poseurPourReconstruction } from './monde/sol-globe.js'
 // ══════ LE CRÉDIT D'ORTHOPHOTO — Tâche R9, tour de correction ═════════
 //
 // ⛔ **LA GARDE PRÉCÉDENTE DISAIT « sous `terre unique`, l'orthophoto n'est
@@ -4729,6 +4739,51 @@ if (fusionDesPasses) {
   // la classe de défaut `1/k` que cette tâche existe pour supprimer.
   composer.setMainCamera(camGlobe)
   if (dof) dof.mainCamera = camGlobe
+  // ══════ LA CARTOGRAPHIE PASSE DANS LA SCÈNE DU GLOBE — Tâche D16-b ══════
+  //
+  // > **Adrien :** « Je souhaite avoir la cartographie qui s'affiche sur la
+  // > Terre entière. Pour l'instant elle ne s'affiche que sur certains lieux et
+  // > avec un zoom important. »
+  //
+  // ⛔ **LES DEUX CAUSES, ET AUCUNE DES DEUX N'EST LE PLANCHER DE ZOOM.**
+  //
+  //   ① `water-layer.js` et `places-layer.js` faisaient `scene.add(this.group)`
+  //      — la scène du BLOC PLAT, celle dont le bloc juste au-dessus vient de
+  //      supprimer la passe. Ils n'étaient pas cachés : ils étaient dessinés
+  //      dans un tampon que plus personne ne regarde.
+  //   ② `mapLayers.setSurfaceVisible(vue.socle)` les éteignait par-dessus le
+  //      marché, `socle` étant borné à faux sous le drapeau.
+  //
+  // ⚠️ **ET LE PLANCHER `OSM_MIN_ZOOM = 12` N'EN EST PAS UNE — MESURÉ.** Il
+  // choisit une SOURCE, pas une présence : sous lui, `water-layer` retombe sur
+  // Natural Earth, qui couvre le monde entier (10 771 rivières, 1 345 lacs) et
+  // qui est DÉJÀ EMBARQUÉ dans `public/data/map/`. Relevé à l'écran avant toute
+  // correction (`.banc/D16b/avant.json`) : les groupes étaient peuplés à z6, z8
+  // et z10 comme à z12, et invisibles partout.
+  //
+  // ⚠️ **LA CAMÉRA DU DÉSENCOMBREMENT SUIT LA SCÈNE.** `places._declutter`
+  // projette les noms pour savoir lesquels se chevauchent : projeter des points
+  // de sphère avec la caméra du bloc calculerait sur un autre monde.
+  mapLayers.poserScene(sceneGlobe)
+  mapLayers.setCamera(camGlobe)
+  // ⚠️ **LE FABRICANT DE POSEUR — UNE FOIS PAR RECONSTRUCTION, PAS PAR SOMMET.**
+  // C'est lui qui capture la liste des tuiles portant encore leurs hauteurs
+  // (`tuilesAvecHauteurs`) : sans elle, chacun des milliers de sommets d'un
+  // calque reparcourrait `globe.tiles`.
+  //
+  // ⚠️ **`echelleBloc` EST CELLE DE `terrain._makeDemSampler`, AU CARACTÈRE
+  // PRÈS** (`main.js:3433` l'écrit déjà ainsi) : c'est elle qui convertit les
+  // mètres du globe en unités de bloc, et une seconde écriture divergerait en
+  // silence le jour où l'exagération bougerait.
+  mapLayers.poserFabricantDePoseur(({ dem, terrain, params, sample }) =>
+    poseurPourReconstruction({
+      globe,
+      dem,
+      sample,
+      echelleBloc: (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1) / dem.extentMeters) * lireExageration(params),
+      actif: true,
+    }),
+  )
 }
 
 // LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
@@ -5033,7 +5088,13 @@ function poserVisibiliteSocle(v) {
   groundInfo.setVisible(vue.cartouche && params.groundInfo)
   traffic.setVisible(vue.socle)
   realWater?.setVisible(vue.socle && params.seaEnabled !== false) // cf. setSeaEnabled
-  mapLayers.setSurfaceVisible(vue.socle)
+  // ⚡ **`vue.carto` ET PLUS `vue.socle` — Tâche D16-b, et c'est LA cause du
+  // défaut d'Adrien.** `socle` est borné à faux sous le drapeau : accroché à
+  // lui, le calque d'eau et les toponymes étaient éteints à toutes les
+  // altitudes et à tous les zooms, alors que leurs groupes étaient peuplés.
+  // Depuis D16-b ils vivent dans la scène du globe, posés sur la sphère : leur
+  // question est celle des boutons, pas celle du maillage plat.
+  mapLayers.setSurfaceVisible(vue.carto)
   isoBtn?.setVisible(vue.boutons) // le raccourci isométrique n'a besoin que d'un bloc, pas du bloc PLAT
   // ⛔ **LE CINÉ SUIT SA PROPRE RÉPONSE, ET IL EST ÉTEINT SOUS LE DRAPEAU** —
   // §3 de `monde/visibilite-surface.js`, qui porte la mesure : ni `shots.stop()`

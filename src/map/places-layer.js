@@ -5,6 +5,11 @@ import { loadLayerForBounds, patchBounds } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
 import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
 import { labelScale, placeTier } from './place-scale.js'
+// ══════ LES TOPONYMES SUR LA SPHÈRE — Tâche D16-b ═════════════════════════
+// Le calque garde son espace de BLOC (sélection, `minDist`, `CLEARANCE`) ;
+// `poseur.placer` décide seulement OÙ le point atterrit. Les conversions
+// vivent là-bas, écrites une fois.
+import { poseurPlat } from '../monde/sol-globe.js'
 
 const HALF = TERRAIN_SIZE / 2
 // Décalage nul, partagé : hors mode continu il n'y a pas de fenêtre à retirer.
@@ -54,11 +59,14 @@ function spriteScreenSize(sprite, camera, vw, vh) {
 const DECLUTTER_PAD_PX = 3
 
 export class PlacesLayer {
-  constructor(scene, camera = null) {
+  // ⛔ **LE CALQUE NE SE RATTACHE PLUS TOUT SEUL — Tâche D16-b, cause ①.** Voir
+  // le même bloc en tête de `water-layer.js` : `scene.add(this.group)` visait la
+  // scène du bloc plat, que la Tâche D16-a ne dessine plus.
+  constructor(camera = null) {
     this.group = new THREE.Group()
     this.group.name = 'places'
-    scene.add(this.group)
     this.meshes = []
+    this._faitPoseur = null
     this._buildId = 0
     this.camera = camera
     // per-entry bookkeeping kept across rebuilds so refresh() can re-run just
@@ -66,6 +74,9 @@ export class PlacesLayer {
     this._entries = []
   }
   setCamera(camera) { this.camera = camera }
+  // Le fabricant de poseur — posé par `MapLayers`, appelé à chaque
+  // reconstruction. `null` = le drapage du dépôt (bloc plat).
+  poserFabricantDePoseur(fn) { this._faitPoseur = typeof fn === 'function' ? fn : null }
   // ZONE ISOLÉE : un prédicat (x, z) → booléen qui dit si un point du monde est
   // DANS le territoire découpé. Sans lui, les noms des villes voisines
   // restaient affichés au-dessus du vide une fois le relief clippé — « ça fait
@@ -149,7 +160,24 @@ export class PlacesLayer {
 
     // PLUS DE `params.placesSize` non plus, même raison et même défaut de 1 :
     // `labelScale` seul décide de la taille d'un nom, comme au lancement.
-    const dotGeo = new THREE.CircleGeometry(0.075, 12); dotGeo.rotateX(-Math.PI / 2)
+    // ⚡ **LE POSEUR — Tâche D16-b.** Hors globe, `poseurPlat` rend le drapage
+    // du dépôt au bit près ; sur le globe, il lit la hauteur DESSINÉE par la
+    // sphère et rend des positions de sphère.
+    const fen0 = terrain.fenetre ?? ZERO
+    const sampleBloc = (x, z) => (terrain.sample ? terrain.sample(x - fen0.x, z - fen0.z) : 0)
+    const poseur = this._faitPoseur?.({ dem, terrain, params, sample: sampleBloc }) ?? poseurPlat(sampleBloc)
+    this._poseur = poseur
+    // ⚠️ **LE POINT AU SOL EST UN DISQUE À PLAT DANS LE PLAN DU BLOC.** Sur la
+    // sphère il faut le RETOURNER vers la verticale locale, et le mettre à
+    // l'échelle : son rayon de 0,075 est une longueur de BLOC, et une longueur
+    // de bloc lue en unités de globe vaut `1/k` fois trop grand — à z12, 175
+    // fois. C'est la classe de défaut de ce chantier, et un disque de 0,075
+    // unité de globe ferait **4,8 km de rayon**.
+    const repere = poseur.globe ? poseur.repereLocal(1) : null
+    const kBloc = repere ? repere.demi : 1 // unités de globe par unité de bloc
+    const dotGeo = new THREE.CircleGeometry(0.075 * kBloc, 12); dotGeo.rotateX(-Math.PI / 2)
+    const _up = new THREE.Vector3()
+    const _yBloc = new THREE.Vector3(0, 1, 0)
 
     for (const p of picks) {
       // ⚠️ `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE, `p.w` EN
@@ -159,8 +187,7 @@ export class PlacesLayer {
       // autre endroit — flottant en l'air ou enterrés. On retire donc le
       // décalage à l'aller. Hors mode continu `fen` vaut zéro et l'appel est
       // celui d'avant, au bit près.
-      const fen = terrain.fenetre ?? ZERO
-      const groundY = terrain.sample ? terrain.sample(p.w.x - fen.x, p.w.z - fen.z) : 0
+      const groundY = poseur.hauteur(p.w.x, p.w.z)
       const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap)
       // shared with labelScale's tier so a place's colour darkness always
@@ -191,14 +218,23 @@ export class PlacesLayer {
       // relief occludes it exactly like the label above it — a dot behind a
       // ridge must disappear along with its name, not float free of it.
       const dot = new THREE.Mesh(dotGeo.clone(), new THREE.MeshBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.85, depthWrite: false, depthTest: true }))
-      dot.position.set(p.w.x, groundY + 0.05, p.w.z)
+      const posPied = poseur.placer(p.w.x, p.w.z, groundY + 0.05)
+      const posTete = poseur.placer(p.w.x, p.w.z, labelY)
+      dot.position.set(posPied.x, posPied.y, posPied.z)
+      // ⚠️ **LE DISQUE SUIT LA VERTICALE LOCALE.** Laissé à plat dans le plan
+      // `y = 0` du bloc, il se verrait par la tranche partout sauf au pôle nord.
+      if (poseur.globe) dot.quaternion.setFromUnitVectors(_yBloc, _up.set(posPied.x, posPied.y, posPied.z).normalize())
       dot.renderOrder = 29
       this.group.add(dot); this.meshes.push(dot)
 
       // thin leader line from the ground dot up to just below the floating label
+      // ⚠️ **LA DESCENTE DE `BASE_H × scale × 0,5` EST EN UNITÉS DE BLOC**, et
+      // elle passe donc par `placer` comme tout le reste — jamais retranchée à
+      // une coordonnée de sphère.
+      const posSousTete = poseur.placer(p.w.x, p.w.z, labelY - BASE_H * scale * 0.5)
       const leaderGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(p.w.x, groundY + 0.05, p.w.z),
-        new THREE.Vector3(p.w.x, labelY - BASE_H * scale * 0.5, p.w.z),
+        new THREE.Vector3(posPied.x, posPied.y, posPied.z),
+        new THREE.Vector3(posSousTete.x, posSousTete.y, posSousTete.z),
       ])
       const leader = new THREE.Line(leaderGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.55, depthWrite: false, depthTest: true }))
       leader.renderOrder = 29
@@ -214,14 +250,22 @@ export class PlacesLayer {
       const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo: null, weight: p.cap ? 800 : 700 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
       sprite.material.sizeAttenuation = false
+      // ⚠️ **L'ÉCHELLE DU SPRITE NE SE CONVERTIT PAS, ET C'EST MESURABLE :**
+      // `sizeAttenuation = false` la lit en unités de CLIP, pas de monde. Un
+      // nom fait le même nombre de pixels quel que soit l'espace où il vit —
+      // multiplier par `k` ici le ferait disparaître (175 fois trop petit à
+      // z12). C'est la seule longueur de ce fichier qui NE traverse PAS.
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)
-      sprite.position.set(p.w.x, labelY, p.w.z)
+      sprite.position.set(posTete.x, posTete.y, posTete.z)
       sprite.renderOrder = 30
       this.group.add(sprite); this.meshes.push(sprite)
 
       // keep pop-desc order (picks order) — the declutter pass below is greedy
       // biggest-first, and refresh() re-walks this same array every tick
-      this._entries.push({ dot, leader, sprite })
+      // ⚠️ **`bloc` GARDE LES COORDONNÉES DE BLOC**, parce que le rejet hors
+      // fenêtre de `_declutter` est un test de BLOC (`|x| > HALF`) et que la
+      // position du sprite, elle, n'en est plus une sur le globe.
+      this._entries.push({ dot, leader, sprite, bloc: { x: p.w.x, z: p.w.z } })
     }
     this.group.visible = true
     this._declutter()
@@ -250,16 +294,28 @@ export class PlacesLayer {
     const ox = this.group.position.x
     const oz = this.group.position.z
     for (const e of this._entries) {
-      const wx = e.sprite.position.x + ox
-      const wz = e.sprite.position.z + oz
+      // ⚠️ **LE REJET HORS FENÊTRE SE LIT EN COORDONNÉES DE BLOC, TOUJOURS.**
+      // Sur le globe, `sprite.position` est un point de sphère à ~100 unités de
+      // l'origine : le comparer à `HALF = 28` rejetterait TOUS les noms, à tous
+      // les zooms — c'est-à-dire exactement le défaut qu'on répare. Les
+      // coordonnées de bloc sont donc gardées par entrée (`e.bloc`).
+      const bx = (e.bloc?.x ?? e.sprite.position.x) + ox
+      const bz = (e.bloc?.z ?? e.sprite.position.z) + oz
       // ⚠️ ET CE QUI EST HORS DE LA FENÊTRE NE S'AFFICHE PAS. Les lieux sont
       // choisis sur toute l'emprise (neuf fois la surface visible) : sans ce
       // rejet, huit neuvièmes des noms flotteraient en l'air au-delà du bord du
       // socle, au-dessus du vide. « Plus rien ne dépasse de la fenêtre. »
-      if (Math.abs(wx) > HALF || Math.abs(wz) > HALF) {
+      if (Math.abs(bx) > HALF || Math.abs(bz) > HALF) {
         e.sprite.visible = false; e.dot.visible = false; e.leader.visible = false; continue
       }
-      ndc.set(wx, e.sprite.position.y, wz).project(camera)
+      // ⚠️ **ET LA PROJECTION SE FAIT SUR LA POSITION RÉELLE DU SPRITE, AVEC LA
+      // CAMÉRA QUI LE REND.** `setCamera` reçoit `camGlobe` sous le drapeau
+      // (`main.js`) : projeter des points de sphère avec la caméra du bloc
+      // rendrait un désencombrement calculé sur un autre monde.
+      // ⚠️ `group.position` traverse : en mode continu le groupe est translaté
+      // de −fenêtre à chaque image, donc `sprite.position` est une position
+      // LOCALE. Sur le globe le groupe est à l'origine et le terme est nul.
+      ndc.copy(e.sprite.position).add(this.group.position).project(camera)
       if (ndc.z > 1) { e.sprite.visible = false; e.dot.visible = false; e.leader.visible = false; continue }
       const cx = (ndc.x * 0.5 + 0.5) * vw
       const cy = (1 - (ndc.y * 0.5 + 0.5)) * vh

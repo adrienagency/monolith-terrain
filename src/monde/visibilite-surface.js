@@ -107,13 +107,15 @@
  *   planète. ⚠️ **Il ne gouverne QUE le maillage**, jamais l'interface.
  * @param {boolean} arg.surface sommes-nous en vue de surface, devant un bloc —
  *   ce que l'automate du seuil décide, avant tout bornage.
- * @returns {{socle: boolean, boutons: boolean, cine: boolean, cartouche: boolean}}
+ * @returns {{socle: boolean, boutons: boolean, cine: boolean, cartouche: boolean, carto: boolean}}
  *   `socle` pour le maillage du bloc plat et les quatorze calques qui lui
  *   appartiennent ; `boutons` pour ce qui ne dépend que d'être en vue de
  *   surface — le raccourci isométrique et le coin cartographie (aérien · base ·
  *   shuffle) ; `cine` pour les plans de cinéma, qui ont en plus besoin d'un
  *   plancher, et n'en ont pas sous le drapeau (voir §3) ; `cartouche` pour la
- *   légende cartographique posée sur la BASE autour du bloc (voir §4).
+ *   légende cartographique posée sur la BASE autour du bloc (voir §4) ;
+ *   `carto` pour les calques de cartographie eux-mêmes — rivières, lacs et
+ *   toponymes —, qui ont quitté la scène du bloc plat (voir §5).
  */
 export function visibiliteSurface({ terreUnique, surface }) {
   const s = !!surface
@@ -132,5 +134,29 @@ export function visibiliteSurface({ terreUnique, surface }) {
     // §4 ci-dessous. Il répond à la MÊME question qu'eux : « sommes-nous devant
     // un bloc », et non « le maillage du bloc plat est-il dessiné ».
     cartouche: s,
+    // ══════════ 5. LA CARTOGRAPHIE SUIT LA VUE, PLUS LE MAILLAGE ═══════════
+    //
+    // > **Adrien, 2026-08-31 :** « Je souhaite avoir la cartographie qui
+    // > s'affiche sur la Terre entière. Pour l'instant elle ne s'affiche que sur
+    // > certains lieux et avec un zoom important. »
+    //
+    // ⛔ **ELLE ÉTAIT ACCROCHÉE À `socle`, ET `socle` EST BORNÉ À FAUX SOUS LE
+    // DRAPEAU.** `mapLayers.setSurfaceVisible(vue.socle)` éteignait donc les
+    // rivières, les lacs et les toponymes **à toutes les altitudes et à tous les
+    // zooms** — mesuré à l'écran (`.banc/D16b/avant.json`, huit couples
+    // lieu × zoom : `visible = false` partout, alors que les groupes étaient
+    // PEUPLÉS, de 3 à 36 objets).
+    //
+    // ⚡ **ET CE N'EST PAS UN OUBLI DE PLUS DANS LA MÊME LISTE, C'EST LE MÊME
+    // PARTAGE QU'AU §2.** `socle` répond à « le maillage du bloc PLAT est-il
+    // dessiné ». Les calques de carte, eux, ne dessinent plus dans son espace
+    // depuis la Tâche D16-b : ils sont posés sur la sphère, dans la scène du
+    // globe. Leur question est celle des boutons — « sommes-nous en vue de
+    // surface, devant un bloc » —, et la réponse est OUI, c'est un crop.
+    //
+    // ⛔ **IL N'Y A PAS D'EXCEPTION ICI, contrairement au ciné.** Le §3 éteint
+    // le ciné parce qu'il MANQUE quelque chose au crop (un plancher). La carto,
+    // elle, ne manque de rien : `monde/sol-globe.js` lui donne le sol du globe.
+    carto: s,
   }
 }

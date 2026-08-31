@@ -32,10 +32,16 @@ import { facteurEchelle } from '../src/monde/frontiere-rendu.js'
 import { latLonToWorld, worldToLatLon, R_GLOBE, EARTH_RADIUS_M, latLonToSphere, demSpan } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
-const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
-const WATER = readFileSync(new URL('../src/map/water-layer.js', import.meta.url), 'utf8')
-const PLACES = readFileSync(new URL('../src/map/places-layer.js', import.meta.url), 'utf8')
-const MANAGER = readFileSync(new URL('../src/map/layer-manager.js', import.meta.url), 'utf8')
+// ⚠️ **ON RETIRE LES COMMENTAIRES AVANT DE LIRE LE CODE.** Ces fichiers
+// CITENT en prose le geste qu'ils ont abandonné (« il faisait
+// `scene.add(this.group)` ») — une assertion qui compterait les citations serait
+// rouge sur une explication et verte sur un vrai retour en arrière.
+const sansCommentaires = (t) => t.replace(/\/\/[^\r\n]*/g, '')
+const lire = (f) => sansCommentaires(readFileSync(new URL(f, import.meta.url), 'utf8'))
+const MAIN = lire('../src/main.js')
+const WATER = lire('../src/map/water-layer.js')
+const PLACES = lire('../src/map/places-layer.js')
+const MANAGER = lire('../src/map/layer-manager.js')
 
 // Un MNT de papier — trois tuiles z12 autour de Chamonix, aux conventions de
 // `dem.js` (`originTileX/Y` entiers, `size = tuiles × tilePx`).

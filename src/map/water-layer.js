@@ -11,6 +11,13 @@ import { makeLakeMaterial } from './lake-material.js'
 import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+// ══════ LA CARTOGRAPHIE SUR LA SPHÈRE — Tâche D16-b ═══════════════════════
+//
+// Le calque garde son espace de BLOC — projection, découpe sur l'empreinte,
+// marges en unités de bloc. Seul le DERNIER geste change : `poseur.placer`
+// décide si le point atterrit sur la dalle plate ou sur la sphère de relief.
+// Les deux conversions vivent là-bas, écrites une fois.
+import { poseurPlat } from '../monde/sol-globe.js'
 
 // À partir de ce demZoom, l'eau vient d'Overpass en pleine finesse ; en
 // dessous, des tuiles Overture ou du Natural Earth.
@@ -108,7 +115,7 @@ export function waterLevelOf(heights) {
 // reported as "on voit les lacs a travers les montagnes". Flat, the same
 // overlap disappears INTO the slope and the terrain occludes it — which is
 // what a real shore does.
-function _buildFilledRing(part, dem, sample, outline, fp, insideBlock, flat = false) {
+function _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, flat = false) {
   if (!part?.outer || part.outer.length < 4) return null
   const outerPts = latlonToWorldPts(part.outer, dem, latLonToWorld)
   if (outerPts.length < 3) return null
@@ -120,7 +127,13 @@ function _buildFilledRing(part, dem, sample, outline, fp, insideBlock, flat = fa
   const clippedTris = triangulateAndClip(outerPts, holePts, outline)
   if (!clippedTris.length) return null
 
-  const positions = []
+  // ⚠️ **ON GARDE LES SOMMETS EN COORDONNÉES DE BLOC JUSQU'AU BOUT.** Le
+  // nivellement des lacs (`flat`) prend la MÉDIANE des hauteurs : la calculer
+  // sur des rayons de sphère mélangerait la hauteur et la position, et un lac
+  // posé « à plat » sur le globe est un lac à RAYON constant, pas à Y constant.
+  // On pose donc en dernier, une fois le niveau choisi — c'est aussi ce qui
+  // laisse la marge `0.06` en unités de bloc, sans conversion ici.
+  const bloc = []
   const index = []
   for (const poly of clippedTris) {
     // clipPolygonToBlock (used inside triangulateAndClip) returns a closed
@@ -142,18 +155,18 @@ function _buildFilledRing(part, dem, sample, outline, fp, insideBlock, flat = fa
       cx /= open.length; cz /= open.length
       if (!insideBlock(cx, cz)) continue
     }
-    const base = positions.length / 3
-    for (const p of open) positions.push(p.x, sample(p.x, p.z) + 0.06, p.z)
+    const base = bloc.length
+    for (const p of open) bloc.push({ x: p.x, z: p.z, y: poseur.hauteur(p.x, p.z) + 0.06 })
     for (let k = 1; k < open.length - 1; k++) index.push(base, base + k, base + k + 1)
   }
   if (!index.length) return null
   if (flat) {
     // one level for the whole part — collected from the heights already draped
-    const heights = []
-    for (let i = 1; i < positions.length; i += 3) heights.push(positions[i])
-    const level = waterLevelOf(heights)
-    for (let i = 1; i < positions.length; i += 3) positions[i] = level
+    const level = waterLevelOf(bloc.map((b) => b.y))
+    for (const b of bloc) b.y = level
   }
+  const positions = []
+  for (const b of bloc) { const v = poseur.placer(b.x, b.z, b.y); positions.push(v.x, v.y, v.z) }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geo.setIndex(index)
@@ -256,9 +269,17 @@ function polygonPartsOf(g) {
 }
 
 export class WaterLayer {
-  constructor(scene) {
-    this.group = new THREE.Group(); this.group.name = 'water'; scene.add(this.group)
+  // ⛔ **LE CALQUE NE SE RATTACHE PLUS TOUT SEUL — Tâche D16-b, cause ①.**
+  // Il faisait `scene.add(this.group)` sur la scène du BLOC PLAT. La Tâche
+  // D16-a a supprimé la passe qui la dessinait : les rivières n'étaient pas
+  // cachées, elles étaient dessinées dans un tampon que plus personne ne
+  // regarde. Le rattachement passe par `MapLayers.poserScene`, un point unique
+  // qui sait, lui, laquelle des deux scènes est rendue.
+  constructor() {
+    this.group = new THREE.Group(); this.group.name = 'water'
     this._buildId = 0; this.usingOsm = false; this.loading = false
+    // Le poseur en vigueur, remplacé à chaque reconstruction (voir `rebuild`).
+    this._poseur = null
     this._lakeMats = []; this._sun = null
     // ══════════ LA RÉSOLUTION DES FLEUVES — UNE SEULE VÉRITÉ ═══════════════
     //
@@ -272,6 +293,10 @@ export class WaterLayer {
     // valeur que `onResize` venait de poser. On la garde donc ici.
     this._resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
   }
+
+  // LE FABRICANT DE POSEUR — posé par `MapLayers`, appelé à chaque
+  // reconstruction. `null` = le drapage du dépôt (bloc plat).
+  poserFabricantDePoseur(fn) { this._faitPoseur = typeof fn === 'function' ? fn : null }
 
   // Les traits larges du calque suivent la taille du tampon de dessin : la
   // valeur mémorisée d'abord (les reconstructions à venir la reliront), les
@@ -558,11 +583,6 @@ export class WaterLayer {
     // ils sont CONSTANTS, le socle restant centré sur l'origine (fenetre-clip.js).
     const fpEmprise = terrain.empriseFootprint?.() ?? null
     const fp = fpEmprise ?? terrain.blockFootprint()
-    const plans = fpEmprise ? terrain.plansFenetre() : null
-    const insideBlock = makeInsideBlock(fp)
-    // Computed once per rebuild (depends only on fp) and shared by every
-    // filled-ring build below — see _buildFilledRing / triangulateAndClip.
-    const outline = blockOutline(fp)
     // ⚠️ LE DRAPAGE SE FAIT EN COORDONNÉES DE CHAMP. `terrain.sample` répond
     // « sous le point AFFICHÉ en x », donc il porte le décalage de fenêtre : une
     // géométrie cuite en coordonnées de champ et drapée avec lui prendrait
@@ -572,6 +592,26 @@ export class WaterLayer {
     // Hors mode continu `fenetre` vaut (0,0) et l'expression est celle d'avant.
     const fen = terrain.fenetre ?? { x: 0, z: 0 }
     const sample = (x, z) => (terrain.sample ? terrain.sample(x - fen.x, z - fen.z) : 0)
+    // ⚡ **LE POSEUR — Tâche D16-b.** Hors globe c'est `poseurPlat(sample)`,
+    // c'est-à-dire le drapage du dépôt au bit près. Sur le globe, il lit la
+    // hauteur DESSINÉE par la sphère et rend des positions de sphère.
+    // ⚠️ Construit UNE FOIS par reconstruction : c'est lui qui capture la liste
+    // des tuiles portant leurs hauteurs, sans quoi chaque sommet reparcourrait
+    // `globe.tiles`.
+    const poseur = this._faitPoseur?.({ dem, terrain, params, sample }) ?? poseurPlat(sample)
+    this._poseur = poseur
+    // ⛔ **PAS DE PLANS DE COUPE EN ESPACE GLOBE.** Ils sont fabriqués en
+    // coordonnées de BLOC (`fenetre-clip.js`) : appliqués à une géométrie posée
+    // sur la sphère, ils couperaient un demi-hémisphère au lieu d'une fenêtre.
+    // La fenêtre continue (`?f3=1`) et le globe ne se croisent pas aujourd'hui —
+    // `empriseFootprint()` rend `null` dès que `empriseCote` vaut 1 — mais un
+    // jour où ils se croiseraient, c'est ici qu'il faudrait porter les plans, et
+    // rien ne le dirait sans cette ligne.
+    const plans = fpEmprise && !poseur.globe ? terrain.plansFenetre() : null
+    const insideBlock = makeInsideBlock(fp)
+    // Computed once per rebuild (depends only on fp) and shared by every
+    // filled-ring build below — see _buildFilledRing / triangulateAndClip.
+    const outline = blockOutline(fp)
     // La résolution du calque, pas celle de la fenêtre (voir le constructeur).
     // `buildLineSegments` la COPIE dans chaque matériau : aucun partage de
     // référence, un export peut donc régler les matériaux sans toucher à cette
@@ -602,7 +642,7 @@ export class WaterLayer {
     ]
     for (const g of groups) {
       if (!g.runs.length) continue
-      const obj = buildLineSegments(g.runs, sample, { color: g.color, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
+      const obj = buildLineSegments(g.runs, poseur, { color: g.color, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
       obj.traverse((o) => { if (o.material) { o.material.opacity = params.waterOpacity ?? 0.9; _coupeALaFenetre(o.material, plans) } })
       this.group.add(obj)
     }
@@ -624,7 +664,7 @@ export class WaterLayer {
         _coupeALaFenetre(areaMaterial, plans)
         const geos = []
         for (const part of areaParts) {
-          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock)
+          const geo = _buildFilledRing(part, dem, poseur, outline, fp, insideBlock)
           if (geo) geos.push(geo)
         }
         const mesh = _meshFusionne(geos, areaMaterial, 17)
@@ -646,6 +686,12 @@ export class WaterLayer {
           half: TERRAIN_SIZE / 2,
           sunDir: this._sun?.dir,
           sunColor: this._sun?.color,
+          // ⚠️ **LE NUANCEUR DU LAC A UNE VERTICALE EN DUR** — voir
+          // `lake-material.js`. Sur la sphère, `+Y` n'est plus le haut : sans ce
+          // repère, le Fresnel et le reflet du soleil sont faux de la latitude
+          // du lieu, et la rampe de couleur sature. `null` hors globe : le
+          // matériau retrouve alors ses uniformes du dépôt.
+          repere: poseur.globe ? poseur.repereLocal(TERRAIN_SIZE / 2) : null,
         })
         _coupeALaFenetre(lakeMaterial, plans)
         this._lakeMats.push(lakeMaterial)
@@ -655,7 +701,7 @@ export class WaterLayer {
           // la fusion vient APRÈS : chaque part reçoit d'abord son propre niveau
           // d'eau (waterLevelOf, la médiane de ses altitudes drapées). Fusionner
           // avant aurait mis Annecy et le Léman au même niveau.
-          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock, true)
+          const geo = _buildFilledRing(part, dem, poseur, outline, fp, insideBlock, true)
           if (geo) geos.push(geo)
         }
         const mesh = _meshFusionne(geos, lakeMaterial, LAKE_RENDER_ORDER)

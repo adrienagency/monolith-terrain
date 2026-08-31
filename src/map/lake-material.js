@@ -70,7 +70,24 @@ const FRAG = /* glsl */ `
   uniform vec3 uSunColor;
   uniform float uSunStrength;
   uniform float uOpacity;
-  uniform float uHalf;     // block half-width, for normalising world XZ
+  uniform float uHalf;     // demi-largeur du bloc, pour normaliser le plan local
+
+  // ══════ LE REPÈRE LOCAL — Tâche D16-b ═════════════════════════════════════
+  //
+  // ⛔ LA VERTICALE ET LE PLAN ÉCRITS PLUS BAS SONT CEUX DU BLOC PLAT. Sur le
+  // globe, la géométrie du lac est posée sur une sphère de rayon 100 : à 46° N
+  // la verticale locale fait 46° avec +Y, et vWorldPos.xz vaut ±100 unités
+  // quand uHalf en vaut 0,16. Le Fresnel, le reflet du soleil ET la rampe de
+  // couleur seraient tous les trois faux, sans que rien ne casse.
+  //
+  // ⚠️ LE REPÈRE VIENT DE monde/sol-globe.js, PAS D'ICI, et il reconstruit
+  // EXACTEMENT le plan du bloc : uEst et uSud sont ses deux axes horizontaux,
+  // uHalf sa demi-largeur convertie en unités de globe. Le fragment retrouve
+  // donc les mêmes p qu'avant, à la courbure près.
+  uniform float uGlobe;    // 0 = dalle plate (le dépôt), 1 = sphère
+  uniform vec3 uCentre;    // l'origine du bloc, en unités de scène
+  uniform vec3 uEst;
+  uniform vec3 uSud;
 
   // value noise — two octaves is all the "variante" this needs; more would
   // start to look like waves, which is not the register we're in
@@ -90,13 +107,14 @@ const FRAG = /* glsl */ `
     // ambitions the rest of this map does not share. The highlight is widened
     // by opening the SPECULAR LOBE instead (below), which gives one smooth
     // sheet of light and stays in the app's quiet register.
-    vec3 N = vec3(0.0, 1.0, 0.0);
+    vec3 N = uGlobe > 0.5 ? normalize(vWorldPos) : vec3(0.0, 1.0, 0.0);
     vec3 V = normalize(cameraPosition - vWorldPos);
     vec3 L = normalize(uSunDir);
 
     // --- body: a broad diagonal ramp, softened by low-frequency noise so the
     // gradient never reads as a straight mechanical wipe across the surface
-    vec2 p = vWorldPos.xz / uHalf;
+    vec3 d = vWorldPos - uCentre;
+    vec2 p = (uGlobe > 0.5 ? vec2(dot(d, uEst), dot(d, uSud)) : vWorldPos.xz) / uHalf;
     float ramp = clamp((p.x + p.y) * 0.35 + 0.5, 0.0, 1.0);
     float grain = vnoise(p * 1.7) * 0.55 + vnoise(p * 4.3) * 0.25;
     float t = clamp(ramp * 0.75 + grain * 0.35, 0.0, 1.0);
@@ -137,7 +155,11 @@ const FRAG = /* glsl */ `
 // Fresnel edge matches the hour of day), `sunDir`/`sunColor` come from the
 // day cycle. polygonOffset matches the old fill material so the lake still
 // wins against the other draped layers.
-export function makeLakeMaterial({ ink, sky, opacity, half, sunDir, sunColor, sunStrength = 1 }) {
+// `repere` — le repère local du globe (`poseur.repereLocal(half)`), ou `null`
+// sur le bloc plat. ⚠️ **Quand il est là, `uHalf` vient de LUI** : c'est la
+// demi-largeur convertie, pas celle du bloc. Deux `half` dans le même appel
+// seraient l'occasion exacte de reprendre le mauvais.
+export function makeLakeMaterial({ ink, sky, opacity, half, sunDir, sunColor, sunStrength = 1, repere = null }) {
   return new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
@@ -156,7 +178,11 @@ export function makeLakeMaterial({ ink, sky, opacity, half, sunDir, sunColor, su
       uSunColor: { value: new THREE.Color(sunColor ?? '#fff4ea') },
       uSunStrength: { value: sunStrength },
       uOpacity: { value: opacity },
-      uHalf: { value: half },
+      uHalf: { value: repere ? repere.demi : half },
+      uGlobe: { value: repere ? 1 : 0 },
+      uCentre: { value: repere ? new THREE.Vector3(repere.centre.x, repere.centre.y, repere.centre.z) : new THREE.Vector3() },
+      uEst: { value: new THREE.Vector3(...(repere?.est ?? [1, 0, 0])) },
+      uSud: { value: new THREE.Vector3(...(repere?.sud ?? [0, 0, 1])) },
     },
   })
 }

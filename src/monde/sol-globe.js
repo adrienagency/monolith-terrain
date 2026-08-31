@@ -152,6 +152,44 @@ export function creerPoseurGlobe({
   }
 
   /**
+   * LE REPÈRE LOCAL, POUR LES NUANCEURS QUI EN ONT UN EN DUR.
+   *
+   * ⚠️ **LE MATÉRIAU DE LAC ÉCRIT `vec3 N = vec3(0.0, 1.0, 0.0)`**
+   * (`map/lake-material.js`) : la verticale du BLOC PLAT. Sur la sphère, la
+   * verticale d'un lac à 46° N n'a plus rien à voir avec `+Y` — 46° d'écart —,
+   * et c'est le Fresnel ET le reflet du soleil qui deviennent faux. Le nuanceur
+   * a donc besoin du repère local, et il vient d'ici plutôt que d'une seconde
+   * écriture chez lui.
+   *
+   * ⚠️ **`demi` EST CONVERTI, ET LA CONVERSION EST LA MÊME QUE PARTOUT.** Le
+   * fragment normalise ses coordonnées par la demi-largeur du bloc
+   * (`uHalf = TERRAIN_SIZE / 2`, 28 unités de BLOC). Laissée telle quelle sur
+   * une géométrie de sphère, la rampe saturerait et le grain descendrait à une
+   * fréquence invisible. `demi × rapportSimilitude()` la ramène en unités de
+   * globe — c'est le `k` de la similitude, et rien d'autre.
+   *
+   * @param {number} demiBloc la demi-largeur du bloc, en unités de bloc
+   */
+  etat.repereLocal = (demiBloc) => {
+    const p = versLatLon(0, 0)
+    if (!p) return null
+    const la = (p.lat * Math.PI) / 180
+    const lo = (p.lon * Math.PI) / 180
+    const sla = Math.sin(la), cla = Math.cos(la)
+    const slo = Math.sin(lo), clo = Math.cos(lo)
+    // ⚠️ **C'EST `repereGlobe` DE `monde/frontiere-rendu.js`, MOT POUR MOT**, et
+    // le test ⑥ le confronte à l'original plutôt que de faire confiance à la
+    // recopie. On ne l'importe pas : `frontiere-rendu.js` porte toute la
+    // similitude de la caméra, et ce module-ci ne doit rien lui devoir.
+    return {
+      centre: etat.placer(0, 0, 0),
+      est: [clo, 0, -slo],
+      sud: [sla * slo, -cla, sla * clo],
+      demi: demiBloc * etat.rapportSimilitude(),
+    }
+  }
+
+  /**
    * Le contrôle de l'en-tête : `echelleGlobe / echelleBloc` DOIT valoir le `k`
    * de la similitude (`facteurEchelle`, `monde/frontiere-rendu.js`). L'exposer
    * plutôt que le supposer est ce qui rend une exagération désaccordée
