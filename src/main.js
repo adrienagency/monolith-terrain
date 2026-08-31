@@ -61,7 +61,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive, planeteEclaireeActive, soleilHeureMondeActif } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
-import { poseFond, plansFond, facteurEchelle } from './monde/frontiere-rendu.js'
+import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
 import { ancrageCartouche, baseCartoucheEnBloc } from './monde/cartouche-globe.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
@@ -4225,6 +4225,39 @@ function largeurBlocM() {
   return dem?.extentMeters || 0
 }
 
+// ══════════ L'ALTITUDE DU PLAN `y = 0` DU BLOC — Tâche R15 ══════════════════
+//
+// ⚠️ **C'EST L'AUTRE MOITIÉ DE `largeurBlocM()`, ET ELLE PREND LE MÊME CHEMIN
+// EXPRÈS.** La similitude bloc → globe a besoin des deux ensemble : la largeur
+// dit l'échelle, celle-ci dit à quelle ALTITUDE poser le plan `y = 0`. Les
+// prendre à deux sources différentes, c'est décrire un bloc qui n'existe pas.
+//
+// **Le zéro du bloc n'est pas la mer**, et les deux écrivains le disent avec les
+// mêmes mots : `monde/fenetre-bornee.js` (« `y = (hauteur − moyenne) × 56 /
+// largeur × exagération` ») et `terrain.js` `_makeDemSampler`
+// (`(altitude − dem.meanM) × echelle`). D'où la paire, dans cet ordre.
+//
+// ⛔ **ET C'EST LE REPLI QUI COMPTE, PAS LA VALEUR — MESURÉ.** `dem` passe à
+// `null` pendant TOUT le rechargement d'un cran (relevé image par image,
+// `.banc/R15/saut-APRES.json` : `dem true→false` sur huit à seize images à
+// chaque cran, `dem.zoom` nul avec). Lire `dem.meanM` seul faisait retomber
+// l'ancre à la mer le temps du chargement, **et la caméra de fond plongeait puis
+// remontait : ×2,3245 puis ×3,0876 d'altitude en une image**, contre 1,0313 au
+// dépôt. La fenêtre bornée, elle, ne disparaît pas — c'est déjà pour ça que
+// `largeurBlocM()` la met en premier, et c'est pour ça qu'`altitudeCadrageM()`
+// ne bougeait pas d'un mètre pendant ces mêmes images (8 705 → 8 668 m).
+//
+// ⚠️ **CE QUI RESTE, ET QUI EST LÉGITIME** : au VRAI changement de bloc la
+// moyenne change (441 → 367 → 605 → 657 → 939 → 1 149 m sur la descente de
+// référence). Ce pas-là est celui du bloc lui-même — le plan `y = 0` se déplace
+// vraiment — et il vaut **×1,025 d'une image de bloc à la suivante**, dans le
+// bruit du dépôt.
+function altitudeAncreBlocM() {
+  const f = terrain.fenetreBornee
+  if (f?.largeurM > 0 && Number.isFinite(f.moyenneM)) return f.moyenneM
+  return params.source === 'real' && Number.isFinite(dem?.meanM) ? dem.meanM : 0
+}
+
 // L'ALTITUDE GÉOMÉTRIQUE DE LA CAMÉRA SUR LE BLOC, EN MÈTRES — sans `dem.meanM`.
 // C'est la grandeur de cadrage de la règle R1 (voir le hook
 // `surfaceCamAltCadrageM` plus bas, qui explique pourquoi il y en a deux).
@@ -4869,6 +4902,35 @@ function majCameraFond() {
   // ce qui se pose sur la sphère de rayon `R_GLOBE` ; la cible, elle, vit à
   // `Y_CIBLE = −0,3`. Lui retrancher son `y` enfoncerait la planète de 0,3 unité
   // de bloc sous la caméra — soit 1 340 m à z12, et 75 km à z3.
+  //
+  // ⚡ **ET LE PLAN `y = 0` N'EST PAS À LA MER : IL EST À LA MOYENNE DU BLOC —
+  // R15.** `monde/fenetre-bornee.js` et `terrain.js` (`_makeDemSampler`) rendent
+  // tous deux `(altitude − moyenne) × echelle`. Sans `altitudeAncreM`, `poseFond`
+  // posait ce plan sur la sphère nue et enfonçait `camGlobe` de cette moyenne :
+  // **1 174 m au-dessus de la mer au Mont-Blanc pour un bloc dont le point le
+  // plus bas est à 3 779 m**, donc 2 605 m SOUS lui. Le sol du globe étant
+  // dessiné en `FrontSide`, il ne dessinait plus rien — c'est ça, l'« écran vide
+  // en montagne » (mesuré aux sept lieux, `.banc/R15/AVANT.json` ; le tableau et
+  // le seuil exact sont dans `poseFond`).
+  // ⛔ **Ce n'est pas une butée qu'on ajoute** : la hauteur au-dessus du sol
+  // redevient `altitudeCadrageM()` exactement, à toute altitude.
+  //
+  // ⚠️ **LA VALEUR VIENT D'`altitudeAncreBlocM()`, ET SON REPLI EST LE POINT
+  // DÉLICAT** — `dem` disparaît pendant chaque rechargement de cran. Le chiffre
+  // du dégât est là-bas, avec la mesure.
+  // ⚠️ **ET L'EXAGÉRATION EST CELLE DU GLOBE, PAS UNE SEIZIÈME LECTURE DE
+  // `lireExageration`.** L'ancre nomme un RAYON sur le globe : lui seul sait où
+  // il dessine une altitude, et il le sait dès sa naissance (`globe.js` lit
+  // l'exagération au constructeur ET dans `majExageration` — les deux lignes que
+  // le recensement de `test/fenetre-branchee.test.js` ①b compte). Sous « une
+  // seule terre » elle vaut celle du bloc : **les deux relevées à 2 aux sept
+  // lieux du banc.**
+  // ⛔ **ET IL N'Y A PAS DE REPLI INVENTÉ** : sans exagération du globe, l'ancre
+  // reste à `R_GLOBE` — c'est-à-dire le comportement du dépôt d'avant R15, et
+  // pas une valeur devinée qui poserait la planète ailleurs que là où le GPU la
+  // dessine.
+  const altitudeAncreM = altitudeAncreBlocM()
+  const exagAncre = globe?.exaggeration > 0 ? globe.exaggeration : 0
   const ancreXZ = controls.target
   const ancre = latLonDuBloc(ancreXZ.x, ancreXZ.z)
   if (!ancre) return
@@ -4876,6 +4938,8 @@ function majCameraFond() {
     lat: ancre.lat,
     lon: ancre.lon,
     origineBloc: [ancreXZ.x, 0, ancreXZ.z],
+    altitudeAncreM,
+    exageration: exagAncre,
     positionBloc: [camera.position.x, camera.position.y, camera.position.z],
     quaternionBloc: camera.getWorldQuaternion(_qBloc).toArray(),
     extentMeters: largeur,
@@ -4887,7 +4951,12 @@ function majCameraFond() {
   })
   camGlobe.position.set(pose.position[0], pose.position[1], pose.position[2])
   camGlobe.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3])
-  const plans = plansFond({ position: pose.position })
+  // ⚠️ **`rayonDuSol` OU `near` TRANCHE LE TERRAIN — R15.** `near` vaut un
+  // cinquième de la hauteur AU-DESSUS DU SOL ; depuis que l'ancre est relevée à
+  // l'altitude du bloc, `d − R_GLOBE` ne la donne plus. Le chiffre du dégât est
+  // dans `plansFond`. C'est le MÊME rayon que celui de la pose : on ne le
+  // recalcule pas, on le redemande à la même loi avec les mêmes arguments.
+  const plans = plansFond({ position: pose.position, rayonDuSol: rayonAncre({ altitudeAncreM, exageration: exagAncre }) })
   camGlobe.near = plans.near
   camGlobe.far = plans.far
   camGlobe.updateProjectionMatrix()
@@ -4910,6 +4979,13 @@ function majCameraFond() {
     lat: ancre.lat,
     lon: ancre.lon,
     origineBloc: [ancreXZ.x, 0, ancreXZ.z],
+    // ⚠️ **LES MÊMES QUE LA CAMÉRA, ET C'EST OBLIGATOIRE — R15.** `altitudeAncreM`
+    // translate l'image de la similitude ; deux valeurs différentes ici et
+    // au-dessus déplaceraient le soleil PAR RAPPORT à la caméra, c'est-à-dire
+    // exactement ce que la Tâche D16-a a rendu neutre. Le test R15 ④ vérifie que
+    // la correction est une translation, donc que le couple traverse ensemble.
+    altitudeAncreM,
+    exageration: exagAncre,
     positionBloc: [sunDisc.positionBloc.x, sunDisc.positionBloc.y, sunDisc.positionBloc.z],
     quaternionBloc: _IDENTITE, // un sprite fait toujours face à la caméra
     extentMeters: largeur,

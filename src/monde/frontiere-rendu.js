@@ -78,7 +78,7 @@
 // aucun test (§0 du plan). Il rend des tableaux de nombres ; le branchement
 // three.js vit dans `main.js` et n'a, lui, d'autre filet que l'œil.
 
-import { R_GLOBE, ORBITAL_M_PER_UNIT } from '../geo.js'
+import { R_GLOBE, ORBITAL_M_PER_UNIT, EARTH_RADIUS_M } from '../geo.js'
 
 const D2R = Math.PI / 180
 
@@ -191,14 +191,75 @@ export function altitudeFondM({ camY, extentMeters, span }) {
 // bloc ; l'écart entre les deux est du second ordre (`d² / 2R` : **17 km pour un
 // bloc de 14 005 km à z3**, soit 0,12 % de sa largeur).
 // ⛔ **Ce n'est donc PAS neutre au bit près, et le §③ du rapport le mesure.**
-export function poseFond({ lat, lon, positionBloc, quaternionBloc, extentMeters, span, origineBloc = [0, 0, 0] }) {
+// ══════════ ⚡ `altitudeAncreM` — LE PLAN `y = 0` DU BLOC N'EST PAS LA MER,
+//            ET C'EST LA RÉPARATION DE « L'ÉCRAN VIDE EN MONTAGNE » (R15) ═══
+//
+// ⛔ **`R_GLOBE` SEUL EST UNE AFFIRMATION, ET ELLE EST FAUSSE DÈS QU'IL Y A DU
+// RELIEF.** Le rayon sur lequel on pose l'ancre dit à quelle ALTITUDE se trouve
+// le plan `y = 0` du bloc. `terrain.js` (`_makeDemSampler`) rend
+// `(altitude − dem.meanM) × echelle` : **le zéro du bloc est l'altitude MOYENNE
+// de son emprise**, pas le niveau de la mer. Poser ce plan à `R_GLOBE`, c'est
+// enfoncer TOUTE la caméra de fond de `dem.meanM`.
+//
+// ⚠️ **C'est le même oubli que `monde/sol-globe.js` §② documente** (« oublier
+// `dem.meanM` poserait toute la cartographie à la mer sous les Alpes »), au
+// second des deux endroits qui traversent verticalement.
+//
+// **Mesuré au navigateur** (`.banc/R15/AVANT.json`, mode sphère par défaut, z16,
+// sept lieux) : `camGlobe` sortait à `altitudeCadrageM()` mètres au-dessus de la
+// MER — 1 174 m au Mont-Blanc — pour un bloc dont le point le plus bas est à
+// 3 779 m. **3 309 m sous son propre plan `y = 0`, 2 605 m sous son point le
+// plus bas.** Le sol du globe est dessiné en `FrontSide` : par en dessous il ne
+// dessine rien, et l'écran est vide. Denver, Mexico, Cusco, Lhassa, Mont-Blanc :
+// tous vides ; Amsterdam et le Sahara : corrects.
+//
+// ➡️ **LE SEUIL N'EST PAS UNE ALTITUDE, C'EST UNE ÉGALITÉ** :
+// `dem.meanM > altitudeCadrageM()`. Et `altitudeCadrageM()` vaut
+// `0,918408 × emprise` — constant à six décimales sur les sept lieux, parce que
+// la caméra de surface est COLLÉE à `controls.maxDistance = DISTANCE_MAX_SURFACE`
+// (`distBloc = 150,000` aux sept). Comme l'emprise porte `cos(lat)`, le seuil
+// vaut 1 029 m à Amsterdam et 1 638 m à Cusco : **il n'y a pas de nombre unique
+// à écrire quelque part**, et c'est pourquoi l'encadrement 884 m / 1 600 m de
+// l'attaque ne se refermait pas.
+//
+// ⚠️ **ET LA CORRECTION N'EST PAS UNE BUTÉE.** On ne borne rien, on ne claque
+// rien : on translate l'ancre de la hauteur qu'elle avait toujours eue. La
+// hauteur au-dessus du sol redevient `altitudeCadrageM()`, exactement, à toute
+// altitude — le test R15 ① le vérifie à 1e-9 près.
+//
+// ⚠️ **LA LOI DE MONTÉE EST CELLE DU GLOBE, PAS UNE SECONDE** : `rayonAncre`
+// écrit `R_GLOBE + h × (R_GLOBE / EARTH_RADIUS_M) × exagération`, c'est-à-dire
+// `dispScale` de `_buildMesh` et `uUnitesParMetre` de `setExaggeration`, mot
+// pour mot. **`exageration` est donc celle du GLOBE** (`globe.exaggeration`) :
+// l'ancre nomme un RAYON sur le globe, et le globe est seul à savoir où il
+// dessine l'altitude `h`. Sous « une seule terre » elle est égale à celle du
+// bloc (`lireExageration(params)`) — relevé 2 aux deux bouts sur les sept lieux
+// du banc.
+/**
+ * Le rayon, en unités de globe, où poser le point d'ancrage de la similitude.
+ *
+ * @param {{altitudeAncreM?: number, exageration?: number}} arg
+ *   `altitudeAncreM` : l'altitude RÉELLE, en mètres au-dessus de la mer, que
+ *   vaut le plan `y = 0` du bloc — c'est-à-dire `dem.meanM`.
+ *   ⛔ **Non fini ⇒ `R_GLOBE`**, jamais `NaN` : une planète à `NaN` disparaît
+ *   sans rien dire, et c'est le cas des premières images où `dem` est nul.
+ * @returns {number}
+ */
+export function rayonAncre({ altitudeAncreM = 0, exageration = 1 } = {}) {
+  const h = Number(altitudeAncreM)
+  if (!Number.isFinite(h)) return R_GLOBE
+  return R_GLOBE + h * ((R_GLOBE / EARTH_RADIUS_M) * exageration)
+}
+
+export function poseFond({ lat, lon, positionBloc, quaternionBloc, extentMeters, span, origineBloc = [0, 0, 0], altitudeAncreM = 0, exageration = 1 }) {
   const k = facteurEchelle({ extentMeters, span })
   const { est, haut, sud } = repereGlobe(lat, lon)
+  const rayon = rayonAncre({ altitudeAncreM, exageration })
   const bx = positionBloc[0] - (origineBloc[0] || 0)
   const by = positionBloc[1] - (origineBloc[1] || 0)
   const bz = positionBloc[2] - (origineBloc[2] || 0)
   const position = [0, 1, 2].map(
-    (i) => haut[i] * R_GLOBE + k * (bx * est[i] + by * haut[i] + bz * sud[i])
+    (i) => haut[i] * rayon + k * (bx * est[i] + by * haut[i] + bz * sud[i])
   )
   return {
     position,
@@ -229,9 +290,35 @@ export function poseFond({ lat, lon, positionBloc, quaternionBloc, extentMeters,
 // tampon de profondeur doit séparer, c'est l'avant de la sphère de son arrière,
 // soit 200 unités d'écart — et il n'est **jamais** composé avec celui du bloc,
 // puisque `main.js` efface la profondeur entre les deux passes.
-export function plansFond({ position, planProcheMin = 1e-5, planProcheMax = 0.5 }) {
+// ══════════ ⚡ `rayonDuSol` — `near` MESURE UNE HAUTEUR AU-DESSUS DU SOL,
+//            ET SANS ÇA LA CORRECTION R15 CLIPPERAIT LE TERRAIN ══════════════
+//
+// `near = hauteur × 0,2` ne se tient QUE si `hauteur` est la hauteur au-dessus
+// de ce que la caméra survole. Tant que l'ancre était à `R_GLOBE`, `d − R_GLOBE`
+// l'était par accident : la caméra était posée à partir de ce même rayon.
+// **En relevant l'ancre à l'altitude du sol (`altitudeAncreM`), `d − R_GLOBE`
+// devient une altitude au-dessus de la MER, et `near` avec elle.**
+//
+// ⛔ **Le calcul du dégât, pour qu'on ne le redécouvre pas à l'écran.** Au
+// Mont-Blanc z16, l'ancre monte de `4 483 × 2 / 63 710 = 0,1407` unité de globe.
+// Laissé sur `R_GLOBE`, `near` passerait de **0,00737 à 0,03552** — quand le
+// point visé n'est qu'à **0,05367** unité de la caméra. **Le plan proche
+// mangerait les deux tiers du chemin** ; rapport `near / distance` mesuré :
+// **0,662 au Mont-Blanc · 0,781 sur un sol moyen de 5 500 m · 1,073 à 8 000 m**,
+// où il passe DEVANT le sol visé. **La correction se paierait par un terrain
+// tranché au ras de l'objectif.**
+//
+// ➡️ On passe donc `rayonDuSol` — le `rayonAncre` employé par la pose — et
+// `near` retrouve exactement la valeur qu'il avait avant R15 (0,00737 au
+// Mont-Blanc), parce qu'il mesure de nouveau la même chose.
+// ⚠️ **`far`, LUI, RESTE SUR `R_GLOBE`**, et ce n'est pas une inattention : il
+// doit contenir le limbe OPPOSÉ de la sphère nue, dont le rayon est `R_GLOBE`.
+// Le mesurer depuis le sol le rendrait trop court d'exactement l'altitude du
+// sol, et rognerait l'horizon au-dessus des Andes.
+export function plansFond({ position, planProcheMin = 1e-5, planProcheMax = 0.5, rayonDuSol = R_GLOBE }) {
   const d = Math.hypot(position[0], position[1], position[2])
-  const hauteur = Math.max(d - R_GLOBE, 0)
+  const sol = Number.isFinite(rayonDuSol) && rayonDuSol > 0 ? rayonDuSol : R_GLOBE
+  const hauteur = Math.max(d - sol, 0)
   const near = Math.min(Math.max(hauteur * 0.2, planProcheMin), planProcheMax)
   return { near, far: d + R_GLOBE + 1 }
 }

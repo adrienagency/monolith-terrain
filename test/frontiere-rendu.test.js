@@ -31,6 +31,7 @@ import {
   altitudeFondM,
   poseFond,
   plansFond,
+  rayonAncre,
 } from '../src/monde/frontiere-rendu.js'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, EARTH_RADIUS_M, latLonToSphere } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
@@ -608,4 +609,203 @@ test('le rapport far/near d’un espace unique est mesuré, pas supposé', () =>
   // « far/near doit rester sous 10⁴ » : la règle porte sur des scènes où la
   // précision doit être UNIFORME. Ici la précision utile suit la distance.
   assert.equal(Math.max(...Object.values(releve)), 8.405e5)
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  R15 — « EN MONTAGNE, LA CAMÉRA PASSE SOUS LE BLOC ET L'ÉCRAN DEVIENT VIDE »
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **LE PLAN `y = 0` DU BLOC N'EST PAS LE NIVEAU DE LA MER.** `terrain.js`
+// (`_makeDemSampler`) rend `(altitude − dem.meanM) × echelle` : le zéro du bloc
+// est l'altitude MOYENNE de son emprise. `poseFond` posait ce plan sur la sphère
+// de rayon `R_GLOBE`, c'est-à-dire à la mer — donc `dem.meanM` trop bas.
+//
+// **Relevé au navigateur, `.banc/R15/AVANT.json`, mode sphère par défaut, z16 :**
+//
+//   | lieu       | emprise (m) | `altitudeCadrageM()` | `dem.meanM` | à l'écran |
+//   |------------|-------------|----------------------|-------------|-----------|
+//   | Amsterdam  | 1 120       | 1 029                | 1           | ✅ bloc    |
+//   | Sahara     | 1 656       | 1 521                | 74          | ✅ bloc    |
+//   | Denver     | 1 411       | 1 296                | 1 600       | ⛔ VIDE    |
+//   | Mexico     | 1 730       | 1 589                | 2 235       | ⛔ VIDE    |
+//   | Cusco      | 1 784       | 1 638                | 3 360       | ⛔ VIDE    |
+//   | Lhassa     | 1 594       | 1 464                | 3 659       | ⛔ VIDE    |
+//   | Mont-Blanc | 1 278       | 1 174                | 4 483       | ⛔ VIDE    |
+//
+// ➡️ **Le seuil n'est pas une altitude en mètres : c'est une ÉGALITÉ.** L'écran
+// se vide dès que `dem.meanM > altitudeCadrageM()`, et `altitudeCadrageM()` vaut
+// `0,918408 × emprise` — constant à six décimales sur les sept lieux, parce que
+// la caméra est COLLÉE à `controls.maxDistance = DISTANCE_MAX_SURFACE` (mesuré :
+// `distBloc = 150,000` partout, et un recul ×4 à la main y revient dans la même
+// image). C'est pour ça que l'attaquant encadrait le seuil entre 884 m et
+// 1 600 m sans pouvoir le fixer : il dépend de la latitude, par le `cos(lat)`
+// de l'emprise.
+
+const R15 = { // Mont-Blanc, z16 — `.banc/R15/AVANT.json`
+  lat: 45.8326, lon: 6.8652,
+  extentMeters: 1278.1929826943012,
+  camY: 102.86169718661748,
+  exageration: 2,
+  meanM: 4483.126997604966,
+}
+const altReelleM = (position, exageration) =>
+  ((Math.hypot(position[0], position[1], position[2]) - R_GLOBE) * ORBITAL_M_PER_UNIT) / exageration
+
+test('R15 — la caméra de fond se pose au-dessus du SOL du bloc, pas au-dessus de la MER', () => {
+  const { lat, lon, extentMeters, camY, exageration, meanM } = R15
+  const span = TERRAIN_SIZE
+  const p = poseFond({
+    lat, lon, positionBloc: [0, camY, 0], quaternionBloc: [0, 0, 0, 1],
+    extentMeters, span, altitudeAncreM: meanM, exageration,
+  })
+  // la hauteur AU-DESSUS DU PLAN DU BLOC — la seule qui décide si l'on voit
+  const hauteurSurLeBloc = altReelleM(p.position, exageration) - meanM
+  assert.ok(hauteurSurLeBloc > 0,
+    `la caméra de fond est ${(-hauteurSurLeBloc).toFixed(0)} m SOUS le plan du bloc`)
+  // ⚡ et elle vaut EXACTEMENT l'altitude de cadrage : la similitude est exacte,
+  // ce n'est pas un réglage approché
+  const attendu = altitudeSurfaceM({ camY, extentMeters, span, exageration })
+  assert.ok(Math.abs(hauteurSurLeBloc - attendu) < 1e-9, `${hauteurSurLeBloc} ≠ ${attendu}`)
+})
+
+test('R15 — MUTATION : oublier `altitudeAncreM` enfonce la caméra d’EXACTEMENT `dem.meanM`', () => {
+  const { lat, lon, extentMeters, camY, exageration, meanM } = R15
+  const span = TERRAIN_SIZE
+  const commun = { lat, lon, positionBloc: [0, camY, 0], quaternionBloc: [0, 0, 0, 1], extentMeters, span, exageration }
+  const bon = altReelleM(poseFond({ ...commun, altitudeAncreM: meanM }).position, exageration)
+  const faux = altReelleM(poseFond({ ...commun, altitudeAncreM: 0 }).position, exageration)
+  assert.ok(Math.abs((bon - faux) - meanM) < 1e-9, `l’écart n’est pas ${meanM} m`)
+  // le régime faux, en clair : 1 174 m annoncés par l'altimètre de cadrage, et
+  // 3 309 m SOUS le plan du bloc. ⚠️ Sous le point le plus BAS du relevé
+  // (min 3 779 m) de 2 605 m — et le sol est dessiné en `FrontSide`, donc
+  // rigoureusement invisible par en dessous : c'est ça, l'écran vide.
+  assert.ok(Math.abs(faux - 1173.9026743925053) < 1e-3, `l’altimètre du fond a bougé : ${faux}`)
+  assert.ok(faux - meanM < -3309 && faux - meanM > -3310, `enfoncement : ${faux - meanM}`)
+})
+
+test('R15 — le seuil est une ÉGALITÉ, et les sept lieux du banc s’y rangent', () => {
+  // `.banc/R15/AVANT.json` — `nCouleurs` est la mesure de pixels de la fenêtre
+  // centrale (128 px de large, IHM exclue) : ≤ 45 couleurs = écran vide,
+  // ≥ 100 = bloc dessiné. Le jugement « vide » n'est plus oculaire.
+  const banc = [
+    { nom: 'amsterdam', ext: 1120.4133713612624, meanM: 1.2545427202165954, nCouleurs: 158 },
+    { nom: 'sahara', ext: 1656.1936413540716, meanM: 74.13429260253906, nCouleurs: 469 },
+    { nom: 'denver', ext: 1410.9689540295977, meanM: 1600.4103454589844, nCouleurs: 36 },
+    { nom: 'mexico', ext: 1730.4783154581598, meanM: 2235.396484375, nCouleurs: 37 },
+    { nom: 'cusco', ext: 1783.8016154602, meanM: 3360.354248046875, nCouleurs: 39 },
+    { nom: 'lhassa', ext: 1594.1341697142006, meanM: 3658.5810546875, nCouleurs: 37 },
+    { nom: 'mont-blanc', ext: 1278.1929826943012, meanM: 4483.126997604966, nCouleurs: 36 },
+  ]
+  // la caméra est collée à la butée : `camY` est le MÊME aux sept lieux
+  const camY = 102.86169718661748, exageration = 2, span = TERRAIN_SIZE
+  for (const l of banc) {
+    const seuilM = altitudeSurfaceM({ camY, extentMeters: l.ext, span, exageration })
+    // le rapport sans dimension, celui qui ne dépend NI du lieu NI du zoom
+    assert.ok(Math.abs(seuilM / l.ext - 0.918408) < 1e-5, `${l.nom} : ${(seuilM / l.ext).toFixed(6)}`)
+    const enterre = l.meanM > seuilM
+    const vide = l.nCouleurs <= 45
+    assert.equal(enterre, vide, `${l.nom} : sol ${l.meanM.toFixed(0)} m, seuil ${seuilM.toFixed(0)} m, ${l.nCouleurs} couleurs`)
+  }
+})
+
+test('R15 — la correction est une TRANSLATION RADIALE : ni `k`, ni l’axe, ni les écarts ne bougent', () => {
+  // ⚠️ **C'EST CE QUI GARDE LE DISQUE SOLAIRE NEUTRE À L'IMAGE** (Tâche D16-a) :
+  // la caméra ET le sprite traversent par la MÊME transformation, donc la
+  // direction et la taille apparentes sont inchangées par construction. Si
+  // `altitudeAncreM` déformait au lieu de translater, cette identité tomberait.
+  const { lat, lon, extentMeters, exageration, meanM } = R15
+  const span = TERRAIN_SIZE
+  const commun = { lat, lon, quaternionBloc: [0.1, 0.2, 0.3, 0.927], extentMeters, span, origineBloc: [3, 0, -4] }
+  const A = [7, 102.8, -5], B = [-11, 40.5, 9]
+  const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
+  const a0 = poseFond({ ...commun, positionBloc: A })
+  const b0 = poseFond({ ...commun, positionBloc: B })
+  const a1 = poseFond({ ...commun, positionBloc: A, altitudeAncreM: meanM, exageration })
+  const b1 = poseFond({ ...commun, positionBloc: B, altitudeAncreM: meanM, exageration })
+  assert.equal(a1.k, a0.k, 'le facteur d’échelle a bougé')
+  assert.deepEqual(a1.quaternion, a0.quaternion, 'le quaternion a bougé')
+  assert.ok(Math.abs(dist(a1.position, b1.position) - dist(a0.position, b0.position)) < 1e-12,
+    'ce n’est plus une isométrie du couple caméra/sprite')
+  // et le déplacement est LE MÊME vecteur pour les deux : une translation
+  for (let i = 0; i < 3; i++) {
+    assert.ok(Math.abs((a1.position[i] - a0.position[i]) - (b1.position[i] - b0.position[i])) < 1e-12)
+  }
+})
+
+test('R15 — sans `altitudeAncreM`, `poseFond` rend EXACTEMENT ce qu’elle rendait', () => {
+  // non-régression : `ancrageCartouche` (`monde/cartouche-globe.js`) appelle sans
+  // l'argument — le cartouche suit le repère des parois du crop, qui est posé sur
+  // la SPHÈRE NUE (`parois-crop.js` §2) — et doit rester au bit près.
+  const extentMeters = 81800, span = TERRAIN_SIZE
+  for (const { lat, lon } of LIEUX) {
+    const P = [7, 26.7, -5], qb = [0.1, 0.2, 0.3, 0.927]
+    const sans = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span })
+    const zero = poseFond({ lat, lon, positionBloc: P, quaternionBloc: qb, extentMeters, span, altitudeAncreM: 0, exageration: 2.8 })
+    assert.deepEqual(zero.position, sans.position)
+    assert.deepEqual(zero.quaternion, sans.quaternion)
+  }
+})
+
+test('R15 — `rayonAncre` est la loi du globe, MOT POUR MOT — pas une seconde', () => {
+  // `globe.js` `_buildMesh` : `dispScale = (R_GLOBE / EARTH_RADIUS_M) × exagération`,
+  // et `setExaggeration` pose `uUnitesParMetre` à la même expression. Une seconde
+  // écriture divergerait le jour où l'exagération bougerait — c'est la classe de
+  // défaut « facteur 121,6 / facteur 10 / facteur 130,4 » de ce chantier.
+  for (const exageration of [1, 2, 2.5, 2.8, 5]) {
+    for (const hM of [0, 74, 1600, 4483.126997604966, 8848]) {
+      const dispScale = (R_GLOBE / EARTH_RADIUS_M) * exageration
+      assert.ok(Math.abs(rayonAncre({ altitudeAncreM: hM, exageration }) - (R_GLOBE + hM * dispScale)) < 1e-12)
+    }
+  }
+  // ⛔ et un `altitudeAncreM` non fini ne pose pas la planète à `NaN` : il vaut zéro
+  for (const mauvais of [undefined, null, NaN, Infinity, 'x']) {
+    assert.equal(rayonAncre({ altitudeAncreM: mauvais, exageration: 2 }), R_GLOBE)
+  }
+})
+
+test('R15 — `near` mesure une hauteur au-dessus du SOL : sans `rayonDuSol`, la correction tranche le terrain', () => {
+  // ⚠️ **LE PIÈGE DE LA CORRECTION, CHIFFRÉ.** En relevant l'ancre à l'altitude
+  // du sol, `d − R_GLOBE` cesse d'être la hauteur au-dessus de ce que la caméra
+  // survole : `near` se met à suivre l'altitude au-dessus de la MER.
+  const { lat, lon, extentMeters, camY, exageration, meanM } = R15
+  const span = TERRAIN_SIZE
+  // le déport horizontal de la vue de trois quarts, tel qu'il est à la butée :
+  // `distBloc = 150`, pente d'arrivée 18/19 → jambe horizontale ≈ 108,9
+  const horizontal = Math.sqrt(150 * 150 - (camY + 0.3) * (camY + 0.3))
+  const pose = poseFond({
+    lat, lon, positionBloc: [horizontal, camY, 0], quaternionBloc: [0, 0, 0, 1],
+    extentMeters, span, altitudeAncreM: meanM, exageration,
+  })
+  const sol = rayonAncre({ altitudeAncreM: meanM, exageration })
+  const bon = plansFond({ position: pose.position, rayonDuSol: sol })
+  const faux = plansFond({ position: pose.position }) // `R_GLOBE` par défaut
+  // ① `near` retrouve EXACTEMENT ce qu'il valait avant R15 : 0,00737 au relevé
+  //    navigateur (`.banc/R15/AVANT.json`, `camGlobe.near`)
+  assert.ok(Math.abs(bon.near - 0.00737) < 5e-5, `near = ${bon.near}`)
+  // ② et le régime fautif le multiplie par ~4,8
+  assert.ok(faux.near / bon.near > 4, `le piège ne mord plus : ×${(faux.near / bon.near).toFixed(2)}`)
+  // ③ ce que ça coûterait : la distance de la caméra au point visé, en unités de
+  //    globe. `near` fautif s'en approche à moins de moitié — et sur un plateau
+  //    plus haut il le dépasse.
+  const cible = poseFond({
+    lat, lon, positionBloc: [0, 0, 0], quaternionBloc: [0, 0, 0, 1],
+    extentMeters, span, altitudeAncreM: meanM, exageration,
+  }).position
+  const dCible = Math.hypot(
+    pose.position[0] - cible[0], pose.position[1] - cible[1], pose.position[2] - cible[2])
+  assert.ok(bon.near < dCible / 2, `near correct trop grand : ${bon.near} vs ${dCible}`)
+  // ⚡ **LE CROISEMENT EST MESURÉ, PAS ESTIMÉ** : le régime fautif passe DEVANT
+  //    le point visé à partir d'un sol moyen de 8 000 m (rapport near/distance :
+  //    0,662 à 4 483 m · 0,781 à 5 500 m · **1,073 à 8 000 m** · 1,541 à 12 000 m).
+  const haut = 8000
+  const poseH = poseFond({
+    lat, lon, positionBloc: [horizontal, camY, 0], quaternionBloc: [0, 0, 0, 1],
+    extentMeters, span, altitudeAncreM: haut, exageration,
+  })
+  assert.ok(plansFond({ position: poseH.position }).near > dCible,
+    'la démonstration du dégât ne tient plus — refaire le calcul du commentaire')
+  assert.ok(plansFond({ position: poseH.position, rayonDuSol: rayonAncre({ altitudeAncreM: haut, exageration }) }).near < dCible / 2)
+  // ④ `far` reste mesuré depuis `R_GLOBE` : il doit contenir le limbe opposé
+  assert.equal(bon.far, faux.far)
+  assert.ok(bon.far > Math.hypot(pose.position[0], pose.position[1], pose.position[2]) + R_GLOBE)
 })
