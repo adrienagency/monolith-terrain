@@ -172,7 +172,17 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // toponymes à une autre altitude que le relief qu'ils drapent, au facteur
   // `exagAvant / exagApres`. Le compte de `main.js` passe de 5 à 6, EN PLACE ;
   // les quatre autres lignes n'ont pas bougé d'un caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 6, 'src/globe.js': 2 }
+  // ⚠️ **ET LE DIX-SEPTIÈME EST ARRIVÉ AVEC LA TÂCHE R18, POUR LA MÊME RAISON
+  // EXACTEMENT QUE LE SEIZIÈME.** Les SOMMETS (`peaksLayer`) sont projetés sous
+  // la sphère à travers le même adaptateur bloc ↔ globe que les rivières et les
+  // toponymes (`poseurDesReperes`, `main.js`) : il lui faut la même `echelleBloc`,
+  // donc la même exagération VIVANTE. Une valeur figée poserait les repères de
+  // sommet à une autre altitude que le relief qu'ils désignent, au facteur
+  // `exagAvant / exagApres` — c'est la classe de défaut n° 1 de ce chantier
+  // (SEPT conversions ratées, dont un facteur 121,6). Le compte de `main.js`
+  // passe de 6 à 7, EN PLACE ; les quatre autres lignes n'ont pas bougé d'un
+  // caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 7, 'src/globe.js': 2 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))

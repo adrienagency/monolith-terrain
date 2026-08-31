@@ -55,14 +55,14 @@ test('① DRAPEAU LEVÉ : le ciné est le SEUL éteint — l’exception ne déb
   // BOUT** : Adrien demandait ces boutons, on n'en retire qu'un, et pour une
   // raison mesurée.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: true }),
-    { socle: false, boutons: true, cine: false, cartouche: true, carto: true })
+    { socle: false, boutons: true, cine: false, cartouche: true, carto: true, reperes: true })
 })
 
 test('① DRAPEAU LEVÉ, hors surface : tout s’éteint, boutons compris', () => {
   // ⚠️ En orbite la planète EST le sujet : un raccourci isométrique « sur le
   // bloc » n'a plus de bloc, et le coin cartographie n'a plus de carte.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: false }),
-    { socle: false, boutons: false, cine: false, cartouche: false, carto: false })
+    { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false })
 })
 
 test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se confondent', () => {
@@ -71,7 +71,7 @@ test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se 
   // booléen, celui d'avant la tâche, au bit près.
   for (const surface of [true, false]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface }),
-      { socle: surface, boutons: surface, cine: surface, cartouche: surface, carto: surface },
+      { socle: surface, boutons: surface, cine: surface, cartouche: surface, carto: surface, reperes: surface },
       'sans drapeau, les QUATRE réponses doivent être le même booléen')
   }
 })
@@ -82,11 +82,11 @@ test('① les entrées molles sont ramenées à des booléens, pas propagées te
   // loin, pas ici. On borne au bord.
   for (const e of [undefined, null, 0, '', NaN]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: false, boutons: false, cine: false, cartouche: false, carto: false })
+      { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false })
   }
   for (const e of [1, 'oui', {}]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: true, boutons: true, cine: true, cartouche: true, carto: true })
+      { socle: true, boutons: true, cine: true, cartouche: true, carto: true, reperes: true })
   }
 })
 
@@ -328,4 +328,69 @@ test('③ LE CRÉDIT EST RESYNCHRONISÉ QUAND LE CROP PREND LA PHOTO — sinon l
 test('③ `main.js` importe la loi plutôt que de la réécrire', () => {
   assert.ok(/import \{ visibiliteSurface \} from '\.\/monde\/visibilite-surface\.js'/.test(MAIN),
     'la loi n’est pas importée')
+})
+
+// ══════════════════════════════════════ ④ LES REPÈRES — Tâche R18, paquet (a)
+//
+// > **Adrien, 2026-08-31 :** « On a plein de choses qui ne fonctionnent pas
+// > encore en mode sphère. »
+//
+// ⛔ **« Sommets » ET « Points cotés » SONT LE §5 UNE TROISIÈME FOIS.** Les deux
+// interrupteurs de la section « Repères » du panneau Carte passaient par
+// `socleAffiche()`, borné à FAUX sous le drapeau : `setLabelsVisible(v && socleAffiche())`
+// et `peaksLayer.update(camera, w, h, socleAffiche())`. Mesuré à l'écran
+// (`.banc/R18/fige-defaut`, mouvement ambiant coupé, plancher de bruit 0,0000
+// sur six relevés) : **écart moyen 0,000 et gradient 0,000** aux deux bouts de
+// chaque interrupteur — l'image est identique AU BIT PRÈS.
+//
+// ⚡ **ET LEUR QUESTION EST CELLE DES BOUTONS, PAS CELLE DU MAILLAGE** : un
+// sommet nommé se pose sur le relief qu'on regarde, et le relief qu'on regarde
+// est le crop. C'est le raisonnement du §4 (cartouche) et du §5 (carto), mot
+// pour mot, appliqué au troisième groupe qui l'attendait.
+test('④ DRAPEAU LEVÉ, en surface : les repères (sommets, points cotés) sont ALLUMÉS', () => {
+  const v = visibiliteSurface({ terreUnique: true, surface: true })
+  assert.equal(v.reperes, true,
+    'les sommets et les points cotés restent éteints sous la sphère — mesuré 0,000 à l’écran')
+  // ⚠️ ET ILS SUIVENT LA VUE, PAS LE DRAPEAU : hors surface, personne.
+  assert.equal(visibiliteSurface({ terreUnique: true, surface: false }).reperes, false,
+    'les repères survivent à la sortie de la vue de surface')
+  // ⚠️ SANS DRAPEAU, RIEN NE CHANGE — c'est le comportement du bloc plat.
+  assert.equal(visibiliteSurface({ terreUnique: false, surface: true }).reperes, true)
+  assert.equal(visibiliteSurface({ terreUnique: false, surface: false }).reperes, false)
+})
+
+test('④ LES SOMMETS ONT CHANGÉ DE PRÉDICAT, DE CAMÉRA ET D’ESPACE', () => {
+  // ⚠️ **`socleAffiche()` GARDE SES LECTEURS, ET C'EST JUSTE** : les calques du
+  // bloc PLAT lui appartiennent, et le bornage à faux est le geste même de la
+  // Tâche I. Ce qui se vérifie ici, c'est que les sommets en sont SORTIS — et
+  // qu'ils sont sortis vers le bon prédicat, la bonne caméra, le bon espace.
+  const sansCommentaires = MAIN.replace(/\/\/[^\n]*/g, '')
+  assert.ok(/function reperesAffiches\(\)/.test(sansCommentaires), 'le prédicat des repères n’existe pas')
+  assert.equal((sansCommentaires.match(/reperesAffiches\(\)/g) || []).length, 2,
+    'le prédicat des repères n’a pas exactement son lecteur (plus sa définition)')
+  // ⛔ **ET IL NE LIT PAS `veilleSocle`** — jamais nourrie sous la sphère, elle
+  // reste FAUSSE pour toujours : c'est le piège n° 1 de ce chantier.
+  const iPred = MAIN.indexOf('function reperesAffiches()')
+  const corps = MAIN.slice(iPred, MAIN.indexOf('\n}', iPred))
+  assert.ok(/globe\?\.baseYCrop != null/.test(corps),
+    'le prédicat des repères ne lit pas la base du crop — s’il y a une base, il y a un bloc')
+
+  // ⚠️ **LA CAMÉRA SUIT LA SCÈNE.** Sous la sphère, les marqueurs se projettent
+  // avec `camGlobe` ; avec celle du bloc ils calculeraient sur un autre monde.
+  const i = MAIN.indexOf('peaksLayer.update(')
+  assert.ok(i > 0, '`peaksLayer.update` a disparu')
+  const appel = MAIN.slice(i, MAIN.indexOf(')', MAIN.indexOf('poseurDesReperes()', i)) + 1)
+  assert.ok(/terreUniqueBranchee \? camGlobe : camera/.test(appel),
+    'les sommets sont encore projetés avec la caméra du bloc sous la sphère')
+  assert.ok(/reperesAffiches\(\)/.test(appel), 'les sommets ne lisent pas le prédicat des repères')
+  assert.ok(/poseurDesReperes\(\)/.test(appel), 'les sommets n’ont pas d’adaptateur bloc ↔ globe')
+
+  // ⛔ **CE QUI RESTE, ET IL FAUT LE DIRE** : « Points cotés » (`labels`) est un
+  // GROUPE DE GÉOMÉTRIE dans la scène du bloc plat, pas des marqueurs de DOM.
+  // Le rallumer ne montrerait rien — c'est le §4 du module (le cartouche) : il
+  // lui faudrait être ADOPTÉ par la scène du globe, avec son repère local.
+  // Paquet (b), DÉCLARÉ ET NON FAIT ; ce test le grave pour que personne ne
+  // croie que R18 l'a réparé.
+  assert.ok(/setLabelsVisible: \(v\) => \(labels\.visible = v && socleAffiche\(\)\)/.test(MAIN),
+    'les points cotés ont changé de prédicat sans être relogés dans la scène du globe')
 })

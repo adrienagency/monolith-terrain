@@ -21,6 +21,45 @@ const OVERPASS = 'https://overpass-api.de/api/interpreter'
 // veut pas allouer un objet par sommet et par image pour le dire.
 const ZERO = { x: 0, z: 0 }
 
+// ══════════ LE POINT À PROJETER — Tâche R18, et il y a DEUX MONDES ══════════
+//
+// > **Adrien, 2026-08-31 :** « On a plein de choses qui ne fonctionnent pas
+// > encore en mode sphère. »
+//
+// ⛔ **LES SOMMETS ÉTAIENT PROJETÉS AVEC LA CAMÉRA DU BLOC PLAT, SUR DES
+// COORDONNÉES DE BLOC PLAT.** Sous le mode sphère, le bloc plat n'est plus
+// dessiné du tout : ses coordonnées ne désignent plus rien à l'écran, et
+// `socleAffiche()` éteignait de toute façon les marqueurs. Mesuré aux deux
+// bouts de l'interrupteur « Sommets », mouvement ambiant coupé
+// (`.banc/R18/fige-defaut`, plancher de bruit 0,0000) : écart moyen **0,000**,
+// gradient **0,000** — l'image est identique au bit près.
+//
+// ⚡ **LA LOI EST ICI, PURE, PARCE QUE `update()` NE SE CHARGE PAS SOUS NODE**
+// (elle touche le DOM). Une garde par expression régulière sur le texte source
+// aurait laissé passer la mutation : ce dépôt en a déjà vu une survivre à
+// 4 082 tests pour exactement cette raison.
+//
+// ⚠️ **AUCUNE CONVERSION D'UNITÉ N'EST ÉCRITE ICI, ET C'EST DÉLIBÉRÉ.** Le
+// chantier compte sept défauts de conversion d'espace ; celui-ci n'en ajoute
+// pas un huitième. `world.y` est en unités de BLOC (`terrain.sample` + le lift
+// de 0,5), et `poseur.placer` est **l'adaptateur bloc ↔ globe du dépôt**
+// (`monde/sol-globe.js`) — celui que les rivières et les toponymes utilisent
+// déjà. Il porte les deux seules conversions, et elles ne sont pas recopiées.
+//
+// @param {{x:number,y:number,z:number}} world le sommet en coordonnées de CHAMP
+// @param {{x:number,z:number}} fenetre le décalage champ → géométrie (mode continu)
+// @param {{globe:boolean, placer:Function}|null} poseur `null` ou plat → le
+//   comportement d'avant, au bit près.
+// @returns {{x:number,y:number,z:number}} le point à projeter, dans l'espace de
+//   la caméra qu'on va utiliser.
+export function pointDuMarqueur(world, fenetre = ZERO, poseur = null) {
+  const x = world.x - fenetre.x
+  const z = world.z - fenetre.z
+  if (!poseur?.globe || typeof poseur.placer !== 'function') return { x, y: world.y, z }
+  const p = poseur.placer(x, z, world.y)
+  return { x: p.x, y: p.y, z: p.z }
+}
+
 // ══════════ COMBIEN DE SOMMETS SUR UNE EMPRISE 3×3 ═════════════════════════
 //
 // Même règle que les noms de lieux (map/places-layer.js) : le nombre suit la
@@ -304,7 +343,7 @@ export class PeaksLayer {
     }
   }
 
-  update(camera, w, h, visible) {
+  update(camera, w, h, visible, poseur = null) {
     let hoveredOn = false
     const vis = [] // dans l'ordre des marqueurs, donc par altitude décroissante
     this._frame++
@@ -326,7 +365,10 @@ export class PeaksLayer {
     const clip = this.getDem?.()?.empriseCote > 1
     const demi = TERRAIN_SIZE / 2
     for (const m of this.markers) {
-      this._v.set(m.world.x - fen.x, m.world.y, m.world.z - fen.z).project(camera)
+      // ⚠️ **LE POINT PASSE PAR LA LOI, PAS PAR TROIS SOUSTRACTIONS EN CLAIR** —
+      // c'est elle qui sait qu'il y a deux mondes (voir `pointDuMarqueur`).
+      const pt = pointDuMarqueur(m.world, fen, poseur)
+      this._v.set(pt.x, pt.y, pt.z).project(camera)
       const dedans = !clip || dansFenetre(m.world.x - fen.x, m.world.z - fen.z, demi)
       const on = visible && dedans && this._v.z < 1
       m.el.style.opacity = on ? 1 : 0
