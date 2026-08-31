@@ -61,7 +61,8 @@ import { RealWater } from './ocean.js'
 import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive, planeteEclaireeActive, soleilHeureMondeActif } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
-import { poseFond, plansFond } from './monde/frontiere-rendu.js'
+import { poseFond, plansFond, facteurEchelle } from './monde/frontiere-rendu.js'
+import { ancrageCartouche, baseCartoucheEnBloc } from './monde/cartouche-globe.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
@@ -1938,13 +1939,38 @@ applyPlinthMaterial()
 plinth.setVisible(params.plinth)
 
 // cartographic cartouche laid out on the ground around the slab
+//
+// ══════ LE CARTOUCHE NE VIT PLUS DANS LA SCÈNE DU BLOC — Tâche D16-c ═══════
+//
+// ⛔ **D16-a A SUPPRIMÉ LA PASSE DE SURFACE** (`passeSurface.enabled = false`) :
+// la scène du bloc n'est plus dessinée du tout sous le mode sphère. Le cartouche
+// y vivait ; le rallumer là n'aurait montré RIEN. Il pend donc d'un groupe
+// d'ANCRAGE, que le branchement de la frontière de rendu fait adopter par
+// `sceneGlobe` — et que `majCartoucheGlobe` pose à chaque image par la
+// similitude (`monde/cartouche-globe.js`).
+//
+// ⚠️ **HORS MODE SPHÈRE, CE GROUPE EST L'IDENTITÉ DANS `scene`** : matrice
+// unité, même parent qu'avant, comportement du dépôt au bit près.
+const groupeCartouche = new THREE.Group()
+groupeCartouche.name = 'ancrage-cartouche'
+scene.add(groupeCartouche)
 const groundInfo = new GroundInfoLayer({
-  scene,
+  scene: groupeCartouche,
   // socle désactivé (Adrien) : la carte se POSE AU SOL — les textes du
   // cartouche remontent au pied du relief (baseY + profondeur du socle).
   // ZONE ISOLÉE : le zéro est le niveau de la mer, et les textes s'y calent —
   // c'est le plan unique que partagent la découpe, la dalle et le cartouche.
-  getBaseY: () => (params.regionMode ? regionBaseY() : params.plinth ? plinth.baseY : plinth.baseY + plinth.depth),
+  // ⚡ **ET SOUS LE MODE SPHÈRE, LA BASE EST CELLE DU CROP, PAS CELLE DU BLOC
+  // PLAT.** Mesuré à La Réunion : `plinth.baseY = −17,4074` contre `−15,6489`
+  // pour le fond du crop ramené en unités de bloc — **1,76 unité d'écart, 11 %
+  // de la profondeur**, soit un cartouche qui flotte sous le fond dès qu'on
+  // baisse la caméra. `baseCartoucheEnBloc` porte la division par `k`, et son
+  // sens (`monde/cartouche-globe.js` §2).
+  getBaseY: () => {
+    const bloc = params.regionMode ? regionBaseY() : params.plinth ? plinth.baseY : plinth.baseY + plinth.depth
+    if (!terreUniqueBranchee || params.regionMode) return bloc
+    return baseCartoucheEnBloc(globe?.baseYCrop, echelleCartouche(), bloc)
+  },
   getInk: () => (params.darkMode ? '#e8e4da' : params.hudInk),
   getWallInk: () => socleWallInk(), // engraved name flips to contrast the socle material
   // sans socle il n'y a plus de flanc : les textes muraux (nom gravé, logo,
@@ -3778,7 +3804,7 @@ async function fetchAndBuildDem({ centreSur = null, enVol = false } = {}) {
   // ⚠️ **ET IL SE RALLUME ICI** — `entrerEnVol` l'avait éteint le temps du vol
   // (voir la note là-bas). La condition est celle de `setSurfaceVisible`, mot
   // pour mot : le cartouche n'existe qu'en mode surface.
-  groundInfo.setVisible(!!params.groundInfo && socleAffiche())
+  groundInfo.setVisible(!!params.groundInfo && cartoucheAffiche())
   if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
@@ -4693,6 +4719,10 @@ if (fusionDesPasses) {
   passeSurface.enabled = false
   // le seul client réel de la passe supprimée (voir le bloc ci-dessus)
   sceneGlobe.add(sunDisc.sprite)
+  // ⚡ **ET LE CARTOUCHE AVEC LUI — Tâche D16-c.** `THREE.Object3D.add` le
+  // retire de `scene` au passage : il n'y a jamais deux parents, donc jamais
+  // deux cartouches. `majCartoucheGlobe` lui donne sa pose à chaque image.
+  sceneGlobe.add(groupeCartouche)
   // ⚡ **ET LES EFFETS LISENT MAINTENANT LA BONNE CAMÉRA.** La profondeur du
   // tampon est celle de `camGlobe` ; un effet qui la linéariserait avec les
   // `near`/`far` de la caméra du bloc se tromperait d'espace — c'est exactement
@@ -4835,6 +4865,70 @@ function majCameraFond() {
 }
 const _IDENTITE = [0, 0, 0, 1]
 
+// ══════ LE CARTOUCHE PASSE DANS L'ESPACE DU GLOBE — Tâche D16-c ═══════════
+//
+// **Adrien :** « Répare l'apparition de la data autour du socle — données
+// Wikipédia et tout le reste, elles n'apparaissent plus. »
+//
+// ⚡ **DEUX CHOSES MANQUAIENT, PAS UNE.** ① le drapeau : `groundInfo` était resté
+// branché sur `vue.socle` quand les boutons du bas passaient sur `vue.boutons`
+// (`monde/visibilite-surface.js` §4) ; ② la SCÈNE : D16-a a supprimé la passe de
+// surface, donc `visible = true` seul ne dessinait rien.
+//
+// ⚠️ **UNE SEULE HOMOTHÉTIE PORTE TOUTES LES LONGUEURS DU CARTOUCHE**, et c'est
+// délibéré : tailles de texte, distances au bord, anneau de sécurité, rose des
+// vents et gravure murale sont TOUS écrits en unités de bloc dans
+// `ground-info-layer.js`. Les convertir un par un, c'est sept occasions de se
+// tromper d'un facteur `1/k` (≈ 130 ici, ≈ 3 700 à z16) ; les porter par
+// `group.scale`, c'en est zéro.
+//
+// ⚠️ **L'ANCRE EST L'ORIGINE DU BLOC, PAS LA CIBLE DE LA CAMÉRA.** La caméra de
+// fond s'ancre sur l'aplomb de la cible (voir `majCameraFond`, et le tableau des
+// trois candidates) parce que ce qu'elle cherche est la CONTINUITÉ au
+// franchissement. Le cartouche, lui, doit coller au CROP — et le crop est posé
+// sur le centre du bloc (`repereCrop`). Mesuré : la similitude ancrée sur
+// l'origine du bloc rend le repère de `crop-parois` à l'epsilon du double,
+// position ET quaternion (le relevé est dans `monde/cartouche-globe.js` §1).
+function echelleCartouche() {
+  const largeur = largeurBlocM()
+  return largeur > 0 ? facteurEchelle({ extentMeters: largeur, span: TERRAIN_SIZE }) : 0
+}
+//
+// ══════ ET LA VISIBILITÉ SE DÉCIDE ICI, SOUS LE MODE SPHÈRE ════════════════
+//
+// ⚠️ **LES QUATRE SITES D'ÉVÉNEMENT NE SUFFISENT PAS, ET C'EST STRUCTUREL.**
+// `entrerEnVol` cache, `fetchAndBuildDem` rallume, le relais de mode et
+// l'interrupteur d'interface font le reste : quatre ÉVÉNEMENTS. Mais sous le
+// mode sphère le bloc naît et meurt sur une ALTITUDE (`veilleCrop`, seuil de
+// mort), c'est-à-dire sans qu'aucun de ces quatre ne se produise. Le cartouche
+// serait resté posé sur une base retirée.
+//
+// ⚠️ **ET CE N'EST PAS UN SECOND INTERRUPTEUR** : on n'écrit QUE sur changement
+// — une comparaison de booléens par image, le patron d'`orthophotoPeinteDerniere`
+// vingt lignes plus haut. Hors mode sphère la fonction rend la main tout de
+// suite et les quatre sites gardent la main, seuls.
+function majCartoucheGlobe() {
+  if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
+  // ⚠️ **`dem` EST DANS LE PRÉDICAT, ET IL PORTE LE VOL.** `entrerEnVol` le met
+  // à `null` : sans lui, le cartouche du palier qu'on quitte resterait gravé
+  // pendant toute la descente, ce que la note d'`entrerEnVol` interdit.
+  const voulu = !!params.groundInfo && !!dem && cartoucheAffiche()
+  if (voulu !== groundInfo.group.visible) groundInfo.setVisible(voulu)
+  // ⚠️ **SORTIE SÈCHE QUAND LE CARTOUCHE EST CACHÉ.** Ce dépôt a déjà eu un
+  // indicateur qui tournait 38 secondes à cause de reconstructions empilées :
+  // celui-ci n'est qu'arithmétique, mais il n'a aucune raison de tourner en
+  // orbite, et la garde est ce qui l'empêche d'y revenir par inadvertance.
+  if (!voulu) return
+  const ancre = latLonOrigineBloc()
+  if (!ancre) return
+  const largeur = largeurBlocM()
+  if (!(largeur > 0)) return
+  const a = ancrageCartouche({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  groupeCartouche.position.set(a.position[0], a.position[1], a.position[2])
+  groupeCartouche.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
+  groupeCartouche.scale.setScalar(a.echelle)
+}
+
 // ══════ LA LONGUEUR QUI TRAVERSE — TÂCHE D16-a, LA CLASSE `1/k` ════════════
 //
 // ⛔ **UNE LONGUEUR MESURÉE DANS L'ESPACE DU BLOC ET CONSOMMÉE PAR LA CAMÉRA QUI
@@ -4936,7 +5030,7 @@ function poserVisibiliteSocle(v) {
   clouds.setVisible(vue.socle)
   plinth.setVisible(vue.socle && params.plinth && !params.regionMode)
   if (regionSkirt) regionSkirt.mesh.visible = vue.socle
-  groundInfo.setVisible(vue.socle && params.groundInfo)
+  groundInfo.setVisible(vue.cartouche && params.groundInfo)
   traffic.setVisible(vue.socle)
   realWater?.setVisible(vue.socle && params.seaEnabled !== false) // cf. setSeaEnabled
   mapLayers.setSurfaceVisible(vue.socle)
@@ -4995,6 +5089,45 @@ const veilleSocle = creerVeilleSocle({
 function socleAffiche() {
   if (terreUniqueBranchee) return false
   return seuilSocleBranche ? veilleSocle.visible : modes?.mode !== 'orbital'
+}
+
+// LE CARTOUCHE EST-IL À L'ÉCRAN ? — LA MÊME QUESTION QUE LES BOUTONS DU BAS.
+//
+// ⛔ **CE N'EST PAS `socleAffiche()`, ET C'EST TOUT LE DÉFAUT D16-c.** Celle-ci
+// répond à « le maillage du bloc PLAT est-il dessiné » — non, sous le drapeau, à
+// toutes les altitudes. Le cartouche, comme les trois boutons du bas, répond à
+// « sommes-nous devant un bloc » : oui, c'est un crop, et il a une base.
+// (`monde/visibilite-surface.js` §4, et le §0 pour la première moitié du même
+// défaut, réparée en août.)
+//
+// ⚠️ **ET CE N'EST PAS UNE SECONDE LISTE** — ce fichier raconte cinq fois cet
+// accident. Ce qui se répète ici est le seul PRÉDICAT DE SURFACE, que
+// `socleAffiche` borne ensuite à faux ; on ne peut pas l'appeler, puisque son
+// bornage est exactement ce qu'on ne veut pas. **La LOI, elle, n'est écrite
+// qu'une fois**, dans `visibiliteSurface`.
+//
+// ⛔ **ET ON NE PEUT PAS LIRE `veilleSocle` SOUS LE MODE SPHÈRE — MESURÉ, PAS
+// DÉDUIT.** `majSeuilSocle` passe la main à `veilleCrop` dès la ligne
+// `if (terreUniqueBranchee)` et le dit en toutes lettres (« c'est le crop qui
+// décide ») : **`veilleSocle` n'est jamais mise à jour**, son état reste celui du
+// départ — `socleAuDepart: !terreUniqueBranchee`, c'est-à-dire FAUX pour
+// toujours. Une première version de cette fonction lisait `veilleSocle.visible`
+// et reproduisait donc le défaut d'Adrien sous un autre nom : cartouche éteint à
+// toutes les altitudes, indéfiniment. Vu au navigateur avant d'être compris.
+//
+// ⚡ **LE PRÉDICAT JUSTE EST CELUI DE LA BASE, ET IL SE LIT TOUT SEUL** : le
+// cartouche est posé SUR la base du crop ; s'il y a une base, il y a un bloc.
+// `globe.baseYCrop` rend `null` tant que les parois ne sont pas posées, et
+// `retirerCrop` l'y remet — au-dessus du seuil de mort comme à la sortie du mode
+// surface. C'est la MÊME veille que celle qui décide du crop, lue par son
+// résultat plutôt que recopiée.
+function cartoucheAffiche() {
+  const surface = terreUniqueBranchee
+    ? modes?.mode !== 'orbital' && globe?.baseYCrop != null
+    : seuilSocleBranche
+      ? veilleSocle.visible
+      : modes?.mode !== 'orbital'
+  return visibiliteSurface({ terreUnique: terreUniqueBranchee, surface }).cartouche
 }
 
 // ⚠️ **L'ENTRÉE EST UNE ALTITUDE GÉOMÉTRIQUE, PAS UNE FRACTION D'ÉCRAN — RÈGLE
@@ -11389,7 +11522,7 @@ const panelCtx = {
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
-    groundInfo.setVisible(v && socleAffiche())
+    groundInfo.setVisible(v && cartoucheAffiche())
     if (v && dem && !groundInfo.lastInfo) chargeCartouche()
     else if (v) groundInfo.rerender()
   },
@@ -12440,6 +12573,7 @@ function tick() {
   // en mode surface c'est elle, et pas la caméra principale, qui dit au quadtree
   // où il est regardé. Sans drapeau, `majCameraFond` rend la main tout de suite.
   majCameraFond()
+  majCartoucheGlobe() // D16-c : le cartouche suit la même similitude que la caméra
   majLoiTextureMonde()
   if (frontiereActive && modes.mode === 'surface') {
     // ⚠️ **LE GLOBE STREAME MAINTENANT EN MODE SURFACE, ET C'EST UN COÛT

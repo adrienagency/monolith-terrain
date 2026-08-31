@@ -69,6 +69,30 @@
 // respecte scrupuleusement son plancher (`plancher()`, `altitudeDeSecurite()`) ;
 // c'est le plancher d'un autre monde. ➡️ **Donner aux plans un `sampleGround` de
 // GLOBE, puis retirer cette exception** — et pas l'inverse.
+//
+// ══════════ 4. LE CARTOUCHE — LA MOITIÉ NON RÉPARÉE DU MÊME DÉFAUT ═════════
+//
+// **Adrien, 2026-08-31 :** « Répare l'apparition de la data autour du socle —
+// données Wikipédia et tout le reste, elles n'apparaissent plus. »
+//
+// ⛔ **C'EST EXACTEMENT LE DÉFAUT DU §0, LAISSÉ À MOITIÉ CORRIGÉ.** Les trois
+// boutons ont été rebranchés sur `boutons` ; `groundInfo` est resté sur `socle`
+// (`main.js` : `groundInfo.setVisible(vue.socle && params.groundInfo)`). Or le
+// cartouche répond à la même question que les boutons — **« y a-t-il un bloc
+// devant nous »** —, et la réponse est OUI : c'est un crop, mais c'en est un, et
+// **il a une base**, celle que `monde/parois-crop.js` lui construit.
+//
+// ⚠️ **MAIS LE DRAPEAU NE SUFFISAIT PAS, ET C'EST CE QUI DISTINGUE CE CAS DES
+// BOUTONS.** Les boutons sont du DOM ; le cartouche est de la géométrie, et il
+// vivait dans la scène du bloc — **que D16-a ne rend plus du tout**
+// (`passeSurface.enabled = false`). Le rendre `visible` ne montrait rien. Il a
+// donc fallu, en plus du drapeau, le faire ADOPTER par la scène du globe :
+// `monde/cartouche-globe.js` porte la similitude et la conversion de base.
+//
+// ⚡ **ET IL N'A PAS BESOIN D'UN ÉCHANTILLONNEUR DE SOL** — contrairement à ce
+// que la carte de D16-b annonçait. Il est posé sur la BASE, un plan horizontal
+// unique, pas sur le relief. Un seul nombre, pas un champ de hauteurs. Le §0 de
+// `monde/cartouche-globe.js` porte la mesure.
 
 /**
  * Qui est visible en surface, et à quel titre.
@@ -83,12 +107,13 @@
  *   planète. ⚠️ **Il ne gouverne QUE le maillage**, jamais l'interface.
  * @param {boolean} arg.surface sommes-nous en vue de surface, devant un bloc —
  *   ce que l'automate du seuil décide, avant tout bornage.
- * @returns {{socle: boolean, boutons: boolean, cine: boolean}} `socle` pour le
- *   maillage du bloc plat et les quatorze calques qui lui appartiennent ;
- *   `boutons` pour ce qui ne dépend que d'être en vue de surface — le raccourci
- *   isométrique et le coin cartographie (aérien · base · shuffle) ; `cine` pour
- *   les plans de cinéma, qui ont en plus besoin d'un plancher, et n'en ont pas
- *   sous le drapeau (voir §3).
+ * @returns {{socle: boolean, boutons: boolean, cine: boolean, cartouche: boolean}}
+ *   `socle` pour le maillage du bloc plat et les quatorze calques qui lui
+ *   appartiennent ; `boutons` pour ce qui ne dépend que d'être en vue de
+ *   surface — le raccourci isométrique et le coin cartographie (aérien · base ·
+ *   shuffle) ; `cine` pour les plans de cinéma, qui ont en plus besoin d'un
+ *   plancher, et n'en ont pas sous le drapeau (voir §3) ; `cartouche` pour la
+ *   légende cartographique posée sur la BASE autour du bloc (voir §4).
  */
 export function visibiliteSurface({ terreUnique, surface }) {
   const s = !!surface
@@ -103,5 +128,9 @@ export function visibiliteSurface({ terreUnique, surface }) {
     // ARBITRAGE.** Voir le §3 ci-dessus : sous le drapeau, ce bouton est un
     // aller simple sous le sol.
     cine: terreUnique ? false : s,
+    // ⚡ **ET LE CARTOUCHE EST LA MOITIÉ NON RÉPARÉE DU DÉFAUT DES BOUTONS** —
+    // §4 ci-dessous. Il répond à la MÊME question qu'eux : « sommes-nous devant
+    // un bloc », et non « le maillage du bloc plat est-il dessiné ».
+    cartouche: s,
   }
 }

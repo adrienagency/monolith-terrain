@@ -39,19 +39,30 @@ test('① DRAPEAU LEVÉ, en surface : le maillage plat est éteint, les boutons 
   assert.equal(v.cine, false, 'le bouton ciné est rallumé sous le drapeau : aller simple sous le sol')
 })
 
+test('① DRAPEAU LEVÉ : le CARTOUCHE est allumé — la moitié non réparée du §0', () => {
+  // ⛔ **LE DÉFAUT D'ADRIEN DU 2026-08-31**, et c'est le même que celui des
+  // boutons : `groundInfo` était resté branché sur `socle` quand les trois
+  // boutons passaient sur `boutons`. Le cartouche est posé sur la BASE autour du
+  // bloc ; sous le drapeau il y a un bloc, et il a une base (`parois-crop.js`).
+  const v = visibiliteSurface({ terreUnique: true, surface: true })
+  assert.equal(v.cartouche, true, 'le cartouche Wikipédia reste éteint sous le drapeau')
+  // ⚠️ et il s'éteint bien avec la surface — en orbite il n'y a plus de base.
+  assert.equal(visibiliteSurface({ terreUnique: true, surface: false }).cartouche, false)
+})
+
 test('① DRAPEAU LEVÉ : le ciné est le SEUL éteint — l’exception ne déborde pas', () => {
   // ⚠️ **UNE EXCEPTION QUI S'ÉTENDRAIT SERAIT LE DÉFAUT D'ORIGINE PAR L'AUTRE
   // BOUT** : Adrien demandait ces boutons, on n'en retire qu'un, et pour une
   // raison mesurée.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: true }),
-    { socle: false, boutons: true, cine: false })
+    { socle: false, boutons: true, cine: false, cartouche: true })
 })
 
 test('① DRAPEAU LEVÉ, hors surface : tout s’éteint, boutons compris', () => {
   // ⚠️ En orbite la planète EST le sujet : un raccourci isométrique « sur le
   // bloc » n'a plus de bloc, et le coin cartographie n'a plus de carte.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: false }),
-    { socle: false, boutons: false, cine: false })
+    { socle: false, boutons: false, cine: false, cartouche: false })
 })
 
 test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se confondent', () => {
@@ -60,8 +71,8 @@ test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se 
   // booléen, celui d'avant la tâche, au bit près.
   for (const surface of [true, false]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface }),
-      { socle: surface, boutons: surface, cine: surface },
-      'sans drapeau, les TROIS réponses doivent être le même booléen')
+      { socle: surface, boutons: surface, cine: surface, cartouche: surface },
+      'sans drapeau, les QUATRE réponses doivent être le même booléen')
   }
 })
 
@@ -71,11 +82,11 @@ test('① les entrées molles sont ramenées à des booléens, pas propagées te
   // loin, pas ici. On borne au bord.
   for (const e of [undefined, null, 0, '', NaN]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: false, boutons: false, cine: false })
+      { socle: false, boutons: false, cine: false, cartouche: false })
   }
   for (const e of [1, 'oui', {}]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: true, boutons: true, cine: true })
+      { socle: true, boutons: true, cine: true, cartouche: true })
   }
 })
 
@@ -195,16 +206,21 @@ test('③ LE COMPTE DES LECTEURS — la garde de CLASSE, pas de cas particulier'
   // style et verte sur un calque rebranché.
   const corps = MAIN.slice(i, MAIN.indexOf('\n}', i)).replace(/\/\/[^\n]*/g, '')
   const compte = (n) => (corps.match(new RegExp('vue\\.' + n, 'g')) || []).length
-  assert.equal(compte('socle'), 11,
-    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 11 — un calque du bloc plat a changé de grandeur`)
+  // ⚠️ **10 ET NON 11 DEPUIS D16-c** : `groundInfo` est passé de `vue.socle` à
+  // `vue.cartouche`. C'est une redistribution VOULUE, et ce compte est
+  // exactement l'endroit où elle devait se déclarer.
+  assert.equal(compte('socle'), 10,
+    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 10 — un calque du bloc plat a changé de grandeur`)
+  assert.equal(compte('cartouche'), 1,
+    `${compte('cartouche')} lecteur de \`vue.cartouche\` au lieu de 1 (groundInfo seul)`)
   assert.equal(compte('boutons'), 2,
     `${compte('boutons')} lecteurs de \`vue.boutons\` au lieu de 2 (isoBtn et mapCorner)`)
   assert.equal(compte('cine'), 1,
     `${compte('cine')} lecteur de \`vue.cine\` au lieu de 1 (cineBtn seul)`)
   // et la fonction ne lit RIEN d'autre que la loi : pas de quatrième grandeur
   // improvisée à côté.
-  assert.equal((corps.match(/vue\.\w+/g) || []).length, 11 + 2 + 1,
-    'un champ de `vue` autre que `socle`, `boutons` et `cine` est lu dans le corps')
+  assert.equal((corps.match(/vue\.\w+/g) || []).length, 10 + 2 + 1 + 1,
+    'un champ de `vue` autre que `socle`, `boutons`, `cine` et `cartouche` est lu dans le corps')
 })
 
 test('③ LE RELAIS DE MODE — sans lui les boutons survivent à l’orbite (mutation M5)', () => {

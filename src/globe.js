@@ -5831,6 +5831,23 @@ export class Globe {
    * mesure `baseY` le long de la verticale de ce centre. L'écart entre ce rayon
    * et le PLAN du fond est la flèche du crop — chiffrée dans `rabattementBorne`.
    */
+  /**
+   * LE FOND DU CROP, EN UNITÉS DE GLOBE — l'accès PUBLIC à `_baseYCrop`.
+   *
+   * ⚠️ **`null` TANT QUE LES PAROIS NE SONT PAS POSÉES**, et l'appelant doit le
+   * traiter : `retirerCrop` remet le champ à `null` sur deux chemins nominaux.
+   * Le cartouche (`monde/cartouche-globe.js`) retombe alors sur la base du bloc
+   * plat, ce qui est la bonne réponse — s'il n'y a pas de crop, il n'y a pas de
+   * base de crop.
+   *
+   * ⚠️ **C'EST LE PLAN DU FOND, MESURÉ LE LONG DE LA VERTICALE DU CENTRE DU
+   * CROP** (voir `repereLocalCrop`), donc exactement le repère dans lequel le
+   * cartouche se pose une fois la similitude appliquée.
+   */
+  get baseYCrop() {
+    return Number.isFinite(this._baseYCrop) ? this._baseYCrop : null
+  }
+
   _rayonPlancherCrop(t) {
     if (!this._parois || !this._crop || !Number.isFinite(this._baseYCrop)) return 0
     if (!tuileDansCrop(t.z, t.x, t.y, this._crop)) return 0
