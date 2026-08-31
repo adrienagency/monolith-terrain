@@ -8646,6 +8646,22 @@ let aerialAttribution = null
 // missing, so the green tick must follow params, not the click)
 async function refreshAerial() {
   await refreshAerialCore()
+  // ══════ LA PHOTO SUR LA SURFACE DU GLOBE — Tâche R16 ═══════════════════════
+  //
+  // ⛔ **LE CROP NE POUVAIT PAS PORTER LA VUE AÉRIENNE MONDE, ET C'ÉTAIT DE
+  // L'ARITHMÉTIQUE** (rapport R12, §2) : le crop naît sous 32,3 km et meurt
+  // au-dessus de 40,3 km, où son emprise fait déjà 1,4 × la hauteur de l'écran
+  // à z13 et 1 475 × à z3. `refreshAerialCore`, juste au-dessus, ne parle QU'À
+  // lui (`terrain.setAerial`). Cette ligne-ci parle à la SURFACE du globe —
+  // une texture par tuile de quadtree, chargée par le parcours qui charge déjà
+  // l'altitude, évincée par la même purge. Voir `monde/photo-monde.js`.
+  //
+  // ⚠️ **APRÈS LE CŒUR, PAS AVANT, POUR QUE LES DEUX DISENT LA MÊME CHOSE.**
+  // `refreshAerialCore` peut éteindre `params.aerialEnabled` lui-même (zone sans
+  // couverture pour le BLOC, panne réseau) ; lue après, la valeur est celle que
+  // le bouton vert affiche à la ligne suivante. Un globe qui peindrait pendant
+  // que le bouton dit « éteint » serait le défaut d'origine, retourné.
+  globe.setPhotoMonde(params.aerialEnabled && params.source === 'real')
   mapCorner?.setAerialActive(params.aerialEnabled && params.source === 'real')
 }
 

@@ -111,6 +111,11 @@ import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './
 // lecteurs (`_buildMesh` qui pose les sommets, `hauteurDessinee` qui les relit),
 // et une table recopiée diverge en silence.
 import { segmentsTuile, interpolerMaille } from './monde/maillage-tuile.js'
+// ══════ L'IMAGERIE DE LA SURFACE DU GLOBE — Tâche R16 ═══════════════════════
+// Le cache par tuile de quadtree, sa sous-fenêtre d'aïeul et sa source mondiale.
+// ⚠️ Le module est PUR (ni THREE, ni DOM, ni réseau) : c'est ce qui rend son
+// piège n° 2 — l'entrée en vol qui ne revient jamais — testable sans navigateur.
+import { PhotoMonde, urlPhotoMonde, FONDU_MER_MONDE } from './monde/photo-monde.js'
 // LA MÉMOIRE DES TUILES DE MNT — Tâche R3, correction I3. ⚠️ **ELLE A
 // DÉMÉNAGÉ, ELLE N'A PAS CHANGÉ** : même Map, même borne de 32 Mo, même LRU.
 // Elle vit désormais dans un module PUR parce que `dem.js` en est le SECOND
@@ -1246,7 +1251,8 @@ uniform vec3 uHazeColor;
 //
 // ⚠️ NEUVIEME SAMPLER, ET LE COMPTE EST REFAIT ICI. Le bloc du masque de cote
 // comptait CINQ liens (uTex, uRamp, uCoastMask, uSol, uSolLut) ; le fond du crop
-// a fait SIX ; uAnalysis et uRampCrop ont fait HUIT. uAerial fait NEUF, pour un
+// a fait SIX ; uAnalysis et uRampCrop ont fait HUIT. uAerial fait NEUF, et
+// uPhoto (Tache R16, la photo de la SURFACE) fait DIX, pour un
 // plafond de seize. Le raisonnement du bloc du masque de cote (ShaderMaterial
 // NU : ni materiau de surface, ni environnement, ni carte d'ombre) tient tel
 // quel, et test/crop-eclairage.test.js COMPTE les sampler2D de ce fragment
@@ -1279,6 +1285,41 @@ uniform vec2 uAerialScale;
 // comme le socle cale uSeaRange sur -dem.minM. Meme substitution, meme bloc.
 // Ce n'est donc PAS une seconde loi de niveau d'eau, c'est la premiere, relue.
 uniform float uAerialCoastFade;
+
+// ══════ LA PHOTO SUR LA SURFACE DU GLOBE — Tache R16 ═══════════════════════
+//
+// ⛔ LE CONSTAT QUI COMMANDE CE BLOC (rapport R12, §2, arithmetique verifiee) :
+// la photo n'existait QUE dans le crop (uAerial, quinze lignes plus haut, sous
+// dedansCrop > 0.0). Or le crop nait sous 32,3 km et meurt au-dessus de 40,3 km,
+// et a 40,3 km son emprise occupe deja 1,4 x la hauteur de l'ecran a z13 et
+// 1 475 x a z3. LE CROP NE PEUT DONC JAMAIS MONTRER UN CONTINENT. Il fallait un
+// second chemin, sur la SURFACE, et le voici.
+//
+// ⚠️⚠️ **UN SEUL SAMPLER DE PLUS, PAS UN PAR TUILE — PIEGE ④ DU BRIEF.** Le
+// nuanceur en etait a NEUF sur seize (test/crop-eclairage.test.js ⑤f, et
+// test/plafond-unites-texture.test.js raconte le jour ou le socle a atteint 18
+// et ou le terrain a disparu). uPhoto en fait DIX. Ce qui varie d'une tuile a
+// l'autre n'est pas le nombre de samplers, c'est la VALEUR de celui-ci : il est
+// declare dans _materialFor, exactement comme uTex et uTilePx, donc chaque tuile
+// lie SA photo au moment du dessin. Douze cents tuiles, un sampler.
+//
+// ⚠️ uPhotoUv EST UNE SOUS-FENETRE, ET C'EST TOUT LE « GROSSIER D'ABORD ». Une
+// tuile z12 lit la photo de son aieul z8 par (uv * uPhotoUv.zw + uPhotoUv.xy) :
+// la couverture est immediate, en basse resolution, sans attendre son propre
+// niveau. C'est le « imagery LOD lags terrain LOD » de Cesium et de Google
+// Earth, et il est gratuit ici parce que le quadtree EST un arbre.
+// Voir monde/photo-monde.js (sousFenetre) pour la derivation, retournement de
+// l'axe Y compris — l'UV monte au nord, l'indice y de tuile monte au sud.
+uniform sampler2D uPhoto;
+uniform float uPhotoOn;      // par TUILE : sa photo est-elle liee ?
+uniform vec4 uPhotoUv;       // par TUILE : (offsetX, offsetY, echelleX, echelleY)
+uniform float uPhotoMonde;   // PARTAGE : l'opacite de la couche, 0 = eteinte
+// ⚠️ ET CELUI-CI A SA PROPRE VALEUR, PAS CELLE DU CROP. uAerialCoastFade vaut
+// ZERO au repos (HABILLAGE_MONDE : « c'est le "eteint" du socle ») et ne prend
+// 0,1 que quand poserHabillage transmet la valeur vivante du BLOC. En orbite il
+// n'y a pas de bloc — la premiere version de ce correctif s'y est laisse prendre
+// et l'ocean est reste NOIR, mesure. Voir FONDU_MER_MONDE (monde/photo-monde.js).
+uniform float uPhotoFonduMer; // PARTAGE : la bande de fondu cotier, en fraction
 
 // ══════ L'ECLAIRAGE DU CROP — Tache P3 ═════════════════════════════════════
 //
@@ -2081,6 +2122,66 @@ void main() {
   // ⚠️ dedansCrop ET NON partBloc : la photo ne depend pas de l'eclairage. La
   // borner a partBloc l'eteindrait avec uEclairageOn, alors que c'est une couche
   // de CARTE. dedansCrop vaut zero hors decoupe, donc la planete est intouchee.
+  // ══════ LA PHOTO SUR LA SURFACE DU GLOBE — Tache R16 ═══════════════════════
+  //
+  // ⛔ **HORS DE dedansCrop, ET C'EST TOUTE LA TACHE.** Le bloc juste en dessous
+  // (uAerial, Tache R9) est enferme dans dedansCrop > 0.0, donc dans un crop qui
+  // meurt au-dessus de 40,3 km : il ne pouvait pas montrer un continent, et il
+  // ne le pouvait pas par arithmetique, pas par reglage. Celui-ci vit sur la
+  // TUILE DE QUADTREE, donc partout ou la planete est dessinee, a toute
+  // distance, et il ne charge que ce que _traverse a retenu ET dessine.
+  //
+  // ⚠️ (1.0 - dedansCrop) : LA SURFACE CEDE LA PLACE AU CROP. Dans l'emprise du
+  // bloc, c'est l'orthophoto nationale de R9 qui doit peindre — 20 cm/px contre
+  // 600 m/px. Les deux couches ne se recouvrent donc jamais, et la transition
+  // suit exactement le fondu de bord du crop, qui est deja lisse.
+  //
+  // ⚠️ ELLE MODULE LA LUMINANCE, ELLE N'ECRASE PAS — meme facteur 0,6 + 0,8 x
+  // shade que terrain.js et que le bloc R9 ci-dessous, sur la meme entree (la
+  // luminance Rec.601 de la couleur DEJA peinte). C'est ce qui laisse l'ombrage
+  // de relief se lire A TRAVERS la photo, et c'est la difference entre une carte
+  // en relief et un visualiseur satellite.
+  //
+  // ⚠️ vUv ET NON qCrop : la photo est registree sur LA TUILE (uv 0..1 sur le
+  // carreau Web Mercator), pas sur l'emprise du crop. uPhotoUv porte la
+  // sous-fenetre de l'aieul quand la tuile est plus fine que l'imagerie
+  // disponible. Le clamp garde la lecture dans le carreau : la jupe herite des
+  // uv de son anneau de bord, donc elle est deja dedans, mais un demi-texel de
+  // debordement se lirait sur la sous-fenetre VOISINE, pas sur du vide.
+  if (uPhotoOn > 0.5 && uPhotoMonde > 0.001) {
+    vec2 pUv = clamp(vUv, 0.0, 1.0) * uPhotoUv.zw + uPhotoUv.xy;
+    vec3 photoSol = texture2D(uPhoto, pUv).rgb;
+    float shadeP = dot(col, vec3(0.299, 0.587, 0.114));
+    // ══════ LE FONDU COTIER DU MONDE — mesure du 2026-09-01 ══════════════════
+    //
+    // ⛔ **SANS LUI, L'OCEAN DEVIENT NOIR ET LA BATHYMETRIE DISPARAIT.** Capture
+    // de l'etape 6, La Reunion a 600 km : l'ecran entier est noir. Blue Marble
+    // rend l'ocean quasi noir ; multiplie par la luminance, il efface la rampe
+    // nautique sur les deux tiers de la planete — c'est-a-dire l'identite meme
+    // du produit. R9 avait mesure exactement la meme chose sur le crop (« 72,7 %
+    // des pixels different, ecart moyen 93,6/255 »), et sa parade est celle-ci.
+    //
+    // ⚠️ **MEME LOI QUE LE BLOC R9 CI-DESSOUS, AVEC LE BUDGET DU MONDE.** Le
+    // crop mesure sa bande sur uMerFondBudgetM (la profondeur de SON champ) ;
+    // le monde n'a pas de champ, il a la rampe — donc uOceanDepth
+    // (RAMPE_MONDE.profondeur). Meme smoothstep, meme sens : 1 au rivage, 0 au
+    // fond. Ce n'est pas une seconde loi, c'est la premiere, relue une fois de
+    // plus.
+    //
+    // ⚠️ ET LE PRIX EST DIT : une cuvette CONTINENTALE sous le niveau de la mer
+    // perd une part de sa photo. Avec la bande livree (6 000 x 0,1 = 600 m), la
+    // vallee de la Mort (-86 m) garde 93 % de la sienne et la Caspienne (-28 m)
+    // 99 % ; la mer Morte (-430 m), elle, n'en garde que 13 %. Sur une imagerie
+    // a 600 m/px, aucune de ces trois-la n'est un sujet — mais le chiffre est
+    // ecrit plutot que decouvert.
+    float pFade = 1.0;
+    if (uPhotoFonduMer > 0.0) {
+      float bandeMondeM = max(uOceanDepth * uPhotoFonduMer, 1e-4);
+      pFade = smoothstep(-bandeMondeM, 0.0, h); // 1 au rivage → 0 au fond
+    }
+    col = mix(col, photoSol * (0.6 + 0.8 * shadeP), uPhotoMonde * (1.0 - dedansCrop) * pFade);
+  }
+
   if (uAerialOn > 0.5 && uAerialOpacity > 0.001 && dedansCrop > 0.0) {
     vec2 aUv = vec2(qCrop.x * 0.5 + 0.5, 1.0 - (qCrop.y * 0.5 + 0.5));
     aUv = uAerialOffset + aUv * uAerialScale;
@@ -2356,6 +2457,46 @@ void main() {
   gl_FragColor = vec4(col, couvertureCrop);
 }
 `
+
+// ══════ LE CHARGEUR D'UNE PHOTO DE TUILE — Tâche R16 ════════════════════════
+//
+// ⚠️ **PAS DE MIPMAPS, ET C'EST UN POSTE DE MÉMOIRE VIDÉO, PAS UN OUBLI.** Une
+// texture 256² en RGBA pèse 256 × 256 × 4 = **262 144 octets = 256 Kio pile** ;
+// sa chaîne de mipmaps ajoute **+33,3 %**, soit 341 Kio. Sur le plafond livré de
+// 192 entrées, c'est 48,0 Mo contre 64,0 Mo — 16 Mo pour un filtrage dont le
+// globe n'a presque jamais besoin : la tuile de photo est MAGNIFIÉE dès que le
+// quadtree passe le niveau 8 (une z8 étirée sur seize tuiles z12), et à l'orbite
+// une tuile z3 couvre une large part de l'écran. Le prix est nommé au rapport :
+// près du limbe, une tuile vue en biais minifie, et là le filtrage linéaire sans
+// mipmap crible. C'est un compromis mesuré, pas un défaut ignoré.
+//
+// ⚠️ `crossOrigin` EST OBLIGATOIRE — même raison que `map/aerial-layer.js` : sans
+// le drapeau la texture est teintée et WebGL la refuse. NASA GIBS envoie bien
+// `Access-Control-Allow-Origin: *` (vérifié en vol par la Tâche R12).
+//
+// ⚠️ `flipY` RESTE À SA VALEUR PAR DÉFAUT (vrai), et c'est ce qui accorde la
+// photo avec le maillage : `_buildMesh` pose `uv.y = 1 - v` en écrivant « canvas
+// row 0 = north = uv v 1 (flipY texture) ». La ligne 0 d'une tuile XYZ est son
+// bord NORD. Les deux conventions se rejoignent, sans retournement à écrire.
+function chargerPhotoTuile(z, x, y) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const tex = new THREE.Texture(img)
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.minFilter = THREE.LinearFilter
+      tex.magFilter = THREE.LinearFilter
+      tex.generateMipmaps = false
+      tex.wrapS = THREE.ClampToEdgeWrapping
+      tex.wrapT = THREE.ClampToEdgeWrapping
+      tex.needsUpdate = true
+      resolve(tex)
+    }
+    img.onerror = () => reject(new Error(`photo monde ${z}/${x}/${y}`))
+    img.src = urlPhotoMonde(z, x, y)
+  })
+}
 
 // ---------------------------------------------------------------- tile math
 
@@ -3066,6 +3207,22 @@ export class Globe {
       uAerialOffset: { value: new THREE.Vector2(0, 0) },
       uAerialScale: { value: new THREE.Vector2(1, 1) },
       uAerialCoastFade: { value: HABILLAGE_MONDE.aerialCoastFade },
+      // ══════ LA PHOTO SUR LA SURFACE — Tâche R16 ═══════════════════════════
+      //
+      // ⚠️ **CELUI-CI EST PARTAGÉ, ET LUI SEUL.** L'opacité est une propriété de
+      // la COUCHE, pas de la tuile : une seule écriture (`setPhotoMonde`) éteint
+      // ou allume la planète entière, sans couture possible entre deux tuiles.
+      // Les trois autres (`uPhoto`, `uPhotoOn`, `uPhotoUv`) vivent dans
+      // `_materialFor` — voir le bloc qui les déclare.
+      //
+      // ⚠️ **`0` AU REPOS : sans `setPhotoMonde`, RIEN NE CHANGE** — même garde
+      // et même raison que `uCropOn`, `uHabOn`, `uAerialOn` et `uMppFacteur`.
+      uPhotoMonde: { value: 0 },
+      // ⚠️ **CELUI-LÀ N'EST PAS NEUTRE À ZÉRO, ET C'EST VOULU** : c'est une
+      // ÉCHELLE de la couche, pas un interrupteur. `uPhotoMonde` porte déjà
+      // l'extinction ; un fondu à zéro ne servirait qu'à peindre l'océan en noir
+      // le jour où quelqu'un allume la couche sans lire ce bloc.
+      uPhotoFonduMer: { value: FONDU_MER_MONDE },
       // LA NORMALE PAR FRAGMENT — Tâche P9. ⚠️ **`uNormaleFineOn: 0` : sans
       // `poserHabillage`, RIEN ne change** — même garde et même raison que
       // `uCropOn`, `uHabOn`, `uMerRampeOn`, `uEclairageOn` et `uMppFacteur`.
@@ -3250,6 +3407,22 @@ export class Globe {
           // une tuile sans niveau déclaré rend une pente 4 096 fois trop faible,
           // donc un bloc PLAT — visible, pas silencieux.
           uUvParMonde: { value: uvParMonde },
+          // ══════ LA PHOTO DE LA SURFACE — Tâche R16 ═══════════════════════
+          //
+          // ⚠️ **PROPRES À LA TUILE, POUR LA MÊME RAISON QUE `uTex` ET
+          // `uTilePx`, ET C'EST LE PIÈGE ④ DU BRIEF PRIS PAR LE BON BOUT.**
+          // Le nuanceur ne gagne qu'UN sampler (neuf → dix sur seize) ; ce qui
+          // varie d'une tuile à l'autre, c'est la VALEUR liée au moment du
+          // dessin. Les mettre dans `this.uniforms` ferait peindre toutes les
+          // tuiles avec la photo de la dernière chargée — exactement la faute
+          // que le commentaire d'`uTilePx` décrit deux lignes plus haut.
+          //
+          // ⚠️ `uPhotoOn: 0` AU REPOS : une tuile qui n'a pas encore de photo
+          // est la planète du dépôt, au bit près. `photoMonde.habiller` est le
+          // SEUL écrivain, et il tourne après le tri spatial de `_traverse`.
+          uPhoto: { value: null },
+          uPhotoOn: { value: 0 },
+          uPhotoUv: { value: new THREE.Vector4(0, 0, 1, 1) },
         },
         // LE MÉLANGE SUIT LE CROP — Tâche B, Étape 5. ⚠️ **PAS TOUJOURS VRAI, ET
         // C'EST LA PRODUCTION QU'ON PROTÈGE** : `transparent` fait passer l'objet
@@ -3267,6 +3440,20 @@ export class Globe {
 
     this._buildPoleCaps()
     this._buildAtmosphere()
+
+    // ══════ L'IMAGERIE DE LA SURFACE — Tâche R16 ═══════════════════════════
+    //
+    // ⛔ **PAS UN SECOND SYSTÈME DE TUILES.** Le cache ci-dessous ne décide RIEN
+    // de spatial : `_traverse` lui passe les tuiles qu'il a retenues (horizon +
+    // tronc de vue) ET dessinées, et il leur trouve une photo. Le tri spatial,
+    // le niveau de détail par distance, la règle sans-trou et la purge sont ceux
+    // du quadtree, au sens strict — c'est la consigne du brief, et c'est aussi
+    // ce qui rend l'ensemble mesurable d'un seul endroit.
+    //
+    // ⚠️ **ÉTEINT AU REPOS** (`actif = false`) : sans `setPhotoMonde`, il ne part
+    // pas une requête et `uPhotoMonde` reste à zéro — la planète est celle du
+    // dépôt, au bit près. C'est `main.js` qui l'allume, sur le bouton d'Adrien.
+    this.photoMonde = new PhotoMonde({ charger: chargerPhotoTuile })
 
     // orbiting cloud cover — lives inside group so globe.setVisible rules it
     this.clouds = new GlobeClouds(R_GLOBE)
@@ -6879,6 +7066,12 @@ export class Globe {
     // qu'une `loading` fantôme lui échappe pendant IMAGES_BLOQUEE images.
     this._purgerFile()
     if (this.tiles.size > this.cacheMax) this._evict()
+    // ══════ L'IMAGERIE, MÊME ORDRE QUE CI-DESSUS — Tâche R16 ═══════════════
+    // Abandon des requêtes fantômes PUIS éviction : l'abandon rend des places
+    // que l'éviction sait reprendre, alors qu'une entrée « en vol » lui
+    // échapperait. C'est mot pour mot l'argument de `_purgerFile` avant
+    // `_evict`, quatre lignes plus haut, et pour la même raison.
+    this.photoMonde?.finImage(this.frame)
     return this._drawn
   }
 
@@ -7104,7 +7297,68 @@ export class Globe {
     if (t.state === 'ready' && t.mesh) {
       t.mesh.visible = true
       this._drawn++
+      // ══════ L'IMAGERIE — Tâche R16, ET C'EST **ICI** QUE ÇA SE JOUE ═══════
+      //
+      // ⚠️⚠️ **SUR LES TUILES DESSINÉES, PAS SUR LES TUILES PARCOURUES — PIÈGE ①
+      // DU BRIEF, PRIS PAR LE BON BOUT.** « Réduis d'abord ce qui entre » dans le
+      // cache : l'ensemble DESSINÉ est exactement la couverture de l'écran, et
+      // tout ce qui est plus large (les parents raffinés, les enfants préparés)
+      // consommerait des places sans jamais peindre un pixel. À l'orbite le
+      // parcours visite 40 tuiles pour en dessiner 28 ; au régional, 216 pour 67.
+      // Demander l'imagerie des 216 aurait triplé ce qui entre, pour rien.
+      //
+      // ⚠️ ET IL N'Y A PAS DE SECOND TRI SPATIAL : la tuile est ici PARCE QUE
+      // l'horizon géométrique et le tronc de vue l'ont laissée passer, quarante
+      // lignes plus haut. La photo hérite du tri du quadtree, elle n'en refait pas.
+      this._habillerPhoto(t)
     }
+  }
+
+  // Lie à la tuile la meilleure photo disponible — la sienne, ou celle d'un
+  // aïeul en attendant. `null` laisse la tuile hypsométrique : pas de trou, pas
+  // de blanc, pas de clignotement. Voir `monde/photo-monde.js`.
+  _habillerPhoto(t) {
+    const pm = this.photoMonde
+    if (!pm || !pm.actif) return
+    const u = t.mesh.material.uniforms
+    if (!u.uPhotoOn) return // matériau emprunté par un test : rien à habiller
+    const r = pm.pourTuile(t, this.frame)
+    if (!r) {
+      // ⚠️ ON REND AUSSI LE SAMPLER, pas seulement le drapeau : une texture
+      // évincée à laquelle un matériau tiendrait encore serait téléversée à la
+      // première image où la tuile redeviendrait visible.
+      u.uPhotoOn.value = 0
+      u.uPhoto.value = null
+      return
+    }
+    u.uPhoto.value = r.tex
+    u.uPhotoUv.value.set(r.ox, r.oy, r.sx, r.sy)
+    u.uPhotoOn.value = 1
+  }
+
+  /**
+   * Allume ou éteint la photo sur la SURFACE du globe (le bouton d'Adrien).
+   *
+   * ⚠️ **ÉTEINDRE NE VIDE PAS LE CACHE**, et c'est la règle 4 des grands (« rien
+   * n'est jeté brutalement ») : rallumer doit être instantané. La borne de
+   * mémoire vidéo est portée par le plafond du cache, pas par l'extinction.
+   */
+  setPhotoMonde(actif, opacite = 1) {
+    const pm = this.photoMonde
+    if (!pm) return false
+    pm.setActif(actif)
+    this.uniforms.uPhotoMonde.value = actif ? opacite : 0
+    if (!actif) {
+      // ⚠️ ET ON DÉLIE LES TUILES : `uPhotoMonde = 0` suffirait à ne rien
+      // peindre, mais les samplers resteraient liés à des textures que le cache
+      // pourrait libérer. Un drapeau qui éteint le DESSIN sans délier la
+      // RESSOURCE est la classe d'erreur que ce fichier a déjà payée.
+      for (const t of this.tiles.values()) {
+        const u = t.mesh?.material?.uniforms
+        if (u?.uPhotoOn) { u.uPhotoOn.value = 0; u.uPhoto.value = null }
+      }
+    }
+    return pm.actif
   }
 
   // les quatre enfants sont-ils DÉJÀ dans le cache ? (sans les créer — c'est
@@ -7375,6 +7629,10 @@ export class Globe {
 
   dispose() {
     this.clouds.dispose()
+    // ⚠️ LES PHOTOS SONT DES TEXTURES GPU COMME LES AUTRES — Tâche R16. Le cache
+    // vit hors de `this.tiles` (plusieurs tuiles partagent une photo d'aïeul) :
+    // la boucle ci-dessous ne les verrait pas.
+    this.photoMonde?.vider()
     for (const t of this.tiles.values()) {
       if (t.mesh) {
         t.mesh.geometry.dispose()
