@@ -141,6 +141,7 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
 // par image relevées dans l'application vivante — voir le §3 du module.
 import { creerVeilleRepos } from './monde/veille-repos.js'
+import { deltaAzimut, decalagePivot } from './monde/pivot-bloc.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
 // risque de cycle depuis `main.js`, qui est en bout de chaîne.
@@ -12496,8 +12497,54 @@ function updateCameraMotion(dt) {
     camera.lookAt(controls.target)
     if (tween.t >= 1) tween.active = false
   } else if (modes.mode === 'surface') {
+    // ══════ TOURNER AUTOUR DU BLOC, PAS AUTOUR DU POINT VISÉ — Tâche R13 ════
+    //
+    // > **Adrien :** *« Le comportement de la rotation de la vue autour de la
+    // > Terre est parfait en mode orbital. Peut-on appliquer celui-là jusqu'au
+    // > mode crop ? »*
+    //
+    // ⛔ **CE N'ÉTAIT PAS LA VITESSE, ET C'EST MESURÉ.** L'orbite haute et le
+    // bloc rendent le MÊME `0,447079 °/px` d'azimut (`.banc/R13/avant.json`) :
+    // même `OrbitControls`, même `rotateSpeed = 1`, même loi. Ce qui diffère est
+    // la CIBLE — le centre de la Terre en orbite, un point du sol sur le bloc.
+    // Le bloc dérivait donc de **68,324 px** à l'écran pour 100 px de souris,
+    // là où la Terre ne bouge jamais.
+    //
+    // ⚠️ **L'AZIMUT EST LU AVANT `update()`** : c'est lui qui applique la
+    // rotation du glissé, et le delta ne se lit qu'en encadrant l'appel.
+    const _azAvantUpdate = controls.getAzimuthalAngle()
     controls.update() // orbital-mode camera is driven by the mode machine
+    pivoterAutourDuBloc(_azAvantUpdate)
   }
+}
+
+// ══════════ LA CORRECTION DE PIVOT, ET LES TROIS GARDES QUI LA BORNENT ═════
+//
+// ⛔ **ON N'ÉCRIT PAS `controls.target` SUR LE CENTRE DU BLOC.** `veille-repos`
+// surveille `|Δ ln(distance caméra→cible)|` au seuil `1e-4`, et c'est ce signal
+// qui arme la bascule de trois quarts de D16 ter. Un ré-ancrage de la cible
+// produit **6,608e-3 — 66 fois le seuil** (mesuré, `.banc/R13/cibles.json`).
+//
+// ➡️ La caméra **et** la cible reçoivent donc le MÊME décalage : une translation
+// rigide, dont l'invariance de la distance est une propriété algébrique et non
+// un réglage (voir `monde/pivot-bloc.js`). D16 ter ne voit rien passer.
+function pivoterAutourDuBloc(azAvant) {
+  // ⚠️ Hors surface il n'y a pas de bloc — en orbite la cible EST déjà le centre
+  // de l'objet regardé, et c'est précisément le geste qu'on copie ici.
+  if (!modes || modes.mode !== 'surface') return
+  // ⛔ Pendant un chargement, un balayage de pose ou un tween de plongée, la
+  // machine pose elle-même caméra ET cible : une correction de pivot les
+  // combattrait, et c'est la classe de défaut que R4 a payée.
+  if (modes.busy || modes.travel || modes._fonduPose || modes._diveTween) return
+  const d = deltaAzimut(azAvant, controls.getAzimuthalAngle())
+  if (d === 0) return
+  const dec = decalagePivot({ cibleX: controls.target.x, cibleZ: controls.target.z, angle: d })
+  if (dec.x === 0 && dec.z === 0) return
+  controls.target.x += dec.x
+  controls.target.z += dec.z
+  camera.position.x += dec.x
+  camera.position.z += dec.z
+  camera.lookAt(controls.target)
 }
 
 let rafId = 0
