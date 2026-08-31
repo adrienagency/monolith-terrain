@@ -1,6 +1,6 @@
 # R13 — LA ROTATION DE VUE ORBITALE, PORTÉE JUSQU'AU BLOC
 
-**Statut : livré, avec une réserve qui demande l'arbitrage d'Adrien.**
+**Statut : livré — les deux moitiés, et la seconde n'a demandé aucune ligne de code.**
 
 > **Adrien :** *« Le comportement de la rotation de la vue autour de la Terre est
 > parfait en mode orbital. Peut-on appliquer celui-là jusqu'au mode crop ? »*
@@ -306,3 +306,167 @@ Toutes les mesures viennent d'une RTX 3080 (ANGLE/D3D11), au lieu de démarrage
 par défaut. La correction de pivot est de l'arithmétique de position — elle ne
 dépend ni de la machine ni du lieu — mais les **dérives en pixels**, elles,
 dépendent du champ et de la taille du canevas.
+
+---
+---
+
+# R13 bis — LA RÈGLE D'ADRIEN, ET POURQUOI ELLE N'A PAS D'EXCEPTION
+
+> **Adrien, après avoir vu les mesures :** *« On utilise le centre de la Terre
+> comme point de rotation, excepté en mode crop. »*
+
+## ⚡ LA RÉPONSE EN UNE PHRASE
+
+**Les deux pivots n'en font qu'un, et c'est de la géométrie.** La correction de
+R13 n'a **jamais eu** de garde de crop : elle couvrait déjà toute la surface. Et
+comme elle ne porte que sur l'AZIMUT — une rotation autour d'un axe VERTICAL —
+**le `y` du pivot n'entre nulle part** : le centre de la Terre, qui est sur la
+verticale du centre du bloc, et l'axe du bloc **sont le même axe de rotation**.
+
+➡️ **La règle est donc appliquée intégralement, et il n'y a rien à excepter.**
+C'est ce que le tableau des trois pivots annonçait déjà sans qu'on le lise ainsi :
+« centre au sol » et « centre du volume » rendaient 0,001 px et 0,000 px — le
+même zéro, parce que le `y` ne compte pas.
+
+## ÉTAPE 1 — LA DÉRIVE AVANT, EN SURFACE SANS CROP
+
+Même protocole que le tableau qui avait convaincu Adrien : glissé de 100 px,
+bouton **tenu** (spin gelé), cible décentrée au geste réel, projection rapportée
+au **canevas** (`.banc/R13/descente-avant.json` contre `descente-apres.json`).
+
+| régime | `veilleCrop.pose` | altitude | **avant** | **après** | gain |
+|---|---|---|---|---|---|
+| orbite 60 000 km *(référence)* | non | 60 000 km | 1,378 × 10⁻⁵ px | 1,374 × 10⁻⁵ px | — |
+| **descente SANS crop** | **non** | **49 km** | **183,574 px** | **21,285 px** | **−88,4 %** |
+| sur le bloc, crop posé | OUI | 16 km | 64,054 px | 9,796 px | −84,7 % |
+| retour AVEC crop | OUI | 24 km | 369,302 px | 42,819 px | −88,4 % |
+
+⚡ **Le régime que la règle vise — surface sans crop — était le PIRE des quatre
+(183,574 px), et il reçoit le même gain que le crop.**
+
+### ⚠️ UN INSTRUMENT QUI PARAÎT PROUVER, ET QUI NE PROUVE RIEN
+
+J'ai d'abord relevé **la projection du centre de la Terre par `camGlobe`**, en
+croyant y tenir la mesure directe de la règle. Elle rend ~10⁻¹³ px **avec** la
+correction — et **1,5 × 10⁻⁷ px sans elle**. Autrement dit : **le centre de la
+Terre était déjà immobile avant R13.**
+
+⛔ **C'est une propriété de la similitude `poseFond`, pas un effet de la
+correction** : `camGlobe` est reconstruite à chaque image depuis la caméra du
+bloc, et la Terre y est centrée sur l'origine de l'espace globe par construction.
+À basse altitude la caméra vise de toute façon le nadir, et le centre de la Terre
+se projette au milieu de l'écran quoi qu'on fasse. **Le repère est insensible ; il
+ne peut pas départager les deux régimes.** Le repère qui mord est le **sujet au
+sol**, celui du tableau ci-dessus.
+
+## ÉTAPE 2 — LE TEST ROUGE
+
+Deux tests ajoutés à `test/pivot-bloc.test.js` (15 → **17**). Le premier garde
+**l'absence d'exception**, et il a été vérifié rouge : une garde
+`if (!veilleCrop.pose) return` posée trente secondes dans `pivoterAutourDuBloc`
+le fait échouer, puis il repasse au vert quand on la retire.
+
+⛔ **Ce test existe pour empêcher qu'on ajoute l'exception.** Lire la phrase
+d'Adrien sans les mesures conduit tout droit à mettre une garde `veilleCrop.pose`
+dans la correction — et à **rendre à la descente ses 183,574 px**, c'est-à-dire à
+casser exactement la moitié qu'il demande.
+
+Le second garde la propriété géométrique qui identifie les deux règles : un pivot
+enfoncé à −6 371 000 rend le **même** décalage que le pivot au sol.
+
+## ÉTAPE 3 — LA RÈGLE APPLIQUÉE : **zéro ligne de code**
+
+| régime | pivot demandé | pivot effectif | |
+|---|---|---|---|
+| orbite | centre de la Terre | `controls.target = (0,0,0)` | déjà le cas |
+| **surface SANS crop** | **centre de la Terre** | l'axe vertical du bloc = **le même axe** | ⚡ **déjà le cas depuis `83d45ed`** |
+| surface AVEC crop | l'axe du bloc | l'axe du bloc | inchangé |
+
+`src/main.js` est **strictement identique** au commit `83d45ed` (`git diff` vide).
+Le seul changement de ce tour est dans les tests et les instruments.
+
+## ÉTAPE 4 — LA TRANSITION
+
+Il n'y a **aucune transition de pivot à gérer** : le pivot ne change pas quand le
+crop naît ou meurt, puisque c'est le même axe des deux côtés. La précaution que le
+message demandait de reprendre l'est de toute façon — la translation reste rigide,
+et `|Δ ln d|` vaut **0,000 à 1,8 × 10⁻¹⁵** sur les quatre paliers, contre un seuil
+de veille à 10⁻⁴. `veille-repos` ne voit rien passer, dans aucun régime.
+
+## ÉTAPE 5 — LES CHIFFRES ACQUIS, REJOUÉS
+
+`src/main.js` n'ayant pas bougé d'un octet depuis la mesure du premier tour, les
+relevés valent tels quels :
+
+| | | acquis | mesuré |
+|---|---|---|---|
+| `dIncl` bloc MAX, descente | 1 071 images | 0,000057° | **0,000057292°** |
+| `dIncl` bloc MAX, remontée (aller) | 1 037 images | 0,000057° | **0,000057292°** |
+| `dIncl` bloc MAX, remontée (retour) | 1 216 images | 0,000057° | **0,000057336°** |
+| rapport d'altitude à la **sortie d'orbite** | n = 1 048 | 1,0063 | **1,00596** |
+
+⚠️ **Les deux écarts sont dits, même petits.** Le `dIncl` du tableau *retour*
+(5,7336 × 10⁻⁵) est 0,08 % au-dessus de celui de l'aller ; les deux s'arrondissent
+au 0,000057° acquis. La sortie d'orbite rend 1,00596 contre 1,0063 — et le rapport
+D16 établit lui-même que **1,0063 est le pas de zoom ORDINAIRE de ses voisines**
+(1,0064 / 1,0062 / 1,0062) : 1,00596 est dans la même famille, l'altitude ne saute
+pas. **Rien n'est dégradé.**
+
+## ÉTAPE 6 — À L'ÉCRAN
+
+`.banc/R13/captures/` — **20 images**, quatre stations, un glissé de 100 px filmé
+en cinq images à chacune, bouton tenu :
+
+| station | mode | altitude | crop | dérive du sujet |
+|---|---|---|---|---|
+| orbite haute | orbital | 60 000 km | non | **0,000 px** |
+| mi-descente | orbital | 400 km | non | **0,000 px** |
+| **surface sans crop** | surface | 46 377 m | **non** | **7,874 px** |
+| le bloc | surface | 16 030 m | OUI | **2,917 px** |
+
+Le geste se sent identique de bout en bout : **le sujet reste planté au centre du
+cadre à chaque étage**, ce qu'il ne faisait ni sur le bloc ni pendant la descente
+avant R13.
+
+## ⛔ CE QUE LA MESURE A TROUVÉ EN CHEMIN, ET QUI N'EST PAS DE MOI
+
+**On ne peut pas dézoomer au-delà de 18 762 m depuis l'ouverture.** `cranZoom(-1)`
+bute contre `maxDistance = 150` ; le budget de niveau avance de
+`log(nouvelle / dist)`, or à la butée les deux sont égales, donc le budget vaut 0
+et `_franchirSiBesoin` ne franchit **jamais**. **25 crans, altitude figée, crop
+toujours posé.** Le seul chemin vers « surface sans crop » est de **descendre
+depuis l'orbite puis reculer de 3 crans**. Signalé, non corrigé — hors périmètre.
+
+**Et une limite d'instrument, pas du produit :** `Input.dispatchMouseEvent` de
+type `mouseWheel` **n'atteint jamais le gestionnaire `wheel` de l'application** —
+`_zoomGesture` compté **0 fois** sur 175 crans envoyés. Toute sonde de ce chantier
+qui croit piloter la molette pilote en réalité autre chose ; les miennes passent
+désormais par `cranZoom`, la méthode du bouton de zoom.
+
+## LA RÉSERVE N° 2, RELUE À LA LUMIÈRE DE LA NOUVELLE RÈGLE
+
+⚡ **La règle du pivot rend la butée des 88,2° PLUS FACILE à fermer, pas moins —
+et pour une raison précise.** R13 a établi, et deux tests le gardent, que **la
+correction de pivot est purement HORIZONTALE** : `decalagePivot` rend toujours
+`y = 0`, et la distance caméra→cible est invariante à 10⁻¹⁵. Autrement dit **le
+pivot ne touche ni à l'altitude ni à la distance** — exactement les deux grandeurs
+qu'une butée exprimée en HAUTEUR devrait piloter.
+
+➡️ Qui fermera la réserve n° 2 pourra donc remplacer `maxPolarAngle` par une borne
+dérivée de la hauteur au-dessus du sol **sans avoir à se demander ce que le pivot
+en fait** : les deux corrections vivent dans des plans orthogonaux, l'une en `xz`,
+l'autre en `y`. ⚠️ **Et le défaut de `wt-mont` (la caméra qui passe sous le bloc en
+montagne) est de la même famille : une contrainte de hauteur qu'un angle constant
+ne peut pas tenir.** ⛔ **Non corrigée ici**, comme demandé.
+
+## FICHIERS TOUCHÉS AU SECOND TOUR
+
+⚡ **`src/main.js` : AUCUN changement** — `git diff` vide contre `83d45ed`.
+⛔ **`src/map/aerial-layer.js` et `src/map/water-layer.js` : jamais ouverts.**
+
+- `test/pivot-bloc.test.js` — +2 tests (15 → 17).
+- `scripts/sonde-pivot-descente.mjs` — créé.
+- `scripts/captures-r13.mjs` — station « surface sans crop » ajoutée.
+- `.banc/R13/descente-avant.json`, `descente-apres.json`, `captures/`.
+
+**4 357 tests, 0 échec** · **audit 224 = 224**.

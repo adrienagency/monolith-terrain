@@ -47,6 +47,7 @@ const etat = () => page.evaluate(`(() => {
   const r = e.renderer.domElement.getBoundingClientRect()
   return { mode: e.modes.mode, altM: e.modes.altM, rotateSpeed: c.rotateSpeed,
     azimut: c.getAzimuthalAngle(), polaire: c.getPolarAngle(), canevas: [r.width, r.height],
+    crop: !!(e.veilleCrop && e.veilleCrop.pose),
     centre: { x: (V.x * .5 + .5) * r.width, y: (-V.y * .5 + .5) * r.height } }
 })()`)
 
@@ -62,8 +63,8 @@ async function station(nom) {
   }
   await m('mouseReleased', CX + 100, CY, 'left', 0); await wait(10)
   const d = Math.hypot(suite[4].centre.x - suite[0].centre.x, suite[4].centre.y - suite[0].centre.y)
-  journal.push({ station: nom, mode: suite[0].mode, altM: suite[0].altM, rotateSpeed: suite[0].rotateSpeed, deriveCentrePx: d, suite })
-  console.log(`${nom.padEnd(22)} ${suite[0].mode.padEnd(9)} alt ${Math.round(suite[0].altM)} m  rotSpeed ${suite[0].rotateSpeed}  centre dérive ${d.toFixed(3)} px`)
+  journal.push({ station: nom, mode: suite[0].mode, altM: suite[0].altM, crop: suite[0].crop, rotateSpeed: suite[0].rotateSpeed, deriveCentrePx: d, suite })
+  console.log(`${nom.padEnd(22)} ${suite[0].mode.padEnd(9)} alt ${String(Math.round(suite[0].altM)).padStart(9)} m  crop ${suite[0].crop ? 'OUI' : 'non'}  centre dérive ${d.toFixed(3)} px`)
 }
 
 // ⚠️ ÉCHAUFFEMENT : le tout premier `pointerdown` d'une session n'atteint pas
@@ -88,6 +89,24 @@ await station('1-orbite-haute')
 await page.evaluate(() => { const m = window.__exp.modes; m.orbAlt = m.orbAltTarget = 400000 / 63710; m._diveArmed = false })
 await wait(60)
 await station('2-descente-400km')
+
+// ⚡ **LA STATION QUE LA RÈGLE D'ADRIEN VISE : surface SANS crop.** On traverse
+// puis on recule de quelques crans, jusqu'à ce que `veilleCrop.pose` tombe —
+// c'est le seul chemin, `cranZoom(-1)` depuis l'ouverture butant à
+// `maxDistance = 150` sans jamais franchir (mesuré : 25 crans, altitude figée).
+await page.evaluate(() => { const m = window.__exp.modes; m.orbAlt = m.orbAltTarget = 40000 / 63710; m._diveArmed = true })
+await page.waitForFunction("window.__exp.modes.mode === 'surface'", { timeout: 60000 })
+await page.waitForFunction('!window.__exp.modes.busy', { timeout: 60000 })
+await wait(120)
+for (let i = 0; i < 30; i++) {
+  if (!(await page.evaluate('!!(window.__exp.veilleCrop && window.__exp.veilleCrop.pose)'))) break
+  await page.evaluate(() => window.__exp.modes.cranZoom(-1))
+  await wait(25)
+  await page.waitForFunction('!window.__exp.modes.busy', { timeout: 30000 }).catch(() => {})
+  await wait(25)
+}
+await wait(150)
+await station('2b-surface-sans-crop')
 
 fs.writeFileSync(path.join(ICI, 'captures.json'), JSON.stringify(journal, null, 1), 'utf8')
 await nav.close()
