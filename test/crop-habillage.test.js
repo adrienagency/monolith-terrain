@@ -146,9 +146,17 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // l'emprise**, posée par une affine — pas une par tuile de quadtree : le
   // compte monte de un, et d'un seul, quel que soit le nombre de tuiles à
   // l'écran. Sept unités restent libres.
+  // ⚠️⚠️ **DIX DEPUIS LA TÂCHE R16, ET LE MÊME ARGUMENT VAUT, EN PLUS FORT** :
+  // `uPhoto` porte l'imagerie de la SURFACE du globe — cette fois-ci il y a bien
+  // **une texture par tuile de quadtree**, jusqu'à 192 vivantes en même temps.
+  // Le compte ne monte pourtant que d'UN, parce que le sampler est déclaré dans
+  // `_materialFor` (comme `uTex` et `uTilePx`) : le PROGRAMME n'en a qu'un, et
+  // c'est sa VALEUR qui change d'un matériau à l'autre au moment du dessin.
+  // Une déclaration par tuile aurait crevé le plafond dès la troisième tuile.
+  // `test/photo-monde.test.js` (⑦) verrouille cette distinction. Six libres.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 9, `le compte attendu est 9 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial), pas ${n}`)
+  assert.equal(n, 10, `le compte attendu est 10 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial, uPhoto), pas ${n}`)
   // ⚠️ **ET LE COMMENTAIRE QUI ANNONCE LE COMPTE DOIT DIRE LE MÊME NOMBRE.** Le
   // brief de la Tâche P2 le demandait nommément (« `globe.js:714` compte les
   // samplers — vérifie où en est ce compte avant d'ajouter ») : un pavé qui
@@ -156,6 +164,7 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // de prose que le tour de mutation de la Tâche K ter a trouvée verte à tort.
   assert.match(GLOBE_SRC, /uAnalysis et uRampCrop font HUIT/)
   assert.match(GLOBE_SRC, /uAerial fait NEUF/)
+  assert.match(GLOBE_SRC, /uPhoto \(Tache R16, la photo de la SURFACE\) fait DIX/)
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════
