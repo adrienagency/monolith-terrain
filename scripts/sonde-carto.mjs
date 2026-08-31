@@ -38,8 +38,14 @@ const LIEUX = {
   reunion: { lat: -21.115, lon: 55.536, nom: 'La Réunion' },
   amazonie: { lat: -3.1, lon: -60.02, nom: 'Amazonie (Manaus)' },
   norvege: { lat: 61.0, lon: 7.0, nom: 'Norvège (Sognefjord)' },
+  leman: { lat: 46.45, lon: 6.5, nom: 'Léman' },
+  baikal: { lat: 53.5, lon: 108.0, nom: 'Baïkal' },
 }
 const CLES = arg('--lieux', 'chamonix,amazonie').split(',')
+// ⚠️ Le mode sphère est le DÉFAUT : `--url ''`. `--url '?terre=deux'` ou
+// `--url '?frontiere=0'` exercent le régime d'AVANT le chantier, où les calques
+// doivent rester dans la scène du bloc et se draper à plat.
+const URL_SUFFIXE = arg('--url', '')
 
 function trouverChrome() {
   const donne = arg('--chrome', process.env.CHROME_PATH)
@@ -84,7 +90,7 @@ try {
   const page = await nav.newPage()
   await page.setViewport({ width: 1280, height: 800 })
   page.on('pageerror', (e) => releve.erreurs.push(String(e.message).slice(0, 200)))
-  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 120000 })
+  await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
   await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe && window.__exp?.mapLayers,
     { timeout: 90000, polling: 100 })
   await dodo(6000)
@@ -175,6 +181,11 @@ try {
             }
           })(),
           nomsVisibles: e.mapLayers.places._entries.filter((x) => x.sprite.visible).length,
+          // ⚠️ **LE CHIFFRE QUI FAIT AUTORITÉ SUR LA COUVERTURE**, et il vient du
+          // poseur lui-même, pendant la construction — pas d'un ré-échantillonnage
+          // d'après coup, qui interroge un globe dont les hauteurs ont pu être
+          // relâchées entre-temps.
+          poseur: { points: e.mapLayers.water._poseur?.points ?? null, refus: e.mapLayers.water._poseur?.refus ?? null },
         }
       })
       ligne.lieu = lieu.nom
@@ -182,6 +193,7 @@ try {
       const nom = `${ETIQ}-${cle}-z${z}.png`
       await page.screenshot({ path: path.join(SORTIE, nom) })
       const d = ligne.drape
+      console.log(`   poseur : ${ligne.poseur.points} sommets, ${ligne.poseur.refus} repliés sur le bloc`)
       console.log(`${lieu.nom} z${z} → water ${ligne.water.objets} obj (${ligne.water.scene}, vis=${ligne.water.visible}) · places ${ligne.places.objets} obj, ${ligne.nomsVisibles} lisibles · drapé ${d ? `n=${d.n} med ${d.medM} m, p95 ${d.p95M} m, max ${d.maxM} m, sans couverture ${d.sansCouverture}` : '—'} · ${ligne.msRebuild} ms`)
     }
   }

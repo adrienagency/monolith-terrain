@@ -28,6 +28,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import { poseurPlat, creerPoseurGlobe, kAttendu } from '../src/monde/sol-globe.js'
+import { OSM_MIN_ZOOM } from '../src/map/water-layer.js'
 import { facteurEchelle } from '../src/monde/frontiere-rendu.js'
 import { latLonToWorld, worldToLatLon, R_GLOBE, EARTH_RADIUS_M, latLonToSphere, demSpan } from '../src/geo.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
@@ -233,6 +234,14 @@ test('⑥ la visibilité de la cartographie ne suit plus le maillage du bloc pla
 })
 
 // ═══════════════════════════════════════════════════════ ⑦ le plancher de zoom
+
+test('⑦ le plancher reste à 12 — la mesure dit que le baisser n’ajoute rien', () => {
+  // ⚡ Mesuré (`scripts/sonde-overpass.mjs`, page vivante) : sur cette machine
+  // la branche Overpass REFUSE à z12 comme à z10, en 6 004 ms — c'est-à-dire
+  // `OVERPASS_ATTENTE_MS` au chiffre près. Baisser le plancher n'ajouterait
+  // aucune donnée et étendrait l'attente à tous les zooms.
+  assert.equal(OSM_MIN_ZOOM, 12)
+})
 
 test('⑦ sous OSM_MIN_ZOOM, l’eau existe quand même — Natural Earth couvre le monde', () => {
   // Le plancher choisit une SOURCE, il ne commande pas la PRÉSENCE. Mesuré à

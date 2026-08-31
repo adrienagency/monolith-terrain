@@ -36,6 +36,51 @@ import { poseurPlat } from '../monde/sol-globe.js'
 // régression : fetchOverpassLines retombe sur le palier Natural Earth au
 // moindre échec (jamais de blanc), et OVERPASS_MAXSIZE (overpass.js) fait
 // échouer la requête AVANT que le navigateur n'avale la charge.
+//
+// ══════════ ⚡ D16-b A CHERCHÉ À LE BAISSER, ET LA MESURE DIT NON ═══════════
+//
+// > **Adrien :** « Pour l'instant [la cartographie] ne s'affiche que sur
+// > certains lieux et **avec un zoom important**. »
+//
+// ⛔ **CE PLANCHER N'ÉTAIT POUR RIEN DANS CE DÉFAUT, ET C'EST MESURÉ.** Il
+// choisit une SOURCE, pas une PRÉSENCE : sous lui, les rivières viennent de
+// Natural Earth (`_neRiverRings`) et les lacs des tuiles mondiales, tous deux
+// DÉJÀ EMBARQUÉS et couvrant la planète (`public/data/map/rivers.json` :
+// 10 771 entités, `lakes.json` : 1 345, `places.json` : 158 474). Relevé à
+// l'écran AVANT toute correction (`.banc/D16b/avant.json`, 8 couples
+// lieu × zoom) : les groupes étaient **peuplés à z6, z8 et z10 comme à z12**
+// — de 3 à 36 objets — et `visible = false` partout. Le défaut était le
+// relogement, pas le plancher.
+//
+// ⚡ **ET SUR LA MACHINE D'ADRIEN, LA BRANCHE OVERPASS NE RAPPORTE RIEN DU
+// TOUT — À AUCUN ZOOM.** `scripts/sonde-overpass.mjs`, page vivante, même
+// chemin que ce calque, Chamonix :
+//
+//   | emprise | lignes | aires | temps |
+//   |---|---|---|---|
+//   | z12 (20 km) | **REFUS** | REFUS | **6 008 ms** |
+//   | z10 (82 km), page fraîche | **REFUS** | REFUS | **6 004 ms** |
+//
+// 6 000 ms est `OVERPASS_ATTENTE_MS` au chiffre près : la requête ne revient
+// jamais. C'est exactement ce que le §« LE BUDGET D'ATTENTE » d'`overpass.js`
+// avait déjà mesuré le 2026-07-31 — *« l'API est injoignable d'ici »*. **Tout
+// ce qu'on voit à l'écran, de z6 à z12, vient donc des données locales.**
+//
+// ➡️ **BAISSER LE PLANCHER N'AJOUTERAIT AUCUNE DONNÉE ET ÉTENDRAIT L'ATTENTE
+// DE 6 s À TOUS LES ZOOMS.** Sur une machine qui, elle, atteint Overpass, il
+// noierait le service public avec les charges du tableau ci-dessus (z10 :
+// 234 594 ways / 286 Mo). **On le laisse à 12.**
+//
+// ⚠️ **ET CE N'EST PAS SEULEMENT UNE QUESTION DE CHARGE : LA DONNÉE FINE N'A
+// PAS DE SENS À PETITE ÉCHELLE.** À z8 le bloc fait ~330 km de large pour
+// ~1 280 px : un pixel vaut 256 m. Les traits sont dessinés en largeur d'ÉCRAN
+// (`riverWidthPx` : 0,9 à 3,5 px, `LineSegments2`), donc y verser les ~50 000
+// ways d'OSM ne rendrait pas des rivières plus fines — ça rendrait un aplat
+// bleu. Le champ `min_zoom` de Natural Earth EST la généralisation
+// cartographique de ce cas, et c'est lui que `filterByZoom` applique.
+// ⛔ **On ne mesure pas z8 contre le point d'accès public** : ce serait
+// demander à un service gratuit de balayer un pays pour un chiffre déductible
+// (voir l'en-tête de `scripts/sonde-overpass.mjs`).
 export const OSM_MIN_ZOOM = 12
 
 // Client-side waterway-kind filter for the zoomed Overpass waterway LINES

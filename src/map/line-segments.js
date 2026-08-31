@@ -20,16 +20,24 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 // `monde/sol-globe.js`, écrite une fois. La convertir aussi ici la ferait DEUX
 // fois — le facteur au carré, et c'est la classe de défaut que cette tâche
 // existe pour ne pas rejouer.
+//
+// ⚡ **UN POINT EST POSÉ UNE FOIS, PAS DEUX — ET C'EST MESURABLE.** Un tracé de
+// `n` points fait `n − 1` segments et donc `2(n − 1)` extrémités : la forme du
+// dépôt appelait l'échantillonneur sur chaque point INTÉRIEUR deux fois, une
+// fois comme fin du segment précédent et une fois comme début du suivant. Sur
+// le bloc plat, `terrain.sample` est un accès tableau et personne ne l'a jamais
+// vu ; sur le globe, chaque appel est une recherche de tuile suivie d'une
+// interpolation de maille. On pose donc les points du tracé D'ABORD, on
+// assemble les segments ensuite. **La sortie est identique au flottant près** —
+// c'est le même point, calculé une fois au lieu de deux.
 function segPositions(runs, poseur, offset) {
   const pos = []
-  const pousse = (x, z) => {
-    const v = poseur.placer(x, z, poseur.hauteur(x, z) + offset)
-    pos.push(v.x, v.y, v.z)
-  }
   for (const run of runs) {
-    for (let i = 0; i < run.length - 1; i++) {
-      pousse(run[i].x, run[i].z)
-      pousse(run[i + 1].x, run[i + 1].z)
+    if (run.length < 2) continue
+    const pts = run.map((p) => poseur.placer(p.x, p.z, poseur.hauteur(p.x, p.z) + offset))
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1]
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z)
     }
   }
   return pos
