@@ -146,6 +146,16 @@ import {
   MONDE_NU, MONDE_ECLAIRE, styleMonde,
   RELIEF_MONDE, RELIEF_MONDE_NUL, GLSL_RELIEF_MONDE,
 } from './monde/planete-eclairee.js'
+// ══════════ L'APPOINT ET L'OMBRAGE DES PENTES — Tâche R21 ══════════════════
+//
+// Six des huit réglages morts de l'inventaire (69 à 73 et 30) atterrissent ici.
+// Même patron que `planete-eclairee.js` juste au-dessus : la loi et ses
+// conversions d'unité chiffrées vivent dans un module PUR qui porte son propre
+// texte GLSL, et ce fichier l'INJECTE. `test/lumiere-sphere.test.js` traduit ce
+// texte-là et l'exécute contre les fonctions JS du module.
+import {
+  APPOINT_MONDE_ETEINT, PENTE_MONDE_NULLE, GLSL_LUMIERE_SPHERE, directionAppointMonde,
+} from './monde/lumiere-sphere.js'
 // ══════════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═════════════════════════════════
 //
 // > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
@@ -1377,6 +1387,35 @@ uniform vec3 uSolIrr;      // hemi.groundColor x hemi.intensity + ambiante nadir
 uniform vec3 uAlbedoBase;  // params.color du socle, en lineaire
 uniform float uAlbedoTeinte; // mapTint — il retrouve un sens des qu'il y a une lumiere
 
+// ══════ L'APPOINT — Tache R21, options 69 a 73 de l'inventaire ═════════════
+//
+// ⛔ CINQ CURSEURS VISIBLES ET INERTES : l'appoint est une seconde
+// THREE.DirectionalLight de la scene du BLOC PLAT, que le crop ne voit pas.
+// Mesure au banc R18 rejouee sous R21, mouvement ambiant coupe (plancher
+// 0,0000) : 0,000 de moyenne et 0,000 de gradient aux deux bouts des cinq.
+//
+// ⚠️ C'EST UN TERME ADDITIF, PAS UNE SECONDE LOI. three accumule une seconde
+// directionnelle dans le MEME irradiance avant le MEME BRDF_Lambert
+// (RE_Direct) ; irradianceCrop fait deja exactement ca pour le soleil. La loi
+// et ses conversions d'unite CHIFFREES vivent dans monde/lumiere-sphere.js.
+//
+// ⚠️ uAppointIrr VAUT (0,0,0) PAR DEFAUT, ET C'EST LA GARDE : la somme du
+// nuanceur est alors inchangee terme a terme, quelle que soit uAppointDir.
+// Meme patron que uReliefMondeGain = 0 et que ECLAIRAGE_MONDE.
+uniform vec3 uAppointDir;  // l'appoint, replace dans le repere du globe
+uniform vec3 uAppointIrr;  // fillLight.color x fillLight.intensity, LINEAIRE
+
+// ══════ L'OMBRAGE DES PENTES — Tache R21, option 30 ════════════════════════
+//
+// ⛔ « AUCUN COTE GLOBE » disait l'inventaire, et naturel-crop.js l'avait
+// DECLARE LAISSE : « les tuiles du globe ne portent que vNormalW, la normale de
+// la SPHERE : la pente du terrain n'existe pas dans ce nuanceur ». C'etait vrai
+// quand ca a ete ecrit : nMonde, la normale PAR FRAGMENT, existe depuis la
+// Tache P9, et D15 l'allume partout.
+//
+// ⚠️ ZERO PAR DEFAUT : mix(a, b, 0) rend a au bit pres. C'est la ligne d'avant.
+uniform float uSlopeTint;
+
 // ══════ LA COUCHE APPARENCE — Tache P3 ═════════════════════════════
 // ⚠️ uSurfaceFx VAUT ZERO PAR DEFAUT, comme uCropOn / uHabOn / uEclairageOn.
 // Ces noms sont ceux que FX_GLSL LIT : les renommer casserait le module
@@ -1465,6 +1504,13 @@ ${GLSL_NORMALE_FINE}
 // test/planete-eclairee.test.js TRADUIT ce texte-ci pour l'executer contre les
 // deux fonctions JS du module. Une seconde ecriture aurait diverge.
 ${GLSL_RELIEF_MONDE}
+
+// ⚠️ INJECTE, PAS RECOPIE — Tache R21. Le terme direct de l'appoint, la pente
+// du sol et le brun des versants vivent dans monde/lumiere-sphere.js, avec la
+// table des conversions d'unite et leur facteur chiffre.
+// test/lumiere-sphere.test.js TRADUIT ce texte-ci et l'EXECUTE contre les
+// fonctions JS du module — il ne le cherche pas par son nom.
+${GLSL_LUMIERE_SPHERE}
 
 // ══════ LA HAUTEUR DU BLOC, ECRITE UNE FOIS — Tache P10 ════════════════════
 //
@@ -2138,6 +2184,32 @@ void main() {
       vec3 lampe = lampeReliefMonde(est, nord, haut, uReliefMondeAz, uReliefMondeEl);
       ombreRelief = ombrageReliefMonde(nMonde, haut, lampe, uReliefMondeGain);
     }
+
+    // ══════ ⚡ L'OMBRAGE DES PENTES — Tache R21, option 30 ══════════════════
+    //
+    // ⛔ « AUCUN COTE GLOBE », disait l'inventaire, et naturel-crop.js avait
+    // DECLARE ce poste laisse : « les tuiles du globe ne portent que vNormalW,
+    // la normale de la SPHERE ». C'etait vrai a l'ecriture ; nMonde, la normale
+    // PAR FRAGMENT, existe depuis la Tache P9 et D15 l'allume partout — c'est
+    // pour ca que ce bloc est ICI, dans le seul endroit ou elle est calculee.
+    //
+    // ⚠️ dot(nMonde, haut) ET NON nMonde.y, ET LE CHIFFRE EST DANS LE MODULE :
+    // a La Reunion (lat -21,26°) haut n'a que 0,3625 de composante Y, donc un
+    // nMonde.y recopie du socle aurait declare 63,7° de pente sur un sol plat.
+    // La verticale du socle est +Y parce que le bloc est plat ; sur une sphere
+    // elle change a chaque fragment. Meme grandeur — un cosinus, sans
+    // dimension —, facteur 1, mais pas le meme vecteur.
+    //
+    // ⚠️ TERRE SEULE, comme le peigne juste au-dessus et comme la branche du
+    // socle : terrain.js pose ce mix dans le else de la branche TERRE.
+    //
+    // ⚠️ ET LE MODE EST DECIDE PAR L'APPELANT, PAS ICI. contexteCrop transmet
+    // ZERO en mode Atlas (il lit uColorMode, l'uniforme meme que setColorMode
+    // ecrit) : sans ca, la fenetre de ~464 ms pendant laquelle l'analyse cuit —
+    // uAnalysisOn encore a 0 en mode Atlas — aurait fait clignoter le brun.
+    if (uSlopeTint > 0.0 && !sousEau) {
+      col = teintePente(col, penteSol(nMonde, haut), uSlopeTint);
+    }
   }
   float nduCrop = dot(nMonde, uHemiHaut);
   float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
@@ -2582,7 +2654,28 @@ void main() {
   // silhouette de bloc, et le prix de l'alternative serait de porter DEUX
   // couleurs dans tout le nuanceur — donc de peindre deux fois l'apparence, le
   // trait de cote, les courbes et le graticule.
-  vec3 colBloc = col * irradianceCrop(dot(nMonde, uSoleilDir), nduCrop, uSoleilIrr, uCielIrr, uSolIrr) * 0.3183098861837907;
+  // ══════ ⚡ ET L'APPOINT S'AJOUTE DANS LA MEME SOMME — Tache R21 ═══════════
+  //
+  // ⛔ CINQ CURSEURS ETAIENT VISIBLES ET INERTES (n° 69 a 73 de l'inventaire),
+  // parce que l'appoint est une THREE.DirectionalLight de la scene du BLOC PLAT
+  // et que le crop ne recoit pas des lampes mais des IRRADIANCES.
+  //
+  // ⚠️ UN TERME DE PLUS DANS LA SOMME, PAS UNE SECONDE LOI, ET C'EST LA MEME
+  // DISCIPLINE QUE L'ENVIRONNEMENT VINGT LIGNES PLUS HAUT : three accumule une
+  // seconde directionnelle dans le MEME irradiance (RE_Direct) avant le MEME
+  // BRDF_Lambert. Ecrire un second produit multiplicatif a cote aurait ete la
+  // faute de D13 §③.
+  //
+  // ⚠️ ET LES CONVERSIONS SONT ECRITES, AVEC LEUR FACTEUR : elles valent toutes
+  // 1, et le §6 de monde/lumiere-sphere.js dit pourquoi chacune vaut 1 —
+  // notamment que placeFill construit sa direction avec les TROIS MEMES termes
+  // que placeSun, donc que directionSoleilLocale s'applique sans retouche.
+  //
+  // ⚠️ uAppointIrr A (0,0,0) : la somme est inchangee terme a terme, quelle que
+  // soit uAppointDir. C'est la garde, et c'est l'etat de repos.
+  vec3 irrBloc = irradianceCrop(dot(nMonde, uSoleilDir), nduCrop, uSoleilIrr, uCielIrr, uSolIrr)
+               + irradianceAppoint(dot(nMonde, uAppointDir), uAppointIrr);
+  vec3 colBloc = col * irrBloc * 0.3183098861837907;
   col = mix(colPlanete, colBloc, partBloc);
 
   // faint paper grain
@@ -3515,6 +3608,16 @@ export class Globe {
       uHemiHaut: { value: new THREE.Vector3(0, 1, 0) },
       uCielIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.cielIrr) },
       uSolIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.solIrr) },
+      // ══════ L'APPOINT ET L'OMBRAGE DES PENTES — Tâche R21 ═════════════════
+      //
+      // ⚠️ **LES TROIS PARTENT DE `lumiere-sphere.js`, PAS D'UN LITTÉRAL.**
+      // C'est le contrat qu'`⑨i` de `test/crop-habillage.test.js` impose déjà à
+      // huit autres : un défaut recopié dans le constructeur ET dans
+      // `retirerHabillage` finit par diverger, et l'aller-retour bit à bit
+      // devient faux sans prévenir.
+      uAppointDir: { value: new THREE.Vector3().fromArray(APPOINT_MONDE_ETEINT.dir) },
+      uAppointIrr: { value: new THREE.Vector3().fromArray(APPOINT_MONDE_ETEINT.irr) },
+      uSlopeTint: { value: PENTE_MONDE_NULLE },
       // ══════ L'AMBIANTE PROPRE À LA PAROI — Tâche P8 ═══════════════════════
       //
       // ⛔ **DEUX AMBIANTES ET NON UNE, PARCE QUE LE SOCLE EN A DEUX.** Le
@@ -4285,6 +4388,26 @@ export class Globe {
     hemiIntensite = null,
     ambianteCoef = null,
     ambianteIntensite = null,
+    // ══════ L'APPOINT — Tâche R21, options 69 à 73 ═══════════════════════════
+    //
+    // ⚠️ **QUATRE CHAMPS PLATS DE PLUS, MÊME RAISON QUE LES DOUZE D'AU-DESSUS** :
+    // `habillageDifferent` compare par `Object.is`, donc un objet `appoint`
+    // reconstruit à chaque image reposerait l'habillage entier soixante fois par
+    // seconde.
+    //
+    // ⛔ **ET L'INTERRUPTEUR EST, ENCORE, L'ABSENCE DE DONNÉE** : un appelant qui
+    // ne passe pas `appointIntensite` laisse `uAppointIrr` à `(0, 0, 0)`,
+    // c'est-à-dire l'image d'avant cette tâche AU BIT PRÈS.
+    appointAzimut = null,
+    appointElevation = null,
+    appointCouleur = null,
+    appointIntensite = null,
+    // ══════ L'OMBRAGE DES PENTES — Tâche R21, option 30 ══════════════════════
+    //
+    // ⚠️ **LE DÉFAUT EST `PENTE_MONDE_NULLE`, PAS `params.slopeTint`.** Un poseur
+    // muet ne doit pas inventer un brunissage : c'est la remarque que
+    // `HABILLAGE_MONDE.aerialCoastFade` porte déjà, et le précédent qu'elle cite.
+    slopeTint = PENTE_MONDE_NULLE,
     // ══════ L'AMBIANTE DE LA PAROI — Tâche P8 ════════════════════════════════
     //
     // ⚠️ **MÊME PATRON QUE PARTOUT ICI : L'INTERRUPTEUR EST L'ABSENCE DE
@@ -4509,7 +4632,41 @@ export class Globe {
         u.uAlbedoBase.value.set(_couleurTampon.r, _couleurTampon.g, _couleurTampon.b)
       }
       if (Number.isFinite(albedoTeinte)) u.uAlbedoTeinte.value = albedoTeinte
+      // ══════ ⚡ L'APPOINT — Tâche R21, options 69 à 73 ════════════════════
+      //
+      // ⛔ **IL EST DANS `if (aLumiere)`, ET C'EST OBLIGATOIRE, PAS UN
+      // RANGEMENT.** `directionAppointMonde` a besoin de `centreLat`/`centreLon`
+      // — les mêmes que le soleil, et pour la même raison : sans repère, poser
+      // l'appoint du golfe de Guinée sur La Réunion. Le garde d'`aLumiere` les
+      // a déjà vérifiés finis.
+      //
+      // ⚠️ **L'INTENSITÉ VIENT DE LA LAMPE, PAS DE `params`** — c'est
+      // `contexteCrop` qui l'y lit, et le §6 de `lumiere-sphere.js` chiffre
+      // pourquoi : `fillLightIntensity` rend **0 exactement** quand
+      // l'interrupteur est éteint, et écrête à **[0 ; 4]**. `params` ne porte
+      // ni l'un ni l'autre.
+      const dirAppoint = Number.isFinite(appointIntensite) && appointCouleur != null
+        ? directionAppointMonde(soleilAzimut, appointAzimut, appointElevation, centreLat, centreLon)
+        : null
+      if (dirAppoint) {
+        u.uAppointDir.value.fromArray(dirAppoint)
+        poserIrradiance(u.uAppointIrr.value, appointCouleur, appointIntensite)
+      } else {
+        u.uAppointDir.value.fromArray(APPOINT_MONDE_ETEINT.dir)
+        u.uAppointIrr.value.fromArray(APPOINT_MONDE_ETEINT.irr)
+      }
     }
+    // ══════ L'OMBRAGE DES PENTES — Tâche R21, option 30 ══════════════════════
+    //
+    // ⚠️ **HORS DU `if (aLumiere)`, ET C'EST DÉLIBÉRÉ** : c'est une couche de
+    // CARTE, pas une lumière. `uAnalysisOn` et `uTexShade`, ses deux voisins de
+    // la colorisation, sont posés dehors eux aussi — la borner à l'éclairage
+    // l'éteindrait avec `uEclairageOn`, exactement le défaut que le bloc de la
+    // photo aérienne nomme (« `dedansCrop` ET NON `partBloc` »).
+    //
+    // ⚠️ **ÉCRÊTÉ : un `NaN` dans un uniforme éteint la moitié d'un GPU sans un
+    // mot** — la remarque que `poserEstompage` porte déjà.
+    u.uSlopeTint.value = Number.isFinite(slopeTint) ? Math.min(1, Math.max(0, slopeTint)) : PENTE_MONDE_NULLE
 
     // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
     //
@@ -4742,6 +4899,14 @@ export class Globe {
     u.uSoleilIrr.value.fromArray(ECLAIRAGE_MONDE.soleilIrr)
     u.uCielIrr.value.fromArray(ECLAIRAGE_MONDE.cielIrr)
     u.uSolIrr.value.fromArray(ECLAIRAGE_MONDE.solIrr)
+    // ⚠️ **L'APPOINT ET LES PENTES AUSSI — Tâche R21**, et pour la raison que ce
+    // bloc porte déjà : l'aller-retour bit à bit d'`⑨h` porte sur les VALEURS,
+    // pas sur leur effet. Un appoint resté sur le soleil d'un crop mort est un
+    // état qui traîne, et `uSlopeTint` est PARTAGÉ par toutes les tuiles — c'est
+    // exactement la fuite d'`uContourInterval` (la planète entière à 250 m).
+    u.uAppointDir.value.fromArray(APPOINT_MONDE_ETEINT.dir)
+    u.uAppointIrr.value.fromArray(APPOINT_MONDE_ETEINT.irr)
+    u.uSlopeTint.value = PENTE_MONDE_NULLE
     // ⚠️ **LES DEUX DE LA PAROI AUSSI — Tâche P8**, et pour la raison que ce
     // bloc porte déjà : l'aller-retour bit-à-bit porte sur les VALEURS. Une
     // paroi restée sur le studio d'un crop mort est un état qui traîne.

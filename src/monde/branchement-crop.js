@@ -272,6 +272,27 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   // absente d'ici, le bloc s'éclairerait à l'ambiante de son premier instant.
   'ambianteCoef',
   'ambianteIntensite',
+  // ══════ L'APPOINT ET L'OMBRAGE DES PENTES — Tâche R21 ═════════════════════
+  //
+  // ⚠️ **CINQ CHAMPS DE PLUS, ET L'ABSENCE DE L'UN D'EUX SE PAIERAIT COMME
+  // CELLE DE `normaleFine` CENT LIGNES PLUS HAUT** : un champ absent d'ici n'est
+  // jamais comparé, donc jamais reposé de son propre chef — il PASSE bien à
+  // chaque pose déclenchée par un autre champ. Le défaut serait donc muet tant
+  // que rien d'autre ne bouge, et se réparerait tout seul au premier changement
+  // d'heure : exactement la course que la Tâche K ter a nommée. Or l'appoint est
+  // **le seul réglage de lumière que le cycle horaire ne pilote pas** — rien ne
+  // bouge derrière lui, il n'y a aucune réparation fortuite à espérer.
+  //
+  // ⚠️ **ET LES CINQ SONT DES SCALAIRES OU DES CHAÎNES**, comme les douze
+  // au-dessus : `Object.is` est la seule comparaison de ce module.
+  'appointAzimut',
+  'appointElevation',
+  'appointCouleur',
+  'appointIntensite',
+  // ⚠️ **`slopeTint` EST UNE COUCHE DE CARTE, PAS UNE LUMIÈRE**, et il est ici
+  // pour la même raison que les dix curseurs d'Atlas : un curseur qu'on traîne
+  // doit se voir sans attendre le prochain changement de lieu.
+  'slopeTint',
   // ⛔ **ET LA PAROI A LA SIENNE, QUI N'EST PAS CELLE-LÀ — Tâche P8.** Le relief
   // voit `scene.environment` (« the neutral room env ») ; la paroi voit son
   // propre `wallMat.envMap` (« their own studio env map »), et `three`

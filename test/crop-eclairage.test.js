@@ -785,7 +785,13 @@ test('⑤e l’albédo est fabriqué AVANT l’apparence et les traits de carte'
   const iFx = FRAG_NU.indexOf('fxBlend(col, fxc, uFxBlend)')
   const iCote = FRAG_NU.indexOf('col = mix(col, uInk, cote * 0.55);')
   const iContour = FRAG_NU.indexOf('col = mix(col, uInk, contour);')
-  const iLumiere = FRAG_NU.indexOf('vec3 colBloc = col * irradianceCrop(')
+  // ⚠️ **L'ANCRE A CHANGE DE FORME AVEC LA TACHE R21, PAS DE SENS.** L'appoint
+  // (options 69 a 73 de l'inventaire) ajoute un second terme direct dans la
+  // MEME somme, donc l'irradiance est nommee avant d'etre multipliee :
+  // `vec3 irrBloc = irradianceCrop(...) + irradianceAppoint(...)`. C'est
+  // toujours l'etape « la lumiere multiplie », et elle doit toujours venir en
+  // dernier.
+  const iLumiere = FRAG_NU.indexOf('vec3 irrBloc = irradianceCrop(')
   assert.ok(iAlbedo > 0 && iFx > iAlbedo, 'l’apparence peint sur l’albédo')
   assert.ok(iCote > iFx, 'le trait de côte passe APRÈS l’apparence')
   assert.ok(iContour > iCote, 'les courbes passent après le trait de côte')

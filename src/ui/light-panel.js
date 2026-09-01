@@ -10,8 +10,13 @@
 // dessous, et la mécanique (azimut/élévation/intensités) reléguée en bas.
 // Meta parlante repliée : « Heure dorée · 17h30 » + pastille couleur du soleil.
 
-import { slider, section, el, color, toggle, onRefresh, refreshAll } from './kit.js'
+import { slider, section, el, color, toggle, onRefresh, refreshAll, visibleWhen } from './kit.js'
 import { lightingFor, sunPosition, solarHourToDate } from '../daycycle.js'
+// ⚠️ **LA DÉCISION N'EST PAS ÉCRITE ICI, ELLE EST EXÉCUTÉE PAR UN TEST — R21.**
+// `reglageAgit` répond « ce curseur a-t-il un receveur en mode sphère », et le
+// motif MESURÉ est rangé à côté de la réponse (`monde/lumiere-sphere.js`, §1
+// et §2). Un `if` écrit ici se serait recopié au curseur mort suivant.
+import { reglageAgit } from '../monde/lumiere-sphere.js'
 
 // heure formatée façon tirette (17h30, 19h) — pas de zéro de tête ni de
 // minutes nulles : la meta est courte, elle ne doit pas tronquer
@@ -70,6 +75,13 @@ export function lightSection(ctx) {
     params[key] = v
     ctx.applyTimeOfDay(params.timeOfDay ?? 10)
   }
+  // ⚠️ **UN CURSEUR QUI SE CACHE QUAND IL N'A PLUS DE RECEVEUR — Tâche R21.**
+  // `visibleWhen` ne rend PAS le nœud (`kit.js`) : le poser en argument
+  // d'`append` y aurait mis `undefined`, et la ligne aurait disparu pour de bon.
+  const siAgit = (row, cle) => {
+    visibleWhen(row, () => reglageAgit(cle, ctx.surSphere?.() === true))
+    return row
+  }
 
   // ---- le star : chips d'ambiance + curseur d'heure fin ----
   const chipRow = el('div', 'ce-chiprow')
@@ -113,28 +125,51 @@ export function lightSection(ctx) {
     el('div', 'ce-fx-head', 'Ambiance'),
     slider({ label: 'Lumière ambiante', min: 0, max: 3, step: 0.02, get: () => params.hemiGain ?? 1, set: (v) => setGain('hemiGain', v) }),
     slider({ label: 'Éclairage d’environnement', min: 0, max: 3, step: 0.02, get: () => params.envGain ?? 1, set: (v) => setGain('envGain', v) }),
-    // ⛔ **ET LA DOUCEUR DES OMBRES N'A RIEN À ADOUCIR — Tâche R18.** Elle règle
-    // le rayon de la carte d'ombre du soleil, et **le crop ne reçoit aucune
-    // ombre portée** : son ombrage vient des irradiances. Mesuré de 0 à 20,
-    // mouvement coupé : **0,000** et **0,000**.
-    slider({ label: 'Douceur des ombres', min: 0, max: 20, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.setShadowSoftness(v) } }),
+    // ══════ ⛔ LA DOUCEUR DES OMBRES N'A RIEN À ADOUCIR — R18, tranché par R21
+    //
+    // ⛔ **ELLE EST CACHÉE EN MODE SPHÈRE, ET PLUS SEULEMENT ANNOTÉE.** R18 avait
+    // posé une note ; le brief R21 tranche : *« un réglage mort visible est pire
+    // qu'un réglage absent — c'est ce qui a produit cet inventaire »*.
+    //
+    // ⚡ **QUATRE CONSTATS INDÉPENDANTS, TOUS RELEVÉS DANS L'APPLICATION
+    // VIVANTE** (le détail et le palier machine sont au §2 de
+    // `monde/lumiere-sphere.js`) : `globe.js` ne contient **aucune** occurrence
+    // de `shadowmap` ; `terrain.mesh.visible` vaut **false** sous le drapeau ;
+    // la scène du bloc compte **42 objets visibles, 1 receveur
+    // (`ShadowMaterial`), 0 maillage casteur** ; et surtout **cette scène n'est
+    // plus rendue du tout** (`passeSurface.enabled = false`).
+    // Mesuré de 0 à 20, mouvement coupé : **0,000** et **0,000** —
+    // et le palier machine était à **0 « PLEINE QUALITÉ », ombres « dynamic »,
+    // carte 1 024²**, donc le zéro n'est pas celui d'un mode dégradé.
+    //
+    // ⛔ **ET LE BRIEF SE TROMPAIT SUR L'UNITÉ** : sous `VSMShadowMap`,
+    // `shadow.radius` est un rayon de flou en TEXELS de la carte d'ombre, pas
+    // une longueur de scène. Il n'y avait aucune conversion d'échelle à faire.
+    //
+    // ⛔ **ON NE LA RETIRE PAS** : elle pilote toujours le bloc plat quand le
+    // bloc plat est dessiné, et elle voyage dans les gabarits.
+    siAgit(
+      slider({ label: 'Douceur des ombres', min: 0, max: 20, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.setShadowSoftness(v) } }),
+      'shadowSoftness'
+    ),
 
     // ---- l'appoint : la lumière que l'heure ne pilote pas ----
     el('div', 'ce-fx-head', 'Appoint'),
     el('div', 'ce-note', 'Une seconde lumière, sans ombre, pour rouvrir un flanc bouché. Sa direction est relative au soleil : elle le suit sans jamais être écrasée.'),
-    // ══════ ⛔ L'APPOINT N'ATTEINT PAS LA SPHÈRE — Tâche R18 ═══════════════
+    // ══════ ⚡ L'APPOINT ATTEINT LA SPHÈRE DEPUIS R21 ══════════════════════
     //
-    // ⛔ **CE SONT DES `THREE.Light` DE LA SCÈNE DU BLOC PLAT.** Le crop n'est
-    // pas éclairé par des lampes : `monde/eclairage-crop.js` reçoit des
-    // IRRADIANCES (`soleilIrr`, `hemiHaut`, `cielIrr`, `solIrr`) et calcule sa
-    // couleur. Une seconde source demande d'étendre cette loi ET ses uniformes
-    // — une transcription, pas un déplacement d'écriture.
+    // ⛔ **LA NOTE DE R18 EST RETIRÉE PARCE QU'ELLE EST DEVENUE FAUSSE.** Elle
+    // disait, à raison pour son époque : *« l'appoint éclaire l'ancienne scène —
+    // il ne se voit pas sur la carte sphérique »*. R21 a porté le terme direct
+    // manquant : `contexteCrop` lit `fillLight` (la LAMPE, pas `params`, pour
+    // hériter de l'interrupteur et de l'écrêtage), `poserHabillage` en fait une
+    // irradiance, et le nuanceur l'ajoute dans la MÊME somme que le soleil.
+    // La loi et ses conversions chiffrées : `monde/lumiere-sphere.js`.
     //
-    // ⚡ **MESURÉ AUX DEUX BOUTS DES CINQ RÉGLAGES**, mouvement ambiant coupé
-    // (plancher de bruit 0,0000) : écart moyen **0,000** et gradient **0,000**
-    // (l'intensité rend 0,0009, soit un millième de niveau de gris).
-    el('div', 'ce-bg-note on',
-      'L’appoint éclaire l’ancienne scène — il ne se voit pas sur la carte sphérique (mesuré : image identique au bit près).'),
+    // ⚠️ **CE QUE R21 N'A PAS FAIT, ET IL FAUT LE DIRE** : les PAROIS du crop
+    // ont leur propre nuanceur, qui appelle `irradianceCrop` sans l'appoint. Un
+    // appoint fort les laisse un cran plus sombres que la surface. Le périmètre
+    // des parois appartient à un autre chantier en cours — non touché exprès.
     // ÉTEINT par défaut. Contrairement au soleil, celui-ci est gratuit dans les
     // deux sens (1,3 ms mesuré) : la lampe existe depuis le boot à intensité 0,
     // l'interrupteur ne fait que monter son intensité, donc rien ne recompile.

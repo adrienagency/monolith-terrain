@@ -58,6 +58,7 @@ import {
   brume,
 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
+import { PENTE_MONDE_NULLE } from '../src/monde/lumiere-sphere.js'
 import { Globe } from '../src/globe.js'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
@@ -734,6 +735,11 @@ function globeStub() {
       uHemiHaut: val(vecStub()), uCielIrr: val(vecStub()), uSolIrr: val(vecStub()),
       uParoiCielIrr: val(vecStub()), uParoiSolIrr: val(vecStub()),
       uAlbedoBase: val(vecStub()), uAlbedoTeinte: val(1),
+      // ══════ L'APPOINT ET L'OMBRAGE DES PENTES — Tache R21 ══════════════
+      // Meme raison que la ligne d'au-dessus : ce stub PORTE ce que
+      // `poserHabillage` ecrit. L'aller-retour bit a bit est chez `crop-habillage` ⑨h.
+      uAppointDir: val(vecStub()), uAppointIrr: val(vecStub()),
+      uSlopeTint: val(PENTE_MONDE_NULLE),
       uParoiCouleur: val(couleurStub()),
       uSurfaceFx: val(0), uFxBlend: val(0), uFxOpacite: val(0), uFxScale: val(1), uFxTime: val(0),
       uFxColA: val(couleurStub()), uFxColB: val(couleurStub()), uFxColC: val(couleurStub()),

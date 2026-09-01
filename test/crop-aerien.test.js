@@ -141,7 +141,13 @@ test('② la photo passe APRÈS la peinture et AVANT l’apparence, les traits e
   const iFx = FRAG_NU.indexOf('fxBlend(col, fxc, uFxBlend)')
   const iCote = FRAG_NU.indexOf('col = mix(col, uInk, cote * 0.55);')
   const iContour = FRAG_NU.indexOf('col = mix(col, uInk, contour);')
-  const iLumiere = FRAG_NU.indexOf('vec3 colBloc = col * irradianceCrop(')
+  // ⚠️ **L'ANCRE A CHANGE DE FORME AVEC LA TACHE R21, PAS DE SENS.** L'appoint
+  // (options 69 a 73 de l'inventaire) ajoute un second terme direct dans la
+  // MEME somme, donc l'irradiance est nommee avant d'etre multipliee :
+  // `vec3 irrBloc = irradianceCrop(...) + irradianceAppoint(...)`. C'est
+  // toujours l'etape « la lumiere multiplie », et elle doit toujours venir en
+  // dernier.
+  const iLumiere = FRAG_NU.indexOf('vec3 irrBloc = irradianceCrop(')
   assert.ok(iSol > 0 && iAerien > iSol, 'la photo passe AVANT l’occupation du sol')
   assert.ok(iAerien > iAlbedo, 'la photo passe AVANT que le bloc devienne un albédo')
   assert.ok(iFx > iAerien, 'l’apparence passe AVANT la photo — elle serait repeinte')
