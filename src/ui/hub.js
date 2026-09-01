@@ -202,6 +202,38 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const escape = () => { hide(); onExplore?.() }
   esc.addEventListener('click', escape)
   veil.addEventListener('click', escape)
+  // ══════ LA MOLETTE EST UNE SORTIE, ELLE AUSSI — Tâche R29 bis ═══════════
+  //
+  // ⛔ **CE QUE VOIT QUELQU'UN QUI OUVRE L'APPLICATION, ET QUE PERSONNE
+  // N'AVAIT MESURÉ.** Le voile porte `pointer-events: auto` (v28.css) et n'avait
+  // que TROIS sorties : le clic, le focus du champ, et Échap. Or le premier
+  // geste d'un visiteur sur une carte est de **défiler**. Relevé au navigateur
+  // (`.banc/R30/voile.json`, trois chargements sur trois, pose stable sur
+  // 400 images) : **37 crans de molette envoyés à la souris, 0 reçu** par
+  // `modes._zoomGesture` ; un glissé de 160 px : rien non plus. Un CLIC, et tout
+  // repart. Qui ne clique pas a une molette morte, sans limite de temps et sans
+  // message.
+  //
+  // ⚠️ **ET LES QUATRE SONDES DE CETTE CAMPAGNE RETIRENT LE VOILE EN PREMIÈRE
+  // LIGNE** — c'est pour ça que le défaut a traversé tout le chantier : aucun
+  // banc n'a jamais mesuré l'application telle qu'on la reçoit.
+  //
+  // ⛔ **ET LA SORTIE VA SUR LA FENÊTRE, PAS SUR LE VOILE — mesuré, pas
+  // supposé.** Le premier jet posait l'écouteur sur `veil` : le journal est
+  // resté identique au bit, `d = 145,5` avant comme après les 32 crans. La
+  // sonde donne le coupable dans son propre relevé —
+  // `sousLeCurseur: "BUTTON.ce-wm-btn"` : au centre de l'écran ce n'est PAS le
+  // voile qui reçoit le geste, c'est le bouton de mode du hub, qui est son
+  // frère dans l'arbre et non son enfant. Un écouteur sur le voile ne voit donc
+  // jamais le cran. Même portée qu'Échap, même garde, deux lignes plus bas.
+  //
+  // ⚠️ **PAS DE `preventDefault`, ET C'EST DÉLIBÉRÉ** : tant que le voile capte,
+  // la toile ne reçoit rien (`domElement` n'est pas dans le chemin de
+  // l'événement), donc il n'y a rien à empêcher — et le cran qui ouvre reste
+  // consommé par l'ouverture, exactement comme le clic.
+  window.addEventListener('wheel', () => {
+    if (isOpen() || sas.enAttente()) escape()
+  }, { capture: true, passive: true })
   // ⚠️ `stopPropagation` : la croix est DANS le voile, qui ferme déjà au clic.
   // Sans ça, un clic sur la croix déclenchait `escape()` deux fois — `hide()`
   // ressort tout seul au second passage, mais `onExplore` partait en double.

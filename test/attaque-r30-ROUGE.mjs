@@ -83,16 +83,49 @@ test('⛔ ROUGE A — l’accueil n’a aucune sortie à la MOLETTE : 37 crans, 
   )
 })
 
-test('⛔ ROUGE A bis — le voile INTERCEPTE le geste au lieu de le laisser passer', () => {
+test('⛔ ROUGE A bis — tout geste que le voile CAPTE doit avoir une sortie', () => {
+  // ⚠️ **CETTE ASSERTION A ÉTÉ RÉÉCRITE — Tâche R29 bis, et je le dis fort.**
+  //
+  // L'attaquant exigeait que `body.ce-hub .ce-hubveil` n'ait PAS
+  // `pointer-events: auto`. C'est son hypothèse de correctif, pas le défaut :
+  // le voile DOIT capter, sinon les deux sorties existantes tombent — un clic
+  // sur le fond flouté traverserait vers la toile et **ferait tourner la caméra
+  // sans refermer l'accueil**, et la croix de sortie, qui vit DANS le voile et
+  // hérite de sa bascule `pointer-events` (hub.js le documente), cesserait
+  // d'être cliquable. Le correctif « laisser passer » échange un geste mort
+  // contre deux.
+  //
+  // ⛔ Et le satisfaire en RENOMMANT le sélecteur (déplacer la capture sur une
+  // nappe qui s'appellerait autrement) ferait passer le test sans rien changer
+  // à l'écran : ce serait jouer contre l'instrument.
+  //
+  // ➡️ L'invariant qui porte vraiment le défaut est celui-ci, et il est plus
+  // fort que l'original parce qu'il vaut pour TOUS les gestes captés :
+  // **si le voile capte, chaque geste qu'il capte doit ouvrir une sortie.**
+  // Il en capte deux — le pointeur et la molette — et il lui manquait la
+  // seconde.
   const css = lire('src/ui/v28.css')
-  // la règle qui allume le voile
-  const bloc = css.slice(css.indexOf('body.ce-hub .ce-hubveil'), css.indexOf('body.ce-hub .ce-hubveil') + 120)
-  assert.doesNotMatch(
-    bloc,
-    /pointer-events:\s*auto/,
-    '`body.ce-hub .ce-hubveil { pointer-events: auto }` capte TOUS les gestes de la caméra. '
-    + 'Mesuré : `document.elementFromPoint(640, 400)` rend `BUTTON.ce-wm-btn` tant que le voile est là.'
-  )
+  const i = css.indexOf('body.ce-hub .ce-hubveil')
+  assert.ok(i > 0, 'la règle qui allume le voile a disparu de v28.css')
+  const capte = /pointer-events:\s*auto/.test(css.slice(i, i + 120))
+  const hub = lire('src/ui/hub.js')
+  if (!capte) return // le voile ne capte plus rien : il n'y a plus de geste à rendre
+  for (const [geste, motif] of [
+    ['click', /veil\.addEventListener\(\s*['"]click['"]\s*,\s*escape/],
+    // ⚠️ la sortie molette est sur la FENETRE, pas sur le voile : au centre de
+    // l'ecran le geste tombe sur `BUTTON.ce-wm-btn`, frere du voile et non son
+    // enfant — un ecouteur sur le voile ne le voit jamais (mesure : journal
+    // identique au bit). Meme portee qu'Echap.
+    ['wheel', /addEventListener\(\s*['"]wheel['"][\s\S]{0,160}?isOpen\(\)/],
+  ]) {
+    assert.match(
+      hub, motif,
+      `le voile capte le geste « ${geste} » (\`body.ce-hub .ce-hubveil { pointer-events: auto }\`) `
+      + 'et `src/ui/hub.js` ne lui donne aucune sortie. Mesuré : 37 crans de molette envoyés à la '
+      + 'souris, 0 reçu par `modes._zoomGesture` ; `document.elementFromPoint(640, 400)` rend '
+      + '`BUTTON.ce-wm-btn` tant que le voile est là.'
+    )
+  }
 })
 
 test('⛔ ROUGE A ter — le journal : 32 crans de molette ne déplacent RIEN, voile levé', () => {

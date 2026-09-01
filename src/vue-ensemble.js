@@ -92,6 +92,15 @@ export function modeCameraDamier(carre, etat = {}) {
 // micro-défilement de pavé vaut ce qu'il pèse.
 const CRAN_MOLETTE_PX = 100
 
+// ⚠️ **AU-DELÀ DE QUATRE CRANS DANS UN SEUL ÉVÉNEMENT, CE N'EST PLUS UNE
+// MOLETTE.** Une roue physique délivre un cran par détente : Chrome en fusionne
+// deux ou trois quand on tourne vite, jamais quarante. `deltaY ≥ 400 px` dans un
+// événement unique est la signature d'un lancer de pavé tactile — un geste dont
+// la FORCE est l'intention, pas la répétition. Le chiffre n'est pas choisi : il
+// est le premier multiple entier du cran de souris (100 px, 120 sous Windows)
+// qu'aucune détente ni aucune fusion de détentes n'atteint.
+const CRANS_LANCER = 4
+
 /**
  * LE SEUIL, ET POURQUOI 1,2.
  *
@@ -120,6 +129,28 @@ export const SEUIL_SORTIE_ENSEMBLE = 1.2
 // (modes.js coupe ses gestes à 220 ms ; on est plus tolérant ici parce qu'on
 // mesure une INTENTION répétée, pas la continuité d'un glissé inertiel.)
 export const OUBLI_MOLETTE_MS = 400
+
+// ⚠️ **LA CONSTANTE DE TEMPS DE L'OUBLI — ET CE N'EST PAS `OUBLI_MOLETTE_MS`.**
+// Tâche R29 bis. Les 400 ms ci-dessus décrivent la CADENCE d'un geste délibéré ;
+// employées comme constante de décroissance elles effaceraient la mémoire dix
+// fois trop vite — mesuré : un balayage franc à deux doigts (40 événements de
+// 4 px en 480 ms) tombait alors à **0,998** pour un seuil de 1,2, alors qu'il
+// sortait avant. Les 2 000 ms ne sont pas choisies : elles sont l'intervalle où
+// les QUATRE invariants écrits dans ce fichier tiennent ensemble, et chacun a
+// son test dans `damier-cadre.test.js` :
+//
+//   · un cran SEUL ne sort pas                      → 1,000 < 1,2   (tout τ)
+//   · deux crans à 60 ms sortent                    → 1,970 ≥ 1,2   (τ ≥ 0)
+//   · vingt crans à 500 ms sortent (le défaut R30)  → 1,779 ≥ 1,2   (τ ≥ 311 ms)
+//   · une goutte toutes les 10 s ne sort JAMAIS     → 1,007 < 1,2   (τ ≤ 5 580 ms)
+//   · un balayage de 180 px à deux doigts sort      → 1,563 ≥ 1,2   (τ ≥ ~1 500 ms)
+//
+// La fenêtre est donc **[1 500 ; 5 580] ms** et 2 000 s'y tient avec de la marge
+// des deux côtés. ⚠️ **Conséquence à connaître** : un cran toutes les 3 s finit
+// par sortir (point fixe 1,287), un cran toutes les 4 s jamais (1,156). C'est la
+// frontière entre « il continue de dézoomer » et « il tripote la molette », et
+// elle est mesurée, pas supposée.
+export const CONSTANTE_OUBLI_MS = 2000
 
 /**
  * Faut-il sortir du cadrage et dézoomer pour de bon ?
@@ -151,9 +182,47 @@ export function doitVraimentDezoomer({ mode, cumul } = {}) {
  */
 export function cumuleDezoom(cumul, deltaY, ecouleMs) {
   const total = Number.isFinite(cumul) ? cumul : 0
-  const base = Number.isFinite(ecouleMs) && ecouleMs > OUBLI_MOLETTE_MS ? 0 : total
+  // ══════ L'OUBLI DÉCROÎT, IL NE GUILLOTINE PLUS — Tâche R29 bis ══════════
+  //
+  // ⛔ **`base = 0` AU-DELÀ DE 400 ms RENDAIT LA MOLETTE MORTE, SANS LIMITE DE
+  // TEMPS ET SANS MESSAGE.** Un visiteur qui défile à deux crans par seconde
+  // repart de zéro à chaque cran : son cumul plafonne à **1,0** pour un seuil
+  // de **1,2**, et il ne sort **JAMAIS** du cadrage. Vingt crans, cent crans,
+  // mille : le même 1,0. `test/damier-cadre.test.js` vérifiait qu'un cran isolé
+  // ne sort pas — pas qu'une SUITE de crans isolés ne sort pas non plus.
+  //
+  // ⚡ **LA DÉCROISSANCE TIENT LES DEUX INTENTIONS ÉCRITES CI-DESSUS**, et
+  // `CONSTANTE_OUBLI_MS` (2 000 ms) porte la mémoire au lieu d'un couperet :
+  //   · « une goutte de molette toutes les dix secondes ne doit pas finir par
+  //     sortir » → `exp(−10 000 / 2 000) = 0,0067` : le cumul plafonne à 1,007,
+  //     donc sous 1,2, **indéfiniment** ;
+  //   · « deux crans, c'est-à-dire un geste répété, donc voulu » → à 100 ms,
+  //     `exp(−0,05) = 0,951`, le deuxième cran rend **1,951** et sort ;
+  //   · à deux crans par seconde, `exp(−0,25) = 0,779`, le deuxième cran rend
+  //     **1,779** et sort. Le geste lent finit par aboutir, ce qui est
+  //     exactement la demande : *« s'il continue de dézoomer, on dézoome
+  //     VRAIMENT »*, pas « on résiste éternellement ».
+  const oubli = Number.isFinite(ecouleMs) && ecouleMs > 0 ? Math.exp(-ecouleMs / CONSTANTE_OUBLI_MS) : 1
+  const base = total * oubli
   if (!Number.isFinite(deltaY) || deltaY <= 0) return base
-  return base + Math.min(1, deltaY / CRAN_MOLETTE_PX)
+  // ══════ LA FORCE D'UN LANCER COMPTE, CELLE D'UN CRAN NON ═══════════════
+  //
+  // ⛔ **`Math.min(1, …)` ÉCRÊTAIT AUSSI LES ÉVÉNEMENTS QUI NE PEUVENT PAS
+  // ÊTRE UN CRAN.** Un balayage de pavé tactile de **4 000 px en un seul
+  // événement** valait 1,0 — le même poids qu'un cran de souris — donc ne
+  // sortait pas. La force du geste ne comptait pas, seule sa répétition en
+  // moins de 400 ms comptait.
+  //
+  // ⚠️ **ET L'ÉCRÊTAGE RESTE, PARCE QU'IL PROTÈGE UN CAS RÉEL** : la souris
+  // Windows dont le cran vaut 120 px, et l'inertie résiduelle d'un pavé (0,02
+  // à 0,2). On garde donc le plafond à UN cran, et on ne rouvre que ce qu'aucun
+  // cran physique ne peut produire — au-delà de `CRANS_LANCER` crans dans un
+  // SEUL événement, ce n'est plus une molette, c'est un lancer.
+  //
+  // La somme est continue et monotone : 120 px → 1,0 (n'ouvre rien) ·
+  // 400 px → 1,0 · 500 px → 2,0 · 4 000 px → 37,0.
+  const crans = deltaY / CRAN_MOLETTE_PX
+  return base + Math.min(1, crans) + Math.max(0, crans - CRANS_LANCER)
 }
 
 /**

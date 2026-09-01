@@ -1616,7 +1616,48 @@ export class Modes {
     this._levelZoom += dBudget
     newDist = dist * Math.exp(dLog)
     factor = newDist / dist
-    const P = this._zoomPivot
+    // ══════ HORS DU CROP, LE ZOOM NE TRANSLATE PLUS — Tâche R29 bis ════════
+    //
+    // ⛔ **C'EST LA PLAINTE D'ADRIEN, ET R27 L'A PROUVÉE SUR LE SEUL CHEMIN OÙ
+    // ELLE ÉTAIT DÉJÀ VRAIE.** R27 §② publie « hors du crop, l'écart à l'axe
+    // vaut EXACTEMENT 0 » — mesuré avec `cranZoom`, qui repose la caméra le long
+    // de `cible → caméra` et **ne touche jamais la cible**. La molette, elle,
+    // passe ICI. Mesuré au geste réel (`.banc/R30/molette.json`, curseur à
+    // (950, 230), rejoué sur le socle d'aujourd'hui) : **2 279 images sur 2 369
+    // hors du crop — 96,2 % — ont la cible hors de l'axe**, jusqu'à
+    // **13,2695 u**, et `target.y` s'écarte de `Y_CIBLE` jusqu'à **1,1728 u**.
+    //
+    // ⚡ **L'ALGÈBRE QUI TRANCHE, ET ELLE DIT QUE LES DEUX SONT INCOMPATIBLES.**
+    // L'homothétie de centre `P` et de rapport `f` se décompose EXACTEMENT en
+    //
+    //     (recul pur autour de la cible)  +  (translation RIGIDE de δ)
+    //     avec δ = (1 − f) · (P − T)
+    //
+    // — identité vérifiée : `T + (C−T)f + (1−f)(P−T) = P + (C−P)f`. Le recul pur
+    // laisse la cible où elle est ; **toute la sortie d'axe EST δ, et δ est
+    // AUSSI ce qui garde le point du curseur immobile à l'écran.** Retirer l'un,
+    // c'est retirer l'autre : « viser toujours le centre de la Terre » et
+    // « zoomer vers le curseur » sont la même quantité prise dans deux sens. Il
+    // n'existe pas de réglage qui donne les deux, et un recentrage qui court
+    // après le zoom ne fait que perdre la course — `decalageRecentrage` est
+    // borné à `PAS_RECENTRAGE_RAD × distance`, soit ~4 px par image.
+    //
+    // ➡️ **ARBITRAGE, ET IL SUIT LA RÈGLE À LA LETTRE** : *« le point d'orbite
+    // doit toujours viser le centre de la Terre. Il change UNIQUEMENT quand on
+    // passe en mode bloc croppé. »* Hors du crop, δ est abandonné et le zoom
+    // devient radial, comme celui du bouton. **Sur le crop, le zoom vers le
+    // curseur est intact** — et c'est là qu'il sert, puisque c'est le régime où
+    // l'on vise une vallée sur un bloc de 27 km. C'est aussi ce que fait DÉJÀ le
+    // déplacement de vue hors du crop (R27, réserve n° 3 : « un `enablePan` hors
+    // du crop est ramené à l'axe ») : le zoom rejoint le pan au lieu de le
+    // contredire.
+    //
+    // ⚠️ **Le prédicat est le HOOK, pas une seconde définition du crop** :
+    // `horsDuCrop` est le seul énoncé, celui de `_cibleVisee` et de
+    // `recentrerSurLaTerre`. Absent — les bancs unitaires qui ne le fournissent
+    // pas — on garde le pivot : une sonde qui ne déclare pas son régime ne
+    // décide pas de celui-ci.
+    const P = this.hooks.horsDuCrop?.() === true ? null : this._zoomPivot
     if (P && Math.abs(factor - 1) > 1e-6) {
       // scale the scene about the pivot so that point stays put on screen
       cam.position.set(P.x + (cam.position.x - P.x) * factor, P.y + (cam.position.y - P.y) * factor, P.z + (cam.position.z - P.z) * factor)
