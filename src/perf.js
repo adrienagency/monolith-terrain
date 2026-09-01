@@ -147,7 +147,13 @@ export function createAdaptiveQuality({
   // plus rien à lâcher. (Le paramètre n'était de toute façon jamais
   // déréférencé ici — seul `params._bloomTierOk` l'était, et il est parti avec.)
   lake,
-  grain = null, // NoiseEffect (optional) — T3 turns film grain off
+  grain = null, // NoiseEffect (optional) — gardé pour les appelants, plus écrit ici (PF3)
+  // ⚡ **LE GOUVERNEUR ÉCRIT `params`, LE RÉGIME DU CROP ÉCRIT LES OBJETS —
+  // PF3.** `params._aoTierOk` et `params.grain` sont des ENTRÉES de
+  // `poserRegimeCrop` (main.js) ; après les avoir posées, on le rappelle. Ainsi
+  // le palier et le mode se composent (palier 3 : grain 0 partout ; hors crop :
+  // grain 0 quel que soit le palier) au lieu de s'écraser l'un l'autre.
+  syncEffets = () => {},
   applyShadowMode,
   announce = () => {},
   refreshAll = () => {},
@@ -254,8 +260,9 @@ export function createAdaptiveQuality({
     }
     if (!dirty.grain) {
       params.grain = n >= 3 ? 0 : base.grain
-      if (grain) grain.blendMode.opacity.value = params.grain
     }
+    // l'occlusion (`_aoTierOk`) et le grain sont relus par le régime du crop
+    syncEffets()
     setGlassSamples(lake, tierSamples(n)) // no UI control → no dirty flag
     expected = {
       pixelRatio: params.pixelRatio,

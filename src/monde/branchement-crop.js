@@ -635,6 +635,18 @@ export function creerVeilleCrop({
   periodeReprise = 30,
   cropAuDepart = false,
   modeSurfaceAuDepart = true,
+  // ══════════ LA MER ET LES EFFETS N'EXISTENT QU'EN MODE CROP — PF3 ═════════
+  //
+  // > **Adrien :** « La mer et les effets n'apparaissent qu'en mode crop. »
+  //
+  // `surBascule(pose)` est appelé UNE fois à la naissance (`true`) et UNE fois
+  // à la mort (`false`) du crop — jamais à un déménagement, jamais sur une
+  // image stable. C'est la porte unique par laquelle `main.js` pose l'état du
+  // compositeur (occlusion ambiante, grain) : un prédicat, une fonction, pas
+  // d'interrupteur par image. La mer, elle, est déjà un maillon de la chaîne
+  // (`poserMer` / `retirerMer`) : elle naît et meurt avec le crop sans rien de
+  // plus.
+  surBascule = null,
 } = {}) {
   if (!globe) {
     throw new TypeError('creerVeilleCrop : il faut un `globe` (ou une fonction qui le rend)')
@@ -837,6 +849,9 @@ export function creerVeilleCrop({
     // testée à vide**, exactement comme la garde `if (nom === 'crop') continue`
     // de `reprendre`, dix lignes plus bas.
     bascules++
+    // ⚠️ **APRÈS `retirerCrop`** : quand le compositeur relit le régime, la mer
+    // est déjà partie et `pose` est déjà faux — l'état qu'il lit est l'état final.
+    surBascule?.(false)
   }
 
   // ⚠️ **LE CORPS DE `maj` VIT ICI POUR QU'IL N'Y AIT QU'UN SEUL POINT DE
@@ -891,10 +906,14 @@ export function creerVeilleCrop({
       if (!pose || s !== signature) {
         // ⚠️ **UN DÉMÉNAGEMENT N'EST PAS UNE NAISSANCE** : le compteur de
         // bascules sert à mesurer le clignotement, pas les déplacements.
-        if (!pose) bascules++
+        const naissance = !pose
+        if (naissance) bascules++
         pose = true
         signature = s
         poserTout(g, ctx)
+        // ⚠️ **APRÈS `poserTout`, ET SEULEMENT À LA NAISSANCE** : un déménagement
+        // rejoue la chaîne, pas le régime — l'état du compositeur n'a pas changé.
+        if (naissance) surBascule?.(true)
         return true
       }
       depuisPose++

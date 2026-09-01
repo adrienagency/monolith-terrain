@@ -385,7 +385,9 @@ export function buildEffectsPanel(ctx) {
     ctx.contrastFx.uniforms.get('contrast').value = p.v.contrast
     ctx.hueSat.saturation = p.v.saturation
     ctx.vignette.darkness = p.v.vignette
-    ctx.grain.blendMode.opacity.value = p.v.grain
+    // le grain n'apparaît qu'en mode crop (PF3) : `params.grain` est posé par
+    // le `Object.assign` ci-dessus, le régime du crop décide s'il s'affiche
+    ctx.syncEffets?.()
   }
   sDev.body.append(
     chipRowOf(LOOK_PRESETS, LOOK_TIPS, (p) => lookPresetOf(params) === p, applyLook),
@@ -394,7 +396,7 @@ export function buildEffectsPanel(ctx) {
     slider({ label: 'Saturation', min: -1, max: 0, step: 0.02, get: () => params.saturation, set: (v) => { params.saturation = v; ctx.hueSat.saturation = v } }),
     el('div', 'ce-fx-head', 'Objectif'),
     slider({ label: 'Vignettage', min: 0, max: 1, step: 0.02, get: () => params.vignette, set: (v) => { params.vignette = v; ctx.vignette.darkness = v } }),
-    slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } })
+    slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.syncEffets?.() } })
   )
   onRefresh(() => {
     // meta façon Lightroom : le look s'il est reconnu, sinon l'écart
@@ -413,7 +415,7 @@ export function buildEffectsPanel(ctx) {
   // chaîne de post-traitement (voir src/main.js), pas seulement ses contrôles :
   // il ne reste donc rien à régler, et la section ne parle plus que du SSAO.
   const sRen = panel.addSection(section('Rendu'))
-  const aoT = toggle({ label: 'Ombrage des creux (SSAO)', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; refreshAll() } })
+  const aoT = toggle({ label: 'Ombrage des creux (SSAO)', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; ctx.syncEffets?.(); refreshAll() } })
   const aoI = slider({ label: 'Intensité de l’ombrage', min: 0.5, max: 12, step: 0.05, get: () => params.ssaoIntensity, set: (v) => { params.ssaoIntensity = v; ctx.ssao.intensity = v } })
   sRen.body.append(aoT, aoI)
   visibleWhen(aoI, () => params.ssaoEnabled)

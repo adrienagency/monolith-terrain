@@ -2427,6 +2427,12 @@ async function assureAoPass() {
       composer.addPass(p, 1)
       aoPass = p
       syncAoColor()
+      // ⚡ **LA PASSE NAÎT ÉTEINTE ET C'EST LE RÉGIME QUI L'ALLUME — PF3.** Elle
+      // n'a le droit de tourner QUE dans le crop (`poserRegimeCrop`, plus bas).
+      // ⚠️ Même `try` que `cameraDeRendu`, même raison : `veilleCrop` est une
+      // `const` déclarée plus bas, et une demande au démarrage (lien partagé)
+      // peut arriver avant elle — l'appel final avant `tick()` recale alors.
+      try { poserRegimeCrop() } catch { /* zone morte temporelle : recalé avant tick() */ }
       // la taille courante : le composer ne redimensionne que ce qu'il connaît
       // AU MOMENT du resize, et on arrive après.
       p.setSize?.(...evenSize())
@@ -2478,7 +2484,11 @@ aoPass.configuration.accumulate = false
 // render, so the release did not hold at boot, and re-disposing every frame
 // would fight the library for a rounding error. The floor below is what the
 // library supports honestly.
-aoPass.enabled = params.ssaoEnabled
+// ⚡ **`enabled` N'EST PLUS POSÉ ICI — PF3.** Une passe d'occlusion ne tourne
+// que dans le crop ; c'est `poserRegimeCrop` qui l'écrit, à la naissance et à
+// la mort du crop. Elle naît donc ÉTEINTE, et `assureAoPass` relit le régime
+// dès qu'elle est bâtie.
+aoPass.enabled = false
 }
 // Si la machine ou un lien partagé demandent l'occlusion dès le départ, on la
 // charge tout de suite — le comportement d'avant, pour ce cas-là seulement.
@@ -6443,9 +6453,61 @@ function contexteCrop() {
 // classe d'erreur que celle qui a créé cette tâche** — du code qui tourne,
 // personne qui le voit. ⚠️ **Il rappelle LA LISTE, il n'en fabrique pas une
 // seconde**, et il ne tourne qu'une fois par entrée en surface.
+// ══════════ LA MER ET LES EFFETS N'EXISTENT QU'EN MODE CROP — PF3 ═══════════
+//
+// > **Adrien, 2026-09-01 :** *« La mer et les effets n'apparaissent qu'en mode
+// > crop. »*
+//
+// ⚠️ **UN SEUL PRÉDICAT, UNE SEULE FONCTION, PAS D'INTERRUPTEUR PAR IMAGE.**
+// `dedansCrop()` est le prédicat ; `poserRegimeCrop()` pose l'état du
+// compositeur, et elle est appelée par `veilleCrop` à la NAISSANCE et à la MORT
+// du crop (`surBascule`), plus aux quelques événements qui changent ce que
+// l'utilisateur demande (bascule d'occlusion, curseur de grain, gabarit,
+// palier machine, changement de mode). Elle ne tourne PAS dans `tick()`.
+//
+// ⛔ **CE QUI EST BORNÉ AU CROP, ET COMMENT :**
+//   · **l'occlusion ambiante (N8AO)** — la passe ENTIÈRE est désactivée hors
+//     crop (`enabled = false` : `postprocessing` la saute, coût 0). Elle n'est
+//     bâtie qu'à la demande (`assureAoPass`), et seulement dans le crop.
+//   · **le grain** — opacité de l'utilisateur dans le crop, 0 dehors. C'est un
+//     effet FUSIONNÉ dans la passe finale (exposition, tons, SMAA…) qui doit
+//     tourner de toute façon : son résidu à opacité 0 est mesuré dans
+//     `rapport-PF3.md`, et il ne justifie pas un second programme.
+//   · **la mer simulée (houle, écume, réfraction)** — rien à faire ici : c'est un
+//     maillon de la chaîne du crop (`poserMer` / `retirerMer`, `globe.js`). Hors
+//     crop `globe._mer` est `null`, la calotte n'existe pas, le grab pass de
+//     réfraction n'a pas de maillage pour se déclencher, et l'océan est celui
+//     de la vue orbitale (bathymétrie peinte par le nuanceur de tuile).
+//
+// ⚠️ **LA PROFONDEUR DE CHAMP EST L'EXCEPTION — règle D20** : active à tous les
+// zooms, orbite comprise. Elle n'est pas touchée ici, et `setEffectsEnabled`
+// ne l'éteint plus en orbite. Le palier machine (`perf.js`) reste seul à
+// pouvoir la couper sur une machine faible.
+//
+// ⚠️ **ET LE PALIER SE COMPOSE, IL NE SE CONTREDIT PAS** : `params._aoTierOk`
+// (palier ≥ 2 lâche l'occlusion) et `params.grain` (palier 3 le met à 0) sont
+// lus ICI ; `perf.js` ne touche plus aux objets, il écrit `params` et rappelle
+// cette fonction (`syncEffets`). Un seul écrivain pour `aoPass.enabled` et
+// pour l'opacité du grain — `test/regime-crop.test.js` le garde.
+//
+// ⚠️ **SANS `terre unique`** (l'ancien bloc plat, `?terre=deux`), il n'y a pas de
+// crop : le « dedans » est alors la vue de surface, comme avant cette tâche.
+function dedansCrop() {
+  return terreUniqueBranchee ? !!veilleCrop?.pose : modes?.mode === 'surface'
+}
+function poserRegimeCrop() {
+  const dedans = dedansCrop()
+  const aoVoulu = dedans && !!params.ssaoEnabled && params._aoTierOk !== false
+  if (aoPass) aoPass.enabled = aoVoulu
+  else if (aoVoulu) assureAoPass() // relit le régime en arrivant — voir là-bas
+  grain.blendMode.opacity.value = dedans ? params.grain : 0
+}
+
 const veilleCrop = creerVeilleCrop({
   globe: () => globe,
   contexte: contexteCrop,
+  // la naissance et la mort du crop posent l'état du compositeur — voir ci-dessus
+  surBascule: () => poserRegimeCrop(),
   estompage: veilleEstompage,
   // ⚠️ **LE REPOS ENTRE PAR LA MÊME PORTE QUE L'ESTOMPAGE — Tâche N.** Il
   // commande deux choses qui doivent être vraies ensemble : l'estompage plein
@@ -6581,8 +6643,14 @@ modes = new Modes({
       veilleEstompage.poserMode(v)
     },
     setEffectsEnabled(v) {
-      setDofEnabled(v && params.bokehEnabled && params.bokehScale > 0)
-      grain.blendMode.opacity.value = v ? params.grain : 0
+      // ⚡ **PLUS DE `setDofEnabled` ICI — règle D20** : la profondeur de champ
+      // est active à tous les zooms, orbite comprise. Elle n'a plus de raison
+      // de s'éteindre à l'entrée en orbite ni de se rallumer au retour.
+      // ⚡ **ET PLUS D'OPACITÉ DE GRAIN ÉCRITE ICI — PF3** : le régime du crop
+      // (`poserRegimeCrop`) est le seul écrivain. Le changement de mode est un
+      // de ses événements — sous `terre unique` la mort du crop l'a déjà
+      // appelé (`veilleCrop.poserMode`), l'appel est alors idempotent.
+      poserRegimeCrop()
       // le globe éteint les effets ; l'interrupteur du soleil est un SECOND
       // motif de coupure, il ne doit pas être perdu au retour sur le bloc
       sun.castShadow = v && sunShadowOn(params.sunEnabled, params.shadowMode)
@@ -7308,13 +7376,16 @@ function applyLook(k) {
   // TEMPLATES et du dé. Seules les chips Développement et leurs tirettes y
   // touchent, via applyGrade ou directement depuis le panneau.
   if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
-  if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
+  // le grain et l'occlusion passent par le régime du crop (PF3) — un gabarit
+  // appliqué en orbite ne doit pas rallumer un grain que l'orbite a éteint
+  if (k.grain != null) params.grain = k.grain
   // render upgrades (2026-07-20): a template may carry the AO look.
   // Les trois clés de bloom d'un vieux gabarit ne sont plus lues : la passe a
   // été retirée le 2026-08-02. Elles sont ignorées en silence, comme les clés
   // de routes et de trait de côte avant elles.
   if (k.ssaoEnabled != null) params.ssaoEnabled = k.ssaoEnabled
   if (k.ssaoIntensity != null) ssao.intensity = params.ssaoIntensity = k.ssaoIntensity
+  if (k.grain != null || k.ssaoEnabled != null) poserRegimeCrop()
   if (k.clouds != null) {
     params.cloudsEnabled = k.clouds
     if (k.clouds) clouds.build(params) // no point rebuilding just to hide them
@@ -12371,6 +12442,8 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   // copie prise ici au démarrage vaudrait `null` pour toujours.
   // (plus de `bloom` ni `bloomPass` : la passe a été retirée le 2026-08-02)
   ssao, get aoPass() { return aoPass },
+  // le grain et l'occlusion s'écrivent par le régime du crop (PF3), jamais sur l'objet
+  syncEffets: () => poserRegimeCrop(),
   applyPlinthSSS, // diffusion sous-surfacique du socle (section Rendu)
   realWater, waterRebuild,
   terrain, globe,
@@ -12757,6 +12830,9 @@ aq = createAdaptiveQuality({
   // perf.js ne lit jamais cet argument, il agit sur l'occlusion par
   // `params._aoTierOk`, que le tick de main.js consulte (comme pour le bloom).
   aoPass,
+  // le gouverneur écrit `params._aoTierOk` et `params.grain`, puis rappelle le
+  // régime du crop (PF3) — il n'écrit plus sur la passe ni sur le grain
+  syncEffets: () => poserRegimeCrop(),
   grain,
   applyShadowMode,
   announce: (m) => modes.announce(m),
@@ -12900,6 +12976,10 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
   // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
   veilleCrop, terreUniqueBranchee, contexteCrop,
+  // LE RÉGIME DU CROP — PF3, même raison : `main.js` n'est chargé par aucun
+  // test, et `scripts/profil-pf3.mjs` doit pouvoir relire le régime après avoir
+  // allumé un effet par la porte de `params`.
+  poserRegimeCrop, dedansCrop,
   // LES REPÈRES ET LES COTES — Tâche R24, exposés pour la MÊME raison que les
   // blocs ci-dessus : `main.js` n'est chargé par aucun test, et le poseur des
   // repères est **le seul moyen de lire la hauteur d'un sommet en mètres** pour
@@ -13434,8 +13514,13 @@ function tick() {
   // d'allumer la bascule, on la demande. `assureAoPass` est idempotent et ne
   // relance rien tant que l'import est en vol, donc l'appeler à chaque image
   // pendant les ~100 ms du chargement ne coûte qu'un test.
-  if (aoPass) aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
-  else if (params.ssaoEnabled) assureAoPass()
+  // ⛔ **IL Y AVAIT ICI L'INTERRUPTEUR PAR IMAGE DE L'OCCLUSION — PF3 L'A
+  // RETIRÉ.** `aoPass.enabled = ssaoEnabled && tierOk && surface && !busy`,
+  // réécrit soixante fois par seconde, et qui allumait l'occlusion sur la
+  // PLANÈTE entre 32 km et l'orbite. L'état est posé par `poserRegimeCrop` à la
+  // naissance et à la mort du crop, et lui seul l'écrit. La garde `!modes.busy`
+  // datait du bloc plat (profondeur d'un autre espace pendant un rechargement) ;
+  // sous `terre unique` la profondeur est celle du globe, continue.
   // (la ligne jumelle du bloom vivait ici — passe retirée le 2026-08-02)
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
@@ -13775,6 +13860,10 @@ function tick() {
 // inutilises (les cles de programme de three portent l espace colorimetrique
 // de sortie). Avec la cible : trois. Meme fluidite, cinq fois moins de gachis.
 warmupPrograms({ renderer, scene, camera, target: composer.inputBuffer }).then(() => { programmesPrets = true })
+// L'ÉTAT INITIAL DU RÉGIME DU CROP — PF3 : au démarrage il n'y a pas de crop,
+// donc pas de grain ni d'occlusion, quel que soit le look tiré au sort. La
+// première naissance du crop les posera.
+poserRegimeCrop()
 tick()
 
 // ---- mode EMBED (shibumap.com/templates) ------------------------------------
