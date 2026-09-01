@@ -446,12 +446,12 @@ centre, **active partout** — l'exception à « les effets seulement en crop »
 | tâche | sujet | arbre | branche |
 |---|---|---|---|
 | **R32** | le pivot = centre de la Terre jusqu'au crop — **confusion d'espace** : quatre passes ont mesuré l'axe du BLOC (le point de surface, `(0,y,0)` en unités de bloc) en l'appelant l'axe de la Terre | `wt-orb3` | `orbite-jusquau-crop` |
-| **R33** | attaquant : le pivot **en mètres du centre de la Terre**, la signature orbite/lacet (lat/lon sous la caméra), tests rouges en espace globe | `wt-att2` | `attaque-pivot-globe` |
+| ~~R33~~ | **FUSIONNÉ** (tests rouges seuls) — pivot à **6 263–6 297 km** du centre pour tout glissé vertical ; glissé H = lacet (0,0000° contre 47,97° en orbite) ; 9 rouges sur 10 dans `test/attaque-r33-ROUGE.mjs` | `wt-att2` | `attaque-pivot-globe` |
 | **PF1** | le profil : qui consomme, trois postes de vue × trois machines émulées, sonde commune `scripts/profil-pf1.mjs` | `wt-pp1` | `perf-profil` |
 | **PF2** | priorité des tuiles : visible d'abord, centre d'abord, à la Cesium (SSE, file de priorité, annulation) | `wt-pp2` | `perf-priorite` |
 | **PF3** | mer et effets seulement en crop — **sauf `dofPass`, active partout (D20)** | `wt-pp3` | `perf-crop-seul` |
 | **PF4** | les bugs qui coûtent : `GL_INVALID_OPERATION`, rotation propre vs rendu à la demande, palier 0×0, clic qui saute, voile | `wt-pp4` | `perf-bugs` |
-| **R34** | profondeur de champ (D20) : autofocus, chaîne d'unités, flou en px aux trois altitudes | `wt-dof` | `flou-zoom` |
+| ~~R34~~ | **FUSIONNÉ** — flou en px identique à 130 km / 2 000 km / 15 000 km (29/12/1/12/30) ; la cause était `near`/`far` copiés une fois par valeur, pas le 130,4 ; 4 675 · 0 | `wt-dof` | `flou-zoom` |
 
 ⚠️ **Nommage** : la campagne performance s'appelle **PF1→PF4** — les `brief-P2.md`
 / `rapport-P2.md`… sont une campagne **antérieure**, ne pas confondre.
