@@ -19,7 +19,7 @@ et ce qui reste à faire.
 | Masque océan (anti faux-lacs) | 🟢 | — | `sea-mask.js` | Flood-fill bord ; **garde-fou en attendant Spec 2** |
 | Détection lacs d'altitude | 🟢 | — | `lake.js` | `detectLakes` (le verre d'eau, lui, est parti) |
 | Isolate the zone (frontières admin) | 🟢 | — | `region-mask.js`, `region-plate.js` | Continent→département selon zoom |
-| Labels villes (toujours au-dessus du relief) | 🟢 | — | `cities.js`, `public/data/cities.json` | Fix rendu Spec 1 (depthTest off) |
+| Labels villes (toujours au-dessus du relief) | 🟢 | — | `map/places-layer.js`, `map/place-tier.js`, `public/data/map/cells/` | ⚠️ Tâche R24 : `cities.js` a été retiré (commit ec9f853) et `public/data/cities.json` avec lui — Natural Earth 10m, pop ≥ 200 k + capitales, **2 068 lignes** qu'aucune ligne de `src/` ne lisait depuis. Le jeu servi est GeoNames cities1000 (`places.json`, 158 474 lignes, seuil ~1 000 hab.), découpé en cellules et filtré par `min_zoom` |
 | Scan (radar / sonar / slice / grid / holo) | 🟢 | — | `scan.js` | |
 
 ## Navigation & zoom
