@@ -304,6 +304,11 @@ function globeStub(crop = RELEVE.crop) {
       uHazeAmt: val(0), uHazeAlt: val(0), uHazeDist: val(0),
       uHazeColor: val(couleurStub('#ffffff')),
       uEclairageOn: val(0),
+      // R21 — l'appoint et l'ombrage des pentes, posés par `poserHabillage`
+      // eux aussi. Absents d'ici, ils faisaient tomber SIX tests de grille à la
+      // fusion, sans qu'aucun ne parle de lumière : `poserHabillage` écrit dans
+      // une table factice incomplète. Voir la garde ⑤ plus bas.
+      uAppointDir: val(vecStub()), uAppointIrr: val(vecStub()), uSlopeTint: val(0),
       uSoleilDir: val(vecStub()), uSoleilIrr: val(vecStub()),
       uHemiHaut: val(vecStub()), uCielIrr: val(vecStub()), uSolIrr: val(vecStub()),
       uParoiCielIrr: val(vecStub()), uParoiSolIrr: val(vecStub()),
@@ -587,4 +592,38 @@ test('⑧b LES DEUX CURSEURS RESTENT AFFICHÉS, ET SANS MARQUE D’ÉTAPE', () =
   assert.match(MAP_PANEL, /label: 'Opacité de la grille'/)
   const iGrille = MAP_PANEL.indexOf("label: 'Taille de la grille'")
   assert.equal(/marqueEtape/.test(MAP_PANEL.slice(iGrille - 400, iGrille)), false)
+})
+
+// ══════ ⑨ LA GARDE QUI EMPÊCHE CETTE TABLE DE DÉRIVER ENCORE ═══════════════
+//
+// ⚠️ **La table d'uniformes factices ci-dessus a lâché DEUX fois**, et jamais en
+// disant pourquoi : R22 a vu treize tests tomber d'un coup, puis la fusion de
+// R21 en a fait tomber six de plus — tous des tests de GRILLE, aucun ne parlant
+// de lumière. La cause est toujours la même : `poserHabillage` écrit dans un
+// uniforme que la table ne déclare pas, et `Cannot set properties of undefined`
+// ne nomme pas le coupable.
+//
+// ⛔ **Le correctif n'est pas d'ajouter l'uniforme manquant** — c'est ce qu'on a
+// fait deux fois. C'est de faire échouer le test AVEC SON NOM le jour où la
+// source en ajoute un.
+test('⑨ LA TABLE FACTICE COUVRE TOUT CE QUE `poserHabillage` ÉCRIT', () => {
+  const src = GLOBE
+  const debut = src.indexOf('  poserHabillage({')
+  const fin = src.indexOf('  retirerHabillage()', debut)
+  assert.ok(debut > 0 && fin > debut, 'les bornes de `poserHabillage` ont bougé — cette garde est à réécrire')
+
+  const corps = src.slice(debut, fin)
+  const ecrits = new Set()
+  for (const m of corps.matchAll(/\bu\.(u[A-Z]\w*)/g)) ecrits.add(m[1])
+  assert.ok(ecrits.size > 20, `garde inopérante : ${ecrits.size} uniformes trouvés`)
+
+  const declares = new Set(Object.keys(globeStub().uniforms))
+  const manquants = [...ecrits].filter((n) => !declares.has(n)).sort()
+  assert.deepEqual(
+    manquants,
+    [],
+    `la table factice de ce fichier ne déclare pas : ${manquants.join(', ')}. ` +
+      'Ajoute-les au `globeStub()` ci-dessus — sinon TOUS les tests de grille tombent ' +
+      'sur « Cannot set properties of undefined », sans nommer la cause.',
+  )
 })
