@@ -113,11 +113,28 @@ export function lightSection(ctx) {
     el('div', 'ce-fx-head', 'Ambiance'),
     slider({ label: 'Lumière ambiante', min: 0, max: 3, step: 0.02, get: () => params.hemiGain ?? 1, set: (v) => setGain('hemiGain', v) }),
     slider({ label: 'Éclairage d’environnement', min: 0, max: 3, step: 0.02, get: () => params.envGain ?? 1, set: (v) => setGain('envGain', v) }),
+    // ⛔ **ET LA DOUCEUR DES OMBRES N'A RIEN À ADOUCIR — Tâche R18.** Elle règle
+    // le rayon de la carte d'ombre du soleil, et **le crop ne reçoit aucune
+    // ombre portée** : son ombrage vient des irradiances. Mesuré de 0 à 20,
+    // mouvement coupé : **0,000** et **0,000**.
     slider({ label: 'Douceur des ombres', min: 0, max: 20, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.setShadowSoftness(v) } }),
 
     // ---- l'appoint : la lumière que l'heure ne pilote pas ----
     el('div', 'ce-fx-head', 'Appoint'),
     el('div', 'ce-note', 'Une seconde lumière, sans ombre, pour rouvrir un flanc bouché. Sa direction est relative au soleil : elle le suit sans jamais être écrasée.'),
+    // ══════ ⛔ L'APPOINT N'ATTEINT PAS LA SPHÈRE — Tâche R18 ═══════════════
+    //
+    // ⛔ **CE SONT DES `THREE.Light` DE LA SCÈNE DU BLOC PLAT.** Le crop n'est
+    // pas éclairé par des lampes : `monde/eclairage-crop.js` reçoit des
+    // IRRADIANCES (`soleilIrr`, `hemiHaut`, `cielIrr`, `solIrr`) et calcule sa
+    // couleur. Une seconde source demande d'étendre cette loi ET ses uniformes
+    // — une transcription, pas un déplacement d'écriture.
+    //
+    // ⚡ **MESURÉ AUX DEUX BOUTS DES CINQ RÉGLAGES**, mouvement ambiant coupé
+    // (plancher de bruit 0,0000) : écart moyen **0,000** et gradient **0,000**
+    // (l'intensité rend 0,0009, soit un millième de niveau de gris).
+    el('div', 'ce-bg-note on',
+      'L’appoint éclaire l’ancienne scène — il ne se voit pas sur la carte sphérique (mesuré : image identique au bit près).'),
     // ÉTEINT par défaut. Contrairement au soleil, celui-ci est gratuit dans les
     // deux sens (1,3 ms mesuré) : la lampe existe depuis le boot à intensité 0,
     // l'interrupteur ne fait que monter son intensité, donc rien ne recompile.

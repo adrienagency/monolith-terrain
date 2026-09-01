@@ -82,6 +82,33 @@ export function buildMapPanel(ctx) {
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
 
   const sContour = panel.addSection(section('Courbes & grille'))
+  // ══════ ⛔ CE QUE CES CINQ CURSEURS FONT SOUS LA SPHÈRE — Tâche R18 ═══════
+  //
+  // ⚠️ **DEUX TRAVERSENT ET NE SE VOIENT PAS ; TROIS N'ONT AUCUN RECEVEUR.**
+  //
+  //   · `contourOpacity` et `contourWeight` ARRIVENT bien sur le globe (relevé
+  //     avant/après sur `globe.uniforms` : `uContourOpacity` passe de 0 à 1,
+  //     `uContourWeight` suit). **Et rien ne se dessine sur les terres.**
+  //     Poussé à bout par le chemin réel — opacité 1, intervalle forcé,
+  //     évanouissement de minification neutralisé, graticule à 1 — l'écran ne
+  //     bouge que de **0,014** niveau de gris moyen. Captures :
+  //     `.banc/R18/courbes2-reel-1.png`, `.banc/R18/courbes-graticule1.png`.
+  //     ➡️ **C'EST UN SEUL DÉFAUT DERRIÈRE TROIS CURSEURS**, et il est en amont
+  //     d'eux : le bloc d'encre du nuanceur de tuile ne peint pas sur les
+  //     tuiles de terre du crop. Régler l'intervalle avant de l'avoir trouvé,
+  //     ce serait empiler un réglage sur une panne.
+  //   · `contourInterval` : le globe cale son intervalle sur l'AMPLITUDE du
+  //     crop (`poserHabillage` → `intervalleCourbes`, relevé à **250 m**) et ne
+  //     lit pas cette tirette. ⚠️ La brancher demande une conversion —
+  //     l'une est en unités de BLOC, l'autre en MÈTRES : c'est la classe de
+  //     défaut n° 1 de ce chantier (sept occurrences).
+  //   · `gridStep` / `gridOpacity` : la découpe de sphère n'a pas de
+  //     quadrillage en unités de bloc. Sa grille cartographique EXISTE et n'est
+  //     pas celle-là — c'est le graticule lat/lon (`uGraticuleOpacity`).
+  const noteCourbes = document.createElement('div')
+  noteCourbes.className = 'ce-bg-note on'
+  noteCourbes.textContent = 'Sur la carte sphérique, les courbes ne se gravent pas encore et la grille du bloc n’existe pas — ces réglages n’ont pas d’effet visible.'
+  sContour.body.append(noteCourbes)
   // ⚠️ CES CINQ CURSEURS ÉCRIVENT LES UNIFORMES DU BLOC CENTRAL EN DIRECT —
   // `u()` est `terrain.mapUniforms`, pas un réglage de `params` qu'une fonction
   // de main.js redistribuerait ensuite. Ils court-circuitent donc

@@ -151,6 +151,34 @@ export function buildEffectsPanel(ctx) {
 
   // ---- clouds — le star est le CARACTÈRE du ciel (chips), le technique au fond
   const sCld = elementsPanel.addSection(section('Nuages'))
+  // ══════ ⛔ QUINZE RÉGLAGES QUI N'ATTEIGNENT PAS LA SPHÈRE — Tâche R18 ══════
+  //
+  // **Adrien, 2026-08-31 :** « On a plein de choses qui ne fonctionnent pas
+  // encore en mode sphère. »
+  //
+  // ⛔ **LE VOLUME DE NUAGES VIT DANS LA SCÈNE DU BLOC PLAT, QUI N'EST PLUS
+  // RENDUE.** Relevé dans l'application (`.banc/R18/diag-nuages-mer.json`) :
+  // le groupe est `Scene/clouds2`, il a un enfant, et `visible = false` —
+  // pendant que la scène du globe, elle, compte 54 objets visibles.
+  //
+  // ⚡ **MESURÉ AUX DEUX BOUTS DES TREIZE CURSEURS ET DES DEUX DU VENT**,
+  // mouvement ambiant coupé (plancher de bruit **0,0000** sur six relevés
+  // consécutifs) : écart moyen **0,000** et gradient **0,000** — l'image est
+  // identique au bit près, quinze fois de suite.
+  //
+  // ⛔ **ET LE GLOBE N'EST PAS UN RECEVEUR TOUT PRÊT.** Il porte bien une
+  // couche de nuages (`globe-clouds.js`, le maillage `cloud-shell`, visible),
+  // mais c'est un AUTRE objet : une coquille sphérique qui porte une texture
+  // équirectangulaire de couverture satellite. Elle n'a ni couverture, ni
+  // bourgeonnement, ni altitude, ni dérive au sens de ces quinze réglages.
+  // Les brancher, c'est PORTER LE VOLUME sur la sphère — une transcription de
+  // loi, pas un déplacement d'écriture (paquet (b) de l'inventaire).
+  //
+  // ⚠️ **LA NOTE EST LÀ PARCE QU'UN CURSEUR QUI NE FAIT RIEN EST PIRE QU'UN
+  // CURSEUR ABSENT.** On ne les retire pas : ils pilotent toujours le bloc plat
+  // (sans le drapeau) et ils voyagent dans les gabarits. On le DIT.
+  sCld.body.append(el('div', 'ce-bg-note on',
+    'Le volume de nuages vit encore dans l’ancienne scène — ces réglages ne se voient pas sur la carte sphérique (mesuré : image identique au bit près).'))
   const rebuildClouds = () => { ctx.clouds.build(params); ctx.syncCloudsVisible?.() }
   // dflt : un look sauvegardé AVANT l'ajout d'un réglage ne le contient pas —
   // sans repli, le slider crashe au boot (toFixed sur undefined, vécu)
