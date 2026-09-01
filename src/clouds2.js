@@ -48,6 +48,10 @@ const _v = new THREE.Vector3()
 // La MÊME valeur sert côté JS (boîte englobante) et côté GLSL (uElongAngle).
 const elongAngle = (params) => ((params?.windDir ?? 45) * Math.PI) / 180
 
+// ⛔ JAMAIS DE BACKTICK DANS UN COMMENTAIRE GLSL — le nuanceur vit dans un
+// template literal : un backtick le TERMINE, et l erreur qu on lit
+// (« Unexpected identifier ») ne pointe pas vers la cause. La page ne demarre
+// simplement plus. Ca a coute une execution de banc a la Tache R20.
 const VERT = /* glsl */ `
   out vec3 vLocalPos; // en unités de BLOC — voir monde/nuages-globe.js §2
   flat out vec3 vCenter;
@@ -73,13 +77,13 @@ const VERT = /* glsl */ `
     float b = vHalf.x / sqrt(e * e * c * c + s * s);
     vAxes = vec3(e * b, b, th);
     // ⛔ LA MARCHE RESTE EN UNITÉS DE BLOC — Tâche R20.
-    // Le groupe porte désormais la similitude bloc → globe (`k` ≈ 0,0077 à
+    // Le groupe porte désormais la similitude bloc → globe (k ≈ 0,0077 à
     // La Réunion). Toutes les constantes du nuanceur sont en unités de bloc
-    // (`world / 0.42`, `near * 3.0`, `smoothstep(1.5, 4.0, …)`, `uMapMin` /
-    // `uMapSize`) : les laisser lire un espace 130 fois plus petit les
+    // (world / 0.42, near * 3.0, smoothstep(1.5, 4.0, …), uMapMin /
+    // uMapSize) : les laisser lire un espace 130 fois plus petit les
     // rendrait TOUTES fausses d'un coup, sans erreur ni message. On sort donc
-    // la position AVANT `modelMatrix`, et la caméra arrive divisée par `k`.
-    // ⚠️ Hors mode sphère `modelMatrix` est l'identité : neutre au bit près.
+    // la position AVANT modelMatrix, et la caméra arrive divisée par k.
+    // ⚠️ Hors mode sphère modelMatrix est l'identité : neutre au bit près.
     vec4 lp = instanceMatrix * vec4(position, 1.0);
     vLocalPos = lp.xyz;
     gl_Position = projectionMatrix * viewMatrix * modelMatrix * lp;
@@ -104,11 +108,11 @@ const FRAG = /* glsl */ `
   flat in vec3 vAxes; // demi-axe long, demi-axe court, angle de l'allongement
   out vec4 outColor;
 
-  // LA CAMÉRA, EN UNITÉS DE BLOC — Tâche R20. `cameraPosition` est en unités
+  // LA CAMÉRA, EN UNITÉS DE BLOC — Tâche R20. cameraPosition est en unités
   // de MONDE ; sous la similitude du globe ce n'est plus l'espace où le ciel
-  // est décrit. `monde/nuages-globe.js` porte la conversion ET le SENS de sa
+  // est décrit. monde/nuages-globe.js porte la conversion ET le SENS de sa
   // division (multiplier au lieu de diviser met la caméra DANS le nuage).
-  // Hors mode sphère elle vaut exactement `camera.position`.
+  // Hors mode sphère elle vaut exactement camera.position.
   uniform vec3 uCamBloc;
 
   uniform sampler3D uVolume;
