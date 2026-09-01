@@ -103,13 +103,30 @@ export function buildMapPanel(ctx) {
   //     (`intervalleCourbes` sur l'amplitude), qui reste le repli sans MNT.
   //   · `contourWeight` traverse (`uContourWeight`) et porte le trait des deux
   //     côtés — même `1.4 × uContourWeight` que `terrain.js`.
-  //   · `gridStep` / `gridOpacity` : la découpe de sphère n'a pas de
-  //     quadrillage en unités de bloc. Sa grille cartographique EXISTE et n'est
-  //     pas celle-là — c'est le graticule lat/lon (`uGraticuleOpacity`).
-  const noteCourbes = document.createElement('div')
-  noteCourbes.className = 'ce-bg-note on'
-  noteCourbes.textContent = 'Sur la carte sphérique, la grille du bloc n’existe pas — ses deux réglages n’ont pas d’effet visible. Les courbes, elles, se gravent.'
-  sContour.body.append(noteCourbes)
+  // ══════ ✅ ET LES DEUX DERNIERS SONT VIVANTS DEPUIS R22 ═══════════════════
+  //
+  // ⛔ **LA NOTE QUI VIVAIT ICI DISAIT « la grille du bloc n'existe pas », ET
+  // C'ÉTAIT VRAI AU MOT PRÈS : le nuanceur du crop n'en portait pas une ligne.**
+  // L'inventaire en concluait qu'elle n'avait « aucun sens » sur la sphère, au
+  // motif que le graticule lat/lon en tenait lieu. ⚡ **C'est le départage que
+  // R22 a réfuté, et par la mesure** : le graticule est une grille de PLANÈTE
+  // (tous les 10°, du pôle à l'équateur, son propre uniforme) ; le carroyage est
+  // une grille de BLOC (un pas au sol, en travers de la découpe). Ce sont deux
+  // objets, pas deux noms du même — et le socle, qui est le modèle, trace les
+  // DEUX. Le crop en trace désormais deux aussi.
+  //
+  //   · `gridOpacity` et `gridStep` peignent le carroyage sur la découpe
+  //     (`globe.js`, bloc « LA GRILLE DE RELEVE DU BLOC »). Avant R22 :
+  //     **0,0000 et 0,0000** sur une fenêtre 1:1 de 512 × 320, c'est-à-dire le
+  //     plancher de bruit lui-même. Les chiffres d'après sont dans
+  //     `rapport-R22.md`.
+  //   · `gridStep` passe par une CONVERSION — la tirette est en unités de BLOC,
+  //     le nuanceur en MÈTRES au sol : `pasGrilleBloc`
+  //     (`monde/habillage-crop.js`), **sans exagération**, contrairement à
+  //     l'intervalle des courbes : l'une est une longueur horizontale, l'autre
+  //     une longueur verticale. Le nombre de cellules en travers du bloc est
+  //     celui du socle, exactement.
+  //   · La couleur « Grille » (panneau Fonds) traverse aussi, par `uGridColor`.
   // ⚠️ CES CINQ CURSEURS ÉCRIVENT LES UNIFORMES DU BLOC CENTRAL EN DIRECT —
   // `u()` est `terrain.mapUniforms`, pas un réglage de `params` qu'une fonction
   // de main.js redistribuerait ensuite. Ils court-circuitent donc

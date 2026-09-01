@@ -186,6 +186,23 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'contourIntervalM',
   'contourOpacity',
   'contourWeight',
+  // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ══════════════════
+  //
+  // ⚠️ **QUATRE SCALAIRES, ET ILS DOIVENT ÊTRE ICI POUR LA MÊME RAISON QUE
+  // `aerialCoastFade` : CE SONT DES TIRETTES.** L'utilisateur bouge « Taille de
+  // la grille » à un instant que rien ne prévoit ; un champ absent de cette
+  // liste n'est jamais comparé, donc jamais reposé — la grille ne changerait
+  // qu'au prochain changement de LIEU ou de palette. C'est la course que la
+  // Tâche K ter a nommée, et qui rend un défaut invisible un chargement sur deux.
+  //
+  // ⚠️ **`gridSpanBloc` AUSSI, ET IL N'EST PAS UNE TIRETTE** : il change quand
+  // l'emprise du bloc change (mode continu), et le pas au sol en dépend
+  // directement. Absent d'ici, un élargissement d'emprise laisserait le
+  // carroyage à l'échelle de l'emprise précédente.
+  'gridStepBloc',
+  'gridOpacite',
+  'gridCouleur',
+  'gridSpanBloc',
   'grainForceM',
   'grainEchelle',
   // ⚠️ **`normaleFine` — Tâche P9, ET SANS CETTE LIGNE ELLE S'ÉTEINDRAIT SEULE.**

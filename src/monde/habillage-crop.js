@@ -94,6 +94,22 @@ export const HABILLAGE_MONDE = Object.freeze({
   // transmet la valeur VIVANTE du socle, et elle seule.
   aerialCoastFade: 0,
   margeCoteM: 0,
+  // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ═══════════════════
+  //
+  // ⚠️ **ZÉRO, ET C'EST L'ÉTAT « PAS DE GRILLE », PAS UN OUBLI.** La grille de
+  // relevé est un objet du BLOC : hors découpe il n'y a pas de bloc, donc pas de
+  // carroyage — la planète nue garde son graticule lat/lon, qui est une autre
+  // grille et qui a son propre uniforme (`uGraticuleOpacity`). C'est la même
+  // règle que `grainForceM: 0` deux lignes plus haut.
+  //
+  // ⚠️ **ET C'EST UNE SEULE ÉCRITURE, LUE PAR LE CONSTRUCTEUR ET PAR
+  // `retirerHabillage`** — le motif que ce fichier raconte pour `solOpacite` et
+  // `aerialOpacite`, et qui existe parce que deux littéraux jumeaux avaient
+  // divergé en silence.
+  gridPasM: 0,
+  gridOpacite: 0,
+  // l'encre par défaut de la grille du socle — `params.gridColor` de `main.js`.
+  gridCouleur: '#242220',
 })
 
 // ══════════ ① LES CHAMPS CUITS — masque de côte, masque de mer, analyse ═════
@@ -407,4 +423,93 @@ export function intervalleCourbesBloc({ valeurBloc, extentMeters, exageration, s
   if (!(echelle > 0) || !Number.isFinite(echelle)) return null
   const m = v / echelle
   return Number.isFinite(m) && m > 0 ? m : null
+}
+
+// ══════════ ⑤ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ═════════════
+
+/**
+ * La tirette « Taille de la grille », en UNITÉS DE BLOC → un pas au sol en
+ * MÈTRES.
+ *
+ * ⚠️ **C'EST LA CLASSE DE DÉFAUT N° 1 DE CE CHANTIER, ET C'EST SA NEUVIÈME
+ * OCCURRENCE** (facteurs déjà payés : 121,6 · 10 · 130,4 · 6, une portée de flou
+ * de 1 465 km, des toponymes 1 830 m sous les Alpes). `terrain.js` divise
+ * `champXZ()` — des unités de scène — par `uGridStep` ; le crop, lui, ne connaît
+ * que `qCrop`, ses coordonnées locales dans [−1, 1]. Poser la valeur de la
+ * tirette telle quelle des deux côtés donnerait **un quadrillage de la bonne
+ * allure et de la mauvaise taille** : à La Réunion, `gridStep = 5` deviendrait
+ * cinq demi-largeurs de crop, c'est-à-dire **UNE SEULE LIGNE, celle du centre**,
+ * sur les 27,4 km du bloc — au lieu de **11,2 cellules**. Le facteur qui manque
+ * est `span / 2 = 28`, celui-là même que `uFxDemiBloc` porte déjà pour la couche
+ * d'apparence.
+ *
+ * ⚡ **ET LA DIFFÉRENCE AVEC `intervalleCourbesBloc` EST TOUT L'ENJEU : IL N'Y A
+ * PAS D'EXAGÉRATION ICI, ET C'EST UNE DÉCISION, PAS UN OUBLI.** L'intervalle des
+ * courbes est une longueur **VERTICALE** : les unités de scène du socle y
+ * mesurent un relief déjà exagéré, donc sa conversion porte un `/ exagération`
+ * (2,8 côté socle, 18 côté globe). Le pas de grille est une longueur
+ * **HORIZONTALE** : `champXZ()` est du x/z de monde, que l'exagération ne touche
+ * à aucun moment (`_ecrireRelief` ne l'applique qu'à `y`). Recopier le
+ * `/ exagération` du voisin d'au-dessus — la tentation, puisque c'est le modèle
+ * que le brief désigne — aurait rendu un pas **DIX-HUIT FOIS TROP FIN** :
+ * **201,6 cellules** en travers du bloc au lieu de 11,2, soit une ligne tous les
+ * **136 m** sur 27,4 km. ⚠️ **Et le sens de l'erreur compte** : ce n'est pas un
+ * quadrillage disparu, c'est une bouillie moirée — mot pour mot ce que la
+ * docstring ci-dessus raconte de son propre cas raté (« neuf mille courbes, donc
+ * une bouillie, donc rien »), la même faute prise par l'autre bout.
+ *
+ *     mètres de sol par unité de scène (horizontal) = largeurSolM / span
+ *     pas_m = valeurBloc × largeurSolM / span
+ *
+ * MESURÉ dans l'application vivante, La Réunion, cadrage d'ouverture :
+ * `largeurSolM` = **27 356,4 m** et `span` = 56, donc **488,51 m par unité de
+ * scène** — la tirette au défaut (`gridStep` = 5) trace un carroyage de
+ * **2 442,5 m**, et à fond (`gridStep` = 2) de **977,0 m**.
+ *
+ * ⚡ **ET `largeurSolM` EST LA LARGEUR DU CROP, PAS `extentMeters` — LES DEUX
+ * DIFFÈRENT DE 0,03 %, ET SEUL LE PREMIER REND LE COMPTE DU SOCLE.** Le nuanceur
+ * du crop compare le pas à `qCrop × uCropDemiM`, donc le nombre de cellules en
+ * travers du bloc vaut `largeurSolM / pas_m`. Nourri de la MÊME largeur des deux
+ * côtés il rend `span / valeurBloc` — **exactement le compte du socle, sans
+ * reste**. Mélanger les deux estimations de la même largeur au sol
+ * (`largeurCropM(repère)` = 27 356,4 m et `dem.extentMeters` = 27 354,3 m à La
+ * Réunion, **0,0079 % d'écart**) rendrait 11,2009 cellules là où le socle en
+ * trace 11,2 : invisible à l'œil, et faux quand même.
+ *
+ * ⚠️ **REND `null` SUR TOUTE ENTRÉE ABSURDE, JAMAIS 0** — même règle et même
+ * raison que `intervalleCourbesBloc` : un pas nul deviendrait `solM / 0` dans le
+ * nuanceur, donc un NaN, et le § « écrêtage de Mercator » de `globe.js` dit où
+ * mène un NaN ici. L'appelant éteint la grille sur `null`.
+ *
+ * @param {{valeurBloc:number, largeurSolM:number, span?:number}} o
+ * @returns {number|null} le pas au sol en mètres, ou `null`
+ */
+export function pasGrilleBloc({ valeurBloc, largeurSolM, span = COTE_CROP_UNITES } = {}) {
+  const v = Number(valeurBloc)
+  const L = Number(largeurSolM)
+  const s = Number(span)
+  if (!(v > 0) || !(L > 0) || !(s > 0)) return null
+  const metresParUnite = L / s // mètres de sol par unité de scène — SANS exagération
+  const m = v * metresParUnite
+  return Number.isFinite(m) && m > 0 ? m : null
+}
+
+/**
+ * Le nombre de cellules de grille en travers du bloc, pour un pas au sol donné.
+ *
+ * ⚠️ **C'EST L'ORACLE DE LA CONVERSION, ET IL NE DÉPEND D'AUCUN NUANCEUR.** Le
+ * socle en trace `span / valeurBloc` par construction (`champXZ() / uGridStep`
+ * sur un bloc de `span` unités) ; le crop en trace `largeurSolM / pas_m`. Les
+ * deux DOIVENT être égaux, et `test/grille-crop.test.js` l'exige. C'est la
+ * « distance connue au sol » que le brief réclame, exprimée en cellules plutôt
+ * qu'en mètres — **un compte se vérifie, une allure non**.
+ *
+ * @param {{largeurSolM:number, pasM:number}} o
+ * @returns {number|null}
+ */
+export function cellulesGrilleCrop({ largeurSolM, pasM } = {}) {
+  const L = Number(largeurSolM)
+  const p = Number(pasM)
+  if (!(L > 0) || !(p > 0)) return null
+  return L / p
 }

@@ -28,7 +28,7 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, merc
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, jupesEffacees } from './monde/parois-crop.js'
-import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
+import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES, largeurCropM, pasGrilleBloc } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
   GRADE_MONDE,
@@ -1002,6 +1002,24 @@ uniform float uNuitCarte;
 uniform float uContourInterval;
 uniform float uContourOpacity;
 uniform float uGraticuleOpacity;
+// ══════════ LA GRILLE DE RELEVE DU BLOC — Tache R22, options 19 et 20 ═══════
+//
+// ⚠️ uGridOpacity VAUT ZERO PAR DEFAUT, exactement comme uCropOn, uHabOn,
+// uMerRampeOn, uEclairageOn et uMppFacteur : sans poserHabillage, le bloc de
+// grille est franchi sans rien peindre et la planete est celle d'avant cette
+// tache AU BIT PRES. La garde est un UNIFORME, donc les fwidth qu'elle protege
+// sont legaux (tous les fragments d'un quad prennent la meme branche) — c'est la
+// meme regle que le trait de cote deux cents lignes plus bas.
+//
+// ⚠️ DEUX LONGUEURS, ET TOUTES DEUX EN METRES DE SOL. uGridStepM est le pas
+// converti depuis la tirette (pasGrilleBloc, monde/habillage-crop.js) ;
+// uCropDemiM est la demi-largeur au sol du crop (largeurCropM / 2), c'est-a-dire
+// ce que vaut qCrop = 1. Leur rapport est le nombre de cellules, et c'est LUI
+// que le test appareille au compte du socle.
+uniform float uGridStepM;   // le pas au sol de la grille, en metres
+uniform float uGridOpacity; // l'opacite de la grille, 0 = eteinte
+uniform vec3 uGridColor;    // l'encre de la grille — uGridColor du socle
+uniform float uCropDemiM;   // la demi-largeur au sol du crop, en metres
 uniform float uOceanDepth;
 uniform float uLandMax;
 
@@ -2417,6 +2435,64 @@ void main() {
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
   col = mix(col, uInk, contour);
 
+  // ══════ LA GRILLE DE RELEVE DU BLOC, PORTEE SUR LA DECOUPE — Tache R22 ═════
+  //
+  // ⛔ **ELLE N'EXISTAIT PAS. Ce n'est pas un rebranchement, c'est une
+  // ECRITURE.** Les options 19 et 20 du Studio ecrivaient uGridStep / uGridOpacity
+  // sur le SOCLE, dont le maillage n'est plus dessine sous la sphere : mesure
+  // avant, sur une fenetre 1:1 de 512 x 320, **0,0000 et 0,0000** — le plancher
+  // de bruit lui-meme.
+  //
+  // ⚠️ **APRES LES COURBES ET AVANT LE GRATICULE, ET L'ORDRE EST UN ARGUMENT.**
+  // C'est celui du socle (terrain.js : bloc « contour lines » puis bloc
+  // « survey grid ») : le carroyage passe PAR-DESSUS les courbes, sinon un
+  // relief dense l'efface par morceaux et la grille cesse d'etre une grille.
+  //
+  // ══════ LA CONVERSION D'UNITE, ECRITE — le defaut n° 1 de ce chantier ══════
+  //
+  // Le socle indexe sa grille sur champXZ(), du x/z de MONDE en unites de scene,
+  // et un bloc fait span = 56 unites de large. Le crop, lui, ne connait que
+  // qCrop, ses coordonnees locales dans [-1, 1]. La conversion vit dans
+  // pasGrilleBloc (monde/habillage-crop.js) et vaut
+  //
+  //     pas_m = valeurBloc x largeurSolM / span
+  //
+  // soit **488,51 m par unite de scene** a La Reunion (27 356,4 m / 56), donc
+  // **2 442,5 m** pour la tirette au defaut — mesure dans l'application vivante. ⚠️ **SANS EXAGERATION** : c'est une
+  // longueur HORIZONTALE, contrairement a l'intervalle des courbes juste
+  // au-dessus, qui en porte une (facteur 18 cote globe). Le detail et les deux
+  // pieges sont dans la docstring de pasGrilleBloc.
+  //
+  // ⚠️ **ET LE COMPTE SE VERIFIE : largeurSolM / pas_m = span / valeurBloc**,
+  // c'est-a-dire EXACTEMENT le nombre de cellules que le socle trace au meme
+  // reglage — 11,2 pour gridStep = 5. C'est la « distance connue au sol » du
+  // brief, exprimee en cellules ; test/grille-crop.test.js l'exige.
+  //
+  // ⚠️ **dedansCrop ET NON partBloc** : une grille de releve est une couche de
+  // CARTE, pas d'eclairage — le meme argument que la photo aerienne et que les
+  // courbes. dedansCrop vaut ZERO hors decoupe, donc la planete nue et la vue
+  // orbitale gardent leur graticule et rien d'autre. C'est de plus une
+  // COUVERTURE DOUCE, donc la grille fond au bord du bloc au lieu d'y poser une
+  // arete d'un pixel.
+  //
+  // ⛔ **ET IL N'Y A PAS DE minFade ICI, C'EST DELIBERE ET C'EST LA LECON DE
+  // R19.** Les courbes du crop mouraient sur ce fondu de minification : sous le
+  // crop, texel valait 3,00 et clamp(1,6 - 3,00 x 0,55) rend ZERO. Le socle,
+  // qui est le modele, n'a aucun fondu de ce genre sur sa grille — et l'ecrire
+  // ici aurait produit une grille parfaite et invisible, mot pour mot le piege
+  // que le brief de R22 signale en premier.
+  if (uGridOpacity > 0.001 && uGridStepM > 0.0 && uCropDemiM > 0.0) {
+    vec2 solM = qCrop * uCropDemiM; // metres de sol depuis le centre du crop
+    vec2 gq = solM / uGridStepM;
+    vec2 dgq = fwidth(gq);
+    vec2 distG = abs(fract(gq + 0.5) - 0.5);
+    // le meme trait que le socle : smoothstep(0, derivee x 1.4, distance)
+    float gxC = 1.0 - smoothstep(0.0, dgq.x * 1.4, distG.x);
+    float gzC = 1.0 - smoothstep(0.0, dgq.y * 1.4, distG.y);
+    float grille = max(gxC, gzC) * uGridOpacity * dedansCrop;
+    col = mix(col, uGridColor, grille);
+  }
+
   // 10° graticule — the survey grid of the planet view
   vec2 g = vLatLon / 10.0;
   vec2 dg = fwidth(g);
@@ -3095,6 +3171,28 @@ export class Globe {
     // LES PAROIS — Tâche B. `null` = le crop est une peau flottante, et c'est
     // l'état d'après la Tâche A. Écrit par `construireParoisCrop`.
     this._parois = null
+    // ══════ « AFFICHER LE SOCLE » — Tâche R22, option 48 ═════════════════════
+    //
+    // ⛔ **LE CURSEUR PILOTAIT UN OBJET QUI N'EST PLUS RENDU.** `params.plinth`
+    // va à `plinth.setVisible` (`src/plinth.js`), c'est-à-dire au socle du BLOC
+    // PLAT — lequel ne se dessine plus du tout sous la sphère (`socleAffiche()`
+    // rend faux, la passe de surface est éteinte). Les parois qu'on voit à
+    // l'écran viennent de `parois-crop.js`, et rien ne leur parlait.
+    //
+    // ⚠️ **C'EST UN ÉTAT RETENU, PAS UN `mesh.visible` POSÉ UNE FOIS**, et c'est
+    // le seul montage qui tienne : `construireParoisCrop` FABRIQUE UN MESH NEUF
+    // à chaque déplacement (elle balaie plus de mille points de contour). Un
+    // `visible = false` posé sur l'ancien mesh serait perdu au premier
+    // déplacement, et le socle reviendrait tout seul sans que personne ne
+    // touche au curseur — la classe de course que la Tâche K ter a nommée.
+    //
+    // ⚠️ **ET ON CACHE, ON NE RETIRE PAS.** `retirerParoisCrop` remet à nul
+    // `_baseYCrop`, `_retraitBaseCrop`, `_plancherJupeCrop` et
+    // `_retraitJupeCrop` — quatre valeurs que le rideau d'eau (Tâche P4) et les
+    // jupes de tuiles (P7, P13, P14) LISENT. Retirer les parois pour cacher un
+    // socle rallongerait les jupes et poserait le rideau de mer sur un fond
+    // deviné : un réglage d'affichage casserait trois géométries voisines.
+    this._paroisVisibles = true
     // LA MER — Tâche F. `null` = pas de calotte, et c'est l'état de production :
     // sans `poserMer`, le globe est celui d'avant, au bit près. Même garde que
     // `uCropOn = 0` (Tâche A), `uHabOn = 0` (Tâche C) et `RAMPE_MONDE` (Tâche D).
@@ -3163,6 +3261,23 @@ export class Globe {
       uContourInterval: { value: HABILLAGE_MONDE.contourIntervalM },
       uContourOpacity: { value: HABILLAGE_MONDE.contourOpacite },
       uGraticuleOpacity: { value: 0.16 },
+      // ══════ LA GRILLE DE RELEVÉ DU BLOC — Tâche R22, options 19 et 20 ══════
+      //
+      // ⚠️ **`uGridOpacity: 0` : sans `poserHabillage`, RIEN NE CHANGE** — même
+      // garde et même raison que `uCropOn`, `uHabOn` et `uMerRampeOn`. Le bloc
+      // de grille du nuanceur est franchi sans peindre, et le graticule lat/lon
+      // de la vue orbitale — qui est une AUTRE grille, celle de la planète —
+      // reste seul à l'écran, au bit près.
+      //
+      // ⚠️ **ET LES TROIS AUTRES SONT DÉCLARÉS ICI, PAS SEULEMENT POSÉS PAR
+      // `poserHabillage`** : `uGridColor` est un `THREE.Color`, donc son porteur
+      // doit exister avant le premier `.set()`, et `uGridStepM` / `uCropDemiM`
+      // sont lus par la garde elle-même. C'est le patron d'`uParoiCouleur`, que
+      // ce fichier documente vingt lignes plus bas pour avoir été codé en dur.
+      uGridStepM: { value: HABILLAGE_MONDE.gridPasM },
+      uGridOpacity: { value: HABILLAGE_MONDE.gridOpacite },
+      uGridColor: { value: new THREE.Color(HABILLAGE_MONDE.gridCouleur) },
+      uCropDemiM: { value: 0 },
       // LA RAMPE — Tâche D, « la rampe se calcule sur le crop ». ⚠️ **LES QUATRE
       // VALEURS VIENNENT DE `RAMPE_MONDE`, PAS DE QUATRE LITTÉRAUX** : `5600` et
       // `6000` étaient écrits ici et nulle part ailleurs ; `retirerRampe` en
@@ -4109,6 +4224,23 @@ export class Globe {
     contourIntervalM = null,
     contourOpacity = null,
     contourWeight = 0.7,
+    // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ═══════════════
+    //
+    // ⚠️ **LA TIRETTE ARRIVE EN UNITÉS DE BLOC ET REPART EN MÈTRES, ET LA
+    // CONVERSION EST FAITE ICI PARCE QUE C'EST ICI QU'ON CONNAÎT LE CROP.**
+    // `largeurCropM(this._crop)` est la largeur au sol de la découpe ; ni
+    // `main.js` ni le nuanceur ne l'ont sous la main. C'est exactement le
+    // montage de `uMargeCoteM` trente lignes plus bas — une conversion qui a
+    // besoin du repère se fait là où le repère vit.
+    //
+    // ⚠️ **`gridSpanBloc` EST LE SPAN DU BLOC VIVANT, PAS 56 EN DUR** : en mode
+    // continu le bloc couvre plusieurs emprises, et un span figé multiplierait
+    // le pas par cette même emprise. Même argument, même mot, que
+    // `contourIntervalM` dans `contexteCrop`.
+    gridStepBloc = null,
+    gridOpacite = 0,
+    gridCouleur = null,
+    gridSpanBloc = COTE_CROP_UNITES,
     grainForceM = 0,
     grainEchelle = 96,
     normaleFine = false,
@@ -4198,6 +4330,30 @@ export class Globe {
     // de terre sur chaque lagune. Sans crop posé, il n'y a pas d'emprise d'où la
     // tirer : la marge reste alors nulle et le masque décide seul.
     u.uMargeCoteM.value = this._crop ? margeCoteDuCrop(this._crop) : 0
+
+    // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ═══════════════
+    //
+    // ⚠️ **UNE SEULE LARGEUR AU SOL, LUE UNE FOIS, ET LES DEUX UNIFORMES EN
+    // SORTENT.** `uCropDemiM` est ce que vaut `qCrop = 1` en mètres, et
+    // `uGridStepM` est le pas converti par la même largeur : leur rapport rend
+    // donc `span / gridStep` **exactement**, c'est-à-dire le compte de cellules
+    // du socle. Les nourrir de deux estimations différentes de la même largeur
+    // (`largeurCropM` et `dem.extentMeters` diffèrent de 0,03 %) aurait fabriqué
+    // un écart invisible et permanent entre les deux Terres.
+    //
+    // ⛔ **ET LA GRILLE S'ÉTEINT PLUTÔT QUE DE RENDRE UN NaN.** `pasGrilleBloc`
+    // rend `null` sur toute entrée absurde (pas de crop, span nul, tirette à
+    // zéro) ; l'opacité suit, donc la garde du nuanceur ne s'ouvre même pas.
+    const demiSolM = this._crop ? largeurCropM(this._crop) / 2 : 0
+    const pasGrilleM = pasGrilleBloc({
+      valeurBloc: gridStepBloc,
+      largeurSolM: demiSolM * 2,
+      span: gridSpanBloc,
+    })
+    u.uCropDemiM.value = demiSolM
+    u.uGridStepM.value = pasGrilleM ?? HABILLAGE_MONDE.gridPasM
+    u.uGridOpacity.value = pasGrilleM ? (Number(gridOpacite) || 0) : HABILLAGE_MONDE.gridOpacite
+    u.uGridColor.value.set(gridCouleur ?? HABILLAGE_MONDE.gridCouleur)
 
     u.uSol.value = sol
     u.uSolLut.value = solLut
@@ -4484,6 +4640,22 @@ export class Globe {
     u.uContourInterval.value = HABILLAGE_MONDE.contourIntervalM
     u.uContourOpacity.value = HABILLAGE_MONDE.contourOpacite
     u.uContourWeight.value = HABILLAGE_MONDE.contourPoids
+    // ══════ ET LA GRILLE DE RELEVÉ S'ÉTEINT — Tâche R22 ═════════════════════
+    //
+    // ⚠️ **MÊME MOTIF QUE `uContourInterval` JUSTE AU-DESSUS, ET LE MÊME PIÈGE
+    // ÉVITÉ.** `uGridOpacity`, `uGridStepM`, `uGridColor` et `uCropDemiM` sont
+    // des uniformes **PARTAGÉS par toutes les tuiles**, et le bloc de grille les
+    // lit sans consulter `uHabOn`. Sans ces quatre lignes, un `retirerCrop`
+    // laisserait la planète entière porter le pas de grille du crop mort —
+    // exactement le défaut que le tour 1 de la Tâche C a corrigé sur
+    // l'intervalle des courbes, et qu'il aurait fallu payer une seconde fois.
+    // ⚡ Le carroyage ne se verrait pas pour autant (`dedansCrop` vaut zéro hors
+    // découpe) : c'est un état qui traîne, pas un pixel. **On le rend quand
+    // même** — `test/crop-habillage.test.js` (⑨) exige l'aller-retour bit à bit.
+    u.uGridStepM.value = HABILLAGE_MONDE.gridPasM
+    u.uGridOpacity.value = HABILLAGE_MONDE.gridOpacite
+    u.uGridColor.value.set(HABILLAGE_MONDE.gridCouleur)
+    u.uCropDemiM.value = 0
     u.uGrainForceM.value = HABILLAGE_MONDE.grainForceM
     u.uGrainEchelle.value = HABILLAGE_MONDE.grainEchelle
     // ⚠️ **ET LA NORMALE FINE S'ÉTEINT — Tâche P9.** Sans crop il n'y a plus de
@@ -6047,6 +6219,10 @@ export class Globe {
     M.setPosition(solide.origine.x, solide.origine.y, solide.origine.z)
     M.decompose(mesh.position, mesh.quaternion, mesh.scale)
     this.group.add(mesh)
+    // ⚠️ **L'ÉTAT RETENU EST APPLIQUÉ AU MESH NEUF — Tâche R22, option 48.**
+    // Sans cette ligne, un socle éteint reviendrait au premier déplacement,
+    // parce que ce mesh-ci vient de naître. Voir `_paroisVisibles`.
+    mesh.visible = this._paroisVisibles
     this._parois = mesh
     // ⚠️ **LE FOND DU BLOC EST RETENU POUR LE RIDEAU D'EAU — Tâche P4.** Le
     // ruban de mer descend jusqu'à LUI, pas jusqu'à une profondeur à part : deux
@@ -6098,6 +6274,21 @@ export class Globe {
     // recalcule depuis l'anneau de bord — la rappeler ne creuse rien.
     this._retaillerJupes()
     return { mesh, solide, couverture: solide.couverture, refus: null }
+  }
+
+  /**
+   * « Afficher le socle » (option 48 du Studio), porté sur la découpe.
+   *
+   * ⚠️ **CACHE, NE RETIRE PAS** — les quatre valeurs dérivées des parois
+   * (`_baseYCrop`, `_retraitBaseCrop`, `_plancherJupeCrop`, `_retraitJupeCrop`)
+   * restent vraies, donc le rideau d'eau et les jupes de tuiles ne bougent pas
+   * d'un pixel. Le motif est écrit au champ `_paroisVisibles`.
+   *
+   * @param {boolean} v
+   */
+  setParoisVisibles(v) {
+    this._paroisVisibles = !!v
+    if (this._parois) this._parois.visible = this._paroisVisibles
   }
 
   /** Retire les parois — le crop redevient une peau flottante. */
