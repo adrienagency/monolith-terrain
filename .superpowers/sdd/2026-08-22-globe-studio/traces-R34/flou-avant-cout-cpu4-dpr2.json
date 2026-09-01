@@ -1,0 +1,242 @@
+{
+ "date": "2026-09-01T20:12:24.123Z",
+ "tag": "avant",
+ "port": 6401,
+ "cpu": 4,
+ "dpr": 2,
+ "lat": -21.2,
+ "lon": 55.5,
+ "scenarios": [
+  {
+   "cle": "2000km",
+   "nom": "2 000 km (surface z4)",
+   "altViseeM": 2000000,
+   "etat": {
+    "mode": "surface",
+    "busy": false,
+    "altM": 1999909.5218142169,
+    "altCadrageM": 2000621.8352105946,
+    "zoom": 4,
+    "emprise": 7005542.229028956,
+    "fusion": true,
+    "mpu": 63710,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "camFx": "camGlobe",
+    "near": 0.5,
+    "far": 276.53543997380416,
+    "fov": 33,
+    "dofPasse": false,
+    "dofActive": false,
+    "cocFocus": null,
+    "cocPlage": null,
+    "bokehScale": null,
+    "params": {
+     "autoFocus": true,
+     "focusDistance": 46.15355449125397,
+     "focusRange": 23,
+     "bokehEnabled": false,
+     "bokehScale": 16.2
+    },
+    "tampon": [
+     1088,
+     680
+    ],
+    "pixelRatio": 0.85,
+    "sousLeCentre": "CANVAS.",
+    "camPos": [
+     122.14798329665153,
+     -96.12142073173942,
+     81.56735462101169
+    ]
+   },
+   "cout": {
+    "pilote": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "tampon": [
+     1088,
+     680
+    ],
+    "pixelRatio": 0.85,
+    "minuterie": true,
+    "etat": {
+     "mode": "surface",
+     "busy": false,
+     "altM": 1999909.5218142169,
+     "altCadrageM": 2000621.8352105946,
+     "zoom": 4,
+     "emprise": 7005542.229028956,
+     "fusion": true,
+     "mpu": 63710,
+     "palier": 0,
+     "palierNom": "PLEINE QUALITÉ",
+     "camFx": "camGlobe",
+     "near": 0.5,
+     "far": 276.53543997380416,
+     "fov": 33,
+     "dofPasse": true,
+     "dofActive": false,
+     "cocFocus": 90.6257109038749,
+     "cocPlage": 45.16208244603504,
+     "bokehScale": 16.2,
+     "params": {
+      "autoFocus": true,
+      "focusDistance": 46.153570382406485,
+      "focusRange": 23,
+      "bokehEnabled": true,
+      "bokehScale": 16.2
+     },
+     "tampon": [
+      1088,
+      680
+     ],
+     "pixelRatio": 0.85,
+     "sousLeCentre": "CANVAS.",
+     "camPos": [
+      122.14798329665153,
+      -96.12142073173942,
+      81.56735462101169
+     ]
+    },
+    "paires": 7,
+    "pairesValides": 7,
+    "avec": {
+     "gpuMs": 11.784,
+     "cpuMs": 14.05
+    },
+    "sans": {
+     "gpuMs": 6.211,
+     "cpuMs": 7.367
+    },
+    "passeGpuMs": 5.552,
+    "passeCpuMs": 7.77,
+    "passeSeule": {
+     "n": 60,
+     "disjoint": false,
+     "medianeMs": 0.649,
+     "minMs": 0.539,
+     "maxMs": 1.939
+    }
+   }
+  },
+  {
+   "cle": "orbite",
+   "nom": "15 000 km (orbite)",
+   "altViseeM": 15000000,
+   "etat": {
+    "mode": "orbital",
+    "busy": false,
+    "altM": 15000000,
+    "altCadrageM": -7587503.461703556,
+    "zoom": 4,
+    "emprise": 7005542.229028956,
+    "fusion": true,
+    "mpu": 63710,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "camFx": "camGlobe",
+    "near": 0.5,
+    "far": 1400,
+    "fov": 33,
+    "dofPasse": true,
+    "dofActive": false,
+    "cocFocus": 65.3823164025203,
+    "cocPlage": 45.16208244603504,
+    "bokehScale": 16.2,
+    "params": {
+     "autoFocus": true,
+     "focusDistance": 65.3823164025203,
+     "focusRange": 23,
+     "bokehEnabled": true,
+     "bokehScale": 16.2
+    },
+    "tampon": [
+     1088,
+     680
+    ],
+    "pixelRatio": 0.85,
+    "sousLeCentre": "CANVAS.",
+    "camPos": [
+     257.73756774418456,
+     -121.30401329813834,
+     177.13812262687128
+    ]
+   },
+   "cout": {
+    "pilote": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "tampon": [
+     1088,
+     680
+    ],
+    "pixelRatio": 0.85,
+    "minuterie": true,
+    "etat": {
+     "mode": "orbital",
+     "busy": false,
+     "altM": 15000000,
+     "altCadrageM": -7587503.461703556,
+     "zoom": 4,
+     "emprise": 7005542.229028956,
+     "fusion": true,
+     "mpu": 63710,
+     "palier": 0,
+     "palierNom": "PLEINE QUALITÉ",
+     "camFx": "camGlobe",
+     "near": 0.5,
+     "far": 1400,
+     "fov": 33,
+     "dofPasse": true,
+     "dofActive": false,
+     "cocFocus": 65.3823164025203,
+     "cocPlage": 45.16208244603504,
+     "bokehScale": 16.2,
+     "params": {
+      "autoFocus": true,
+      "focusDistance": 65.3823164025203,
+      "focusRange": 23,
+      "bokehEnabled": true,
+      "bokehScale": 16.2
+     },
+     "tampon": [
+      1088,
+      680
+     ],
+     "pixelRatio": 0.85,
+     "sousLeCentre": "CANVAS.",
+     "camPos": [
+      257.73756774418456,
+      -121.30401329813834,
+      177.13812262687128
+     ]
+    },
+    "paires": 7,
+    "pairesValides": 7,
+    "avec": {
+     "gpuMs": 11.458,
+     "cpuMs": 12.117
+    },
+    "sans": {
+     "gpuMs": 9.232,
+     "cpuMs": 9.163
+    },
+    "passeGpuMs": 2.492,
+    "passeCpuMs": 3.677,
+    "passeSeule": {
+     "n": 60,
+     "disjoint": false,
+     "medianeMs": 0.362,
+     "minMs": 0.359,
+     "maxMs": 1.31
+    }
+   }
+  }
+ ],
+ "erreursConsole": [
+  "Failed to load resource: the server responded with a status of 404 ()",
+  "Failed to load resource: the server responded with a status of 404 ()",
+  "Failed to load resource: the server responded with a status of 404 ()",
+  "Failed to load resource: the server responded with a status of 404 ()",
+  "Failed to load resource: the server responded with a status of 404 ()",
+  "Failed to load resource: net::ERR_CONNECTION_TIMED_OUT",
+  "Failed to load resource: net::ERR_CONNECTION_TIMED_OUT"
+ ]
+}
