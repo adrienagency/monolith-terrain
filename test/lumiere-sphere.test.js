@@ -386,6 +386,32 @@ test('④c les trois uniformes existent et partent de leur module — pas d’un
   }
 })
 
+test('④a bis ⚡ LA PAROI DU CROP REÇOIT LE MÊME APPOINT — Tâche R21 bis', () => {
+  // ⛔ **R21 AVAIT LAISSÉ LA PAROI DE CÔTÉ ET L'AVAIT DIT** : « un appoint fort
+  // les laisse un cran plus sombres que la surface ». Le périmètre est libre.
+  const MAT = GLOBE_NU.slice(
+    GLOBE_NU.indexOf('_materiauParois()'),
+    GLOBE_NU.indexOf('_melangeCrop(actif)')
+  )
+  assert.ok(MAT.length > 500, 'le matériau des parois est introuvable — relis-le')
+  // ⚡ **PARTAGÉ, PAS JUMEAU.** L'appoint est une LAMPE : `fillLight` éclaire
+  // tous les matériaux de la scène avec la même irradiance, comme `sun`. C'est
+  // l'inverse de l'ambiante, qui vient d'un `envMap` posé sur UN matériau et qui
+  // a donc bien deux uniformes (`uParoiCielIrr` / `uParoiSolIrr`, Tâche P8).
+  assert.match(MAT, /uAppointDir: this\.uniforms\.uAppointDir/)
+  assert.match(MAT, /uAppointIrr: this\.uniforms\.uAppointIrr/)
+  assert.equal(/uParoiAppoint/.test(GLOBE_NU), false, 'un jumeau d’appoint pour la paroi = deux écritures d’une grandeur')
+  // et le TERME est bien dans la somme, pas seulement l'uniforme déclaré
+  assert.match(MAT, /vec3 irrParoi = irradianceCrop\([^;]*\)\s*\+ irradianceAppoint\(dot\(N, uAppointDir\), uAppointIrr\);/)
+  assert.match(MAT, /vec3 colBloc = uCol \* vAo \* irrParoi \* /)
+  // ⚠️ **ET LE TEXTE EST INJECTÉ, PAS RECOPIÉ** : deux écritures de la loi
+  // auraient laissé la paroi et la surface diverger au premier réglage.
+  assert.match(MAT, /\$\{GLSL_LUMIERE_SPHERE\}/)
+  // ⛔ **L'OPTION 50 RESTE LUE SUR LE MATÉRIAU** — règle de R22, et l'appoint ne
+  // doit pas l'avoir déplacée : `uCol` vient toujours de `uParoiCouleur`.
+  assert.match(MAT, /uCol: this\.uniforms\.uParoiCouleur/)
+})
+
 test('④d ⛔ LES CINQ CHAMPS SONT SURVEILLÉS — sinon la réparation est fortuite', () => {
   // ⚠️ **UN CHAMP ABSENT DE `CHAMPS_HABILLAGE` N'EST JAMAIS COMPARÉ**, donc
   // jamais reposé de son propre chef. Et l'appoint est le SEUL réglage de

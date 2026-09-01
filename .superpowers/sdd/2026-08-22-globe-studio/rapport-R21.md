@@ -12,7 +12,7 @@ démarrage depuis que `src/flags.js` lève ses drapeaux. Lieu et pose relevés :
 
 | n° | libellé | issue | le chiffre qui la prouve |
 |---|---|---|---|
-| **68** | Douceur des ombres | ⛔ **sans objet sur une sphère** — curseur **caché** en mode sphère | **0,000 / 0,000 sur 5 mesures sur 6** (la sixième est le transitoire du §④ bis), et **quatre constats de code indépendants**, dont `passeSurface.enabled = false` |
+| **68** | Douceur des ombres | ⛔ **sans objet sur une sphère** — curseur **caché** en mode sphère | **0,000 / 0,000 sur 5 mesures sur 6** (la sixième est le transitoire du §④ ter), et **quatre constats de code indépendants**, dont `passeSurface.enabled = false` |
 | **69** | Appoint (interrupteur) | ✅ **branché** | **moy 0,467 · grad 0,236** — ×23,3 le plancher |
 | **70** | Intensité | ✅ **branché** | **moy 1,984 · grad 0,787** — ×99,2 (valeur basse du triplet : 0,466 / 0,236) |
 | **71** | Écart au soleil | ✅ **branché** | **moy 0,363 · grad 0,279** — ×18,1 |
@@ -20,6 +20,9 @@ démarrage depuis que `src/flags.js` lève ses drapeaux. Lieu et pose relevés :
 | **73** | Couleur | ✅ **branché** | **moy 0,514 · grad 0,153** — ×25,7 |
 | **26** | Ombrage auto | ✅ **il l'était déjà** — le ⛔ de l'inventaire est un **défaut de protocole** | **moy 1,404 · grad 0,558** — ×70,2, mesuré avec le bon geste |
 | **30** | Ombrage des pentes | ✅ **branché** | **moy 0,119 · grad 0,154** — ×6,0, **reproduit à 0,001 près sur cinq campagnes**, AVANT = 0,000 / 0,000 |
+
+⚡ **ET DEPUIS R21 bis, LES PAROIS DU CROP AUSSI** : appoint à 3, **55 591
+pixels** changent contre **0** au témoin éteint — §④ bis.
 
 **Le barème est celui de l'inventaire lui-même** (`inventaire-studio-2.md`) :
 ✅ = `moy ≥ 0,06` **ou** `grad ≥ 0,12`. **Les sept passent** — six d'entre eux
@@ -245,7 +248,72 @@ la majorité, c'est le §④ bis ci-dessous.
 
 ---
 
-## ④ bis ⚡ LE BANC A UN TRANSITOIRE, ET IL A FRAPPÉ LE TÉMOIN NUL
+## ④ bis ⚡ L'APPOINT SUR LES PAROIS DU CROP — la ligne en attente, faite
+
+R21 avait laissé les parois de côté et l'avait écrit : *« une ligne le jour où
+c'est libre »*. C'est libre.
+
+### CE QUI A ÉTÉ ÉCRIT — deux uniformes PARTAGÉS, pas deux jumeaux
+
+⚡ **ET C'EST L'ARGUMENT DE P8 PRIS DANS L'AUTRE SENS.** P8 a démontré que le
+relief et la paroi ne voient **pas** le même environnement — un `envMap` est posé
+sur UN matériau, et `three` n'écrase `envMapIntensity` que sur ceux qui n'en ont
+pas. D'où `uParoiCielIrr` / `uParoiSolIrr`, deux uniformes distincts.
+
+⛔ **L'appoint n'est pas un environnement : c'est une LAMPE.** `fillLight` est une
+`THREE.DirectionalLight` de la scène, sans `envMap` et sans ombre : elle éclaire
+**tous** les matériaux avec la même irradiance, exactement comme `sun` — dont
+`uSoleilIrr` est déjà partagé entre les tuiles et la paroi. La paroi reçoit donc
+`this.uniforms.uAppointDir` et `this.uniforms.uAppointIrr`, **les mêmes objets**.
+Lui fabriquer un `uParoiAppointIrr` aurait été **deux écritures d'une seule
+grandeur**, et la paroi aurait pu diverger de la surface au premier réglage. Le
+test ④a bis interdit ce jumeau par son nom.
+
+⛔ **ET LA RÈGLE R22 EST RESPECTÉE** : `uCol` vient toujours de `uParoiCouleur`,
+donc l'option 50 reste lue **sur le matériau**. Relevé à l'écran : `c06a44` — la
+paroi vivante, pas le `#d8d4cc` de `params`. Le test le verrouille.
+
+### LA MESURE — et l'instrument fait se désigner la paroi
+
+⚠️ **LA PAROI EST UNE BANDE ÉTROITE : une moyenne sur l'image entière la noie.**
+C'est le défaut ① de l'inventaire (« une moyenne de boîte annule un motif fin »),
+pris par l'autre bout — ici c'est la SURFACE de l'objet mesuré qui est petite.
+
+⚡ **La parade : on ne cherche pas la paroi, on la fait se désigner.** Deux images
+au même instant, même page, appoint allumé dans les deux ; dans la seconde,
+l'uniforme d'appoint **de la seule paroi** est remplacé par un vecteur nul privé
+(le code d'avant, au bit près, sans recharger ni recompiler). **Tout pixel qui
+diffère est un pixel de paroi, par construction.** Livré :
+`scripts/sonde-paroi-r21bis.mjs`, pleine résolution **1 280 × 800**.
+
+| état | pixels changés | part de l'image | écart moyen **sur ces pixels** | sur l'image entière | pire |
+|---|---|---|---|---|---|
+| **témoin, appoint ÉTEINT** | **0** | 0,000 % | — | 0,0000 / grad 0,0000 | 0 |
+| appoint à **0,6** (le défaut) | **39 799** | 3,89 % | **14,78 / 255** | 0,5781 / grad 0,1258 | 73 |
+| appoint à **3** (le maximum) | **55 591** | 5,43 % | **36,95 / 255** | 2,0062 / grad 0,3050 | 268 |
+
+⚡ **LE TÉMOIN À ZÉRO PIXEL EST LA MOITIÉ DE LA MESURE.** Appoint éteint, la même
+bascule ne change **pas un seul pixel sur 1 024 000** : l'instrument ne fabrique
+pas sa propre différence. Et l'aller-retour A/C rend **0 pixel** dans les trois
+cas — la bascule est réversible au bit près.
+
+⚠️ **PALIER RELEVÉ DANS LE MÊME RELEVÉ**, comme demandé : `palier 0 « PLEINE
+QUALITÉ », ombres "dynamic" 1024², pixelRatio 1, canevas 1280 × 800`. Et
+`uAppointIrr` global et paroi tenus côte à côte dans le journal : `[3 · 1,8719 ·
+0,9694]` des deux côtés — **le partage est vérifié à l'exécution**, pas seulement
+dans le source.
+
+⚠️ **UNE RÉSERVE SUR LA BOÎTE, ET JE LA PUBLIE.** La boîte englobante des pixels
+changés vaut `[278, 28, 991, 579]` — plus haute que la paroi elle-même. La
+profondeur de champ est active au palier 0 (`dof: true`) : elle **étale** une
+partie du changement au-delà des pixels de paroi. Le compte de 55 591 est donc
+« les pixels que la correction change », pas « les pixels de paroi » au sens
+strict. La conclusion ne bouge pas — 0 contre 55 591 —, mais le nombre est un
+majorant.
+
+---
+
+## ④ ter ⚡ LE BANC A UN TRANSITOIRE, ET IL A FRAPPÉ LE TÉMOIN NUL
 
 **C'est la trouvaille d'instrument de cette tâche, et elle vaut plus que six des
 huit verdicts.**
@@ -303,9 +371,244 @@ Les six autres sont au-dessus de la zone, ou reproduits : le n° 73 rend
 
 ---
 
+## ④ quater ⚡ LA CHASSE AU TRANSITOIRE — R21 bis
+
+> **Le coordinateur :** *« Ne te contente pas d'une corrélation. Reproduis le
+> transitoire à volonté avant de nommer sa cause. Si tu n'y arrives pas, dis-le :
+> "non reproductible à volonté" est un résultat, pas un échec. »*
+
+Livré : `scripts/sonde-transitoire-r21bis.mjs`. ⚡ **Il ne mesure pas que
+l'image, il photographie l'ÉTAT** — la pose de la caméra au millionième (le
+grand oubli de R21), le palier machine et les six réglages qu'il commande, le
+rapport de pixels, la taille du canevas, l'état activé/désactivé de **chaque
+passe du compositeur**, le compte de tuiles par état, l'heure, le ton, la
+bannière de performance, et vingt-six uniformes du globe. Quand l'écart tombe,
+le banc **différencie** les deux états et nomme ce qui a bougé.
+
+### ⛔ CE QUE LES DEUX PREMIÈRES CHASSES ONT ÉLIMINÉ
+
+| chasse | protocole | passes | écarts |
+|---|---|---|---|
+| **1 — `--suivi`** | une seule page, **aucun rechargement, aucun geste**, N relevés du même état | **90** | **0** |
+| **2 — `--recharge`** | **rechargement à chaque passe**, puis le protocole du témoin nul de R21 (4 relevés espacés) | **24** | **0** |
+
+⚡ **La chasse 1 est le résultat le plus tranchant des deux, et elle est
+définitive dans son périmètre :** `moy = 0` et `grad = 0` **à chacune des
+90 lignes**, sur près de trois minutes de scène vivante. **Le transitoire
+n'existe pas dans une page qui vit.** Cela élimine d'un coup, et par la mesure et
+non par la lecture, tout ce qui tourne en régime permanent : le grain, le ton,
+l'exposition, un palier qui oscillerait, une dérive de la caméra, un
+rafraîchissement périodique.
+
+⚠️ **La chasse 2 ne prouve rien, et il faut le dire.** Zéro sur 24 avec un
+transitoire à ~1 sur 13 a **15 % de chances d'arriver par hasard** — c'est trop
+pour conclure. Elle a en revanche livré un fait que personne n'avait vu.
+
+### ⛔ CE QUE LA CHASSE 2 A TROUVÉ SANS LE CHERCHER : LA PORTE N'EST PAS UNE PORTE
+
+Le journal, à **chacune des 24 passes**, ligne pour ligne :
+
+```
+porte=EXPIREE en 45 002 ms, 4 tuile(s) restante(s)
+```
+
+⛔ **L'ATTENTE « PLUS AUCUNE TUILE EN VOL » N'ABOUTIT JAMAIS.** Elle expire à son
+délai de 45 s, à **chaque chargement, sans exception**, et il reste en
+permanence **4 tuiles** — jusqu'à **9** — dans l'état `loading` ou `empty`.
+
+⚠️ **C'est un garde-fou que R21 a ajouté en croyant fermer une porte, et qui est
+en réalité une temporisation de 45 secondes déguisée.** Il a bien fait tomber le
+plancher de bruit de 0,157 à 0,0000 — mais **pas pour la raison écrite**. Ce
+n'est pas « la file est vide », c'est « on a attendu trois quarts de minute ».
+La conclusion de R21 sur ce point est donc **juste par accident**, et sa raison
+est **retirée**.
+
+➡️ Corollaire immédiat : **la scène n'est jamais quiescente au sens de cette
+mesure.** Un banc qui attend la quiescence attendra toujours son délai.
+
+---
+
+### ⚡ LA CHASSE 3 : LE BRAS SANS LA PORTE — et ce qui bouge tout seul
+
+`--sans-porte` retire l'attente de 45 s : **30 passes, 0 écart.** Et le banc, qui
+relève désormais le diff d'état **à chaque passe et pas seulement sur écart**,
+donne le fait brut :
+
+```
+tuiles = 112/0/4   (total / loading / empty)   à chacun des 4 relevés
+ETAT BOUGE : memo : 298 -> 293 ; memo : 293 -> 318 ; memo : 318 -> 307
+```
+
+⛔ **RIEN NE BOUGE, SAUF LE TAS JAVASCRIPT.** Ni la caméra, ni le palier, ni le
+rapport de pixels, ni les passes du compositeur, ni les 26 uniformes, ni le
+compte de tuiles. Et les 4 tuiles « restantes » sont **`empty`, jamais
+`loading`** : ce sont des places vides que rien ne remplira, pas un chargement en
+cours. **La porte de R21 attendait une condition qui ne peut pas arriver.**
+
+**Bilan des trois chasses : 144 passes, 0 transitoire, sur machine oisive.**
+
+### ⚡ LE BRAS QUI ACCUSE — ET QUI DISCULPE : `--charge`
+
+Les trois chasses tournaient sur une machine **oisive**. Les campagnes de R21,
+elles, tournaient pendant que la même machine exécutait `npm test`, des éditions
+de sources et d'autres sondes. Et le dépôt a un **gouverneur** (`src/perf.js`)
+qui descend d'un palier après **2,5 s sous 30 images/s** et remonte après
+**12 s au-dessus de 55** — c'est l'hypothèse ① du coordinateur, et la bannière
+« PERFORMANCE — … » qu'il a vue est son `announce()`.
+
+⛔ **ON NE L'APPELLE PAS À LA MAIN** — `setTier` n'est pas exposé, et prouver
+qu'un interne change l'image ne prouverait pas que le gouverneur se déclenche.
+On ralentit le processeur par CDP (`Emulation.setCPUThrottlingRate`), on relâche,
+et on regarde. ⚠️ **Et on MESURE la cadence pendant le ralentissement** : sans ça,
+un « palier inchangé » à 45 i/s serait un faux négatif — la première tentative,
+à ×8, laissait la page à une cadence que le gouverneur n'a aucune raison de
+sanctionner, et elle n'a donc rien testé.
+
+| ralentissement | cadence mesurée | palier atteint | **écart d'image** | **et il revient ?** |
+|---|---|---|---|---|
+| ×8 | *(non mesurée au 1ᵉʳ essai)* | aucun | 0,000 / 0,000 | — |
+| **×20** | 57,4 → **14,0 i/s** | LIGHT | **0,038 / 0,038** — 0,5 % des pixels | ⛔ **non** : retour 0,0388 |
+| **×60** | 57,5 → **0,44 i/s** | ESSENTIAL | **1,468 / 2,643** — 78,5 % des pixels | ⛔ **non** : retour 0,0378 |
+
+**3 déclenchements sur 3 passes, aux deux taux : le gouverneur EST reproductible
+à volonté.** Le diff d'état le nomme sans ambiguïté — à ×60 :
+
+```
+pixelRatio        1 -> 0.85
+canvas            [1280,800] -> [1088,680]
+params.grain      0.26 -> 0
+params.shadowMode "dynamic" -> "off"
+sun.cast          true -> false
+uni.uMppFacteur   47.179404 -> 55.505182
+banniere          null -> "PERFORMANCE — ESSENTIAL MODE"
+```
+
+### ⛔ ET C'EST PRÉCISÉMENT CE QUI L'INNOCENTE — DEUX FOIS
+
+⚠️ **J'ai cru tenir la cause. La mesure l'a refusée, et c'est exactement le piège
+que le coordinateur m'avait décrit.**
+
+**① L'AMPLITUDE NE COLLE PAS.** Le gouverneur ne peut produire que deux sauts, et
+le transitoire n'est ni l'un ni l'autre :
+
+```
+un cran (LIGHT)        0,038 / 0,038
+LE TRANSITOIRE         0,162 à 0,191  /  0,326 à 0,385     ← quatre fois trop grand
+le plancher (ESSENTIAL) 1,468 / 2,643                       ← huit fois trop grand
+```
+
+**② IL NE REVIENT PAS, ET LE TRANSITOIRE SI.** `UP_SUSTAIN` vaut **12 s par
+cran** : une descente à ESSENTIAL met **36 s** à se défaire, et après 45 s
+d'attente il restait encore **0,038** d'écart (le `shadowMode` pas encore rendu).
+Or la signature du transitoire est un **`dRetour` de 0 exactement**, entre deux
+relevés espacés de **2,7 s**. ⛔ **Le gouverneur ne peut pas produire un
+aller-retour bit à bit en 2,7 secondes.** C'est arithmétique, pas une opinion.
+
+➡️ **L'hypothèse ① du coordinateur est RÉFUTÉE PAR LA MESURE**, et pas écartée
+par lecture. Elle a coûté quatre bancs — et elle valait le prix : le gouverneur
+change bel et bien l'image, personne ne l'avait chiffré, et **on sait maintenant
+ce qu'il coûte** (0,038 pour un cran, 1,468 pour le plancher).
+
+⚠️ **Les deux autres pistes du coordinateur, avec ce que j'ai relevé :**
+- **② la cuisson de l'analyse (~464 ms)** — non départagée. Elle ne peut pas
+  être testée par ce banc : `uAnalysisOn` valait 1 aux 144 passes, l'analyse
+  était déjà cuite avant le premier relevé.
+- **③ `signaux.ecran` dégénéré** — ⛔ **pas reproduit ici** : la sonde relève
+  `[800, 600]`, pas `[0, 0]`, et le palier de démarrage vaut **0** aux quatre
+  bancs. Un écran dégénéré aurait fait démarrer bas puis remonter ; ça n'est
+  arrivé à aucune passe. **Ça n'exclut pas le défaut dans le panneau navigateur
+  du coordinateur — ça dit qu'il n'est pas la cause de CE transitoire-ci.**
+
+### ⛔ LE VERDICT, ET C'EST UN RÉSULTAT
+
+**Le transitoire n'est PAS reproductible à volonté.** 144 passes sur machine
+oisive, trois protocoles, plus deux bras de charge contrôlée : il ne s'est pas
+montré une seule fois. Sa cause **reste non identifiée** — mais la liste des
+suspects s'est réduite, et cette fois **par la mesure** :
+
+| écarté | par quoi |
+|---|---|
+| tout ce qui tourne en régime (grain, ton, exposition, dérive de caméra, palier qui oscillerait) | chasse 1 : **90 passes, `moy = 0` et `grad = 0` à chaque ligne** |
+| le rechargement seul | chasses 2 et 3 : **54 passes, 0 écart** |
+| **le gouverneur de performance** | chasses 5 et 6 : **amplitude 0,038 ou 1,468, jamais 0,17 — et il met 12 à 36 s à revenir** |
+| l'écran dégénéré au démarrage | `signaux.ecran = [800, 600]`, palier 0 aux quatre bancs |
+
+➡️ **Ce qui reste** : quelque chose qui dure **moins de 2,7 s**, revient **au bit
+près**, touche l'image **globalement** (le gradient monte deux fois plus que la
+moyenne), et n'apparaît **que sous charge extérieure**. Les voiles de chargement
+(`voile-whiteout`, `voile-loading`) et une repose de la chaîne du crop sont les
+deux familles qui restent, et **aucune n'est mesurée** : elles ne sont pas dans
+la photographie d'état de ce banc. **C'est la première chose à instrumenter au
+prochain tour.**
+
+---
+
+## ④ quinquies ⛔ LE SEUIL DE 0,06 DE L'INVENTAIRE EST SOUS LE BRUIT — ET VOICI OÙ
+
+> **Le coordinateur :** *« Si un ✅ sur douze est du bruit, l'inventaire des
+> 127 options est faux quelque part et personne ne sait où. Si tu confirmes que
+> le seuil de 0,06 est sous le bruit, dis-le franchement. »*
+
+**Je le confirme, et je peux dire où.** Le barème de `inventaire-studio-2.md`
+déclare ✅ dès **`moy ≥ 0,06` ou `grad ≥ 0,12`**. Le transitoire vaut **0,162 à
+0,191 de moyenne et 0,326 à 0,385 de gradient**. ⛔ **Le seuil est donc environ
+trois fois sous l'amplitude du bruit qu'on vient de nommer.**
+
+⚠️ **MAIS ÇA NE REND PAS L'INVENTAIRE FAUX PARTOUT, ET LA DISTINCTION EST
+ARITHMÉTIQUE.** Un transitoire ne peut qu'**ajouter** de l'écart : il peut donc
+transformer un ⛔ en faux ✅, **jamais l'inverse**.
+
+| verdict | exposé au transitoire ? |
+|---|---|
+| **⛔ (47)** | ⛔ **NON.** La règle exige `moy < 0,005` **et** `grad < 0,01` **et** aucun uniforme touché. Un transitoire pousse vers le haut : il ne peut pas fabriquer un ⛔. *(Les faux ⛔ de ce chantier viennent des défauts de PROTOCOLE du §①, pas du bruit.)* |
+| **✅ (72)** | ⚠️ **OUI, pour ceux dont les DEUX grandeurs sont sous le transitoire.** |
+
+### LES SEPT LIGNES CONCERNÉES, NOMMÉES
+
+Comptées sur les 127 lignes chiffrées de l'inventaire : **7 verdicts ✅ sur 72**
+ont **à la fois** `moy < 0,19` **et** `grad < 0,39`, c'est-à-dire tiennent
+entièrement dans la bande du transitoire.
+
+| n° | libellé | moy | grad |
+|---|---|---|---|
+| 98 | Réfraction | 0,081 | 0,138 |
+| 36 | Couleurs sèches | 0,122 | 0,089 |
+| 91 | Hauteur des vagues | 0,140 | 0,236 |
+| **120** | **Vitesse du suivi** | **0,162** | **0,326** |
+| **11** | **Opacité de l'eau** | **0,178** | **0,355** |
+| **56** | **Échelle du détail** | **0,184** | **0,318** |
+| **24** | **Échelle fine** | **0,188** | **0,320** |
+
+⚡ **LES QUATRE DERNIÈRES SONT EN GRAS PARCE QU'ELLES SONT LA SIGNATURE, PAS
+SEULEMENT LA BANDE.** Le transitoire mesuré vaut **0,162 / 0,327** (n° 68),
+**0,164 / 0,332** (témoin nul), **0,191 / 0,385** (n° 73 avant). La ligne 120 —
+**0,162 / 0,326** — est ce chiffre-là **à la troisième décimale**.
+
+⛔ **ET JE M'ARRÊTE LÀ, PARCE QUE C'EST UNE CORRÉLATION.** Je ne déclare aucune
+de ces sept lignes fausse : je dis que **leur chiffre ne les prouve pas**, et
+qu'il faut les re-mesurer en répétition. Deux d'entre elles ont même des raisons
+indépendantes d'être vraies :
+- **91 « Hauteur des vagues » est l'ÉTALON du barème** — et R18 l'a corroborée
+  par **deux captures côte à côte** montrant les crêtes, pas par son chiffre.
+  ⚠️ Le point d'étalonnage du seuil tombe donc lui-même dans la bande du bruit,
+  et il n'a survécu que parce qu'une IMAGE l'a confirmé.
+- **24 et 56** sont deux des trois options que R18 a **sauvées d'un faux ⛔** en
+  découvrant qu'elles ne commitent qu'au relâchement — et elles **régénèrent le
+  terrain**, donc elles agissent forcément. **Leurs valeurs (0,188 et 0,184) ne
+  le démontrent pourtant pas** : elles sont indiscernables du transitoire.
+
+➡️ **Ce qu'il faut retenir pour la suite du chantier, et c'est la phrase la plus
+utile de ce rapport :** ⛔ **un relevé unique entre 0,06 et 0,19 ne décide de
+rien.** Au-dessus, le verdict tient ; en dessous de 0,005/0,01, le ⛔ tient. **Ce
+qui est entre les deux exige une répétition** — trois campagnes, et on regarde si
+le chiffre se reproduit à la troisième décimale (le n° 30 de R21 le fait sur
+cinq) ou s'il saute (le n° 68 : 0,000 cinq fois, 0,162 une).
+
+---
+
 ## ⑤ CE QUE J'AI CRU, PUIS RÉFUTÉ
 
-**C'est la section la plus utile du rapport, et elle a six entrées.**
+**C'est la section la plus utile du rapport, et elle a huit entrées.**
 
 ### ① J'ai cru que le brief avait raison sur l'unité de `shadow.radius`
 
@@ -359,7 +662,31 @@ transitoire d'amplitude **0,17**, c'est-à-dire **plus grand que le signal du
 n° 30** que je viens de brancher. ⚡ **Un témoin qui passe une fois ne dit rien
 d'un défaut qui frappe une fois sur douze.**
 
-### ⑥ J'ai cru pouvoir gater l'ombrage des pentes sur `uAnalysisOn`
+### ⑥ J'ai cru que la porte « plus aucune tuile en vol » fermait quelque chose
+
+Je l'avais ajoutée pour faire tomber le plancher de bruit de 0,157 à 0,0000, et
+elle l'a fait. J'ai écrit que la cause était « les tuiles encore en vol ».
+⛔ **La chasse 2 a journalisé la porte : elle EXPIRE à ses 45 secondes, à chaque
+chargement, sans une seule exception, et il reste en permanence 4 à 9 tuiles.**
+Elles sont `empty`, jamais `loading` : des places vides que rien ne remplira.
+**La porte attendait une condition qui ne peut pas arriver** — c'était une
+temporisation de 45 s déguisée en garde-fou. Le plancher tombe bien, mais **pas
+pour la raison que j'avais écrite**, et cette raison est retirée.
+
+### ⑦ J'ai cru tenir le transitoire avec le gouverneur de performance
+
+Tout collait : il change l'image d'un coup, il revient, il est sporadique, il
+dépend de la charge — et le coordinateur l'avait mis en tête de ses pistes. Je
+l'ai reproduit **3 fois sur 3**, la bannière et le diff d'état à l'appui. Puis
+j'ai mesuré l'amplitude : **0,038 pour un cran, 1,468 pour le plancher**, quand
+le transitoire vaut **0,17**. Et j'ai regardé le retour : `UP_SUSTAIN` vaut
+**12 s par cran**, quand la signature du transitoire est un aller-retour bit à
+bit en **2,7 s**. ⛔ **Deux réfutations indépendantes, toutes deux chiffrées.**
+Si je m'étais arrêté à la corrélation, j'aurais nommé une cause fausse et fermé
+le dossier — c'est exactement ce contre quoi le coordinateur m'avait prévenu, et
+c'est arrivé.
+
+### ⑧ J'ai cru pouvoir gater l'ombrage des pentes sur `uAnalysisOn`
 
 C'était le miroir apparemment exact de `uColorMode == 1` côté globe — le
 nuanceur du globe n'a pas de `uColorMode`, et `contexteCrop` ne passe l'analyse
@@ -374,15 +701,9 @@ alors qu'`uColorMode` vaut 1 dès le premier instant. Le brun des versants aurai
 
 ## ⑥ CE QUE R21 N'A PAS FAIT, ET IL FAUT LE SAVOIR
 
-- ⛔ **Les PAROIS du crop n'ont pas l'appoint.** Elles ont leur propre nuanceur
-  (`globe.js`, le matériau des parois), qui appelle `irradianceCrop` avec
-  `uParoiCielIrr` / `uParoiSolIrr`. Un appoint fort les laisse **un cran plus
-  sombres que la surface** — visible sur `.banc/R21/apres-70-Intensité.png`.
-  **Non touché exprès** : le périmètre des parois appartient à un chantier
-  parallèle (`C:\Dev\wt-par`), et une fusion y ferait conflit. La correction est
-  d'une ligne le jour où ce périmètre est libre : ajouter
-  `irradianceAppoint(dot(N, uAppointDir), uAppointIrr)` à la somme, exactement
-  comme sur les tuiles.
+- ✅ **~~Les PAROIS du crop n'ont pas l'appoint~~ — FAIT au tour R21 bis**, le
+  périmètre étant libéré par R22. Voir §④ bis : 55 591 pixels contre 0 au
+  témoin. C'était bien une ligne.
 - ⚠️ **L'ombrage des pentes agit sur TOUTE la planète, pas seulement sur le
   crop.** C'est délibéré et conforme à D15 (« rendre la planète éclairée et
   reliefée **partout** ») : la pente ne lit **aucune** donnée cuite sur
@@ -398,11 +719,18 @@ alors qu'`uColorMode` vaut 1 dès le premier instant. Le brun des versants aurai
 
 ## ⑦ LES TESTS
 
-- **`npm test` : 4 449 · 0 échec** (base à battre : 4 422 · 0). **+27**, tous
-  dans `test/lumiere-sphere.test.js`.
-- **`npm run audit:tests` : 230 listés · 230 sur disque · aucun écart.** Le
-  nouveau fichier a été **ajouté à la liste explicite de `package.json`** — sans
-  ça il n'aurait jamais tourné.
+- **R21** — `npm test` : **4 449 · 0 échec** (base 4 422), **+27** dans
+  `test/lumiere-sphere.test.js` ; `audit:tests` **230 = 230**.
+- **R21 bis**, après fusion de `regroupement` — `npm test` : **4 573 · 0 échec**
+  (base à battre 4 572), **+1** : `④a bis`, qui verrouille l'appoint des parois,
+  le PARTAGE des deux uniformes (et interdit le jumeau `uParoiAppoint` par son
+  nom), et le fait que l'option 50 reste lue sur le matériau (règle R22).
+  `audit:tests` **237 = 237**, aucun écart.
+- ⚠️ **La collision R21/R22 signalée par le coordinateur est vérifiée de mon
+  côté** : la garde ⑨ de `test/grille-crop.test.js` extrait le corps de
+  `poserHabillage` et le compare à la table factice. Je n'ai ajouté aucun
+  uniforme à `this.uniforms` ce tour-ci — la paroi ne fait que LIRE ceux de R21
+  —, donc elle n'avait rien à me rappeler.
 - Quatre fichiers existants ont été touchés, et seulement là où la forme du
   nuanceur a changé : `crop-aerien` et `crop-eclairage` ancraient l'ordre des
   étapes sur `vec3 colBloc = col * irradianceCrop(`, devenu
@@ -427,19 +755,36 @@ alors qu'`uColorMode` vaut 1 dès le premier instant. Le brun des versants aurai
    l'unité annoncée par le brief, `scripts/sonde-lumiere-r21.mjs`, et les trois
    corrections d'instrument (palier machine journalisé, attente des tuiles,
    témoin nul).
-3. *(ce rapport, et le témoin « avant » sous le même protocole)*
+3. **`16353de` — R21 étape 3 : le rapport, l'avant/après sous le même protocole,
+   et un transitoire de banc que le témoin nul a fini par attraper.**
+4. **R21 bis — l'appoint sur les parois, et la chasse au transitoire.** La paroi
+   reçoit les deux uniformes PARTAGÉS de l'appoint (55 591 pixels contre 0 au
+   témoin) ; `scripts/sonde-paroi-r21bis.mjs` et
+   `scripts/sonde-transitoire-r21bis.mjs` ; le gouverneur reproduit à volonté
+   puis **réfuté par l'amplitude et par le temps de retour** ; les sept lignes de
+   l'inventaire dont le chiffre ne prouve rien, nommées.
 
 ---
 
 ## ⑨ CE QUI RESTE OUVERT
 
-- ⛔ **Le transitoire du banc (§④ bis) n'a pas de cause identifiée.** Amplitude
-  0,17 / 0,33, une mesure sur douze, signature reconnaissable (valeur basse nulle,
-  `dRetour` nul). Il fausse tout verdict tiré d'un relevé unique sous ce seuil.
-  **Tâche à ouvrir** — et d'ici là, **tout banc de ce dépôt qui publie un chiffre
-  sous 0,2 sans répétition est suspect**, y compris rétroactivement.
-- ⚠️ **L'appoint sur les PAROIS du crop** — une ligne, dès que le périmètre des
-  parois est libre (§⑥).
+- ⛔ **Le transitoire n'a toujours pas de cause identifiée, mais la chasse a
+  réduit la liste PAR LA MESURE** (§④ quater). **Non reproductible à volonté** :
+  144 passes sur machine oisive, trois protocoles, deux bras de charge contrôlée.
+  ➡️ **Ce qu'il reste à instrumenter au prochain tour** : les voiles de
+  chargement (`voile-whiteout`, `voile-loading`) et une repose de la chaîne du
+  crop — les deux seules familles qui durent moins de 2,7 s et reviennent, et les
+  deux qui **ne sont pas** dans la photographie d'état de la sonde.
+- ⛔ **La porte « plus aucune tuile en vol » est à réparer dans les deux sondes
+  qui la portent** (`sonde-lumiere-r21.mjs`, `sonde-transitoire-r21bis.mjs`).
+  Elle expire toujours : compter les `loading` **sans** les `empty`, et assumer
+  la temporisation au lieu de la déguiser. ⚠️ **Je ne l'ai PAS corrigée dans ce
+  tour, et c'est délibéré** : la changer maintenant rendrait irreproductibles
+  tous les chiffres publiés avec elle. Elle se corrige au tour suivant, avec une
+  re-mesure du plancher.
+- ⛔ **Les sept lignes du §④ quinquies** — à re-mesurer en répétition avant de
+  s'appuyer dessus. Et **le coût du gouverneur est désormais chiffré** (0,038 un
+  cran, 1,468 le plancher) : c'est un chiffre que personne n'avait.
 - ⚠️ **Les 39 autres réglages ⛔ de l'inventaire.** R21 en traite huit. Vu ce que
   le protocole a rendu ici — **trois zéros sur huit n'étaient pas des verdicts** —
   il est prudent de supposer que **le compte de 47 est surévalué**, et de

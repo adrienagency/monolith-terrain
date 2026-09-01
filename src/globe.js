@@ -6698,6 +6698,25 @@ export class Globe {
         uCielIrr: this.uniforms.uParoiCielIrr,
         uSolIrr: this.uniforms.uParoiSolIrr,
         uEclairageOn: this.uniforms.uEclairageOn,
+        // ══════ L'APPOINT — Tâche R21 bis, et il est PARTAGÉ ══════════════════
+        //
+        // ⚡ **LES DEUX UNIFORMES DES TUILES, PAS DEUX JUMEAUX — ET C'EST LE
+        // MÊME ARGUMENT QUE P8, PRIS DANS L'AUTRE SENS.** P8 a démontré que le
+        // relief et la paroi ne voient pas le même ENVIRONNEMENT, parce qu'un
+        // `envMap` est posé sur UN matériau et que `three` n'écrase
+        // `envMapIntensity` que sur ceux qui n'en ont pas. D'où `uParoiCielIrr`
+        // et `uParoiSolIrr`, deux lignes au-dessus.
+        //
+        // ⛔ **L'APPOINT N'EST PAS UN ENVIRONNEMENT : C'EST UNE LAMPE.**
+        // `fillLight` est une `THREE.DirectionalLight` de la scène, sans
+        // `envMap` et sans ombre — elle éclaire **tous** les matériaux de la
+        // scène avec la même irradiance, exactement comme `sun`. C'est pour ça
+        // que `uSoleilIrr` est déjà partagé trois lignes plus haut, et l'appoint
+        // se range du même côté que lui. **Lui fabriquer un `uParoiAppointIrr`
+        // aurait été deux écritures d'une seule grandeur** — et la paroi aurait
+        // pu diverger de la surface au premier réglage.
+        uAppointDir: this.uniforms.uAppointDir,
+        uAppointIrr: this.uniforms.uAppointIrr,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aoCrop;
@@ -6722,7 +6741,13 @@ export class Globe {
         uniform vec3 uCielIrr;
         uniform vec3 uSolIrr;
         uniform float uEclairageOn;
+        uniform vec3 uAppointDir;
+        uniform vec3 uAppointIrr;
         ${GLSL_IRRADIANCE}
+        // ⚠️ INJECTE, PAS RECOPIE — Tache R21 bis. Le meme texte que les tuiles,
+        // depuis monde/lumiere-sphere.js. Deux ecritures d'irradianceAppoint
+        // auraient laisse la paroi et la surface diverger en silence.
+        ${GLSL_LUMIERE_SPHERE}
         void main() {
           vec3 N = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
           // ⚠️ SANS ECLAIRAGE, LA LOI DE PLANETE — AU BIT PRES. C'est le repli
@@ -6733,9 +6758,15 @@ export class Globe {
           colPlanete = mix(uNuitFond, colPlanete, uNuitCarte + (1.0 - uNuitCarte) * day);
           // L ALBEDO DE LA PAROI : sa couleur x son occlusion de contact, tout
           // comme le socle multiplie material.color par son attribut color.
-          vec3 colBloc = uCol * vAo
-            * irradianceCrop(dot(N, uSoleilDir), dot(N, uHemiHaut), uSoleilIrr, uCielIrr, uSolIrr)
-            * ${RECIPROQUE_PI};
+          // ⚡ ET L'APPOINT S'AJOUTE DANS LA MEME SOMME QUE SUR LES TUILES —
+          // Tache R21 bis. R21 avait laisse la paroi de cote (perimetre d'un
+          // chantier parallele) et l'avait DIT : « un appoint fort les laisse un
+          // cran plus sombres que la surface ». Mesure a l'ecran, appoint a
+          // fond : la surface montait de 1,984 de moyenne pendant que la paroi
+          // ne bougeait pas. Meme terme, meme fonction, meme uniforme.
+          vec3 irrParoi = irradianceCrop(dot(N, uSoleilDir), dot(N, uHemiHaut), uSoleilIrr, uCielIrr, uSolIrr)
+            + irradianceAppoint(dot(N, uAppointDir), uAppointIrr);
+          vec3 colBloc = uCol * vAo * irrParoi * ${RECIPROQUE_PI};
           gl_FragColor = vec4(uEclairageOn > 0.5 ? colBloc : colPlanete, 1.0);
         }`,
     })
