@@ -325,11 +325,30 @@ un faux négatif. À ×20 et ×60 (57 → 14 puis 0,44 i/s), le palier bascule 3
 sur 3 — **et c'est ce qui l'innocente** : l'amplitude ne colle pas (0,038 ou
 1,468, jamais 0,17) et `UP_SUSTAIN` vaut 12 s par cran contre 2,7 s observés.
 
-### ⚠️ Trouvé sans le chercher : une temporisation déguisée
+### ✅ Trouvé sans le chercher, puis tranché par R26 : une temporisation déguisée
 
-La porte **« plus aucune tuile en vol » expire à ses 45 s à CHAQUE chargement,
+La porte **« plus aucune tuile en vol » expirait à ses 45 s à CHAQUE chargement,
 sans exception** : il reste 4 à 9 tuiles `empty` que rien ne remplira jamais.
 Ce n'était pas une condition, c'était un `sleep(45 s)` sous un autre nom.
 
-⛔ **Non corrigé exprès** : la réparer rendrait irreproductibles les chiffres déjà
-publiés. Note posée dans les deux sondes. **Tâche à ouvrir.**
+⚡ **R26 A TRANCHÉ — ET L'ALARME ÉTAIT FAUSSE, C'EST UN BON RÉSULTAT**
+(`rapport-R26.md`). Les tuiles résiduelles ne sont **demandées par personne** :
+`demanderEmprise` (`monde/flux-terrain.js`, étape 2) les rend à `empty` quand
+l'emprise du socle bouge **en plein vol**, et `_horsCropSeul` les écarte ensuite
+à la première ligne de `_traverse`. **Pas de fuite de places, pas de point
+fixe** : 112 entrées sur 1 700 au repos, `_refus` = 0, `_evictJusqua` jamais
+appelé, crédit restant 1 619/1 700. Sous **15 min d'usage** la population
+**oscille entre 28 et 37** — elle ne grandit pas.
+
+✅ **Corrigé** : `Globe.tuilesEnVol()` (`src/globe.js`), **une seule définition**,
+appelée par les **TROIS** sondes qui portaient la formule fautive
+(`sonde-lumiere-r21.mjs`, `sonde-transitoire-r21bis.mjs` et
+`sonde-paroi-r21bis.mjs` — la troisième n'avait jamais été repérée).
+**43,4 s gagnées par mesure de banc, 0 ms à l'écran** : le défaut était dans le
+banc, pas dans le moteur.
+
+⚠️ **Les chiffres de `rapport-R21.md` restent valables** — mesuré sur 3
+chargements avant de corriger : entre la fermeture de la porte corrigée (1,7 s)
+et la 45ᵉ seconde, **0 tuile n'arrive et 0 requête ne part**. En revanche un
+temps de PRÉPARATION relevé avant R26 ne se compare plus à un relevé d'après :
+c'est le banc qui a changé, pas la scène.
