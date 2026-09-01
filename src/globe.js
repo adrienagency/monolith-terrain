@@ -7207,6 +7207,48 @@ export class Globe {
     return n
   }
 
+  // ═══════════ COMBIEN DE TUILES SONT ENCORE EN VOL ? — Tâche R26 ═══════════
+  //
+  // ⛔ **CETTE MÉTHODE EXISTE PARCE QUE DEUX BANCS AVAIENT ÉCRIT LA MAUVAISE
+  // FORMULE, CHACUN DE SON CÔTÉ.** `scripts/sonde-lumiere-r21.mjs` et
+  // `scripts/sonde-transitoire-r21bis.mjs` attendaient tous deux
+  // `state === 'loading' || state === 'empty'` pour compter zéro. Cette porte
+  // **n'a jamais pu se fermer** : elle expirait à ses 45 s à CHAQUE chargement,
+  // sur 24 chargements de R21 et 6 de R26 — c'était un `sleep(45 s)` déguisé.
+  //
+  // ⚡ **ET LE MOTEUR EST SAIN — MESURÉ, R26.** Les 4 à 9 tuiles résiduelles ne
+  // sont pas des requêtes qui ne reviennent jamais : ce sont des entrées de
+  // cache rendues à `empty` par `demanderEmprise` (`monde/flux-terrain.js`,
+  // étape 2, `g._annuler`) quand l'emprise du socle bouge, **et que plus
+  // personne ne parcourt** — `_horsCropSeul` les écarte à la première ligne de
+  // `_traverse`. Elles ne sont donc **demandées par personne**, ce qui est le
+  // seul état d'où `_request` sait repartir si la caméra y revient. Elles sont
+  // évinçables au rang 0 (`_bloquee` : `empty` + `lastUsed !== frame`), donc
+  // elles ne retiennent aucune place du budget pour de bon.
+  //
+  // ⚠️ **LE DISCRIMINANT EST `lastUsed`, ET IL EST NÉCESSAIRE.** Une `empty`
+  // touchée par le parcours de l'image courante EST en vol au sens utile : elle
+  // attend une sonde de couverture (`planTuile` sans réponse), un créneau de
+  // file, ou la fin d'une quarantaine, et `_traverse` la redemandera à l'image
+  // suivante — l'image va donc encore changer. Une `empty` PÉRIMÉE, elle,
+  // n'attend rien ni personne. Compter les deux, c'est attendre pour toujours ;
+  // n'en compter aucune, c'est mesurer une scène qui bouge encore.
+  //
+  // ⚠️ `queue.length` et `inFlight` sont comptés EN PLUS des `loading`, et ce
+  // n'est pas un double comptage gênant : la seule lecture utile est « est-ce
+  // zéro ». Ils gardent la porte fermée si une entrée de file survivait à sa
+  // tuile (l'orpheline de `_purgerFile`), cas où aucun `state` ne le dirait.
+  //
+  // @returns {number} 0 quand la planète a fini de se charger.
+  tuilesEnVol() {
+    let n = this.queue.length + this.inFlight
+    for (const t of this.tiles.values()) {
+      if (t.state === 'loading') n++
+      else if (t.state === 'empty' && t.lastUsed === this.frame) n++
+    }
+    return n
+  }
+
   _pump() {
     while (this.inFlight < MAX_CONCURRENT && this.queue.length) {
       this.queue.sort((a, b) => b.priority - a.priority)

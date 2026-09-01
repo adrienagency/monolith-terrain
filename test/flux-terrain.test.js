@@ -1111,3 +1111,94 @@ test('remplirHauteurs DIT si la fusion a eu lieu — sans quoi la mer se croit r
   assert.equal(sansNappe.bathy, false, 'sans nappe, la fusion n a PAS eu lieu')
   g.dispose()
 })
+
+// ═══════════ LA PORTE DES BANCS — Tâche R26 ══════════════════════
+//
+// ⛔ **DEUX SONDES ONT ATTENDU 45 s PAR MESURE POUR RIEN, PENDANT TOUTE UNE
+// CAMPAGNE.** Elles attendaient `state === 'loading' || state === 'empty'` à
+// zéro. Cette condition **ne peut pas arriver** : `demanderEmprise` rend à
+// `empty` les tuiles qui sortent de l'emprise du socle, et plus aucun parcours
+// ne les touche — elles restent donc `empty` sans que ce soit un défaut.
+//
+// Les trois tests qui suivent épinglent le départage, dans l'ordre où il a été
+// mesuré : la population résiduelle existe, elle n'est demandée par personne,
+// elle ne retient aucune place pour de bon, et la porte corrigée la distingue
+// de ce qui est vraiment en vol.
+
+test('la porte d origine ne peut PAS se fermer : `demanderEmprise` laisse des `empty` périmées', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  // une première emprise, dont on laisse la file se remplir sans la vider
+  demanderEmprise(flux, { emprise: empriseSocle({ centre: CENTRE }) })
+  assert.ok(g.queue.length > 0, 'le banc n a pas rempli la file du socle')
+  // la caméra bouge : le socle réclame une AUTRE emprise, et l'ancienne sort
+  demanderEmprise(flux, { emprise: empriseSocle({ centre: { lat: CENTRE.lat + 3, lon: CENTRE.lon + 3 } }) })
+
+  g.frame += 1 // une image passe : ce qui n'est plus réclamé devient périmé
+  const perimees = [...g.tiles.values()].filter((t) => t.state === 'empty' && t.lastUsed !== g.frame)
+  assert.ok(perimees.length > 0, 'aucune `empty` périmée : le banc ne reproduit pas le défaut')
+
+  // ⚠️ **LA FORMULE D'ORIGINE, RECOPIÉE ICI TELLE QUELLE** — c'est elle qu'on
+  // épingle, pas une paraphrase.
+  let ancienne = 0
+  for (const t of g.tiles.values()) if (t.state === 'loading' || t.state === 'empty') ancienne++
+  assert.ok(ancienne > 0, 'la porte d origine tomberait à zéro : le défaut n est plus reproduit')
+
+  // et ces tuiles-là ne sont demandées par personne : `_bloquee` les reprend au
+  // rang 0 de l'éviction, donc elles ne retiennent aucune place pour de bon.
+  assert.ok(perimees.every((t) => g._bloquee(t)), 'une `empty` périmée échappe au rang 0 de l éviction')
+  g.dispose()
+})
+
+test('`tuilesEnVol` compte ce qui vole, et retombe à zéro quand la porte doit s ouvrir', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  demanderEmprise(flux, { emprise: empriseSocle({ centre: CENTRE }) })
+  assert.ok(g.tuilesEnVol() > 0, 'la porte s ouvre alors que le socle part sur le réseau')
+
+  for (let i = 0; i < 400 && g.tuilesEnVol() > 0; i++) await avancer(MS_PAR_IMAGE)
+  assert.equal(g.tuilesEnVol(), 0, 'la porte ne se ferme pas une fois le socle arrivé')
+
+  // ⚡ **ET C'EST L'EMPRISE QUI BOUGE EN PLEIN VOL QUI FABRIQUE LA POPULATION**,
+  // pas une emprise qui bouge une fois tout arrivé : `_annuler` ne rend à `empty`
+  // que ce qui est **encore dans la file**. Une tuile déjà `ready` qui sort de
+  // l'emprise reste `ready`. C'est la nuance que le premier jet de ce test avait
+  // manquée, et c'est elle qui explique pourquoi le résidu apparaît au
+  // CHARGEMENT (le crop se pose pendant que le socle vole encore).
+  demanderEmprise(flux, { emprise: empriseSocle({ centre: { lat: CENTRE.lat + 3, lon: CENTRE.lon + 3 } }) })
+  demanderEmprise(flux, { emprise: empriseSocle({ centre: { lat: CENTRE.lat + 6, lon: CENTRE.lon + 6 } }) })
+  for (let i = 0; i < 600 && g.tuilesEnVol() > 0; i++) await avancer(MS_PAR_IMAGE)
+  g.frame += 1
+  let ancienne = 0
+  for (const t of g.tiles.values()) if (t.state === 'loading' || t.state === 'empty') ancienne++
+  assert.equal(g.tuilesEnVol(), 0, 'la porte corrigée reste ouverte après un déplacement d emprise')
+  assert.ok(ancienne > 0, 'la porte d origine se fermerait : les deux ne se distinguent plus')
+  g.dispose()
+})
+
+test('`tuilesEnVol` ne coupe PAS trop tôt : une `empty` FRAÎCHE compte encore', async () => {
+  // ⚠️ **C'EST LA MOITIÉ QUI SE CASSE EN SILENCE.** Une porte qui ignorerait
+  // toutes les `empty` se fermerait pendant qu'une tuile attend un créneau de
+  // file (`PLAFOND_FILE`) ou une sonde de couverture : `_traverse` la
+  // redemandera à l'image suivante, donc l'image change encore. Le discriminant
+  // est `lastUsed`, et ce test est celui qui le prouve.
+  const g = neuf()
+  for (let i = 0; i < PLAFOND_FILE + 40; i++) {
+    const t = g._ensureTile(10, 520 + i, 360)
+    g._request(t, 1)
+  }
+  const refusees = [...g.tiles.values()].filter((t) => t.state === 'empty')
+  assert.ok(refusees.length > 0, 'le banc n a refusé aucune requête : PLAFOND_FILE n a pas mordu')
+
+  // périmées → la porte les ignore
+  g.frame += 1
+  const enVolSansFraiches = g.tuilesEnVol()
+  // le parcours les touche → la porte les compte
+  for (const t of refusees) t.lastUsed = g.frame
+  assert.equal(
+    g.tuilesEnVol(),
+    enVolSansFraiches + refusees.length,
+    'une `empty` touchée par le parcours courant n est pas comptée comme en vol'
+  )
+  g.dispose()
+})

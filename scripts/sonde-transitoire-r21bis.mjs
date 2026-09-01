@@ -53,11 +53,15 @@ const ETIQ = opt('--etiquette', 'transitoire')
 const RECHARGE = has('--recharge')
 const REPOS = Number(opt('--repos', '900'))
 // ⚡ **LE BRAS TÉMOIN DE L'EXPÉRIENCE.** La chasse 2 a montré que la porte des
-// tuiles **EXPIRE À CHAQUE FOIS** — 45 002 ms, et il reste 4 à 9 tuiles en
-// `loading`/`empty` en permanence. La sonde attendait donc 45 s de plus que ce
+// tuiles **EXPIRAIT À CHAQUE FOIS** — 45 002 ms, et il reste 4 à 9 tuiles
+// `empty` périmées en permanence. La sonde attendait donc 45 s de plus que ce
 // que son auteur croyait, et mesurait une scène BEAUCOUP plus posée que celle
 // des bancs d'origine. `--sans-porte` retire cette attente : c'est la seule
 // variable qui change entre les deux bras.
+// ⚠️ **DEPUIS R26 LA PORTE SE FERME VRAIMENT** (`globe.tuilesEnVol()`), en ~1 s
+// au lieu d'expirer à 45 s : les deux bras ne diffèrent donc plus que d'environ
+// une seconde. Un relevé d'avant R26 comparé à un relevé d'après ne se compare
+// pas — c'est le banc qui a changé, pas la scène.
 const SANS_PORTE = has('--sans-porte')
 // ══════════ ⚡ LE BRAS QUI ACCUSE — `--charge` ══════════════════════════════
 //
@@ -330,9 +334,12 @@ try {
       localStorage.setItem('shibumap-workmode', 'studio')
     } catch {}
   })
-  // ⛔ **ET ELLE N'EN EST PAS UNE — MESURÉ SUR 24 CHARGEMENTS.** Elle EXPIRE à
-  // ses 45 s à chaque fois, et il reste 4 à 9 tuiles `empty` (jamais `loading`)
-  // que rien ne remplira. Ce qu'elle fait réellement, c'est temporiser 45 s.
+  // ⛔ **ELLE N'EN ÉTAIT PAS UNE — CORRIGÉE PAR R26.** Elle attendait
+  // `loading || empty`, condition qui ne peut pas arriver : il reste 4 à 9
+  // tuiles `empty` PÉRIMÉES (rendues par `demanderEmprise`, plus parcourues par
+  // personne). Elle expirait donc à ses 45 s à chaque fois — un `sleep(45 s)`
+  // déguisé. Elle interroge désormais `globe.tuilesEnVol()`, défini une seule
+  // fois dans `src/globe.js`.
   // ⚠️ **LA PORTE DES TUILES EST JOURNALISÉE, PAS SEULEMENT ATTENDUE.** Elle est
   // enveloppée d'un `.catch()` : si elle EXPIRE, la sonde continue quand même,
   // sur une scène qui n'a pas fini de se poser — et personne ne le saurait. Ce
@@ -355,24 +362,26 @@ try {
     let porte = SANS_PORTE ? 'sautee' : 'ok'
     const tPorte = Date.now()
     if (!SANS_PORTE) await page.waitForFunction(() => {
-      const t = window.__exp.globe?.tiles
-      if (!t) return true
-      let n = 0
-      for (const v of t.values()) if (v.state === 'loading' || v.state === 'empty') n++
-      return n === 0
+      const g = window.__exp.globe
+      if (!g) return true
+      return g.tuilesEnVol() === 0
     }, { polling: 250, timeout: 45000 }).catch(() => { porte = 'EXPIREE' })
     const msPorte = Date.now() - tPorte
     await dodo(4000)
+    // ⚠️ **DEUX CHIFFRES, PAS UN.** `enVol` est ce que la porte regarde ;
+    // `emptyPerimees` est la population qui la faisait expirer — on la garde au
+    // journal pour que personne n'ait à la redécouvrir une troisième fois.
     const restes = await page.evaluate(() => {
-      const t = window.__exp.globe?.tiles
-      let n = 0
-      if (t) for (const v of t.values()) if (v.state === 'loading' || v.state === 'empty') n++
-      return n
+      const g = window.__exp.globe
+      if (!g) return { enVol: 0, emptyPerimees: 0 }
+      let p = 0
+      for (const v of g.tiles.values()) if (v.state === 'empty' && v.lastUsed !== g.frame) p++
+      return { enVol: g.tuilesEnVol(), emptyPerimees: p }
     })
     return { porte, msPorte, restes, msTotal: Date.now() - t0 }
   }
   let prep = await preparer()
-  console.log('preparation : porte=' + prep.porte + ' en ' + prep.msPorte + ' ms, ' + prep.restes + ' tuile(s) restante(s)')
+  console.log('preparation : porte=' + prep.porte + ' en ' + prep.msPorte + ' ms, ' + prep.restes.enVol + ' en vol, ' + prep.restes.emptyPerimees + ' empty perimee(s)')
 
   const releve = async (nom) => {
     await page.evaluate(() => window.__tr.vider())

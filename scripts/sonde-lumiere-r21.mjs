@@ -356,27 +356,32 @@ try {
     // n'est pas la mer, elle est COUPÉE — ce sont les tuiles qui arrivent encore
     // du réseau et qui s'affinent. On attend donc que la file du globe se vide,
     // et on retombe sur le plancher de R18.
-    // ⛔ **CETTE PORTE N'EN EST PAS UNE — MESURÉ AU TOUR R21 bis, ET ELLE EST
-    // GARDÉE TELLE QUELLE EXPRÈS.** Journalisée sur 24 chargements consécutifs,
-    // elle EXPIRE à ses 45 s **à chaque fois, sans exception**, et il reste en
-    // permanence **4 à 9 tuiles** — qui sont `empty`, jamais `loading` : des
-    // places vides que rien ne remplira. Elle attend donc une condition qui ne
-    // peut pas arriver, et ce qu'elle fait réellement est **temporiser 45 s**.
-    // ⚠️ Le plancher de bruit tombe bien de 0,157 à 0,0000 grâce à elle — mais
-    // pas pour la raison écrite ci-dessous, et cette raison est RETIRÉE.
-    // ⛔ **NE PAS LA « CORRIGER » SANS RE-MESURER LE PLANCHER** : tous les
-    // chiffres publiés dans `rapport-R21.md` l'ont été avec cette attente-là.
     // ⚠️ **ON ATTEND L'ÉTAT DES TUILES, ON NE COMPTE PAS LES SECONDES.** Le
-    // quadtree porte l'état de chacune (`empty` / `loading` / prête) : tant qu'il
-    // en reste une en vol, l'image change encore, et ce changement-là serait
-    // attribué au curseur qu'on bouge.
+    // quadtree porte l'état de chacune : tant qu'il en reste une en vol, l'image
+    // change encore, et ce changement-là serait attribué au curseur qu'on bouge.
+    //
+    // ⛔ **CETTE PORTE ÉTAIT FAUSSE, ET R26 L'A CORRIGÉE.** Elle attendait
+    // `state === 'loading' || state === 'empty'`, condition qui **ne peut pas
+    // arriver** : il reste en permanence 4 à 9 tuiles `empty` PÉRIMÉES — des
+    // entrées de cache rendues à `empty` par `demanderEmprise` quand l'emprise du
+    // socle bouge, que plus aucun parcours ne touche, et que **personne ne
+    // demande**. La porte expirait donc à ses 45 s à chaque chargement (24 sur
+    // 24 chez R21, 6 sur 6 chez R26) : c'était un `sleep(45 s)` déguisé.
+    //
+    // ⚡ **ET LES 45 s N'ACHETAIENT RIEN — MESURÉ AVANT DE CORRIGER**
+    // (`scripts/sonde-porte-r26.mjs`, 3 chargements) : entre la fermeture de la
+    // porte CORRIGÉE et la 45ᵉ seconde, **0 tuile n'arrive et 0 requête ne
+    // part**. Le plancher de bruit de R21 est donc reproductible avec la porte
+    // corrigée ; les chiffres de `rapport-R21.md` ne sont pas invalidés.
+    //
+    // ⚠️ `tuilesEnVol()` vit dans `src/globe.js` — **une seule définition**, pas
+    // une formule recopiée dans chaque banc. C'est cette recopie qui a laissé la
+    // même erreur vivre dans deux sondes à la fois.
     await page.waitForFunction(() => {
-      const t = window.__exp.globe?.tiles
-      if (!t) return true
-      let enVol = 0
-      for (const v of t.values()) if (v.state === 'loading' || v.state === 'empty') enVol++
-      window.__enVol = enVol
-      return enVol === 0
+      const g = window.__exp.globe
+      if (!g) return true
+      window.__enVol = g.tuilesEnVol()
+      return window.__enVol === 0
     }, { polling: 250, timeout: 45000 }).catch(() => {})
     await dodo(4000)
     return page.evaluate(poserCibles)
