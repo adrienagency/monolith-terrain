@@ -36,6 +36,11 @@ import {
   mesurerRelief,
   echelleRampe,
   plancherRampeDuCrop,
+  // LE REGIME DU MONDE HORS DE LA DECOUPE — Tache R28, §⑥ de rampe-crop.js.
+  // ⚠️ **DES CONSTANTES DE NUANCEUR, PAS DES UNIFORMES** : RAMPE_MONDE et
+  // GRADE_MONDE sont geles et personne ne les repose. Le pourquoi chiffre est
+  // au point d'injection.
+  GLSL_REGIME_MONDE,
 } from './monde/rampe-crop.js'
 // L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis. Pur lui aussi : il ne rend que
 // des nombres. ⚠️ **C'EST LUI QUI TIENT LES QUATRE NOMBRES DE RAMPE, ET PLUS
@@ -128,7 +133,7 @@ import { memoTuiles, tuileMemorisee, viderMemoTuiles } from './monde/memo-tuiles
 // injecte `GLSL_NATUREL` dans SON fragment et ce fichier dans LE SIEN : il n'y a
 // qu'une seule écriture du peigné, de l'humidité, du pivot et du voile aérien.
 // `test/crop-naturel.test.js` interdit qu'une de ces formules soit réécrite ici.
-import { GLSL_NATUREL, NATUREL_MONDE } from './monde/naturel-crop.js'
+import { GLSL_NATUREL, NATUREL_MONDE, GAIN_PEIGNE_MONDE, GAIN_OMBRE_MONDE } from './monde/naturel-crop.js'
 // ══════ LA COUCHE APPARENCE — Tâche P3 ══════════════════════════════
 // `FX_GLSL` était déjà partagé entre `terrain.js` et les vignettes du panneau ;
 // le crop en est le troisième lecteur. `GLSL_MELANGE` ferme une dette plus
@@ -1502,6 +1507,12 @@ float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); ret
 // voile aerien ; les recopier ici aurait fait exactement les « deux ecritures
 // jumelles » dont terrain.js porte la cicatrice.
 ${GLSL_NATUREL}
+// ══════ LE REGIME DE RAMPE DU MONDE — Tache R28 ═══════════════════════════
+//
+// ⚠️ **APRES GLSL_NATUREL, ET C'EST UNE OBLIGATION** : natRampTMonde appelle
+// natRampT. Le meme argument que la ligne « APRES GLSL_NATUREL, parce que
+// fxBlend mode 10 appelle natSoftLight », plus bas.
+${GLSL_REGIME_MONDE}
 
 // ⚠️ INJECTE, PAS RECOPIE — Tache P3, et il vient APRES GLSL_NATUREL parce
 // qu'il APPELLE natLuminance. La loi d'eclairage n'est pas maison : c'est celle
@@ -1970,6 +1981,30 @@ void main() {
     // demonstration chiffree juste au-dessus.
     float pivot = max(uHeightPivot, natPlancherPivot((0.0 - uReliefBas) / max(uLandMax - uReliefBas, uPlancherRampeM)));
     float rampT = natRampT(hNormRelief, pivot, uHeightContrast);
+    // ══════ ⛔ LA BANDE VERTE DES COTES — Tache R28 ════════════════════════
+    //
+    // > Adrien, 2026-09-01 : « Pourquoi y a-t-il une zone verte tout autour des
+    // > cotes ? »
+    //
+    // ⛔ LES QUATRE UNIFORMES DE LA LIGNE AU-DESSUS SONT MESURES SUR LE CROP ET
+    // PARTAGES PAR LES 1 700 MATERIAUX DE TUILE. La planete entiere prenait donc
+    // l'echelle d'une ile. RELEVE dans l'application vivante, La Reunion z12
+    // (diag-r28-bande.mjs) : uReliefBas 107,5 · uLandMax 3 009,6 · pivot 0,41 ·
+    // contraste 2,2 — donc natRampT SATURE A ZERO pour TOUTE terre de 0 a
+    // 637,8 m, c'est-a-dire le PREMIER texel du LUT, rgb(147, 160, 115),
+    // #93a074, la premiere butee de la palette : un olive vert. La bande.
+    //
+    // ⚡ ET LE DEPARTAGE EST dedansCrop, PAS UN SECOND SEUIL. C'est la couverture
+    // douce de la superellipse que les parois, l'albedo et l'eclairage suivent
+    // deja : le fondu est celui du bord du bloc, donc il n'y a aucune couture a
+    // inventer. La decision 4 d'Adrien (« la rampe se calcule sur le crop, et
+    // les ALENTOURS la suivent ») parle de l'emprise voisine d'une affiche —
+    // jamais de la planete ; c'est ce que rampe-crop.js §⑤ ecrit deja.
+    //
+    // ⚠️ ON MELANGE L'INDICE, PAS LA COULEUR : les deux regimes lisent la MEME
+    // table, rampT y est continu, et un seul echantillonnage suffit. Melanger
+    // deux couleurs aurait coute une seconde lecture de texture par fragment.
+    rampT = mix(natRampTMonde(h), rampT, dedansCrop);
     float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
     col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
   }
@@ -1993,10 +2028,25 @@ void main() {
   // UNE APPROXIMATION : terrain.js divise par uSlabHalf = 28 une distance en
   // unites de scene, et l'en-tete de habillage-crop.js DEMONTRE x = 28 * u. Le
   // quotient est donc qCrop, terme a terme.
+  // ══════ ⛔ ET IL NE SORT PAS DE LA DECOUPE — Tache R28 ═══════════════════
+  //
+  // fd est une distance au CENTRE DU CROP en demi-cotes de crop : hors de
+  // l'emprise elle vaut plus de 1, donc le clamp la fige a 1 et le voile
+  // s'applique A PLEINE DISTANCE sur toute la planete. retirerHabillage le dit
+  // deja pour le crop MORT (« le voile ne suit pas, et ce n'est pas un oubli :
+  // il peindrait un degrade centre sur un lieu qu'on a quitte ») ; le meme
+  // argument vaut pour le crop VIVANT, et personne ne l'avait tire.
+  //
+  // ⚡ MESURE, Borneo z10, temoin nul a 0 pixel (diag-r28-fuites.mjs) : eteindre
+  // uHazeAmt change 509 975 pixels, 49,80 % de l'image, d'un ecart moyen de
+  // 20,54/255 — et l'ecart-type de luminance MONTE de 32,66 a 35,21. Le voile
+  // ne faisait pas que teinter : il APLATISSAIT les alentours. C'est la moitie
+  // de l'« aplat vert olive uniforme, sans relief » de la capture 2.
+  float hazeIci = uHazeAmt * dedansCrop;
   if (uRampCropOn > 0.5 && uHazeAmt > 0.001 && !sousEau) {
     float fd = clamp(length(qCrop), 0.0, 1.0);
-    float veil = natVoile(hNormRelief, fd, uHazeAmt, uHazeAlt, uHazeDist);
-    col = natBrume(col, natLuminance(col), veil, uHazeColor, uHazeAmt);
+    float veil = natVoile(hNormRelief, fd, hazeIci, uHazeAlt, uHazeDist);
+    col = natBrume(col, natLuminance(col), veil, uHazeColor, hazeIci);
   }
 
   // ══════ LE FOND MARIN PREND LA RAMPE NAUTIQUE DU SOCLE ════════════════════
@@ -2010,7 +2060,29 @@ void main() {
   // ⚠️ ET LE PLANCHER EST CELUI DE LA TACHE D, PAS UN NOUVEAU : uPlancherRampeM.
   // En poser un second aurait donne deux gardes de division qui divergent.
   if (uMerRampeOn > 0.5 && sousEau) {
-    float dMer01 = pow(clamp(-h / max(uMerFondBudgetM, uPlancherRampeM), 0.0, 1.0), 0.55);
+    // ══════ ⛔ L'EAU GARDE LE RENDU DE L'ORBITE AU LOIN — Tache R28 ═══════
+    //
+    // > Adrien, 2026-09-01 : « excepte l'eau, qu'on simule au-dessus de Z10
+    // > comme tu le fais avec la vue orbitale. »
+    //
+    // ⛔ uMerFondBudgetM EST LE BUDGET DU CROP, ET IL EST PARTAGE PAR TOUTES LES
+    // TUILES. Releve a Borneo z10 : 113,3 m. Toute la planete peignait donc son
+    // ocean sur 113 metres de profondeur — c'est-a-dire que TOUT ce qui depasse
+    // le plateau continental saturait sur uOceanDeep, d'un seul aplat. C'est le
+    // « sans bathymetrie » de la capture 2, et c'est exactement l'inverse de la
+    // capture 4, ou Adrien montre l'eau qu'il veut garder.
+    //
+    // ⚡ MESURE, Borneo z10, temoin nul a 0 pixel : rendre a la mer le budget du
+    // monde change 371 592 pixels, 36,29 % de l'image, d'un ecart moyen de
+    // 24,77/255 — le plus gros ecart moyen des six postes du banc.
+    //
+    // ⚠️ ON MELANGE LA PROFONDEUR NORMALISEE, PAS LA COULEUR NI LE BUDGET : un
+    // seul pow par fragment (il n'y en avait qu'un avant), et la couleur reste
+    // lue une seule fois. Melanger le BUDGET aurait mis un mix a l'interieur
+    // d'une division, donc un profil non monotone au bord du crop.
+    float dMerCrop = clamp(-h / max(uMerFondBudgetM, uPlancherRampeM), 0.0, 1.0);
+    float dMerMonde = clamp(-h / MONDE_PROFONDEUR, 0.0, 1.0);
+    float dMer01 = pow(mix(dMerMonde, dMerCrop, dedansCrop), 0.55);
     col = dMer01 < 0.45
       ? mix(uOceanShallow, uOceanMid, dMer01 / 0.45)
       : mix(uOceanMid, uOceanDeep, (dMer01 - 0.45) / 0.55);
@@ -2033,7 +2105,18 @@ void main() {
     // ⚠️ LE PLAFOND A 1 N'EST PAS DECORATIF : la tirette « Force » monte a 2, et
     // mix() au-dela de 1 EXTRAPOLE — il fabriquerait des verts fluorescents sur
     // les forets denses, exactement l'atlas scolaire qu'on refuse.
-    float k = min(1.0, lavis.a * uSolOpacite);
+    // ══════ ⛔ ET ELLE NE SORT PAS DE LA DECOUPE — Tache R28 ═══════════════
+    //
+    // sUv est bati sur qCrop : hors de l'emprise il depasse [0 ; 1], et la
+    // mosaique est en ClampToEdge — sa derniere ligne se prolongerait donc sur
+    // toute la planete estompee, sans qu'aucune erreur ne soit levee. C'est mot
+    // pour mot le piege que uFondChamp et uAnalysis documentent deja, et D15
+    // range uSol parmi ce qui NE PEUT PAS devenir global pour cette raison.
+    //
+    // ⚠️ NON MESURE A L'ECRAN, ET C'EST DIT : le gabarit d'ouverture pose
+    // solOn = 0, donc ce bloc ne s'execute pas dans l'etat livre. C'est une
+    // garde de coherence D15, pas la correction d'un defaut observe.
+    float k = min(1.0, lavis.a * uSolOpacite) * dedansCrop;
     if (k > 0.001) {
       col = mix(col, blSetLum(lavis.rgb, mix(blLum(col), blLum(lavis.rgb), 0.55)), k);
     }
@@ -2060,6 +2143,14 @@ void main() {
   // ⚠️ 1.0 PAR DEFAUT, ET IL N'EST ECRIT QUE SOUS DEUX GARDES (Tache R6) : la
   // planete nue multiplie donc sa couleur par un, c'est-a-dire par rien.
   float ombreRelief = 1.0;
+  // ══════ ⚡ LES DEUX CANAUX DU PEIGNE DU MONDE — Tache R28 ═════════════════
+  //
+  // ⚠️ (0,5 ; 0,5) EST LE NEUTRE EXACT, PAS UN A-PEU-PRES : natEcartPeigne(0,5)
+  // rend 0,5, et natSoftLight(c, 0,5) rend c AU BIT PRES — step(0.5, 0.5) vaut
+  // 1, donc la branche prise est b + 0 x (d - b). Sans normale fine, le peigne
+  // du monde ne peut donc rien peindre, et ce n'est pas une garde de plus :
+  // c'est la valeur elle-meme.
+  vec2 peigneMondeRG = vec2(0.5);
   // ══════ LA NORMALE PAR FRAGMENT — Tache P9 ═══════════════════════════════
   //
   // ⛔ CE QUI MANQUAIT N'ETAIT PAS DU DETAIL DE PEINTURE, C'ETAIT DE L'OMBRAGE.
@@ -2193,16 +2284,65 @@ void main() {
       : max(1.0 / uTilePx, pasEmpreinte);
     vec2 dqU = vec2(qParUv * pas, 0.0);
     vec2 dqV = vec2(0.0, -qParUv * pas);
-    float dhU = hauteurEchant(vUv + vec2(pas, 0.0), qCrop + dqU)
-              - hauteurEchant(vUv - vec2(pas, 0.0), qCrop - dqU);
-    float dhV = hauteurEchant(vUv + vec2(0.0, pas), qCrop + dqV)
-              - hauteurEchant(vUv - vec2(0.0, pas), qCrop - dqV);
+    // ⚠️ LES QUATRE ECHANTILLONS SONT NOMMES, PLUS SOUSTRAITS A LA VOLEE — Tache
+    // R28. Ce n'est pas un rangement : le peigne du monde a besoin de leur
+    // SOMME autant que de leurs differences, et les nommer est ce qui lui evite
+    // de les relire. Les deux differences ci-dessous sont celles du depot,
+    // terme a terme.
+    float hUp = hauteurEchant(vUv + vec2(pas, 0.0), qCrop + dqU);
+    float hUm = hauteurEchant(vUv - vec2(pas, 0.0), qCrop - dqU);
+    float hVp = hauteurEchant(vUv + vec2(0.0, pas), qCrop + dqV);
+    float hVm = hauteurEchant(vUv - vec2(0.0, pas), qCrop - dqV);
+    float dhU = hUp - hUm;
+    float dhV = hVp - hVm;
 
     // la pente de sol : une denivelee en unites de scene par une distance en
     // unites de scene. Le 2 x pas du denominateur est celui de la difference
     // CENTREE, et uUnitesParMetre porte l'exageration -- pas uniteParUv.
     float k = uUnitesParMetre / (2.0 * pas * uniteParUv);
     nMonde = normaleParGradientSol(dhU * k, dhV * k, est, nord, haut);
+
+    // ══════ ⚡ LE PEIGNE DES CRETES, SUR TOUTE LA TERRE — Tache R28 ═════════
+    //
+    // > Adrien, 2026-09-01 : « Je veux que ce soit le style qui est utilise en
+    // > dessous de Z10 qui habille toute la Terre. »
+    //
+    // ⛔ uAnalysis EST CUITE SUR L'EMPRISE DU CROP, et D15 l'exclut du global
+    // pour cette raison exacte. Mais D15 nomme aussi le peigne parmi ce qui PEUT
+    // le devenir : « se calcule depuis cette meme texture de hauteur ». C'est ce
+    // que fait ce bloc, et il ne coute presque rien.
+    //
+    // ⚡ LE PRIX, COMPTE AVANT D'ETRE PAYE : la normale lit DEJA les quatre
+    // voisins. Un laplacien discret demande les memes quatre plus le CENTRE,
+    // soit UNE lecture de texture de plus — pas cinq. Et le centre se relit,
+    // il ne se reprend pas a h : h passe par decodeMetersAA, un lissage a cinq
+    // taps, alors que hauteurEchant lit decodeMeters. Prendre h aurait
+    // compare un centre LISSE a des voisins BRUTS, c'est-a-dire mesure le
+    // lissage plutot que le relief — un laplacien qui aurait toujours du signe.
+    //
+    // ⚠️ LE SIGNE : POSITIF SUR UNE CRETE. Le laplacien discret est
+    // Somme(voisins) - 4 x centre, positif dans un TALWEG ; le canal du socle
+    // (terrain-analysis.js, texShade) est positif sur une croupe CONVEXE. D'ou
+    // 4 x centre - Somme.
+    //
+    // ⚠️ ET C'EST LE MEME k QUE LA PENTE : la courbure sort donc en ECART DE
+    // PENTE, sans dimension — independante du niveau de tuile, de la latitude
+    // et de l'exageration. Un laplacien laisse en metres aurait change de force
+    // a chaque frontiere de niveau de tuile.
+    float hCentre = hauteurEchant(vUv, qCrop);
+    float courbure = (4.0 * hCentre - hUp - hUm - hVp - hVm) * k;
+    // ⚠️ LA MEME LAMPE QUE L'OMBRAGE DE RELIEF, HISSEE — pas une seconde. Deux
+    // lampes a tenir d'accord, c'est la faute que ce fichier a payee sur
+    // uContourInterval.
+    vec3 lampe = lampeReliefMonde(est, nord, haut, uReliefMondeAz, uReliefMondeEl);
+    // ⚠️ LES DEUX CANAUX, MEME LOI : la courbure pour le peigne (canal R du
+    // socle), l ecart d eclairement pour l ombrage (canal G). natPeigneMonde est
+    // SCALAIRE — le traducteur du test ne connait ni vec2 ni ses constructeurs.
+    float ecartOmbre = clamp(dot(nMonde, lampe), 0.0, 1.0) - clamp(dot(haut, lampe), 0.0, 1.0);
+    peigneMondeRG = vec2(
+      natPeigneMonde(courbure, ${GAIN_PEIGNE_MONDE.toFixed(2)}),
+      natPeigneMonde(ecartOmbre, ${GAIN_OMBRE_MONDE.toFixed(2)})
+    );
 
     // ══════ ⚡ L'OMBRAGE DE RELIEF DE LA PLANETE — regle D15, Tache R6 ══════
     //
@@ -2236,7 +2376,9 @@ void main() {
     // uCropOn / uHabOn / uMerZeroSousEau, et elle est DOUBLE : sans la normale
     // fine ce bloc n'est meme pas atteint.
     if (uReliefMondeGain > 0.0) {
-      vec3 lampe = lampeReliefMonde(est, nord, haut, uReliefMondeAz, uReliefMondeEl);
+      // ⚠️ lampe EST CELLE DU BLOC AU-DESSUS — Tache R28. Elle y a ete hissee
+      // parce que le peigne du monde la lit aussi ; la valeur est la meme, terme
+      // a terme, et test/planete-eclairee.test.js execute toujours la loi.
       ombreRelief = ombrageReliefMonde(nMonde, haut, lampe, uReliefMondeGain);
     }
 
@@ -2265,6 +2407,34 @@ void main() {
     if (uSlopeTint > 0.0 && !sousEau) {
       col = teintePente(col, penteSol(nMonde, haut), uSlopeTint);
     }
+  }
+
+  // ══════ ⚡ LE PEIGNE DU MONDE SE POSE — Tache R28 ═════════════════════════
+  //
+  // ⛔ ICI ET PAS PLUS HAUT, PARCE QUE LA NORMALE PAR FRAGMENT N'EXISTE QU'ICI.
+  // Le peigne du CROP, lui, reste a sa place (juste apres la rampe), ou le socle
+  // le pose — et il ne bouge pas d'une ligne.
+  //
+  // ⚠️ ET L'ORDRE EST LE MEME POUR LE MONDE, PAS SEULEMENT « ACCEPTABLE » : sur
+  // un fragment HORS DECOUPE, rien entre la rampe et ce point ne touche a col.
+  // Les trois postes intermediaires sont le voile aerien (desormais borne au
+  // crop, quelques lignes plus haut), le fond marin (sousEau seul, et ce bloc-ci
+  // est terre seule) et l'occupation du sol (bornee au crop, meme tache). La
+  // couleur qui entre ici est donc, hors decoupe, celle qui sortait de la rampe
+  // — le meme point du pipeline, atteint autrement.
+  //
+  // ⚠️ (1.0 - partAnalyse) : LA OU L'ANALYSE CUITE EXISTE, C'EST ELLE QUI PEINT.
+  // Le laplacien fractionnaire du socle est meilleur que le laplacien d'ordre 2
+  // d'ici, et il est deja paye. Les deux ne s'additionnent donc jamais : le crop
+  // prend le sien, le monde prend celui-ci, et dedansCrop fond les deux sur la
+  // silhouette du bloc — la meme frontiere que la rampe, l'albedo et les parois.
+  //
+  // ⚠️ TERRE SEULE ET NORMALE FINE OBLIGATOIRE : sans elle peigneMondeRG vaut
+  // son neutre (0,5 ; 0,5) et natPeigne rend col au bit pres, donc la garde est
+  // dans la valeur autant que dans le test.
+  float partAnalyse = uAnalysisOn > 0.5 ? dedansCrop : 0.0;
+  if (uNormaleFineOn > 0.5 && uTexShade > 0.001 && !sousEau) {
+    col = natPeigne(col, peigneMondeRG.x, peigneMondeRG.y, uTexShade * (1.0 - partAnalyse));
   }
   // ══════ LA MATIERE DU RELIEF — Tache R25, option 38 ══════════════════════
   //
@@ -3701,7 +3871,12 @@ export class Globe {
       // filet, et `test/crop-naturel.test.js` le prouve sur un balayage.
       uAnalysis: { value: null },
       uAnalysisOn: { value: 0 },
-      uTexShade: { value: NATUREL_MONDE.texShade },
+      // ⚡ **AU REPOS DU MONDE, PAS À ZÉRO — Tâche R28.** Même patron et même
+      // raison que `uNormaleFineOn` et `uMerZeroSousEau` : sous D15 le peigne
+      // des crêtes est un poste de la PLANÈTE, pas du crop. `MONDE_NU.texShade`
+      // vaut `NATUREL_MONDE.texShade`, donc drapeau baissé c'est le dépôt au bit
+      // près, et `test/planete-eclairee.test.js` interdit aux deux de diverger.
+      uTexShade: { value: styleMonde(this.planeteEclairee).texShade },
       uWetK: { value: NATUREL_MONDE.wetK },
       uExpoK: { value: NATUREL_MONDE.expoK },
       uHemi: { value: NATUREL_MONDE.hemi },
@@ -5040,7 +5215,13 @@ export class Globe {
     // déjà payé un (`uContourInterval`, la planète entière à 250 m).
     u.uAnalysis.value = null
     u.uAnalysisOn.value = 0
-    u.uTexShade.value = NATUREL_MONDE.texShade
+    // ⚡ **SAUF SOUS D15 — Tâche R28, et c'est ici que la moitié ④ se refermait.**
+    // Ce site est appelé à CHAQUE mort de crop, donc dans la vue lointaine
+    // elle-même. Rendre zéro y aurait éteint le peigne du monde au moment précis
+    // où Adrien le regarde. Même patron, même raison et même ligne que
+    // `uNormaleFineOn` cinquante lignes plus haut — et `MONDE_NU.texShade` VAUT
+    // `NATUREL_MONDE.texShade`, un test le verrouille.
+    u.uTexShade.value = styleMonde(this.planeteEclairee).texShade
     u.uWetK.value = NATUREL_MONDE.wetK
     u.uExpoK.value = NATUREL_MONDE.expoK
     u.uHemi.value = NATUREL_MONDE.hemi
