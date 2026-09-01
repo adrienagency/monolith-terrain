@@ -15,7 +15,7 @@ travail et comment le recoudre. Les branches, elles, survivent dans git.
 ## L'ÉTAT AU 2026-09-01, 00 h
 
 **Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`.**
-**4 491 tests · 0 échec · `audit:tests` 231 = 231** (après R20 bis, R22 et l'arbitrage du ciel).
+**4 525 tests · 0 échec · `audit:tests` 234 = 234** (après R20 bis, R22, l'arbitrage du ciel et R23).
 
 ⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
 démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
@@ -31,13 +31,13 @@ démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
 | **R20 bis** | **les nuages — 14 curseurs sur 15 vivants** | `nuages-globe` |
 | **R22** | **les parois du bloc et la grille — 4 sur 4, + l'encre de grille en prime** | `parois-grille` |
 | **R20 ter** | **le ciel par défaut se voit — ×2,3 à ×16 de pixels selon le lieu** | `nuages-globe` |
+| **R23** | **le geste continu, la caméra hors du sol, et le retour à l'orbite** | `vitesse-camera` |
 
 ### En cours — quatre arbres, quatre agents
 
 | tâche | sujet | branche | arbre |
 |---|---|---|---|
 | **R21** | l'éclairage : ombres, lampe d'appoint, ombrage des pentes (8 options) | `lumiere-crop` | `C:\Dev\wt-lum` |
-| **R23** | les deux sauts de caméra restants (×66,67 et la butée à 88,2°) | `vitesse-camera` | `C:\Dev\wt-vit` |
 | **R24** | la toponymie : sommets et points cotés (2 options) | `toponymie-globe` | `C:\Dev\wt-top` |
 
 **Périmètres attribués, pour que les fusions ne se battent pas :**
@@ -56,8 +56,7 @@ structurelles, l'éclairage de R21 se posera dessus.
 
 1. ~~R22~~ **fusionné**.
 2. **R21** (`lumiere-crop`) — l'éclairage, par-dessus.
-3. **R23** (`vitesse-camera`) — disjoint, mais c'est celui qui change ce qu'on
-   ressent : le fusionner tard permet de le juger seul.
+3. ~~R23~~ **fusionné**.
 4. **R24** (`toponymie-globe`) — le plus additif, donc le dernier.
 
 ---
@@ -80,7 +79,7 @@ contenu du disque. Un écart = un test qui ne tourne pas.
 
 ## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 491 · 0 échec**
+1. `npm test` — **base à battre : 4 525 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
 3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
    `t39.jpg`) : elles sont l'état AVANT de cette campagne.
@@ -111,6 +110,8 @@ rentrées : il restera ~14 des 47, essentiellement
   `DEPTH_COMPONENT24` et `DEPTH_COMPONENT32F` ;
 - le clic sur le globe qui saute onze fois ;
 - le saut résiduel ×1,156 au changement de bloc ;
+- **la caméra passe encore sous le sol 12 images sur 7 569** (0,16 %) après R23,
+  contre 450 sur 505 avant — réserve écrite au §⑥ de `rapport-R23.md` ;
 - machine lente ×10 → la bascule de trois quarts arrive à 11,98 s ;
 - le bouton photo aérienne inerte hors 16 pays (**arbitrage produit**) ;
 - le crop est désormais **plus lisse que le socle** — le grain n'a pas été porté ;
