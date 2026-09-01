@@ -898,11 +898,40 @@ if (uSSS > 0.001) {
     this.liner.position.y = baseY * 0.015 - 0.02
   }
 
-  setColors(params) {
+  // ══════ « COULEUR DE LA TRANCHE » — Tâche R22, option 50 ══════════════════
+  //
+  // ⛔ **LE CURSEUR ÉCRIVAIT DANS UNE VARIABLE QUE PERSONNE NE RELISAIT.**
+  // Relevé dans l'application vivante au démarrage : `params.plinthColor =
+  // #d8d4cc`, `wallMat.color = #c06a44`. Le gabarit d'ouverture pose un
+  // préréglage PBR, donc `_pbrColored` est vrai, donc la ligne ci-dessous
+  // refusait la valeur — et le crop, qui lit `plinth.wallMat.color`
+  // (`contexteCrop` → `paroiCouleur` → `uParoiCouleur`), ne voyait jamais rien
+  // bouger. Mesuré avant : **0,0000** sur une fenêtre 1:1 de 512 × 320.
+  //
+  // ⚠️ **CE N'EST PAS UN DÉFAUT DE SPHÈRE, ET C'EST IMPORTANT DE LE DIRE** : le
+  // socle du bloc plat souffrait EXACTEMENT du même refus, au même endroit. La
+  // sphère ne fait que l'exposer, parce que c'est elle qu'on regarde.
+  //
+  // ⚡ **LA DISTINCTION QUI RÉPARE, ET ELLE EXISTAIT DÉJÀ SANS ÊTRE NOMMÉE :
+  // UNE RECOLORATION AUTOMATIQUE N'EST PAS UN CHOIX D'UTILISATEUR.**
+  // `_pbrColored` a été écrit pour qu'un mode sombre ou une teinte dérivée du
+  // fond (`derivePlinthColor`, `main.js`) n'écrasent pas une matière choisie
+  // exprès — et il a raison. Mais il traitait le CURSEUR de couleur comme une
+  // de ces automatismes. `explicite: true` sépare les deux : le doigt gagne, la
+  // dérivation perd. Le picker de matières, lui, repose sa propre couleur
+  // (`setMaterial`), donc le dernier geste gagne dans les deux sens.
+  //
+  // ⚠️ **LE VERRE RESTE EXEMPTÉ, ET CE N'EST PAS UN OUBLI** : sa couleur de mur
+  // est un blanc de base, la teinte vit dans `attenuationColor` (Beer-Lambert).
+  // Y poser la couleur du curseur laisserait le verre inchangé à l'écran ET
+  // repeindrait la paroi du crop d'un blanc que le socle ne montre pas — deux
+  // Terres pour un seul réglage. L'interface le dit maintenant : la ligne est
+  // CACHÉE sous une tranche de verre (`ui/create-panel.js`).
+  setColors(params, { explicite = false } = {}) {
     // glass keeps its clear white base (tint rides on attenuation), and a real
     // PBR preset keeps its own colour — only the plain default socle takes the
-    // edge/dark-mode colour.
-    if (!this.isGlass && !this._pbrColored) this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
+    // edge/dark-mode colour, unless the user picked one explicitly (R22).
+    if (!this.isGlass && (explicite || !this._pbrColored)) this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
     // the table is a ShadowMaterial (no color — it only darkens the background
     // where the shadow lands); the dark sheet reads a touch stronger
     this.baseMat.opacity = params.darkMode ? 0.34 : 0.24

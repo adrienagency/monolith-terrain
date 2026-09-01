@@ -569,14 +569,31 @@ export function contributeTerrainSections(ctx) {
     },
   })
   isolate.setAttribute('data-tip', 'Découpe la carte au trait de côte de la zone sous la vue — sans base carrée, sans mer.')
+  // ══════ CES DEUX-LÀ SONT VIVANTS SOUS LA SPHÈRE DEPUIS R22 ════════════════
+  //
+  // · « Afficher le socle » cache désormais **les parois de la découpe**
+  //   (`globe.setParoisVisibles`, appelé par `ctx.onPlinthToggled`) et plus
+  //   seulement le socle du bloc plat, qui n'est plus rendu. Mesuré, fenêtre
+  //   1:1 512 × 320 : **0,0004** avant, voir `rapport-R22.md`.
+  // · « Couleur de la tranche » passe en écriture EXPLICITE : elle bat le
+  //   préréglage PBR, que la recoloration automatique (mode sombre, teinte
+  //   dérivée du fond) continue, elle, de respecter. Le motif complet est en
+  //   tête de `setColors` (`src/plinth.js`). Mesuré : **0,0000** avant.
+  const rangeeCouleurTranche = color({ label: 'Couleur de la tranche', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params, { explicite: true }); ctx.onPlinthToggled?.() } })
   sBlk.body.append(
     // le toggle recale AUSSI le cartouche (textes au pied du relief) et les
     // gravures murales (elles disparaissent sans socle) — ctx.onPlinthToggled
     toggle({ label: 'Afficher le socle', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface'); ctx.onPlinthToggled?.() } }),
     isolate,
     // (tirette Épaisseur retirée — « ne sert à rien », Adrien)
-    color({ label: 'Couleur de la tranche', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params) } })
+    rangeeCouleurTranche
   )
+  // ⛔ **AUCUN CURSEUR AFFICHÉ S'IL N'AGIT PAS** — l'attendu n° 2 de R22. Sous
+  // une tranche de VERRE, la couleur du mur est un blanc de base et la teinte
+  // vit dans `attenuationColor` : le curseur ne peut rien y peindre, ni sur le
+  // socle ni sur la découpe. On le cache plutôt que de le laisser bouger pour
+  // rien — même règle que « Épaisseur des courbes » en mode sombre.
+  visibleWhen(rangeeCouleurTranche, () => params.plinthFinish !== 'glass')
 
   // le catalogue EXPOSÉ : 25 solides + 25 verres en grille de vignettes (même
   // langage que Matière du relief) — le menu déroulant cachait la marchandise
