@@ -1,52 +1,63 @@
-# PLAN DE FUSION — la campagne R
+# PLAN DE FUSION — carte de secours de la campagne R
 
 > **Adrien, 2026-08-23 :** *« Quand tu auras fini tu mergeras toutes les
 > avancées. »*
+>
+> **Adrien, 2026-08-31, avant d'aller se coucher :** *« reprends la suite de la
+> reconstruction sur toutes les options utiles pour ce qui est du mode sphère.
+> (…) travaille sans t'arrêter, utilise les skills qu'on utilise habituellement. »*
 
 ⚠️ **Ce fichier est la carte de secours.** S'il y a coupure, il dit où est chaque
-travail et comment le recoudre — les branches, elles, survivent dans git.
+travail et comment le recoudre. Les branches, elles, survivent dans git.
 
 ---
 
-## L'ÉTAT DES BRANCHES
+## L'ÉTAT AU 2026-09-01, 00 h
 
-**Base commune : `d366a40`** (`regroupement`, après la fusion de la première
-vague : repos + boutons + dalles + mer).
+**Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`, à `15e4d1a`.**
+**4 442 tests · 0 échec · `audit:tests` 230 = 230.**
 
-| tâche | branche | arbre | état |
+⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
+démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
+
+### Fusionné
+
+| tâche | sujet | branche |
+|---|---|---|
+| R4→R9 | repos, boutons, dalles, mer, planète éclairée, côtes, jour/nuit, satellite | fusionnées |
+| R13 | le pivot de rotation sur le bloc | `pivot-bloc` |
+| R18 | le fond marin | fusionnée |
+| R19 | les courbes de niveau du crop | `courbes-crop` |
+| **R20 bis** | **les nuages — 14 curseurs sur 15 vivants** | `nuages-globe` |
+
+### En cours — quatre arbres, quatre agents
+
+| tâche | sujet | branche | arbre |
 |---|---|---|---|
-| R9 — imagerie satellite | `satellite-crop` | `C:\Dev\wt-sat` | livré, **en relecture** |
-| R4 — saut de pose caméra + surcouche sombre | *(sur `regroupement`)* | `C:\Dev\wt-merge` | en cours |
-| R6 — la planète plus jamais nue (D15) | `planete-eclairee` | `C:\Dev\wt-nue` | en cours |
-| R5 — trait de côte en escalier | `cote-crop` | `C:\Dev\wt-cote2` | en cours |
-| R7 — l'heure du jour des deux côtés | `jour-nuit` | `C:\Dev\wt-jn2` | en cours |
-| R8 — le chargement qui ne s'arrête pas | — | — | enquête |
+| **R21** | l'éclairage : ombres, lampe d'appoint, ombrage des pentes (8 options) | `lumiere-crop` | `C:\Dev\wt-lum` |
+| **R22** | les parois du bloc et la grille (4 options) | `parois-grille` | `C:\Dev\wt-par` |
+| **R23** | les deux sauts de caméra restants (×66,67 et la butée à 88,2°) | `vitesse-camera` | `C:\Dev\wt-vit` |
+| **R24** | la toponymie : sommets et points cotés (2 options) | `toponymie-globe` | `C:\Dev\wt-top` |
 
-⚠️ **R4 travaille DIRECTEMENT sur `regroupement`** dans l'arbre principal : il n'y
-a rien à fusionner pour lui, mais **il faut fusionner les autres PAR-DESSUS son
-travail**, pas l'inverse.
+**Périmètres attribués, pour que les fusions ne se battent pas :**
+- R21 → `light-panel.js`, `eclairage-crop.js`, le nuanceur de `globe.js`
+- R22 → `parois-crop.js`, `habillage-crop.js`, le nuanceur de `globe.js`, `map-panel.js`
+- R23 → `modes.js`, `zoom-continu.js`, `pivot-bloc.js`, `descente-bornee.js`
+- R24 → `peaks.js`, `labels.js`, `cartouche-globe.js`, `sol-globe.js`
+
+⚠️ **R21 et R22 se partagent le nuanceur de `src/globe.js`** — c'est le seul
+recouvrement assumé. **Fusionner R22 en premier** : sa grille et ses parois sont
+structurelles, l'éclairage de R21 se posera dessus.
 
 ---
 
-## L'ORDRE DE FUSION, ET IL N'EST PAS ARBITRAIRE
+## L'ORDRE DE FUSION
 
-Trois des cinq touchent le nuanceur de `src/globe.js`. **Fusionner du plus
-structurant au plus local** limite les conflits à des ajouts, pas à des
-réécritures.
-
-1. **R6 (`planete-eclairee`)** — ⚠️ **EN PREMIER.** Il déplace les sept
-   interrupteurs de style hors de la chaîne du crop : c'est le changement le plus
-   structurant du lot, et les autres doivent atterrir sur son état, pas l'inverse.
-2. **R7 (`jour-nuit`)** — l'éclairage, juste après R6 qui l'a réorganisé.
-   ⚠️ **Si R7 signale que jour/nuit passe par les mêmes interrupteurs que R6,
-   c'est le SEUL cas où l'ordre est à revoir** : fusionner R7 d'abord et laisser
-   R6 s'y adapter.
-3. **R5 (`cote-crop`)** — le champ de la mer, local à `_cuireChampMer`.
-4. **R9 (`satellite-crop`)** — **quatre insertions purement ADDITIVES** déclarées
-   par son rapport (uniformes fragment après `uHazeColor`, `this.uniforms` après
-   `uContourWeight`, bloc fragment entre `albedoCrop` et « LA COUCHE APPARENCE »,
-   `poserHabillage`/`retirerHabillage`). ⚠️ **Le plus tolérant du lot — donc le
-   dernier**, il se posera sur ce que les autres auront laissé.
+1. **R22** (`parois-grille`) — touche la structure du nuanceur.
+2. **R21** (`lumiere-crop`) — l'éclairage, par-dessus.
+3. **R23** (`vitesse-camera`) — disjoint, mais c'est celui qui change ce qu'on
+   ressent : le fusionner tard permet de le juger seul.
+4. **R24** (`toponymie-globe`) — le plus additif, donc le dernier.
 
 ---
 
@@ -56,48 +67,113 @@ réécritures.
 explicite de fichiers**, pas un glob : un test absent de la liste **ne tourne
 jamais**. Ce défaut a déjà frappé ce dépôt.
 
-**Résolution : l'UNION, jamais un choix de camp.** Le script est écrit et
-vérifié :
-`C:\Users\adrie\AppData\Local\Temp\claude\G--My-Drive--GITHUB\ed4e3ecd-eb07-4312-a4ba-d4e3ef43c3f0\scratchpad\fusion-test-line.py`
-Il prend le fichier en argument, fait l'union dans l'ordre, et **échoue
-bruyamment si un fichier est perdu**.
+**Résolution : l'UNION, jamais un choix de camp.** Le script est écrit, vérifié,
+et écrit en binaire (donc pas de CRLF) :
+`…\scratchpad\fusion-test.py` — il prend le fichier en argument, fait l'union dans
+l'ordre, et **échoue bruyamment si un fichier est perdu**.
 
 ⛔ **Après CHAQUE fusion : `npm run audit:tests`**, qui compare la liste au
 contenu du disque. Un écart = un test qui ne tourne pas.
 
 ---
 
-## LA VÉRIFICATION DE FIN — non négociable
+## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 195 · 0 échec** (avant R9)
+1. `npm test` — **base à battre : 4 442 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
-3. ⚠️ **DRAPEAU BAISSÉ, LA PRODUCTION DOIT ÊTRE RIGOUREUSEMENT INCHANGÉE.**
-   C'est la garantie que tout ce chantier a tenue, et la barre est haute :
-   la Tâche P2 a tenu **0 pixel d'écart sur 1 024 000**, trois chargements,
-   `git stash` à l'appui.
-4. **À L'ÉCRAN, drapeau levé**, et **comparé aux 39 images d'Adrien**
-   (`…/scratchpad/video/t01.jpg` … `t39.jpg`). ⚠️ **C'est le seul juge** : elles
-   sont l'état AVANT de cette campagne.
-5. **Un agent noteur** sur l'état fusionné, protocole `brief-noteur.md`.
+3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
+   `t39.jpg`) : elles sont l'état AVANT de cette campagne.
+
+⛔ **D17 : il n'y a PAS de production.** L'ancienne étape « drapeau baissé, la
+production doit être rigoureusement inchangée » est **abrogée** — ne la remets
+pas, elle a fait perdre du temps sur presque tous les briefs.
 
 ⚠️ **Le panneau navigateur de session ne composite pas toujours** — un banc a
-compté « 0 image en 3,7 s ». **Un Chrome sans tête capture l'image composée**
-quel que soit `preserveDrawingBuffer` ; patron dans `scripts/sonde-demarrage.mjs`.
+compté « 0 image en 3,7 s ». **Un Chrome sans tête capture l'image composée** ;
+patron dans `scripts/sonde-demarrage.mjs`.
 
 ---
 
-## CE QUI RESTE OUVERT APRÈS LA FUSION — à ne pas oublier
+## CE QUI RESTE OUVERT APRÈS CETTE VAGUE
 
-- **le voile gris** : **nommé** (le rideau d'eau, `vJupe > 0`, 163 des 164 pixels
-  peints hors silhouette), **pas corrigé** — sa géométrie relève d'un autre
-  périmètre ;
-- **le crédit d'orthophoto faux en PRODUCTION** (sans drapeau) — défaut
-  préexistant, **laissé exprès à l'arbitrage d'Adrien** ;
-- **le bouton ciné éteint** sous le drapeau : le danger est réglé, la
-  fonctionnalité manque (`shots` est nourri de `terrain.sample`) ;
-- **les couches vectorielles** (plans d'eau, rivières, étiquettes) ne suivent pas
-  sur le crop ;
-- **37 tuiles hors crop** venant de `demanderEmprise` (anneau de marge + nappe de
-  mer) — refus assumé faute de budget de vérification visuelle au bord ;
-- **`uAerialCoastFade` non porté** : au large, photo pleine côté globe là où le
-  socle estompe. **Écart non mesuré.**
+**Les options mortes du studio** (`inventaire-studio-2.md`), une fois R21/R22/R24
+rentrées : il restera ~14 des 47, essentiellement
+- **le sélecteur de matière de surface (17 vignettes)** — le globe n'a pas de
+  matière PBR de relief ; c'est la plus grosse pièce restante ;
+- **nuit (2) et canopée (1)** — des couches éteintes par défaut ;
+- **l'automatisation de caméra (2)** — le bouton ciné, éteint exprès parce qu'il
+  laissait la caméra **862 m sous le sol** ;
+- **la mise au point auto au pointeur (1)** — le flou est inerte.
+
+**Défauts déclarés, non corrigés :**
+- `GL_INVALID_OPERATION` à chaque image composée — tracé à un `blit` entre
+  `DEPTH_COMPONENT24` et `DEPTH_COMPONENT32F` ;
+- le clic sur le globe qui saute onze fois ;
+- le saut résiduel ×1,156 au changement de bloc ;
+- machine lente ×10 → la bascule de trois quarts arrive à 11,98 s ;
+- le bouton photo aérienne inerte hors 16 pays (**arbitrage produit**) ;
+- le crop est désormais **plus lisse que le socle** — le grain n'a pas été porté ;
+- **la bande 1 147–1 274 km sans nuages** (réserve de R20) ;
+- la question ODbL « conserver et redistribuer » pour les modèles vendus.
+
+**Le mode plat n'est pas supprimé.** Adrien le veut ; l'ordre à tenir est
+**reloger les couches du bloc → PUIS supprimer → PUIS optimiser**.
+
+---
+
+## ⚠️ CE DOSSIER EST IGNORÉ, MAIS SES FICHIERS SONT SUIVIS — nuance qui piège
+
+`git add .superpowers/sdd/2026-08-22-globe-studio` **échoue** : le dossier est
+ignoré. Mais les fichiers qui y sont déjà suivis le restent, et **ils fusionnent
+normalement**. Les deux conséquences :
+
+1. **Un fichier NOUVEAU dans ce dossier ne s'ajoute qu'avec `git add -f`.** Sans
+   le `-f`, un rapport reste sur le disque, ne part jamais, et disparaît avec
+   l'arbre de travail.
+2. **Un nouvel arbre de travail REÇOIT les fichiers suivis** (règles, briefs,
+   rapports déjà commités) puisqu'ils sont dans l'index — inutile de les recopier
+   à la main, contrairement à ce que j'ai d'abord écrit ici.
+
+⚠️ **Vérifier après chaque fusion que le `rapport-RXX.md` de la tâche est bien
+arrivé** : s'il manque, l'agent l'a écrit sans `-f`, et il faut aller le chercher
+dans son arbre.
+
+## MESURÉ LE 2026-09-01 À L'ÉCRAN — deux constats qui n'étaient pas au dossier
+
+### ⛔ ① On ne peut PAS revenir au globe en dézoomant. Le cran survit au retour.
+
+Relevé sur `window.__exp`, La Réunion, mode par défaut, molette poussée à
+saturation puis `modes.stepWider()` appelé directement :
+
+| | `_levelZoom` | `_empriseVue` | `altM` | `dist` | mode | crop |
+|---|---|---|---|---|---|---|
+| avant | 0,099284 | 27 354,269 m | 18 684 m | 149,38 | surface | oui |
+| après | 0,103424 | **27 354,269 m** | **18 684 m** | **150,00** | surface | oui |
+
+`stepWider` est **saturé** : l'emprise ne bouge pas d'un mètre, `dist` tape la
+butée `maxDistance = 150`.
+
+⚡ **Le crop meurt à `SEUIL_MORT_M = 40 342,8 m`. La butée plafonne l'altitude à
+18 684 m — 46 % du seuil.** Le crop ne peut donc **jamais** mourir en dézoomant.
+La seule sortie est `modes.enterOrbit()`, c'est-à-dire **un bouton** : exactement
+le cran que D16 supprime, dans le sens du retour.
+
+⚠️ **Ne pas remonter `maxDistance` sans réfléchir** : la butée (150, unités de
+bloc) et le seuil (40 342,8 m) vivent dans **deux espaces différents**. C'est la
+classe de défaut revenue neuf fois. → confié à **R23**.
+
+### ⚠️ ② Le palier machine se calcule sur un écran 0×0 dans le panneau
+
+`window.__palierMachine.signaux.ecran` rend **`[0, 0]`** alors que
+`window.innerWidth/Height` rend 1280×720. La raison affichée le dit :
+*« 0×0 à densité 1 = 0.0 Mpx → charge légère »*.
+
+Le palier était à **PLEINE QUALITÉ** (`ombres: "dynamic"`, `ombresRes: 1024`,
+`grain: true`, `dof: true`, `ssao: false`, **`nuages: 0`**) — mais la bannière
+**« PERFORMANCE — ESSENTIAL MODE »** s'était affichée en plein écran pendant le
+chargement de cette même page.
+
+⛔ **Le palier éteint les ombres et le grain avant les curseurs du studio.** Toute
+mesure d'ombre, de grain ou de nuages doit relever `window.__palierMachine`
+**dans le même relevé**, sinon elle attribue au curseur ce que fait le palier.
+→ signalé à **R21**.
