@@ -34,6 +34,55 @@
 // l'application n'atteint pas en zoomant : pas une seule des trois altitudes
 // demandées à l'étape 7 ne la montre.**
 //
+// ══════════ 0 bis. POURQUOI `uFade` VAUT ZÉRO — LA GARDE PROTÈGE, ET LA
+//                  VOIE 1 NE MARCHE MÊME PAS SI ON LA LÈVE ══════════════════
+//
+// ⛔ **LA MESURE DU §0 EST REPRODUITE**, sonde inchangée, même six altitudes
+// (`.banc/R20/verif/diag-coquille.json`) : `uFade = 0,0000` à 18 km, écart
+// **0,000 / 0,000**, et les six lignes retombent au millième près.
+//
+// La garde qui l'éteint est une ligne d'`update()` dans `globe-clouds.js` :
+// `uFade = smoothstep(R × 1,18, R × 1,50, d)`, sous le commentaire *« clouds
+// are a planet-view feature — fade out as the camera dives »*. **Un commentaire
+// d'intention n'est pas une mesure.** On l'a donc levée, à la main, en vue de
+// surface (`scripts/diag-r20-voie1.mjs`, `.banc/R20/diag-voie1.json`) :
+//
+//   | ce qu'on mesure | valeur |
+//   |---|---|
+//   | rayon du globe | 100 unités = 6 371 km |
+//   | rayon de la coquille | 101,5 unités |
+//   | **altitude de la coquille** | **95 565 m** — la ligne de Kármán |
+//   | texture de la coquille | 512 × 256 |
+//   | **un texel à l'équateur** | **78 184 m** |
+//   | altitude caméra du relevé | 36 691 m |
+//   | **écart à l'écran, `uFade` FORCÉ à 1** | **0,000 / 0,000** |
+//
+// ⚡ **CE N'EST DONC PAS UN FONDU QUI CACHE LA COQUILLE À 18 KM, C'EST LA
+// GÉOMÉTRIE.** Elle est 59 km au-dessus de la caméra, qui regarde vers le bas :
+// hors champ. Lever la garde ne change **rien**, au bit près — et même en
+// réussissant à la mettre dans le cadre, un texel de 78 km ne peut pas
+// dessiner un cumulus de 1 km. **La voie 1 est morte à la mesure**, pas à
+// l'argument, et la garde protège bien quelque chose : l'approche finale.
+//
+// ══════════ 0 ter. LA VOIE PRISE — LA DEUXIÈME, QUI REND LA TROISIÈME GRATUITE
+//
+// ⚡ **Le brief penchait pour la troisième (« coquille au loin, volume près du
+// sol, fondu entre les deux ») en la disant « la plus chère ». LA MESURE DIT
+// QU'ELLE EST DÉJÀ ÉCRITE, ET QU'ELLE NE COÛTE RIEN DE PLUS QUE LA DEUXIÈME.**
+//
+// Les deux systèmes ne se disputent aucune altitude, et le fondu qui les sépare
+// EXISTE — c'est `uFade` lui-même, relevé sur quatorze distances
+// (`.banc/R20/diag-deux-systemes.json`, champ `echelle`) :
+//
+//   · `uFade = 0` **jusqu'à 1 147 km inclus** — le domaine du volume ;
+//   · il monte de 1 274 km (0,011) à 3 186 km (1,000) — la relève ;
+//   · `uFade = 1` **au-delà** — le domaine de la coquille.
+//
+// ➡️ **On reloge `clouds2` dans la scène du globe (voie 2), et la voie 3 tombe
+// dedans sans une ligne de fondu à écrire.** Le seul geste qui reste est de
+// borner le volume à la vue de SURFACE, pour ne pas le payer en orbite — ce que
+// `visibiliteSurface` fait déjà pour cinq autres calques (`nuages`, §7).
+//
 // ══════════ 1. LEQUEL SURVIT, ET POURQUOI ══════════════════════════════════
 //
 // ⚡ **`clouds2` SURVIT.** Trois raisons, dans l'ordre où elles pèsent :
@@ -161,16 +210,33 @@ export function ancrageNuages({ lat, lon, extentMeters, span }) {
  *
  * ⚠️ **Cette fonction n'est appelée par aucun chemin de rendu**, et c'est
  * voulu : la conversion de rendu est l'homothétie du groupe (§2). Elle existe
- * pour que le test puisse dire « 6 595 m » et « 860 085 m » au lieu de comparer
+ * pour que le test puisse dire « 3 297 m » et « 860 085 m » au lieu de comparer
  * deux flottants sans unité — c'est-à-dire pour qu'une mutation qui retire `k`
  * tue par un nombre qu'un humain reconnaît.
  *
  * ⚠️ **L'EXAGÉRATION EST DANS LA FORMULE ET N'EST PAS DANS L'HOMOTHÉTIE**, et
  * ce n'est pas une contradiction : le relief du crop porte la MÊME exagération
  * que celui du bloc (§3), donc elle se simplifie entre les deux espaces mais
- * PAS entre l'espace de bloc et les mètres réels. Un plafond de 13,5 unités de
- * bloc est à 6 595 m au-dessus du zéro du bloc **quand on croit l'exagération**,
- * et à 13 190 m si on l'oublie.
+ * PAS entre l'espace de bloc et les mètres réels.
+ *
+ * ⛔ **ET LA VERSION PRÉCÉDENTE DE CE PARAGRAPHE ÉTAIT FAUSSE D'UN FACTEUR
+ * DEUX** — la classe de défaut du §2, prise dans son propre en-tête. Elle
+ * annonçait « 6 595 m quand on croit l'exagération, 13 190 m si on l'oublie ».
+ * **Exécutée**, la fonction rend **3 297,2 m** à `exageration = 2` et
+ * **6 594,3 m** à `exageration = 1` : le rapport était bon, les deux valeurs
+ * étaient doublées. Les nombres ci-dessous sont ceux que `node` imprime, et un
+ * test les tient tous les deux.
+ *
+ *   | `exageration` | `altitudeNuageM(13,5)` | ce que c'est |
+ *   |---|---|---|
+ *   | 2 (le défaut) | **3 297,2 m** | l'altitude RÉELLE du plafond de nuages |
+ *   | 1 | **6 594,3 m** | la même hauteur lue sur une carte non exagérée |
+ *
+ * ⚠️ **NE PAS CONFONDRE AVEC LES 6 594 m DU §2** : là-bas c'est
+ * `hauteurGlobeEnM(hauteurNuageEnGlobe(...))`, des mètres de carte EXAGÉRÉE
+ * — la hauteur que le groupe posé rend vraiment, et qui doit rester exagérée
+ * puisque le relief du crop l'est aussi. Deux grandeurs, deux fonctions ; leur
+ * quotient est exactement l'exagération, et c'est ce que le test vérifie.
  *
  * @param {object} o
  * @param {number} o.hauteurBloc une hauteur en unités de BLOC (« Altitude »)

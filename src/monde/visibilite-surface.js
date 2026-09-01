@@ -183,5 +183,31 @@ export function visibiliteSurface({ terreUnique, surface }) {
     // (`monde/sol-globe.js`, l'adaptateur bloc ↔ globe que la carto utilise
     // déjà). Ce booléen ouvre la porte ; le câblage est dans `main.js`.
     reperes: s,
+    // ══════════ 7. LES NUAGES — Tâche R20, et c'est le §5 UNE QUATRIÈME FOIS
+    //
+    // ⛔ **`clouds.setVisible(vue.socle)` : borné à faux sous le drapeau.** Le
+    // système `clouds2` était donc éteint à toutes les altitudes — et quand on
+    // le forçait visible, l'écart à l'écran valait **0,000 / 0,000**, parce
+    // qu'il vivait dans la scène du bloc plat, que D16-a ne rend plus
+    // (`.banc/R20/diag-deux-systemes.json`, 16 instances vivantes dessinées
+    // dans un tampon que personne ne regarde).
+    //
+    // ⛔ **ET LA COQUILLE DU GLOBE NE LE REMPLACE PAS À CETTE ALTITUDE.**
+    // Mesuré aux six altitudes (`.banc/R20/verif/diag-coquille.json`,
+    // reproduction de la mesure du 2026-08-31) : à 18 km comme à 1 200 km,
+    // `uFade = 0,0000` et écart **0,000 / 0,000**. Et ce n'est pas le fondu
+    // qui la cache — garde LEVÉE, `uFade` forcé à 1 en vue de surface, l'écart
+    // vaut encore **0,000 / 0,000** (`.banc/R20/diag-voie1.json`) : la coquille
+    // est à **95 565 m** au-dessus du rayon, hors champ d'une caméra qui
+    // regarde le sol, et sa texture 512×256 vaut **78 184 m par texel**.
+    //
+    // ⚡ **LEUR QUESTION EST CELLE DES BOUTONS**, exactement comme aux §4, §5 et
+    // §6 : un nuage se pose au-dessus du relief qu'on REGARDE, et le relief
+    // qu'on regarde est le crop. Le maillage du bloc plat n'y est pour rien.
+    //
+    // ⚠️ **ET LE DRAPEAU NE SUFFIT PAS, COMME POUR LE CARTOUCHE** : il faut en
+    // plus que la scène du globe ADOPTE le groupe et lui donne la similitude —
+    // `monde/nuages-globe.js`, câblage dans `main.js`.
+    nuages: s,
   }
 }
