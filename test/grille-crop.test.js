@@ -318,6 +318,13 @@ function globeStub(crop = RELEVE.crop) {
       uFxColA: val(couleurStub('#000000')), uFxColB: val(couleurStub('#000000')), uFxColC: val(couleurStub('#000000')),
       uFxP1: val(0), uFxP2: val(0), uFxP3: val(0),
       uFxDemiBloc: val(28), uFxFenetre: val({ set() {} }),
+      // R25 — la matière du relief, posée par `poserHabillage` elle aussi.
+      // ⚠️ La garde ⑨ ci-dessous les a réclamés PAR LEUR NOM avant qu'un seul
+      // test de grille ne tombe : c'est exactement ce pour quoi elle existe.
+      uMatOn: val(0), uMatMap: val(null), uMatNormal: val(null), uMatNormalOn: val(0),
+      uMatRepeat: val(1), uMatBump: val(1),
+      uMatNoiseOn: val(0), uMatNoiseCut: val(0), uMatNoiseSoft: val(0.2), uMatNoiseScale: val(0.5),
+      uMatAboveZero: val(0), uMatBandeM: val(0),
     },
   }
 }

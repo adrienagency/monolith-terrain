@@ -59,6 +59,8 @@ import {
 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
 import { PENTE_MONDE_NULLE } from '../src/monde/lumiere-sphere.js'
+// R25 — l etat de repos de la matiere du relief, une seule ecriture (contrat ⑨i)
+import { MATIERE_MONDE_ETEINTE } from '../src/monde/matiere-crop.js'
 import { Globe } from '../src/globe.js'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
@@ -745,6 +747,24 @@ function globeStub() {
       uFxColA: val(couleurStub()), uFxColB: val(couleurStub()), uFxColC: val(couleurStub()),
       uFxP1: val(0), uFxP2: val(0), uFxP3: val(0),
       uFxDemiBloc: val(28), uFxFenetre: val({ set() {} }),
+      // R25 — la matiere du relief. ⛔ TROISIEME TABLE FACTICE DU DEPOT, et la
+      // QUATRIEME chute en masse sur le meme Cannot set properties of undefined :
+      // R22 (13 tests), la fusion R21 (6), R25 dans crop-habillage (11) puis ici.
+      // La garde qui NOMME le coupable ne vivait que dans grille-crop.test.js ;
+      // elle est reprise a la fin de ce fichier et de crop-habillage, parce qu une
+      // garde posee sur un tiers des tables ne garde rien.
+      uMatOn: val(MATIERE_MONDE_ETEINTE.on),
+      uMatMap: val(null),
+      uMatNormal: val(null),
+      uMatNormalOn: val(MATIERE_MONDE_ETEINTE.normalOn),
+      uMatRepeat: val(MATIERE_MONDE_ETEINTE.repeat),
+      uMatBump: val(MATIERE_MONDE_ETEINTE.bump),
+      uMatNoiseOn: val(MATIERE_MONDE_ETEINTE.noiseOn),
+      uMatNoiseCut: val(MATIERE_MONDE_ETEINTE.noiseCut),
+      uMatNoiseSoft: val(MATIERE_MONDE_ETEINTE.noiseSoft),
+      uMatNoiseScale: val(MATIERE_MONDE_ETEINTE.noiseScale),
+      uMatAboveZero: val(MATIERE_MONDE_ETEINTE.aboveZero),
+      uMatBandeM: val(MATIERE_MONDE_ETEINTE.bandeM),
     },
   }
 }
@@ -756,4 +776,37 @@ test('⑤e sans crop, `smoothstep` du module et celui du GLSL parlent la même l
   for (const x of balayage(200)) {
     assert.ok(Math.abs(smoothstep(0.2, 0.8, x * 1.4 - 0.2) - SMOOTHSTEP(0.2, 0.8, x * 1.4 - 0.2)) < 1e-15, `x=${x}`)
   }
+})
+
+// ══════ LA GARDE QUI EMPÊCHE CETTE TABLE DE DÉRIVER ENCORE — Tâche R25 ══════
+//
+// ⚠️ **TROISIÈME COPIE, ET C'EST LE POINT.** Trois fichiers de test portent une
+// table factice de `this.uniforms` — `grille-crop`, `crop-habillage` et
+// celui-ci —, et la garde qui NOMME le coupable n'avait été posée que sur le
+// premier, à la fusion R21+R22. R25 a fait tomber **onze** tests dans
+// `crop-habillage` et **trois** ici, sur le même `Cannot set properties of
+// undefined` muet. ⛔ **Une garde posée sur un tiers des tables ne garde rien.**
+test('⓪ LA TABLE FACTICE DE CE FICHIER COUVRE TOUT CE QUE `poserHabillage` ÉCRIT', () => {
+  const debut = GLOBE_SRC.indexOf('  poserHabillage({')
+  const fin = GLOBE_SRC.indexOf('  retirerHabillage()', debut)
+  assert.ok(debut > 0 && fin > debut, 'les bornes de `poserHabillage` ont bougé — cette garde est à réécrire')
+  const corps = GLOBE_SRC.slice(debut, fin)
+  const ecrits = new Set()
+  // ⚠️ **PAS DE LIMITE DE MOT, ET C'EST UNE CICATRICE À TROIS OCCURRENCES.** Une
+  // limite de mot écrite par un script d'édition est déjà arrivée dans un
+  // fichier de ce dépôt en RETOUR ARRIÈRE (0x08) — le test trouvait alors 0
+  // uniforme sur 68 en restant vert (plan de fusion). Ça s'est reproduit deux
+  // fois en écrivant cette garde-ci et sa jumelle. `u.` suivi d'une majuscule
+  // suffit, et n'a besoin d'aucune séquence d'échappement fragile.
+  for (const m of corps.matchAll(/u\.(u[A-Z][A-Za-z0-9]*)/g)) ecrits.add(m[1])
+  // ⚠️ **LE TÉMOIN N'EST PAS DÉCORATIF** : lui seul distingue « la table est
+  // complète » de « l'extraction n'a rien trouvé ». Il a rougi deux fois, sur
+  // une expression régulière que le script d'édition avait mangée.
+  assert.ok(ecrits.size > 20, `garde inopérante : ${ecrits.size} uniformes trouvés`)
+  const declares = new Set(Object.keys(globeStub().uniforms))
+  const manquants = [...ecrits].filter((n) => !declares.has(n)).sort()
+  assert.deepEqual(manquants, [],
+    `la table factice de ce fichier ne déclare pas : ${manquants.join(', ')}. ` +
+      'Ajoute-les au `globeStub()` ci-dessus — sinon les tests de ce fichier tombent ' +
+      'sur « Cannot set properties of undefined », sans nommer la cause.')
 })

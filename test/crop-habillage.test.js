@@ -156,7 +156,18 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // `test/photo-monde.test.js` (⑦) verrouille cette distinction. Six libres.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 10, `le compte attendu est 10 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial, uPhoto), pas ${n}`)
+  // ⚠️⚠️ **DOUZE DEPUIS LA TÂCHE R25, ET C'EST LE COMPTE QUI A DÉCIDÉ DE CE QUI
+  // EST PORTÉ.** `uMatMap` (l'albédo de la matière) et `uMatNormal` (sa carte de
+  // normales) sont **une seule paire pour tout le bloc**, pas une par tuile :
+  // `terrain._loadTextureSet` met en cache par dossier, et `poserHabillage` en
+  // pose la référence. ⛔ **La carte de RUGOSITÉ aurait fait treize**, et elle
+  // n'est pas là — non pas pour tenir le compte, mais parce que le crop est
+  // éclairé par `BRDF_Lambert` seul et n'a aucun terme spéculaire pour la
+  // recevoir (`monde/matiere-crop.js`). **Quatre unités restent libres**, et le
+  // plafond n'est pas théorique : `terrain.js` a déjà planté dessus (« le
+  // gabarit java passait de 17 à 18 unités, le terrain ne linkait plus et
+  // disparaissait »).
+  assert.equal(n, 12, `le compte attendu est 12 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop, uAerial, uPhoto, uMatMap, uMatNormal), pas ${n}`)
   // ⚠️ **ET LE COMMENTAIRE QUI ANNONCE LE COMPTE DOIT DIRE LE MÊME NOMBRE.** Le
   // brief de la Tâche P2 le demandait nommément (« `globe.js:714` compte les
   // samplers — vérifie où en est ce compte avant d'ajouter ») : un pavé qui
@@ -165,6 +176,14 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   assert.match(GLOBE_SRC, /uAnalysis et uRampCrop font HUIT/)
   assert.match(GLOBE_SRC, /uAerial fait NEUF/)
   assert.match(GLOBE_SRC, /uPhoto \(Tache R16, la photo de la SURFACE\) fait DIX/)
+  // ⚠️ ET LE PAVE DE globe.js DOIT DIRE LE MEME NOMBRE — meme exigence que les
+  // trois lignes du dessus. On cherche le mot DOUZE a cote des deux noms, sans
+  // reconstituer la coupure de ligne du commentaire : une garde qui depend du
+  // reformatage d un pave se casse au premier retour a la ligne deplace.
+  assert.ok(GLOBE_SRC.includes("(Tache R25, la matiere du relief) font DOUZE"),
+    "le pave de globe.js n annonce pas DOUZE samplers")
+  assert.ok(GLOBE_SRC.includes("uMatMap / uMatNormal"),
+    "le pave de globe.js ne nomme pas les deux samplers de la matiere")
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════
@@ -588,6 +607,10 @@ test('⑧ le décodage de classe garde les trois précautions du socle', () => {
 
 import { Globe } from '../src/globe.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
+// R25 — l etat de repos de la matiere du relief : la table factice ci-dessous
+// en part, comme elle part de HABILLAGE_MONDE et d APPARENCE_MONDE. Un litteral
+// recopie finirait par diverger de globe.js (contrat ⑨i).
+import { MATIERE_MONDE_ETEINTE } from '../src/monde/matiere-crop.js'
 import { NATUREL_MONDE } from '../src/monde/naturel-crop.js'
 import { ECLAIRAGE_MONDE } from '../src/monde/eclairage-crop.js'
 import { APPARENCE_MONDE } from '../src/monde/melange-crop.js'
@@ -733,9 +756,59 @@ function globeStub(crop = REPERE) {
       uFxP3: val(APPARENCE_MONDE.fxP3),
       uFxDemiBloc: val(APPARENCE_MONDE.fxDemiBloc),
       uFxFenetre: val(vec2(APPARENCE_MONDE.fxFenetreX, APPARENCE_MONDE.fxFenetreY)),
+      // R25 — la matière du relief. ⛔ **TROISIÈME FOIS QUE CETTE TABLE LÂCHE**,
+      // et la première dans CE fichier : R22 en a vu treize tomber d'un coup,
+      // R21 six de plus, et R25 onze ici — toujours sur le même
+      // `Cannot set properties of undefined`, qui ne nomme jamais le coupable.
+      // La garde qui le nomme vivait dans `grille-crop.test.js` SEULEMENT ; elle
+      // est reprise plus bas, parce qu'une garde qui ne couvre qu'un des deux
+      // fichiers à table factice ne couvre rien.
+      uMatOn: val(MATIERE_MONDE_ETEINTE.on),
+      uMatMap: val(null),
+      uMatNormal: val(null),
+      uMatNormalOn: val(MATIERE_MONDE_ETEINTE.normalOn),
+      uMatRepeat: val(MATIERE_MONDE_ETEINTE.repeat),
+      uMatBump: val(MATIERE_MONDE_ETEINTE.bump),
+      uMatNoiseOn: val(MATIERE_MONDE_ETEINTE.noiseOn),
+      uMatNoiseCut: val(MATIERE_MONDE_ETEINTE.noiseCut),
+      uMatNoiseSoft: val(MATIERE_MONDE_ETEINTE.noiseSoft),
+      uMatNoiseScale: val(MATIERE_MONDE_ETEINTE.noiseScale),
+      uMatAboveZero: val(MATIERE_MONDE_ETEINTE.aboveZero),
+      uMatBandeM: val(MATIERE_MONDE_ETEINTE.bandeM),
     },
   }
 }
+
+// ══════ LA GARDE QUI EMPÊCHE CETTE TABLE DE DÉRIVER ENCORE — Tâche R25 ══════
+//
+// ⚠️ **ELLE EST LA COPIE DE `⑨` DE `test/grille-crop.test.js`, ET C'EST LE
+// POINT.** Cette garde a été écrite à la fusion R21+R22 après DEUX chutes en
+// masse ; elle n'a été posée que sur `grille-crop`. R25 a fait tomber ONZE tests
+// de ce fichier-ci, sur la même erreur muette — la garde était au bon endroit
+// pour la moitié du problème. Deux fichiers portent une table factice de
+// `this.uniforms` : les deux doivent porter la garde.
+test('⓪ LA TABLE FACTICE DE CE FICHIER COUVRE TOUT CE QUE `poserHabillage` ÉCRIT', () => {
+  const debut = GLOBE_SRC.indexOf('  poserHabillage({')
+  const fin = GLOBE_SRC.indexOf('  retirerHabillage()', debut)
+  assert.ok(debut > 0 && fin > debut, 'les bornes de `poserHabillage` ont bougé — cette garde est à réécrire')
+  const corps = GLOBE_SRC.slice(debut, fin)
+  const ecrits = new Set()
+  // ATTENTION : PAS DE LIMITE DE MOT ICI, et c est la TROISIEME fois que ce
+  // caractere mord sur ce chantier. Le plan de fusion consigne deja une limite
+  // de mot ecrite par un script d edition et arrivee dans le fichier en RETOUR
+  // ARRIERE (0x08) : le test trouvait 0 uniforme sur 68 et se declarait vert.
+  // Ca m est arrive une fois de plus en ecrivant cette garde-ci, et le temoin
+  // ecrits.size > 20 juste en dessous est ce qui l a rattrape. Elle n apporte
+  // rien ici — u. suivi d une majuscule suffit —, donc elle n y est pas.
+  for (const m of corps.matchAll(/u\.(u[A-Z]\w*)/g)) ecrits.add(m[1])
+  assert.ok(ecrits.size > 20, `garde inopérante : ${ecrits.size} uniformes trouvés`)
+  const declares = new Set(Object.keys(globeStub().uniforms))
+  const manquants = [...ecrits].filter((n) => !declares.has(n)).sort()
+  assert.deepEqual(manquants, [],
+    `la table factice de ce fichier ne déclare pas : ${manquants.join(', ')}. ` +
+      'Ajoute-les au `globeStub()` ci-dessus — sinon les tests de ce fichier tombent ' +
+      'sur « Cannot set properties of undefined », sans nommer la cause.')
+})
 const poserHab = (g, arg) => Globe.prototype.poserHabillage.call(g, arg)
 const retirerHab = (g) => Globe.prototype.retirerHabillage.call(g)
 const lireHab = (g) => {
