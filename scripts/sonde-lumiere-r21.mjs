@@ -45,6 +45,16 @@ const ETIQUETTE = opt('--etiquette', 'apres')
 const IMAGES = Number(opt('--images', '6'))
 const REPOS_MS = Number(opt('--repos', '900'))
 const VISIBLE = has('--visible')
+// ⚡ **LE TÉMOIN « AVANT », ET IL EST PLUS PROPRE QU'UN RETOUR EN ARRIÈRE DU
+// CODE.** Le grief que R21 adresse à l'inventaire — « tu as mesuré sans la
+// précondition » — vaut contre R21 elle-même si elle ne compare pas les deux
+// états SOUS LE MÊME PROTOCOLE. Plutôt que de restaurer les sources d'avant
+// (autre binaire, autre session, autre file de tuiles), on coupe le TRANSPORT :
+// `poserHabillage` reçoit l'habillage AMPUTÉ des cinq champs neufs. Les gardes
+// du nuanceur ramènent alors `uAppointIrr` à (0,0,0) et `uSlopeTint` à 0,
+// c'est-à-dire l'image d'avant cette tâche AU BIT PRÈS — et c'est exactement ce
+// qui manquait avant R21 : le transport, pas la loi.
+const SIMULE_AVANT = has('--simule-avant')
 const CAPTURES = has('--captures')
 const LARG = 256
 const HAUT = 160
@@ -293,7 +303,7 @@ const nav = await puppeteer.launch({
   args: [...(VISIBLE ? [] : ['--headless=new']), '--no-sandbox', '--enable-unsafe-swiftshader', '--window-size=1280,900'],
 })
 fs.mkdirSync(SORTIE, { recursive: true })
-const rapport = { etiquette: ETIQUETTE, port: PORT, images: IMAGES, grille: [LARG, HAUT], lignes: [] }
+const rapport = { etiquette: ETIQUETTE, simuleAvant: SIMULE_AVANT, port: PORT, images: IMAGES, grille: [LARG, HAUT], lignes: [] }
 
 try {
   const page = await nav.newPage()
@@ -322,6 +332,21 @@ try {
       document.body.classList.add('ce-railL-off', 'ce-railR-off')
     })
     await dodo(1500)
+    if (SIMULE_AVANT) await page.evaluate(() => {
+      const g = window.__exp.globe
+      if (g.__avantR21) return
+      g.__avantR21 = true
+      const orig = g.poserHabillage.bind(g)
+      g.poserHabillage = (a = {}) => {
+        const b = { ...a }
+        delete b.appointAzimut
+        delete b.appointElevation
+        delete b.appointCouleur
+        delete b.appointIntensite
+        b.slopeTint = 0
+        return orig(b)
+      }
+    })
     await page.evaluate(poserInstrument, LARG, HAUT)
     // ⚡ le mouvement ambiant coupé : le plancher de bruit tombe à 0,0000, et la
     // rotation propre du globe (~1,9 °/s après 3 s) avec lui
