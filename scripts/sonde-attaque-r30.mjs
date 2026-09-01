@@ -147,6 +147,24 @@ await page.evaluate(() => {
     return updOrig(...a)
   }
 
+  // ══════ ET UNE SECONDE SONDE, AU RENDU — Tache R29 bis ══════════════════
+  //
+  // ⛔ **CELLE DU DESSUS NE VOIT PAS LA FIN DE L IMAGE, ET LA MESURE DU SOL EN
+  // DEPEND.** `redresserSurLeSol` (main.js) ecrit `camera.position` **sans**
+  // rappeler `controls.update()` : la butee de sol s applique donc APRES le
+  // dernier `controls.update()` de l image, et une sonde branchee dessus releve
+  // une pose qui va etre corrigee. Toutes les images fautives de la manche
+  // `sol` portent `phi > maxPhi` — la butee SAIT, elle n a simplement pas
+  // encore parle. On releve donc aussi au seul endroit qui ne ment pas : juste
+  // avant que l image parte au GPU.
+  T.dessin = []
+  const cibleRendu = (e.composer && typeof e.composer.render === 'function') ? e.composer : e.renderer
+  const rndOrig = cibleRendu.render.bind(cibleRendu)
+  cibleRendu.render = function (...a) {
+    if (T.on) T.dessin.push(window.__R30.instant())
+    return rndOrig(...a)
+  }
+
   // ══════ LA CHAÎNE DE ZOOM, FONCTION PAR FONCTION ════════════════════════
   const tracer = (nom, avant, apres) => {
     if (!T.tracerAppels) return
@@ -477,6 +495,19 @@ if (MANCHE === 'sol') {
       window.__R30.frames = []
       return F
     }, nom)
+    const frDessin = await page.evaluate((n) => {
+      const F = (window.__R30.dessin || []).filter((x) => String(x.tag).startsWith(n + '/'))
+      window.__R30.dessin = []
+      return F
+    }, nom)
+    const parTagDessin = {}
+    for (const x of frDessin) {
+      const k = x.tag
+      const b = (parTagDessin[k] ??= { n: 0, sous: 0, hmin: Infinity })
+      b.n++
+      if (x.hauteurSol != null) { b.hmin = Math.min(b.hmin, x.hauteurSol); if (x.hauteurSol < 0) b.sous++ }
+    }
+    for (const k of Object.keys(parTagDessin)) { const b = parTagDessin[k]; if (b.hmin === Infinity) b.hmin = null }
     const parTag = {}
     for (const x of fr) {
       const k = x.tag
@@ -488,7 +519,15 @@ if (MANCHE === 'sol') {
       b.dernierPhi = x.phi
     }
     for (const k of Object.keys(parTag)) { const b = parTag[k]; if (b.hmin === Infinity) b.hmin = null; delete b.dernierPhi }
-    sortie.lieux.push({ nom, lat, lon, zoom, pose, couchee, parTag, images: fr.length })
+    // ⚠️ **LES IMAGES FAUTIVES ELLES-MEMES — Tache R29 bis.** Un agregat dit
+    // COMBIEN et JUSQU OU ; il ne dit pas si la butee croyait degager. On garde
+    // donc les dix pires, avec `phi` ET `maxPhi` : si `phi <= maxPhi` sur une
+    // image sous le sol, ce n est pas la butee qui a lache, c est sa MESURE du
+    // sol qui differe de celle de la sonde — et c est un autre defaut.
+    const fautives = fr.filter((x) => x.hauteurSol != null && x.hauteurSol < 0)
+      .sort((a, b) => a.hauteurSol - b.hauteurSol).slice(0, 10)
+      .map((x) => ({ tag: x.tag, h: +x.hauteurSol.toFixed(4), phi: +x.phi.toFixed(3), maxPhi: +x.maxPhi.toFixed(3), butee: x.phi > x.maxPhi + 1e-6, d: +x.d.toFixed(3), dmin: +x.dmin.toFixed(3), solY: x.solY, cy: +x.cy.toFixed(3), zoomVel: x.zoomVel }))
+    sortie.lieux.push({ nom, lat, lon, zoom, pose, couchee, parTag, parTagDessin, fautives, images: fr.length, imagesDessin: frDessin.length })
   }
 }
 

@@ -13457,6 +13457,33 @@ function tick() {
   // décroche totalement" field bug, and it clobbered EVERY camera rig alike,
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
+  // ══════ ET ON REDRESSE *APRÈS* LE ZOOM AUSSI — Tâche R29 bis ═══════════
+  //
+  // ⛔ **LA RÉSERVE N° 1 DE R23, FERMÉE, ET C'ÉTAIT UN ORDRE D'APPEL.** Elle
+  // écrivait : *« la piste non close : une écriture de caméra qui appelle
+  // `controls.update()` elle-même et se fait relever avant le redressement de
+  // l'image suivante »*. C'est exactement ça, et ça se lit dans `tick()` :
+  // `updateCameraMotion(dt)` — qui porte `distanceMinSol`, `polaireMaxSol` et
+  // `redresserSurLeSol` — court **cinquante-sept lignes plus haut** que
+  // `modes.update(dt)`, qui porte `_applyZoom`. Le DERNIER à poser la caméra
+  // chaque image est donc le glissé de zoom, et plus rien ne regarde le sol
+  // après lui : la butée d'angle corrige l'image d'avant pendant que le glissé
+  // replonge sur celle-ci, image après image.
+  //
+  // ⚡ **LE GESTE QUI LE RÉVÈLE EST NEUF, ET C'EST L'ATTAQUANT QUI L'A TROUVÉ**
+  // (`.banc/R30/sol.json`) : **tourner PENDANT que l'élan de zoom court** — ce
+  // que fait une main qui ne lâche pas la souris entre deux gestes. R23 tournait
+  // à distance figée, donc son banc ne pouvait pas le voir. Mesuré avant :
+  // **57 images sous le sol sur 16 767 (0,34 %)**, jusqu'à **−7,9906 u** au
+  // Svalbard, **8 configurations** hors de la borne de −0,9577 u qu'elle publie.
+  //
+  // ⚠️ **CE SECOND APPEL NE COÛTE NI `veille-repos` NI D16 ter**, et ce n'est pas
+  // un espoir : `redresserSurLeSol` repose la caméra **au même rayon `d`**
+  // (`target + d·(sin φ·sin az, cos φ, sin φ·cos az)`), donc `|Δ ln d| = 0` par
+  // construction — la même garantie que R23 a établie pour le premier appel. Et
+  // il sort en une comparaison (`if (!(phi > max)) return`) sur toute image où
+  // la caméra est déjà dégagée, c'est-à-dire presque toutes.
+  if (modes.mode === 'surface') redresserSurLeSol()
   zoomStepper?.update()
   // ══════ LE SEUIL DU SOCLE — Tâche 3, branchée ══════════════════════
   //
