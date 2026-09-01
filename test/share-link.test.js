@@ -19,7 +19,7 @@ function fakeParams(overrides = {}) {
     color: '#dddcd5', roughness: 0.88, roughnessVariation: 0.14, roughnessScale: 9.5, bumpScale: 0.9, envMapIntensity: 0.2,
     exposure: 0.96, contrast: 0.07, saturation: -0.35, vignette: 0.6, grain: 0, fogNear: 35.5, fogFar: 50, fogColor: '#ffffff', fogEnabled: false,
     bgMode: 'solid', bgColorA: '#e9eef4', bgColorB: '#dfe6ef', bgColorC: '#c7d2df', bgAngle: 135, bgEnv: '',
-    fov: 30, autoFocus: true, focusDistance: 20, focusRange: 10, bokehEnabled: false, bokehScale: 2,
+    fov: 30, autoFocus: true, focusDistance: 5000, focusRatio: 0.3, bokehEnabled: false, bokehScale: 2,
     plinth: true, plinthDepth: 7, plinthColor: '#d8d4cc', plinthFinish: 'solid', plinthPbr: 'stone', plinthGlass: 'frosted',
     plinthGlassDiffusion: 0.7, plinthGlassProjection: 0.5, plinthGlassBump: 0.6, plinthBump: 1.5,
     slabCorner: 0.04, slabCornerSmoothing: 0.6, groundInfo: true,
