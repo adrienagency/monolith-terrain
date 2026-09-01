@@ -79,6 +79,126 @@ export function empriseCote(dem) {
   return dem?.empriseCote > 1 ? dem.empriseCote : 1
 }
 
+// ══════════ LE SEUIL DE ZOOM, ET IL EST ÉCRIT COMME CELUI DES VILLES ═══════
+//
+// **Tâche R24.** `map/place-tier.js` porte déjà la loi pour les toponymes :
+// « population → zoom minimal ». Un sommet n'a pas de population ; son
+// importance cartographique, c'est son ALTITUDE. Les bandes reprennent la même
+// forme, et les largeurs d'emprise sont celles que `place-tier.js` a mesurées
+// (patch 3 tuiles, ~45° N) : z6 ≈ 1 300 km, z8 ≈ 330 km, z9 ≈ 165 km,
+// z10 ≈ 83 km, z11 ≈ 41 km, z12 ≈ 21 km, z13 ≈ 10 km.
+//
+// ⛔ **ET CE N'EST PAS DE LA PRÉCAUTION : C'EST LE PIÈGE DES ROUTES.** Adrien a
+// retiré le calque routes en juillet parce qu'il « mettait trop de temps à
+// charger ». Un sommet de 400 m étiqueté sur une emprise de 1 300 km, c'est la
+// même faute d'échelle : le repère ne désigne rien de lisible, et la requête qui
+// l'a cherché est du trafic perdu.
+export function minZoomSommet(eleM) {
+  const h = Number(eleM)
+  if (!Number.isFinite(h)) return 12 // sans altitude, pas d'importance à faire valoir
+  if (h >= 4000) return 6 // les toits d'un continent — visibles de loin
+  if (h >= 2500) return 8 // ~330 km : un grand sommet alpin
+  if (h >= 1500) return 9 // ~165 km
+  if (h >= 800) return 10 // ~83 km
+  if (h >= 400) return 11 // ~41 km
+  return 12 // ~21 km : les bosses, au ras du bloc
+}
+
+// ⚠️ **D18, RÈGLE 2 : AUCUNE CLASSE N'APPARAÎT PAR UN TEST BOOLÉEN.** « Elle
+// apparaît par une valeur continue partant de zéro. » Un sommet entre donc en
+// **opacité**, sur UN niveau de zoom entier, et jamais d'un coup — c'est la même
+// discipline qu'OSM Carto (autoroute à 0,4 px) et Positron (50 % à z6).
+// ⛔ Un claquement annulerait le travail de D16, dit la règle. Il annulerait
+// aussi le lissage anti-mal-de-cœur de `easePeakOffset` juste en dessous.
+export function opaciteSommet(eleM, zoom) {
+  // ⛔ `Number(null)` VAUT ZÉRO, PAS `NaN` : sans ce test explicite, « pas de
+  // zoom connu » deviendrait « zoom 0 », c'est-à-dire TOUT masqué — l'inverse
+  // exact du repli voulu, et en silence.
+  if (zoom == null) return 1
+  const z = Number(zoom)
+  if (!Number.isFinite(z)) return 1
+  const seuil = minZoomSommet(eleM)
+  // le fondu s'ouvre UN niveau avant le seuil et vaut 1 au seuil
+  return Math.max(0, Math.min(1, z - (seuil - 1)))
+}
+
+// ══════════ L'ANCRAGE EN ALTITUDE — LA CONVERSION, ÉCRITE ══════════════════
+//
+// ⛔ **LE SOL DU BLOC N'EST PAS LE SOL DESSINÉ, ET L'ÉCART SE MESURE.** Relevé
+// à La Réunion, mode sphère par défaut, z12, sur une grille de 13 × 13 points
+// du bloc (`.banc/R24/sol-bloc-vs-globe.json`) : médiane **+1,9 m**, mais
+// l'étendue va de **−72,0 m à +98,7 m**, et **42 points sur 169 — 25 % —** ont
+// le sol du BLOC SOUS le sol DESSINÉ par le globe. Un repère ancré sur
+// `terrain.sample` y est enterré d'autant. C'est la classe de défaut
+// « toponymes plantés 1 830 m sous les Alpes » de ce chantier, en plus petit.
+//
+// ⚡ **LA SORTIE N'EST PAS UNE MARGE, C'EST LE MAXIMUM DES DEUX SOLS.** Prendre
+// le plus haut est la seule règle qui ne peut PAS enterrer un repère, quel que
+// soit lequel des deux échantillonneurs a raison à ce point-là.
+//
+// ⚠️ **ET LES TROIS CONVERSIONS SONT ICI, CHIFFRÉES** — relevé au même endroit,
+// `exagération = 2` :
+//   ① mètres → unités de BLOC : `× echelleBloc`, mesuré **4,094 425 e−3**
+//      (= `span / extentMeters × exagération` = 56 / 27 354,269 × 2) ;
+//   ② mètres → unités de GLOBE : `× echelleGlobe`, mesuré **3,139 225 e−5**
+//      (= `R_GLOBE / EARTH_RADIUS_M × exagération` — c'est mot pour mot la
+//      forme de `rayonAncre` dans `monde/frontiere-rendu.js`, celle qui marche) ;
+//   ③ unité de BLOC → unité de GLOBE : leur rapport `k`, mesuré
+//      **7,667 071 e−3**, et c'est le `k` de la similitude.
+// ⛔ **AUCUNE DE CES TROIS N'EST ÉCRITE DANS CE FICHIER** : elles vivent toutes
+// les trois dans `monde/sol-globe.js`, et `poseur.placer` les applique. Les
+// recopier ici en ferait une SECONDE loi — la classe de défaut n° 1 du chantier
+// (facteurs 121,6 · 10 · 130,4 · 6 déjà attrapés).
+//
+// `DEGAGEMENT_BLOC` reste en unités de BLOC, et c'est délibéré : la similitude
+// le transporte avec la taille du cartouche, donc le repère flotte toujours de
+// la même fraction du bloc. En mètres il vaut **0,5 / 4,094 425 e−3 = 122,1 m**
+// à z12 — un nombre qui suit le zoom, comme la taille apparente du bloc.
+export const DEGAGEMENT_BLOC = 0.5
+
+/**
+ * L'altitude d'ancrage d'un repère, EN UNITÉS DE BLOC.
+ *
+ * @param {number} solDessineBloc le sol que le GLOBE dessine, déjà en unités de
+ *   bloc (`poseur.hauteur`) — `null`/`NaN` quand aucune tuile ne couvre.
+ * @param {number} solBlocPlat le sol du bloc plat (`terrain.sample`).
+ * @param {number} [degagement]
+ * @returns {number}
+ */
+export function ancrageSommet(solDessineBloc, solBlocPlat, degagement = DEGAGEMENT_BLOC) {
+  const a = Number.isFinite(solDessineBloc) ? solDessineBloc : -Infinity
+  const b = Number.isFinite(solBlocPlat) ? solBlocPlat : -Infinity
+  const sol = Math.max(a, b)
+  if (!Number.isFinite(sol)) return degagement
+  return sol + degagement
+}
+
+// ══════════ LE COÛT RÉSEAU — ET C'EST LA VRAIE QUESTION ════════════════════
+//
+// ⛔ **D18 INTERDIT OVERPASS EN DIRECT** : « Tolérance réelle : < 100 requêtes
+// et < 10 Mo par JOUR pour un usage régulier. » Ce calque en tirait **une par
+// reconstruction de terrain**, c'est-à-dire une par cran de zoom : une descente
+// de z12 à z17 en coûtait **six**, et rien n'était réutilisé au retour.
+//
+// ⚡ **LA SORTIE EST UN CACHE PAR EMPRISE**, arrondie au dix-millième de degré
+// (~11 m) pour que deux reconstructions de la MÊME vue ne comptent qu'une fois.
+// Mesuré sur une descente complète : voir `rapport-R24.md`.
+//
+// ⚠️ **ET LE CACHE MÉMORISE AUSSI L'ÉCHEC.** Overpass est injoignable depuis
+// cette machine (`Connect Timeout` sur les quatre adresses, quatre miroirs
+// essayés) : sans mémoire de l'échec, chaque reconstruction relancerait une
+// requête qui va expirer, et le calque passerait son temps en attente.
+const CACHE_SOMMETS = new Map()
+const CACHE_MAX = 24 // une vingtaine de déplacements, comme le cache de cellules
+
+export function cleEmprise(south, west, north, east, budget) {
+  const r = (v) => Math.round(v * 1e4) / 1e4
+  return `${r(south)},${r(west)},${r(north)},${r(east)}|${budget}`
+}
+
+export function videCacheSommets() { CACHE_SOMMETS.clear() }
+export function tailleCacheSommets() { return CACHE_SOMMETS.size }
+
 export async function fetchTopPeaks(dem, count = 5) {
   // ⚠️ `demSpan`, pas `TERRAIN_SIZE` : sur une emprise 3×3 le champ fait 168
   // unités. La boîte écrite en dur ne demandait à Overpass que le bloc CENTRAL —
@@ -92,24 +212,43 @@ export async function fetchTopPeaks(dem, count = 5) {
   // 500-node budget: on a dense z8 patch (whole Alps) 150 was low enough to
   // miss the actual highest summits before the client-side sort
   const budget = 500 * cote * cote
+  // ⚡ **UNE EMPRISE, UNE REQUÊTE — voir le cache ci-dessus.** La clé est
+  // l'emprise arrondie, pas le zoom : deux reconstructions qui regardent le même
+  // rectangle ne valent qu'une requête, et le retour d'un aller-retour de zoom
+  // ne coûte plus rien.
+  const cle = cleEmprise(south, west, north, east, budget)
+  if (CACHE_SOMMETS.has(cle)) return CACHE_SOMMETS.get(cle)
   const q = `[out:json][timeout:20];node["natural"="peak"]["name"](${south},${west},${north},${east});out body ${budget};`
-  const r = await fetch(OVERPASS, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(q)}`,
-  })
-  if (!r.ok) throw new Error(`overpass → HTTP ${r.status}`)
-  const json = await r.json()
-  return (json.elements || [])
-    .map((e) => ({
-      name: e.tags?.name || '',
-      ele: parseFloat(e.tags?.ele) || null,
-      lat: e.lat,
-      lon: e.lon,
-    }))
-    .filter((p) => p.name)
-    .sort((a, b) => (b.ele ?? -1) - (a.ele ?? -1))
-    .slice(0, count * cote * cote)
+  const p = (async () => {
+    const r = await fetch(OVERPASS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(q)}`,
+    })
+    if (!r.ok) throw new Error(`overpass → HTTP ${r.status}`)
+    const json = await r.json()
+    return (json.elements || [])
+      .map((e) => ({
+        name: e.tags?.name || '',
+        ele: parseFloat(e.tags?.ele) || null,
+        lat: e.lat,
+        lon: e.lon,
+      }))
+      .filter((p) => p.name)
+      .sort((a, b) => (b.ele ?? -1) - (a.ele ?? -1))
+      .slice(0, count * cote * cote)
+  })()
+  // ⚠️ **LA PROMESSE EST MISE EN CACHE, PAS SON RÉSULTAT** : deux
+  // reconstructions rapprochées (un cran de zoom pendant qu'Overpass répond
+  // encore) partagent alors la MÊME requête au lieu d'en lancer deux.
+  // ⛔ **ET L'ÉCHEC RESTE EN CACHE.** Sans ça, un Overpass injoignable — c'est
+  // le cas depuis cette machine — ferait relancer une requête qui expire à
+  // chaque reconstruction. `catch` ici pour qu'une promesse mémorisée mais
+  // jamais réclamée ne remonte pas en rejet non traité.
+  p.catch(() => null)
+  CACHE_SOMMETS.set(cle, p)
+  if (CACHE_SOMMETS.size > CACHE_MAX) CACHE_SOMMETS.delete(CACHE_SOMMETS.keys().next().value)
+  return p
 }
 
 // Séparateur de milliers À LA MAIN. `toLocaleString('fr-FR')` pose une
@@ -151,8 +290,13 @@ const PEAK_GLISSE = 0.04
 // PEAK_HOLD frames de calme consécutives, sinon un cartouche coincé entre deux
 // voisins clignoterait à 60 Hz — soit exactement le mal qu'on soigne.
 const PEAK_HOLD = 8
+// Période de re-lecture du sol DESSINÉ, en images (Tâche R24). 30 images, soit
+// un demi-tour de seconde à 60 Hz : invisible à l'œil sur un marqueur qui suit
+// déjà sa crête, et c'est le même arbitrage de FRAÎCHEUR que les 500 ms du
+// poseur dans `main.js` — les tuiles arrivent du réseau, pas de la mémoire.
+const PEAK_REANCRE = 30
 
-export const PEAK_CONST = { PEAK_CART_H, PEAK_GAP, PEAK_MARGE, PEAK_DEADZONE, PEAK_GLISSE, PEAK_HOLD } // exposé pour les tests
+export const PEAK_CONST = { PEAK_CART_H, PEAK_GAP, PEAK_MARGE, PEAK_DEADZONE, PEAK_GLISSE, PEAK_HOLD, PEAK_REANCRE } // exposé pour les tests
 
 // Placement glouton, pur (aucun DOM) : `list` est déjà dans l'ordre de
 // priorité, chaque entrée porte le point projeté (ax, ay) et la largeur mesurée
@@ -240,11 +384,21 @@ function buildHoverCard() {
 }
 
 export class PeaksLayer {
-  constructor({ terrain, getDem, announce, onFocus }) {
+  // ⚡ **`getPoseur` — Tâche R24.** `update()` recevait déjà le poseur à chaque
+  // image ; `refresh()` ne l'avait PAS, et c'est là que l'altitude d'ancrage se
+  // décide. Un repère ancré sur le seul sol du bloc plat est enterré partout où
+  // le globe dessine plus haut — 25 % des points relevés, jusqu'à 72 m.
+  // `null` (ou un poseur plat) ⇒ comportement d'avant, au bit près.
+  // ⚠️ **`getZoom` sert LE SEUIL D'IMPORTANCE, pas la requête** : le budget
+  // Overpass est déjà borné par `out body`, ce qui manquait c'est de ne pas
+  // ÉTIQUETER une bosse de 400 m sur une emprise continentale (`minZoomSommet`).
+  constructor({ terrain, getDem, announce, onFocus, getPoseur = null, getZoom = null }) {
     this.terrain = terrain
     this.getDem = getDem
     this.announce = announce
     this.onFocus = onFocus // (worldVec3, name) → orbit above the summit
+    this.getPoseur = getPoseur
+    this.getZoom = getZoom
     this.enabled = false
     this.markers = [] // { el, tag, world, name, ele, lat, lon, tw, ox, oy… }
     this._v = new THREE.Vector3()
@@ -287,6 +441,11 @@ export class PeaksLayer {
         return
       }
       const demi = demSpan(dem) / 2
+      // ⚡ **LE POSEUR EST PRIS UNE FOIS PAR RECONSTRUCTION**, jamais par
+      // sommet : `monde/sol-globe.js` le dit lui-même — « sans elle, chacun des
+      // milliers de sommets d'un calque reparcourrait `globe.tiles` ».
+      const poseur = this.getPoseur?.() ?? null
+      const surGlobe = !!poseur?.globe
       for (const p of peaks) {
         const w = latLonToWorld(dem, p.lat, p.lon)
         if (Math.abs(w.x) > demi || Math.abs(w.z) > demi) continue
@@ -297,8 +456,18 @@ export class PeaksLayer {
         // Même correction que map/places-layer.js. Hors mode continu `fen` vaut
         // zéro et l'appel est celui d'avant, au bit près.
         const fen = this.terrain.fenetre ?? ZERO
-        const y = this.terrain.sample(w.x - fen.x, w.z - fen.z) + 0.5
-        const ele = p.ele ?? Math.round(this.terrain.heightToFeet(y - 0.5) / 3.28084)
+        const solPlat = this.terrain.sample(w.x - fen.x, w.z - fen.z)
+        // ⚡ **ET LE SOL DESSINÉ PAR LE GLOBE, quand il y en a un** — voir
+        // `ancrageSommet` : les deux sols diffèrent de −72 m à +98,7 m à La
+        // Réunion, et le bloc est SOUS le dessin sur un quart des points.
+        // `poseur.hauteur` rend déjà des unités de BLOC, et il retombe tout seul
+        // sur `sample` quand aucune tuile ne couvre (`refus`).
+        const solGlobe = surGlobe ? poseur.hauteur(w.x, w.z) : null
+        const y = ancrageSommet(solGlobe, solPlat)
+        // ⚠️ **L'ALTITUDE AFFICHÉE RESTE CELLE DU SOL, PAS CELLE DE L'ANCRE** :
+        // on retranche le dégagement, sinon la cote grandirait de 122 m d'un
+        // coup et le cartouche mentirait de la hauteur à laquelle il flotte.
+        const ele = p.ele ?? Math.round(this.terrain.heightToFeet(y - DEGAGEMENT_BLOC) / 3.28084)
         const el = document.createElement('div')
         el.className = 'peak-marker'
         const dot = document.createElement('i')
@@ -329,7 +498,11 @@ export class PeaksLayer {
         // fontes arrivent après le premier rendu) ; shownFor part plein pour
         // que la toute première pose soit immédiate — le délai de PEAK_HOLD ne
         // concerne que les RÉapparitions.
-        const marker = { el, tag, world, name: p.name, ele, lat: p.lat, lon: p.lon, tw: 0, shownFor: PEAK_HOLD }
+        // `solPlat` est gardé pour le RÉ-ANCRAGE paresseux d'`update()` : les
+        // tuiles de hauteur du globe arrivent du réseau, et un repère construit
+        // avant elles est posé sur le repli. Sans cette mémoire il faudrait
+        // rappeler `terrain.sample` à chaque tour.
+        const marker = { el, tag, world, name: p.name, ele, lat: p.lat, lon: p.lon, solPlat, tw: 0, shownFor: PEAK_HOLD }
         // fiche de survol (altitude m/ft + coordonnées) — voir buildHoverCard()
         el.addEventListener('pointerenter', () => this._showCard(marker))
         el.addEventListener('pointerleave', () => this._hideCard())
@@ -364,14 +537,36 @@ export class PeaksLayer {
     // (|x|+|z| ≤ 56) qui s'affiche parfaitement aujourd'hui.
     const clip = this.getDem?.()?.empriseCote > 1
     const demi = TERRAIN_SIZE / 2
+    // ══════════ LE RÉ-ANCRAGE PARESSEUX — Tâche R24 ═════════════════════════
+    //
+    // ⚠️ **LES HAUTEURS DU GLOBE ARRIVENT DU RÉSEAU.** Un repère construit avant
+    // ses tuiles est posé sur le repli (le sol du bloc plat), et il y resterait
+    // pour toujours : `refresh()` ne repasse qu'à la reconstruction suivante.
+    // On relit donc le sol dessiné toutes les `PEAK_REANCRE` images — 45
+    // marqueurs au pire, un vingtième de seconde d'écart, et ça s'arrête tout
+    // seul dès que le sol ne bouge plus.
+    if (poseur?.globe && this._frame % PEAK_REANCRE === 0) {
+      for (const m of this.markers) {
+        const sol = poseur.hauteur(m.world.x, m.world.z)
+        const y = ancrageSommet(sol, m.solPlat)
+        if (Math.abs(y - m.world.y) > 1e-6) m.world.y = y
+      }
+    }
+    // ⚠️ **D18, RÈGLE 2 — L'ENTRÉE EST CONTINUE, JAMAIS BOOLÉENNE.** Le zoom du
+    // MNT décide de l'opacité de chaque repère, par son altitude
+    // (`opaciteSommet`). Sans ça toute la classe apparaîtrait d'un coup au
+    // franchissement d'un cran — « un claquement annulerait le travail de D16 ».
+    const zoom = this.getZoom?.()
     for (const m of this.markers) {
       // ⚠️ **LE POINT PASSE PAR LA LOI, PAS PAR TROIS SOUSTRACTIONS EN CLAIR** —
       // c'est elle qui sait qu'il y a deux mondes (voir `pointDuMarqueur`).
       const pt = pointDuMarqueur(m.world, fen, poseur)
       this._v.set(pt.x, pt.y, pt.z).project(camera)
       const dedans = !clip || dansFenetre(m.world.x - fen.x, m.world.z - fen.z, demi)
-      const on = visible && dedans && this._v.z < 1
-      m.el.style.opacity = on ? 1 : 0
+      const importance = zoom == null ? 1 : opaciteSommet(m.ele, zoom)
+      m.importance = importance
+      const on = visible && dedans && this._v.z < 1 && importance > 0
+      m.el.style.opacity = on ? importance : 0
       // an off-screen marker keeps its last transform (frozen), so without this
       // its tag (pointer-events:auto) stays clickable while invisible → phantom
       // clicks focusing a peak that isn't on screen (incl. all of orbit mode)
