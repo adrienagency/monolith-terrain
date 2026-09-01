@@ -4,10 +4,15 @@
 // Each surface shader carries an "Appearance" block (opacity + Figma-style blend
 // mode) plus its own per-effect controls.
 
-import { el, section, toggle, select, color, slider, onRefresh, keepScroll } from './kit.js'
+import { el, section, toggle, select, color, slider, onRefresh, keepScroll, visibleWhen } from './kit.js'
 import { Panel } from './shell.js'
 import { BLEND_MODES } from '../fx-meta.js'
 import { materialsByCategory } from '../material-catalog.js'
+// ⚠️ **UNE TABLE, PAS UN `if` PAR LIGNE — Tâche R25, même mécanique que R21.**
+// `matiereAgit` dit, poste par poste, s'il a un receveur en mode sphère, avec
+// son MOTIF écrit à côté ; `vignetteAgit` fait de même pour le verre. Un test
+// lit la table, et il n'y a qu'une écriture de « ça n'agit pas ».
+import { matiereAgit, vignetteAgit } from '../monde/matiere-crop.js'
 import { requestFxThumb } from './fx-thumbs.js'
 
 const ICON =
@@ -138,7 +143,14 @@ export function buildShadersPanel(ctx) {
         let media
         if (m.thumb) { media = el('img', 'ce-mat-vig-img'); media.src = m.thumb; media.alt = m.label; media.loading = 'lazy' }
         else { media = el('span', 'ce-mat-vig-img'); if (m.swatch) media.style.background = m.swatch }
-        grid.append(tile(m.id, m.label, media, false))
+        const t = tile(m.id, m.label, media, false)
+        // ⛔ **UNE VIGNETTE QUI SE CACHE QUAND ELLE N'A PAS DE RECEVEUR — R25.**
+        // Le verre est le seul cas, et c'est une MESURE : sa transmission est
+        // une passe de rendu de la scène entière (×3,87 au crop, ×4,78 en
+        // orbite du temps d'image, minuterie du pilote). ⚠️ `visibleWhen` ne
+        // REND PAS le nœud (`kit.js`) : on l'appelle sur `t` déjà ajouté.
+        grid.append(t)
+        visibleWhen(t, () => vignetteAgit(m.id, ctx.surSphere?.() === true))
       }
       matPick.append(grid)
     }
@@ -148,17 +160,33 @@ export function buildShadersPanel(ctx) {
     const id = ctx.getSurfaceMat()
     if (!id) return
     if (id === 'glass') {
-      matCtl.append(color({ label: 'Teinte du verre', get: () => ctx.getGlassTint(), set: (v) => ctx.setGlassTint(v) }))
+      // ⚠️ **LA VIGNETTE EST CACHÉE EN MODE SPHÈRE, MAIS LA BRANCHE RESTE** : un
+      // gabarit enregistré peut porter `terrainSurfaceMat: 'glass'`, et l'ouvrir
+      // ferait afficher cinq réglages sans receveur. Ils se cachent donc AUSSI,
+      // par la même table.
+      const tint = color({ label: 'Teinte du verre', get: () => ctx.getGlassTint(), set: (v) => ctx.setGlassTint(v) })
+      matCtl.append(tint)
+      visibleWhen(tint, () => matiereAgit('terrainGlassTint', ctx.surSphere?.() === true))
       for (const c of ctx.glassControls) {
-        matCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: c.k === 'terrainGlassThickness' || c.k === 'terrainGlassClarity' ? 0.5 : 0.01, get: () => ctx.getGlassParam(c.k), set: (v) => ctx.setGlassParam(c.k, v) }))
+        const row = slider({ label: c.label, min: c.min, max: c.max, step: c.k === 'terrainGlassThickness' || c.k === 'terrainGlassClarity' ? 0.5 : 0.01, get: () => ctx.getGlassParam(c.k), set: (v) => ctx.setGlassParam(c.k, v) })
+        matCtl.append(row)
+        visibleWhen(row, () => matiereAgit(c.k, ctx.surSphere?.() === true))
       }
     } else {
+      // ⚠️ **`siAgit` NE REND PAS LE NŒUD SI ON L'ÉCRIT COMME `visibleWhen` —
+      // R21 a payé exactement ce piège.** Il retourne donc `row`, et
+      // `visibleWhen` est appelé dessus avant de rendre.
+      const siAgit = (row, cle) => { visibleWhen(row, () => matiereAgit(cle, ctx.surSphere?.() === true)); return row }
       matCtl.append(
-        slider({ label: 'Échelle (tuilage)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
-        slider({ label: 'Relief de la matière', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
-        slider({ label: 'Rugosité', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
-        slider({ label: 'Bruit (révèle la base)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }),
-        toggle({ label: 'Au-dessus du niveau zéro', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) })
+        siAgit(slider({ label: 'Échelle (tuilage)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }), 'terrainMatScale'),
+        siAgit(slider({ label: 'Relief de la matière', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }), 'terrainSurfaceBump'),
+        // ⛔ **LA RUGOSITÉ N'A AUCUN RECEVEUR SUR LA SPHÈRE, ET C'EST
+        // STRUCTUREL** : le crop est éclairé par `albedo × irradianceCrop × 1/π`,
+        // c'est-à-dire `BRDF_Lambert` et rien d'autre — zéro terme spéculaire et
+        // zéro `envMap` dans `globe.js`. Le motif est écrit dans la table.
+        siAgit(slider({ label: 'Rugosité', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }), 'terrainMatRoughness'),
+        siAgit(slider({ label: 'Bruit (révèle la base)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }), 'terrainMatNoise'),
+        siAgit(toggle({ label: 'Au-dessus du niveau zéro', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) }), 'terrainMatAboveZero')
       )
     }
   }
