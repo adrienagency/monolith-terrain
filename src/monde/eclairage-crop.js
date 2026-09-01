@@ -446,9 +446,18 @@ float natGris(float hn, float ny) {
   return v * mix(${PENTE_BAS}, ${PENTE_HAUT.toFixed(1)}, pow(max(ny, 0.0), ${PENTE_EXPO}));
 }
 ${GLSL_OMBRE_PEINTURE}
+// ══ LA MATIERE DU RELIEF — Tache R25 ═══════════════════════════════════════
+// terrain.js dose la peinture avec un paintShade que le BRUIT DE MATIERE tire
+// vers 1 (« la carte revelee est ramenee vers sa clarte naturelle, pas ombree
+// par l albedo de la matiere »). Le crop avait la loi sans ce levier.
+// ⚠️ UNE SEULE ECRITURE : albedoCrop DELEGUE, il ne recopie pas. Passer
+// natOmbrePeinture(natLuminance(fond)) rend l ancienne loi AU BIT PRES.
+vec3 albedoCropMat(vec3 mapCol, vec3 base, float gris, float teinte, float ombre) {
+  return mix(base * gris, mapCol * ombre, teinte);
+}
 vec3 albedoCrop(vec3 mapCol, vec3 base, float gris, float teinte) {
   vec3 fond = base * gris;
-  return mix(fond, mapCol * natOmbrePeinture(natLuminance(fond)), teinte);
+  return albedoCropMat(mapCol, base, gris, teinte, natOmbrePeinture(natLuminance(fond)));
 }
 ${GLSL_IRRADIANCE}
 vec3 eclairerCrop(vec3 mapCol, vec3 base, float teinte, float hn, float ndu, float ndl,

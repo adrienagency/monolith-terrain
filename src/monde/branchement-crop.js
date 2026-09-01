@@ -182,6 +182,31 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   // juste au-dessus. Et c'est un SCALAIRE : `Object.is` le voit changer, et il ne
   // reposera pas l'habillage soixante fois par seconde.
   'aerialCoastFade',
+  // ══════ LA MATIÈRE DU RELIEF — Tâche R25, option 38 ═══════════════════════
+  //
+  // ⚠️ **DIX CHAMPS, ET ILS DOIVENT ÊTRE ICI POUR LA RAISON D'`aerialCoastFade`
+  // ET DES QUATRE DE LA GRILLE : CE SONT UN SÉLECTEUR ET QUATRE TIRETTES.**
+  // L'utilisateur clique une vignette de matière à un instant que rien ne
+  // prévoit ; un champ absent de cette liste n'est jamais comparé, donc jamais
+  // reposé — la matière ne changerait qu'au prochain changement de LIEU. C'est
+  // la course de la Tâche K ter, et elle rend le sélecteur inerte un
+  // chargement sur deux.
+  //
+  // ⚠️ **`matMap` / `matNormal` SONT DES TEXTURES, ET LEUR IDENTITÉ EST STABLE**
+  // — `terrain._loadTextureSet` les met en cache par dossier (`this._texSets`),
+  // donc `Object.is` voit bien « même matière » et « matière changée ». C'est
+  // l'inverse du cas `hazeColor`, où un `THREE.Color` muté en place ne se
+  // comparait pas.
+  'matMap',
+  'matNormal',
+  'matRepeat',
+  'matBump',
+  'matNoiseOn',
+  'matNoiseCut',
+  'matNoiseSoft',
+  'matNoiseScale',
+  'matAboveZero',
+  'matBandeM',
   'amplitudeM',
   'contourIntervalM',
   'contourOpacity',
