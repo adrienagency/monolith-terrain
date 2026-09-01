@@ -174,14 +174,18 @@ test('②b le nuanceur MÉLANGE les deux régimes sur `dedansCrop` — exécuté
   // ⚠️ **LA LIGNE DU CROP N'A PAS BOUGÉ**, et `crop-naturel` ⑤d continue de
   // l'exiger : R28 lui ADJOINT le régime du monde, il ne la remplace pas.
   assert.match(FRAG_NU, /float rampT = natRampT\(hNormRelief, pivot, uHeightContrast\);/)
-  assert.match(FRAG_NU, /rampT = mix\(natRampTMonde\(h\), rampT, dedansCrop\);/)
+  // ⚠️ **LA LIGNE A CHANGÉ AVEC R31, ET LE DÉPARTAGE `dedansCrop` N'A PAS BOUGÉ.**
+  // Le régime du monde est désormais NOMMÉ (`rampTMonde`) parce que R31 le lit
+  // deux fois ; le mélange spatial est le même, et il reste le DERNIER.
+  assert.match(FRAG_NU, /float rampTMonde = natRampTMonde\(h\);/)
+  assert.match(FRAG_NU, /rampT = mix\(rampTMonde, rampT, dedansCrop\);/)
   // et on l'EXÉCUTE aux deux bouts : dedans c'est le crop, dehors c'est le monde
-  const m = /rampT = mix\(([^;]+)\);/.exec(FRAG_NU)
+  const m = /rampT = mix\(rampTMonde, rampT, dedansCrop\);/.exec(FRAG_NU)[0]
   // eslint-disable-next-line no-new-func
-  const f = new Function('rampT', 'h', 'dedansCrop', 'MIX', 'natRampTMonde',
-    `return MIX(${m[1].replace(/mix\(/g, 'MIX(')})`)
-  assert.equal(f(0.77, 1234, 1, MIX, rampeTMonde), 0.77, 'dans le crop, la loi du crop, exactement')
-  assert.equal(f(0.77, 1234, 0, MIX, rampeTMonde), rampeTMonde(1234), 'hors du crop, la loi du monde')
+  const f = new Function('rampT', 'rampTMonde', 'dedansCrop', 'MIX',
+    `${m.replace(/^rampT = mix\(/, 'rampT = MIX(')} return rampT`)
+  assert.equal(f(0.77, rampeTMonde(1234), 1, MIX), 0.77, 'dans le crop, la loi du crop, exactement')
+  assert.equal(f(0.77, rampeTMonde(1234), 0, MIX), rampeTMonde(1234), 'hors du crop, la loi du monde')
 })
 
 // ══════════ ③ L'EAU GARDE LE RENDU DE L'ORBITE AU LOIN ═════════════════════
