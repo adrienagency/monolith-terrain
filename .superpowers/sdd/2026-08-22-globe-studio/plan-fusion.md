@@ -279,3 +279,57 @@ retour arrière** (0x08) : le test trouvait **0 uniforme sur 68** et se déclara
 d'édition qui écrit du texte non littéral corrompt en silence*. Écrire en
 binaire ne suffit pas — **relire l'octet écrit** (`grep | cat -A`) quand on pose
 une expression régulière ou une séquence d'échappement.
+
+---
+
+## ⛔ LE BARÈME DE L'INVENTAIRE EST PARTIELLEMENT SOUS LE BRUIT — mesuré, pas supposé
+
+L'inventaire déclare ✅ à partir de **`moy ≥ 0,06` ou `grad ≥ 0,12`**. R21 a
+établi que le banc porte un transitoire de **~0,17 / 0,33**, une mesure sur
+douze, cause **non identifiée** (`dRetour` nul en 2,7 s).
+
+⚡ **Un transitoire ne peut qu'AJOUTER : il fait un faux ✅, jamais un faux ⛔.**
+Les 47 options mortes sont donc hors de cause. Mais **sept des 72 ✅ ont leurs
+deux grandeurs dans la bande** :
+
+| option | moy / grad |
+|---|---|
+| **98** | 0,081 / 0,138 |
+| **36** | 0,122 / 0,089 |
+| **91** | 0,140 / 0,236 |
+| **120** | **0,162 / 0,326** — *le chiffre du transitoire à la troisième décimale* |
+| **11** | 0,178 / 0,355 |
+| **56** | 0,184 / 0,318 |
+| **24** | 0,188 / 0,320 |
+
+⚠️ **Aucune n'est déclarée fausse** — la corrélation n'est pas la preuve. Mais le
+**point d'étalonnage du barème (91) tombe lui-même dans la bande**, et n'a
+survécu que parce qu'une **capture d'écran** l'a confirmé, pas son chiffre.
+
+➡️ **RÈGLE : entre 0,06 et 0,19, un relevé unique ne décide de rien.** Il faut
+une répétition, ou une preuve d'une autre nature (capture, différence par
+construction). Toute tranche future qui rouvre une de ces sept doit **remesurer
+avant de conclure**.
+
+### Deux acquis de méthode de la même passe
+
+✅ **Faire se désigner ce qu'on mesure, plutôt que le chercher.** La paroi du crop
+est une bande étroite qu'une moyenne d'image noie. R21 a rendu **deux images au
+même instant**, l'uniforme de la seule paroi mis à zéro dans la seconde : tout
+pixel qui diffère **est** un pixel de paroi, par construction. 0 pixel sur
+1 024 000 au témoin, 39 799 à l'appoint 0,6, 55 591 à 3.
+
+⚠️ **Un ralentissement qui ne mesure pas la cadence ne teste rien.** La première
+tentative à ×8 laissait la cadence assez haute pour que « palier inchangé » soit
+un faux négatif. À ×20 et ×60 (57 → 14 puis 0,44 i/s), le palier bascule 3 fois
+sur 3 — **et c'est ce qui l'innocente** : l'amplitude ne colle pas (0,038 ou
+1,468, jamais 0,17) et `UP_SUSTAIN` vaut 12 s par cran contre 2,7 s observés.
+
+### ⚠️ Trouvé sans le chercher : une temporisation déguisée
+
+La porte **« plus aucune tuile en vol » expire à ses 45 s à CHAQUE chargement,
+sans exception** : il reste 4 à 9 tuiles `empty` que rien ne remplira jamais.
+Ce n'était pas une condition, c'était un `sleep(45 s)` sous un autre nom.
+
+⛔ **Non corrigé exprès** : la réparer rendrait irreproductibles les chiffres déjà
+publiés. Note posée dans les deux sondes. **Tâche à ouvrir.**
