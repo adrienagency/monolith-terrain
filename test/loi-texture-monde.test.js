@@ -383,12 +383,22 @@ test('④g `texelTuile` est, LUI AUSSI, le texte du dépôt, intact', () => {
   assert.equal(expr, 'max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx')
 })
 
-test('④h LES SIX AUTRES `fwidth` NE SONT PAS TOUCHÉS — l’audit de la tâche', () => {
-  // ⚠️ Le nuanceur porte SEPT `fwidth`. Un seul était en espace-tuile de bout en
-  // bout (`minFade`) ; les six autres mesurent des mètres, des degrés ou une
+test('④h LES SEPT AUTRES `fwidth` NE SONT PAS TOUCHÉS — l’audit de la tâche', () => {
+  // ⚠️ Le nuanceur porte HUIT `fwidth`. Un seul était en espace-tuile de bout en
+  // bout (`minFade`) ; les sept autres mesurent des mètres, des degrés ou une
   // couverture de côte — des grandeurs de MONDE par pixel d'écran, donc des
   // largeurs de trait légitimes. Ce test fige le compte : si quelqu'un en ajoute
   // ou en retire un, la question se rouvre.
+  //
+  // ⚡ **ELLE S'EST ROUVERTE À LA TÂCHE R22, ET C'EST EXACTEMENT LE TRAVAIL QU'ON
+  // ATTEND DE CE TEST.** La grille de relevé du bloc en ajoute un huitième,
+  // `fwidth(gq)`, et il est de la BONNE classe : `gq` vaut
+  // `qCrop × uCropDemiM / uGridStepM`, c'est-à-dire des mètres de sol divisés par
+  // des mètres de sol. Il ne dépend ni du niveau de la tuile ni de `uTilePx`,
+  // donc il ne peut pas fabriquer l'arête droite de frontière de niveaux que la
+  // Tâche K a mesurée (23,5 % de l'image au nadir, contre 0,05 % pour `crowd`).
+  // Sa garde est de plus un UNIFORME, donc sa dérivée est définie — la même
+  // exigence que celle du trait de côte, et elle est vérifiée plus bas.
   const iFrag = GLOBE.indexOf('const FRAG')
   const frag = GLOBE.slice(iFrag, GLOBE.indexOf('\n`\n', iFrag))
   // ⚠️ **LES COMMENTAIRES SONT RETIRÉS D'ABORD** : ce fichier PARLE de `fwidth`
@@ -397,10 +407,10 @@ test('④h LES SIX AUTRES `fwidth` NE SONT PAS TOUCHÉS — l’audit de la tâc
   const code = frag.replace(/\/\/[^\n]*/g, ' ')
   const appels = code.match(/fwidth\s*\(/g) || []
   const sites = code.split('\n').filter((l) => /fwidth\s*\(/.test(l))
-  // SEPT sites, HUIT appels : `texelTuile` en porte deux (les deux composantes
+  // HUIT sites, NEUF appels : `texelTuile` en porte deux (les deux composantes
   // de `fwidth(vUv)`), et c'est le seul.
-  assert.equal(sites.length, 7, `le nuanceur porte ${sites.length} sites de fwidth, pas 7`)
-  assert.equal(appels.length, 8, `le nuanceur porte ${appels.length} appels à fwidth, pas 8`)
+  assert.equal(sites.length, 8, `le nuanceur porte ${sites.length} sites de fwidth, pas 8`)
+  assert.equal(appels.length, 9, `le nuanceur porte ${appels.length} appels à fwidth, pas 9`)
   assert.equal(sites.filter((l) => (l.match(/fwidth\s*\(/g) || []).length === 2).length, 1)
   // et celui de la côte garde sa garde par UNIFORME — c'est ce qui rend sa
   // dérivée définie, et c'est pour ça qu'on ne l'a pas touché.
@@ -408,6 +418,21 @@ test('④h LES SIX AUTRES `fwidth` NE SONT PAS TOUCHÉS — l’audit de la tâc
   assert.ok(iCote > 0)
   const avant = code.slice(Math.max(0, iCote - 300), iCote)
   assert.ok(/uHabOn > 0\.5 && uCoastMaskOn > 0\.5/.test(avant), 'la garde de la côte doit rester un uniforme')
+  // ⚠️ **ET CELUI DE LA GRILLE AUSSI — Tâche R22.** `fwidth(gq)` vit sous
+  // `if (uGridOpacity > 0.001 && uGridStepM > 0.0 && uCropDemiM > 0.0)`, TROIS
+  // uniformes : tous les fragments d'un quad prennent donc la même branche.
+  // ⛔ Une garde qui aurait ajouté `dedansCrop > 0.0` — la tentation, puisque la
+  // grille ne peint que dans la découpe — aurait dépendu de la DONNÉE, et la
+  // dérivée serait devenue indéfinie sur toute la frontière du bloc. La couverture
+  // du crop multiplie donc le résultat, elle ne garde pas la branche.
+  const iGrille = code.indexOf('fwidth(gq)')
+  assert.ok(iGrille > 0, '`fwidth(gq)` de la grille est introuvable')
+  const avantGrille = code.slice(Math.max(0, iGrille - 300), iGrille)
+  assert.ok(
+    /uGridOpacity > 0\.001 && uGridStepM > 0\.0 && uCropDemiM > 0\.0/.test(avantGrille),
+    'la garde de la grille doit rester un uniforme'
+  )
+  assert.equal(/if \([^)]*dedansCrop[^)]*\)\s*\{[^}]*fwidth\(gq\)/.test(code), false, 'la garde de la grille ne doit pas dépendre de la donnée')
 })
 
 // ══════════ ⑤ LE BRANCHEMENT ═══════════════════════════════════════════════

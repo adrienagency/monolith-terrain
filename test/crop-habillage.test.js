@@ -653,6 +653,16 @@ function globeStub(crop = REPERE) {
       uContourInterval: val(HABILLAGE_MONDE.contourIntervalM),
       uContourOpacity: val(HABILLAGE_MONDE.contourOpacite),
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
+      // ⚠️ **LES QUATRE DE LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20.**
+      // ⚡ **CE STUB EST UNE GARDE, ET IL VIENT DE FAIRE SON TRAVAIL** : R22 a
+      // ajouté quatre uniformes au globe et treize tests sont tombés d'un coup
+      // (`Cannot set properties of undefined`), parce que la table d'ici ne les
+      // portait pas. C'est exactement ce qu'on lui demande — ⑨h ne peut prouver
+      // un aller-retour BIT À BIT que sur une table qui ressemble à la vraie.
+      uGridStepM: val(HABILLAGE_MONDE.gridPasM),
+      uGridOpacity: val(HABILLAGE_MONDE.gridOpacite),
+      uGridColor: val(couleurStub(HABILLAGE_MONDE.gridCouleur)),
+      uCropDemiM: val(0),
       uGrainForceM: val(HABILLAGE_MONDE.grainForceM),
       uGrainEchelle: val(HABILLAGE_MONDE.grainEchelle),
       // ⚠️ **LA NORMALE PAR FRAGMENT — Tâche P9**, au même défaut que le

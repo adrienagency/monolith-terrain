@@ -991,7 +991,16 @@ test('⑦e `retirerHabillage` rend la loi du MONDE, pas le neutre — quand elle
   const src = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
   const i = src.indexOf('retirerHabillage() {')
   assert.ok(i > 0)
-  const corps = src.slice(i, i + 6000)
+  // ⚠️ **LE CORPS ENTIER, PAS UNE FENÊTRE DE 6 000 CARACTÈRES.** La borne fixe
+  // d'origine a fait tomber ce test à la Tâche R22, qui n'a fait qu'AJOUTER un
+  // bloc de commentaire quinze lignes plus haut dans la même fonction : le
+  // `_rampeMonde` cherché était sorti de la fenêtre alors qu'il n'avait pas
+  // bougé d'une ligne. Un test qui tombe sur la LONGUEUR d'un commentaire ne
+  // mesure pas ce qu'il croit. On coupe donc à l'accolade fermante de la
+  // méthode — le même repère que `crop-habillage` prend pour `contexteCrop`.
+  const finCorps = src.indexOf('\n  }\n', i)
+  assert.ok(finCorps > i, 'la fin de `retirerHabillage` est introuvable')
+  const corps = src.slice(i, finCorps)
   // l'analyse part TOUJOURS (12 Mo par MNT 1536²) ; le LUT, lui, est celui du socle
   assert.match(corps, /u\.uAnalysis\.value = null/)
   assert.match(corps, /u\.uAnalysisOn\.value = 0/)

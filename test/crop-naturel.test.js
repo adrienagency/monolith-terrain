@@ -712,6 +712,9 @@ function globeStub() {
       uAerial: val(null), uAerialOn: val(0), uAerialOpacity: val(1),
       uAerialOffset: val({ set() {} }), uAerialScale: val({ set() {} }), uAerialCoastFade: val(0),
       uContourInterval: val(500), uContourOpacity: val(0.55), uContourWeight: val(0.7),
+      // la grille de relevé — Tâche R22 ; même remarque que la photo aérienne
+      // ci-dessus : un uniforme oublié ici tombe en `TypeError`, pas en assertion.
+      uGridStepM: val(0), uGridOpacity: val(0), uGridColor: val(couleurStub()), uCropDemiM: val(0),
       uGrainForceM: val(0), uGrainEchelle: val(96), uNormaleFineOn: val(0),
       uAnalysis: val(null), uAnalysisOn: val(0),
       uTexShade: val(NATUREL_MONDE.texShade), uWetK: val(NATUREL_MONDE.wetK),
