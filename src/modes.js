@@ -12,6 +12,7 @@ import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 import { PinchTracker } from './gestes.js'
 import { pasEscalier, paliersRetenus, palierDeClic } from './escalier-zoom.js'
+import { POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // LA LOI D'ALTITUDE vit dans un module PUR (voir son en-tête, et la Tâche 1 du
 // plan « globe continu »). Rien ne change ici : ces quatre fonctions sont
 // exactement les calculs qui étaient écrits en clair ci-dessous, sortis pour
@@ -997,8 +998,12 @@ export class Modes {
       // `_surfCam.near` reposait, mais elle est maintenant DÉDUITE.
       this.camera.near = planProche(this.camera.position.y - this._solSous(arrival.target))
       this.camera.updateProjectionMatrix()
-      this.controls.maxPolarAngle = Math.PI * 0.49
-      this.controls.rotateSpeed = 1 // orbital update scales it down to ~0.015
+      // ⚠️ LE PLAFOND DUR — la vraie butée est posée par image dans `main.js`
+      // (`polaireMaxSol`, Tâche R23) : elle dépend de la distance et du relief.
+      this.controls.maxPolarAngle = POLAIRE_MAX_DURE
+      // ⚠️ `rotateSpeed = 1` DES DEUX CÔTÉS depuis R23 — l'orbite ne le ramène
+      // plus à 0,015 (le commentaire d'avant décrivait ce saut comme un contrat).
+      this.controls.rotateSpeed = 1
       this.controls.enableZoom = false // surface zoom is our inertial dolly
       this.controls.enablePan = true
       this.controls.enabled = true
@@ -1461,7 +1466,8 @@ export class Modes {
     const max = c.maxDistance
     const dist = c.getDistance()
     let factor = Math.exp(-this._zoomVel * dt) // vel > 0 (zoom in) → factor < 1
-    let newDist = THREE.MathUtils.clamp(dist * factor, min, max)
+    const voulue = dist * factor // ce que le geste DEMANDE, avant toute butée
+    let newDist = THREE.MathUtils.clamp(voulue, min, max)
     // clamp to the level's own zoom budget: the glide stops at the zone limit
     // (Adrien) instead of running to the physical near/far stop
     let dLog = Math.log(Math.max(newDist, 1e-6) / Math.max(dist, 1e-6))
@@ -1473,7 +1479,40 @@ export class Modes {
       if (this._levelZoom + dLog < -BUDGET_NIVEAU) { dLog = -BUDGET_NIVEAU - this._levelZoom; this._zoomVel = 0 }
       else if (this._levelZoom + dLog > BUDGET_NIVEAU) { dLog = BUDGET_NIVEAU - this._levelZoom; this._zoomVel = 0 }
     }
-    this._levelZoom += dLog
+    // ══════ LE BUDGET COMPTE L'INTENTION, PAS LE MOUVEMENT CLIPPÉ — R23 ═════
+    //
+    // ⛔ **LA TRANSITION ÉTAIT À SENS UNIQUE, ET C'EST MESURÉ.** Vue couchée
+    // vers l'horizon puis dézoom à la molette, 1 500 images, l'API de l'appli
+    // (`.banc/R23/avant.json`, `remontees['couchee-vers-horizon']`) : **l'orbite
+    // n'est JAMAIS atteinte**, 2 niveaux franchis puis plus rien, la caméra
+    // collée à `d = 150 / plafond 150` et le budget figé à **0,68782** — pour un
+    // niveau qui en vaut **0,69315**. Il manquait **0,005**, définitivement.
+    //
+    // ⚡ **LE MÉCANISME, ET IL EST DE LA MÊME FAMILLE QUE `0,49π` :**
+    // `maxDistance` borne une DISTANCE caméra → cible, alors que ce qu'il faut
+    // borner est une ALTITUDE. Or `distance = (camY − yCible) / cos φ` : à la
+    // butée polaire, `cos(88,2°) = 0,0314` contre 0,688 à la pente d'arrivée —
+    // **la même altitude coûte 21,9 fois plus de distance**. Le plafond mord
+    // donc bien avant que le niveau soit dépensé, `dLog` tombe à zéro, et
+    // l'intention de l'utilisateur est jetée en silence.
+    //
+    // ➡️ **ON GARDE LA BUTÉE SUR LA CAMÉRA, ON LA RETIRE DU COMPTEUR.** Le
+    // franchissement DIVISE la distance par deux (`poseApresNiveau` conserve
+    // l'altitude de fond) : il fait donc lui-même la place que la butée refuse.
+    // Compter l'intention, c'est laisser le niveau se franchir puis le
+    // mouvement reprendre — jamais un saut, puisque la traversée conserve
+    // l'altitude.
+    //
+    // ⚠️ **ET SEULEMENT SI UN NIVEAU PEUT L'ABSORBER.** Vers l'extérieur il y en
+    // a toujours un (un cran plus large, ou la porte orbitale) ; vers
+    // l'intérieur, au zoom fin, il n'y a plus rien à affiner — laisser courir le
+    // compteur y serait un compteur qui ne se dépense jamais.
+    let dBudget = dLog
+    if (this._continu() && newDist !== voulue) {
+      const intention = Math.log(Math.max(voulue, 1e-6) / Math.max(dist, 1e-6))
+      if (intention > 0 || !!this.hooks.getRefineTarget?.()) dBudget = intention
+    }
+    this._levelZoom += dBudget
     newDist = dist * Math.exp(dLog)
     factor = newDist / dist
     const P = this._zoomPivot
@@ -1489,7 +1528,11 @@ export class Modes {
     this._zoomVel *= Math.exp(-dt / ZOOM_TAU) // the coast
     // clamp at the zone limit and spend the momentum there — the glide never
     // crosses a level; a fresh re-scroll at the limit does (see the wheel handler)
-    if (newDist <= min + 1e-3 || newDist >= max - 1e-3) this._zoomVel = 0
+    // ⚠️ **ET L'ÉLAN NE MEURT PAS SUR UNE BUTÉE QUI VA S'OUVRIR — R23.** Tuer la
+    // vitesse au plafond alors que le compteur vient d'encaisser l'intention
+    // rendrait le franchissement dépendant du fait que l'utilisateur RE-défile :
+    // c'est le cran que la Tâche M a supprimé, revenu par la fenêtre.
+    if ((newDist <= min + 1e-3 || newDist >= max - 1e-3) && dBudget === dLog) this._zoomVel = 0
     if (Math.abs(this._zoomVel) < ZOOM_STOP) this._zoomVel = 0 // coast spent
     // ⚠️ **APRÈS LE DÉPLACEMENT, PAS AVANT.** Le franchissement lit le compteur
     // que cette image vient d'incrémenter ; le placer plus haut le ferait décider
@@ -1510,11 +1553,47 @@ export class Modes {
       if (this.travel) {
         this._updateTravel(dt)
       } else if (!this.busy) {
-        // damped proportional zoom + altitude-scaled rotation
+        // damped proportional zoom
         this.orbAlt = THREE.MathUtils.damp(this.orbAlt, this.orbAltTarget, 6, dt)
         const dir = this.camera.position.clone().normalize()
         this.camera.position.copy(dir).multiplyScalar(R_GLOBE + this.orbAlt)
-        this.controls.rotateSpeed = THREE.MathUtils.clamp((this.orbAlt / R_GLOBE) * 1.4, 0.015, 1)
+        // ══════ LE GESTE EST LE MÊME PARTOUT — Tâche R23 ═══════════════════
+        //
+        // ⛔ **LA LOI D'AVANT ÉTAIT `clamp((orbAlt / R_GLOBE) × 1,4, 0,015, 1)`,
+        // ET C'EST ELLE QUI FABRIQUAIT LE SAUT DE VITESSE.** Relevé au
+        // navigateur, glissé de 100 px, écran 1280×800 (`.banc/R23/avant.json`) :
+        // **0,447079 °/px** en orbite haute, **0,006716 °/px à 40 km** — et
+        // **0,447079 °/px sur le bloc**, où `rotateSpeed` vaut 1. Rapport entre
+        // les deux régimes : **66,5**. C'est la limite ③ de `monde/pivot-bloc.js`.
+        //
+        // ⚡ **CE QUI DÉCIDE : LE GESTE EST DÉJÀ LE MÊME AUX DEUX BOUTS QU'ADRIEN
+        // JUGE PARFAITS.** L'orbite haute et le bloc portent le même
+        // 0,447079 °/px, la même loi d'`OrbitControls` (`2π·dx/hauteur ×
+        // rotateSpeed`) et le même `rotateSpeed = 1`. La loi d'altitude ne vivait
+        // que DANS l'intervalle — le seul endroit où le geste n'a jamais été jugé.
+        //
+        // ⚠️ **ET EN RÉGIME CONTINU ELLE NE SERVAIT DÉJÀ PLUS À RIEN**, ce qui
+        // est le constat qui rend le retrait sûr : la porte orbitale est
+        // GÉOMÉTRIQUE (`niveauDArrivee`, `monde/zoom-continu.js`) et s'ouvre vers
+        // 7 à 12 millions de mètres — franchissement mesuré à **12 332 703 m** —
+        // alors que le genou de la loi tombait à `R_GLOBE / 1,4`, soit
+        // **4 550 000 m**. `rotateSpeed` valait **déjà 1 sur toute la descente
+        // réelle** : 1 810 images relevées, pire rapport d'une image à la
+        // suivante **×1,0000**. Ce qui change ici est le régime hérité
+        // (`?terre=deux`), où la plongée tombe à 8 000 m et où le ×66,67 était
+        // bel et bien atteint, et les hautes latitudes, où la porte descend sous
+        // le genou (voir `test/butee-sol.test.js`).
+        //
+        // ⚠️ **LA RÉSERVE, ET ELLE EST PUBLIÉE :** à basse altitude orbitale la
+        // rotation autour du CENTRE de la Terre (« on utilise le centre de la
+        // Terre comme point de rotation, excepté en mode crop », Adrien) balaie
+        // beaucoup de sol — 0,447 ° de longitude par pixel. À L'ÉCRAN c'est
+        // pourtant exactement le geste de l'orbite haute : le point de sol au
+        // centre du cadre se déplace de `f × dθ` pixels quelle que soit
+        // l'altitude, parce que le vecteur caméra → sol tourne du même angle des
+        // deux côtés. Ce qui change avec l'altitude est le kilométrage, pas le
+        // geste.
+        this.controls.rotateSpeed = 1
         this.controls.update()
       }
 
