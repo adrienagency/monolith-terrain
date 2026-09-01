@@ -15,7 +15,7 @@ travail et comment le recoudre. Les branches, elles, survivent dans git.
 ## L'ÉTAT AU 2026-09-01, 00 h
 
 **Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`.**
-**4 480 tests · 0 échec · `audit:tests` 231 = 231** (après R20 bis et R22).
+**4 491 tests · 0 échec · `audit:tests` 231 = 231** (après R20 bis, R22 et l'arbitrage du ciel).
 
 ⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
 démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
@@ -30,6 +30,7 @@ démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
 | R19 | les courbes de niveau du crop | `courbes-crop` |
 | **R20 bis** | **les nuages — 14 curseurs sur 15 vivants** | `nuages-globe` |
 | **R22** | **les parois du bloc et la grille — 4 sur 4, + l'encre de grille en prime** | `parois-grille` |
+| **R20 ter** | **le ciel par défaut se voit — ×2,3 à ×16 de pixels selon le lieu** | `nuages-globe` |
 
 ### En cours — quatre arbres, quatre agents
 
@@ -79,7 +80,7 @@ contenu du disque. Un écart = un test qui ne tourne pas.
 
 ## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 480 · 0 échec**
+1. `npm test` — **base à battre : 4 491 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
 3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
    `t39.jpg`) : elles sont l'état AVANT de cette campagne.
@@ -114,6 +115,11 @@ rentrées : il restera ~14 des 47, essentiellement
 - le bouton photo aérienne inerte hors 16 pays (**arbitrage produit**) ;
 - le crop est désormais **plus lisse que le socle** — le grain n'a pas été porté ;
 - **la bande 1 147–1 274 km sans nuages** (réserve de R20) ;
+- ⚠️ **ARBITRAGE POUR ADRIEN — `cloudAltitude` est en unités de BLOC, pas en
+  mètres.** C'est la cause du défaut ci-dessous ; le plancher marin n'en corrige
+  que le symptôme. L'exprimer en mètres réels le réglerait partout, **mais
+  déplacerait le ciel de TOUS les gabarits enregistrés** — donc l'aspect du
+  travail de design d'Adrien. **Ne pas trancher seul.**
 - la question ODbL « conserver et redistribuer » pour les modèles vendus.
 
 **Le mode plat n'est pas supprimé.** Adrien le veut ; l'ordre à tenir est
@@ -137,6 +143,23 @@ normalement**. Les deux conséquences :
 ⚠️ **Vérifier après chaque fusion que le `rapport-RXX.md` de la tâche est bien
 arrivé** : s'il manque, l'agent l'a écrit sans `-f`, et il faut aller le chercher
 dans son arbre.
+
+### ⛔ ④ NEUVIÈME occurrence de la classe « unités » — les nuages sous la mer
+
+Trouvée par R20 en pleine mer, et invisible partout ailleurs. `uSeaY` vaut
+**−1,80** à La Réunion, **−6,91** aux Alpes, **+13,05 au large du Pacifique** :
+la verticale du bloc est normalisée sur l'amplitude **locale** du relief. Au
+large, toute la colonne de nuages (7,43 → 13,50) passait **sous l'eau** —
+**0 pixel sur 1 024 000, avant comme après**.
+
+Correctif : plancher `Math.max(base, mer + 0,5)`, **neutre au bit près** là où la
+mer est déjà dessous (Réunion et Alpes ne bougent pas d'un flottant, vérifié).
+
+⚠️ **Et le défaut n'était pas où on le cherchait** : le littéral `params` de
+`main.js` pose `cloudsEnabled: false`, `cloudAltitude: 1`, `cloudOpacity: 2,25`,
+alors que l'appli démarre avec `true`, `13,5`, `0,6`. **La vraie source est
+`public/templates/defaults/shibustart.json`.** Régler `main.js` n'aurait rien
+changé à l'écran. Un test garde ce chemin.
 
 ## MESURÉ LE 2026-09-01 À L'ÉCRAN — deux constats qui n'étaient pas au dossier
 
