@@ -1,7 +1,6 @@
 # R30 — ATTAQUANT : LA CHAÎNE CAMÉRA TIENT. C'EST LE VOILE D'ACCUEIL QUI LA TENAIT FERMÉE.
 
-Arbre `C:\Dev\wt-att`, branche `attaque-camera`, `HEAD = 91ca80f` — **identique
-à `regroupement` au bit près** (`git diff regroupement HEAD -- src/` : vide).
+Arbre `C:\Dev\wt-att`, branche `attaque-camera`, base **`91ca80f`**.
 Serveur `npm run dev --port 5931` (arrêté à la fin).
 Instrument : `scripts/sonde-attaque-r30.mjs`, Chrome sans tête 1280 × 800,
 relevé **DANS la boucle** (`controls.update` enveloppé) et **fonction par
@@ -9,8 +8,39 @@ fonction** (`_zoomGesture`, `_applyZoom`, `cranZoom`, `_franchirSiBesoin`,
 `_refine`, `_coarsen`, `_rescale`, `enterOrbit` enveloppés à l'entrée et à la
 sortie). Journaux : `.banc/R30/`, `.banc/R15/r30-saut.json`.
 
-⛔ **Aucune ligne de comportement n'a été touchée.** `git diff regroupement HEAD
--- src/` est vide, et il l'est encore.
+⛔ **Aucune ligne de comportement n'a été touchée.** `git diff 91ca80f HEAD --
+src/` est vide, et il l'est encore.
+
+---
+
+## ⚠️⚠️ À LIRE AVANT TOUT LE RESTE : `regroupement` A BOUGÉ PENDANT QUE JE MESURAIS
+
+Quand j'ai commencé, `git rev-parse regroupement` rendait **`91ca80f`** et
+`git diff regroupement HEAD -- src/` était **vide** : j'ai vérifié cette parité
+en première ligne, exprès. À la fin de la tâche, `regroupement` rend
+**`6694adb`** et porte **trois commits R29 de plus**, dont deux qui touchent
+`src/modes.js` (**5 insertions, 64 suppressions**).
+
+⛔ **JE N'AI PAS LU LEUR DIFF, ET C'EST DÉLIBÉRÉ** — le brief l'interdit, et mon
+indépendance est tout ce que vaut cette mesure. Je n'ai regardé que la liste des
+titres de commits et le `--stat`, pour savoir si mon socle avait bougé.
+
+➡️ **CE QUE ÇA CHANGE, ET IL FAUT LE DIRE AVANT LES CHIFFRES :**
+
+| section | mesurée sur `91ca80f` | à rejouer sur `6694adb` avant d'agir ? |
+|---|---|---|
+| **§① le voile d'accueil** | oui | **NON** — `src/ui/hub.js` et `src/ui/v28.css` ne sont pas dans leur diff ; le défaut est en amont de la caméra |
+| **Q1** l'orbite atteinte, le prix du geste | oui | ⚠️ **OUI** — leurs titres nomment `_franchirSiBesoin` et le compteur de niveau |
+| **Q2** le pivot hors de l'axe | oui | ⚠️ **OUI** — le mécanisme est dans `_applyZoom`, même fichier |
+| **Q3** la caméra sous le sol | oui | ⚠️ **OUI, partiellement** — la loi est dans `butee-sol.js` / `main.js`, mais le geste passe par `_applyZoom` |
+| **Q4** le °/px aux latitudes | oui | **NON** — `rotateSpeed` est un littéral, et `grep` dit qu'il n'a que deux sites |
+| **Q5** le saut au changement de bloc | oui | **NON** — il se mesure sur `camGlobe`, hors de `modes.js` |
+
+⛔ **Aucun de mes chiffres n'est invalidé par ce mouvement** : ils décrivent
+exactement l'état `91ca80f`, qui est l'état que tu as mesuré ce matin et sur
+lequel tu as posé ta question. Mais **trois des cinq questions doivent être
+rejouées** sur le nouveau socle avant qu'on en tire une décision — la commande
+est une seule ligne, elle est au §④.
 
 ---
 
@@ -504,7 +534,7 @@ protège rien.
 | `npm test` | **4 641 tests · 0 échec** — la base est intacte |
 | `npm run audit:tests` | **240 listés · 240 sur disque · aucun écart** |
 | tests rouges livrés | **11**, dans `test/attaque-r30-ROUGE.mjs` (hors liste, hors audit — §④) |
-| `git diff regroupement HEAD -- src/` | **vide** — aucune ligne de comportement touchée |
+| `git diff 91ca80f HEAD -- src/` | **vide** — aucune ligne de comportement touchée |
 | images relevées dans la boucle | **120 730** sur 16 journaux |
 | scripts ajoutés | `scripts/sonde-attaque-r30.mjs` (0 octet 0x0D, relu) |
 
