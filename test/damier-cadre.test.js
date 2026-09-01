@@ -515,9 +515,15 @@ test('UN cran de souris ne sort jamais, DEUX sortent', () => {
 })
 
 test('une caresse de pave tactile ne defait pas le cadrage', () => {
+  // ⚠️ **CE TEST EXIGEAIT `0,2` AU FLOTTANT PRES, C'EST-A-DIRE L'ABSENCE DE
+  // DECROISSANCE — Tache R29 bis.** Son INTENTION est « une caresse ne defait
+  // pas le cadrage », et elle se dit en une comparaison au seuil. L'egalite
+  // exacte, elle, verrouillait la guillotine : le cumul ne pouvait QUE se
+  // remettre a zero ou s'additionner tel quel, jamais decroitre. On garde la
+  // borne SUPERIEURE — l'oubli ne peut qu'aider — et on exige la propriete.
   let c = 0
   for (let k = 0; k < 5; k++) c = cumuleDezoom(c, 4, 30) // 5 evenements de 4 px
-  presque(c, 0.2, '20 px cumules')
+  assert.ok(c <= 0.2 + 1e-9, `20 px cumules valent ${c}, au-dessus des 0,2 nominaux`)
   assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: c }), false)
   // …mais un balayage franc a deux doigts, lui, sort
   for (let k = 0; k < 40; k++) c = cumuleDezoom(c, 4, 12)
@@ -525,18 +531,60 @@ test('une caresse de pave tactile ne defait pas le cadrage', () => {
 })
 
 test('un cran isole ne s\'ajoute pas a un total perime', () => {
+  // ⚠️ **REECRIT — Tache R29 bis.** L'ancienne version exigeait
+  // `cumuleDezoom(1, 100, 401) === 1` : c'etait la guillotine elle-meme, pas son
+  // intention. L'intention est un ORDRE — plus le silence est long, moins le
+  // total d'avant compte — et un cran isole ne suffit jamais a lui seul.
   const un = cumuleDezoom(0, 100, 40)
-  assert.equal(cumuleDezoom(un, 100, OUBLI_MOLETTE_MS + 1), 1, 'le silence a remis le compteur a zero')
-  assert.equal(cumuleDezoom(un, 100, OUBLI_MOLETTE_MS), 2, '…mais pas AVANT la fin du silence')
+  assert.equal(un, 1, 'un cran vaut un')
+  const court = cumuleDezoom(un, 100, 60)
+  const moyen = cumuleDezoom(un, 100, OUBLI_MOLETTE_MS)
+  const long = cumuleDezoom(un, 100, OUBLI_MOLETTE_MS * 10)
+  assert.ok(court > moyen && moyen > long, `l'oubli n'est pas monotone : ${court} / ${moyen} / ${long}`)
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: court }), true, 'deux crans rapproches sortent')
+  // ⚡ **LA FRONTIERE, ET ELLE EST MESUREE** : un cran toutes les 3 s finit par
+  // sortir (point fixe 1,287), un cran toutes les 4 s jamais (1,156). C'est la
+  // separation entre « il continue de dezoomer » et « il tripote la molette ».
+  let lent = 0
+  for (let k = 0; k < 200; k++) lent = cumuleDezoom(lent, 100, 4000)
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: lent }), false,
+    `un cran toutes les 4 s a fini par sortir (cumul ${lent})`)
+  let moyennementLent = 0
+  for (let k = 0; k < 200 && !doitVraimentDezoomer({ mode: 'ensemble', cumul: moyennementLent }); k++) {
+    moyennementLent = cumuleDezoom(moyennementLent, 100, 3000)
+  }
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: moyennementLent }), true,
+    `un cran toutes les 3 s ne sort JAMAIS (cumul ${moyennementLent})`)
+})
+
+test('une goutte de molette toutes les dix secondes ne sort JAMAIS', () => {
+  // ⛔ **L'INVARIANT QUE `OUBLI_MOLETTE_MS` EXISTE POUR TENIR**, et il est ecrit
+  // dans son propre commentaire : « une goutte de molette toutes les dix
+  // secondes finirait par sortir du cadrage sans que personne l'ait voulu ». Il
+  // tient desormais par DECROISSANCE (`exp(−10 000 / 400) = 1,4e−11`) et non
+  // plus par remise a zero — et c'est ici qu'on l'exige, sur cinq cents
+  // gouttes, pas sur deux.
+  let c = 0
+  for (let k = 0; k < 500; k++) {
+    c = cumuleDezoom(c, 100, 10000)
+    assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: c }), false,
+      `sorti a la goutte ${k + 1}, cumul ${c}`)
+  }
+  // le point fixe vaut `1 / (1 − exp(−10 000 / 2 000)) = 1,00678` : il ne DERIVE
+  // pas, il plafonne — et c'est ca l'invariant, pas l'egalite a 1.
+  assert.ok(c < 1.01, `le cumul derive a ${c} au lieu de plafonner a 1,00678`)
 })
 
 test('seul le DEZOOM compte dans le cumul', () => {
   // deltaY < 0 = on s'approche : ca ne fait pas avancer une sortie par dezoom.
-  assert.equal(cumuleDezoom(0.5, -400, 10), 0.5)
-  assert.equal(cumuleDezoom(0.5, 0, 10), 0.5)
-  assert.equal(cumuleDezoom(0.5, NaN, 10), 0.5)
-  // …et le silence remet a zero meme sans cran de dezoom
-  assert.equal(cumuleDezoom(0.5, -400, OUBLI_MOLETTE_MS + 1), 0)
+  // ⚠️ A `ecouleMs = 0` il n'y a AUCUN oubli : c'est l'enonce PUR de la regle,
+  // sans le terme de temps par-dessus (Tache R29 bis).
+  assert.equal(cumuleDezoom(0.5, -400, 0), 0.5)
+  assert.equal(cumuleDezoom(0.5, 0, 0), 0.5)
+  assert.equal(cumuleDezoom(0.5, NaN, 0), 0.5)
+  // …et le temps qui passe ne peut que RETRANCHER, jamais ajouter
+  const apres = cumuleDezoom(0.5, -400, OUBLI_MOLETTE_MS + 1)
+  assert.ok(apres > 0 && apres < 0.5, `le silence rend ${apres}, hors de ]0 ; 0,5[`)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

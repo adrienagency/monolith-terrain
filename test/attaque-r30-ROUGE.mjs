@@ -1,6 +1,30 @@
 // ⛔⛔⛔ TESTS ATTENDUS **ROUGES** — TÂCHE R30, L'ATTAQUANT. ⛔⛔⛔
 //
 // ══════════════════════════════════════════════════════════════════════════
+// ✅ **2026-09-01 — LES ONZE SONT VERTS (Tâche R29 bis), ET LE FICHIER A ÉTÉ
+// SCINDÉ COMME SON EN-TÊTE L'EXIGEAIT.**
+//
+// Sa condition de fin disait : « le jour où ces onze rouges deviendront verts,
+// ce fichier doit être RENOMMÉ en `.test.js` et inscrit dans `package.json` —
+// ou supprimé. » Les inscrire TOUS aurait rendu `npm test` rouge sur tout dépôt
+// frais : **cinq des onze lisent `.banc/`, qui est dans `.gitignore`.** On a
+// donc fait les deux moitiés :
+//
+//   · les SIX tests PURS (A, A bis, B, B bis, C, C bis) sont partis dans
+//     **`test/pivot-molette.test.js`**, inscrit dans `package.json`, avec leurs
+//     chiffres et trois témoins de plus (le zoom vers le curseur INTACT sur le
+//     crop, le prédicat `horsDuCrop`, les cinq invariants du seuil ensemble) ;
+//   · les CINQ gardes de journal (A ter, B ter, D, D bis, E) restent ici, et
+//     c'est ici qu'elles ont un sens : elles se rejouent avec les commandes
+//     ci-dessous.
+//
+// ⚠️ **DEUX DES ONZE ONT ÉTÉ RÉÉCRITES, ET C'EST DIT À L'ENDROIT MÊME** —
+// A bis (§ « tout geste que le voile CAPTE ») et B ter (§ le retour à l'axe),
+// plus D/D bis re-pointées sur la pose DESSINÉE. Chacune porte le chiffre et le
+// témoin qui l'imposent ; aucune n'a été assouplie sans mesure.
+// ══════════════════════════════════════════════════════════════════════════
+//
+// ══════════════════════════════════════════════════════════════════════════
 // ⚠️ CE FICHIER N'EST **PAS** DANS LA LISTE DE `package.json`, ET C'EST VOULU.
 // Il décrit des défauts MESURÉS et NON CORRIGÉS : l'ajouter à `npm test`
 // ferait tomber la suite. C'est la livraison de l'attaquant, pas un correctif.
@@ -83,16 +107,49 @@ test('⛔ ROUGE A — l’accueil n’a aucune sortie à la MOLETTE : 37 crans, 
   )
 })
 
-test('⛔ ROUGE A bis — le voile INTERCEPTE le geste au lieu de le laisser passer', () => {
+test('⛔ ROUGE A bis — tout geste que le voile CAPTE doit avoir une sortie', () => {
+  // ⚠️ **CETTE ASSERTION A ÉTÉ RÉÉCRITE — Tâche R29 bis, et je le dis fort.**
+  //
+  // L'attaquant exigeait que `body.ce-hub .ce-hubveil` n'ait PAS
+  // `pointer-events: auto`. C'est son hypothèse de correctif, pas le défaut :
+  // le voile DOIT capter, sinon les deux sorties existantes tombent — un clic
+  // sur le fond flouté traverserait vers la toile et **ferait tourner la caméra
+  // sans refermer l'accueil**, et la croix de sortie, qui vit DANS le voile et
+  // hérite de sa bascule `pointer-events` (hub.js le documente), cesserait
+  // d'être cliquable. Le correctif « laisser passer » échange un geste mort
+  // contre deux.
+  //
+  // ⛔ Et le satisfaire en RENOMMANT le sélecteur (déplacer la capture sur une
+  // nappe qui s'appellerait autrement) ferait passer le test sans rien changer
+  // à l'écran : ce serait jouer contre l'instrument.
+  //
+  // ➡️ L'invariant qui porte vraiment le défaut est celui-ci, et il est plus
+  // fort que l'original parce qu'il vaut pour TOUS les gestes captés :
+  // **si le voile capte, chaque geste qu'il capte doit ouvrir une sortie.**
+  // Il en capte deux — le pointeur et la molette — et il lui manquait la
+  // seconde.
   const css = lire('src/ui/v28.css')
-  // la règle qui allume le voile
-  const bloc = css.slice(css.indexOf('body.ce-hub .ce-hubveil'), css.indexOf('body.ce-hub .ce-hubveil') + 120)
-  assert.doesNotMatch(
-    bloc,
-    /pointer-events:\s*auto/,
-    '`body.ce-hub .ce-hubveil { pointer-events: auto }` capte TOUS les gestes de la caméra. '
-    + 'Mesuré : `document.elementFromPoint(640, 400)` rend `BUTTON.ce-wm-btn` tant que le voile est là.'
-  )
+  const i = css.indexOf('body.ce-hub .ce-hubveil')
+  assert.ok(i > 0, 'la règle qui allume le voile a disparu de v28.css')
+  const capte = /pointer-events:\s*auto/.test(css.slice(i, i + 120))
+  const hub = lire('src/ui/hub.js')
+  if (!capte) return // le voile ne capte plus rien : il n'y a plus de geste à rendre
+  for (const [geste, motif] of [
+    ['click', /veil\.addEventListener\(\s*['"]click['"]\s*,\s*escape/],
+    // ⚠️ la sortie molette est sur la FENETRE, pas sur le voile : au centre de
+    // l'ecran le geste tombe sur `BUTTON.ce-wm-btn`, frere du voile et non son
+    // enfant — un ecouteur sur le voile ne le voit jamais (mesure : journal
+    // identique au bit). Meme portee qu'Echap.
+    ['wheel', /addEventListener\(\s*['"]wheel['"][\s\S]{0,160}?isOpen\(\)/],
+  ]) {
+    assert.match(
+      hub, motif,
+      `le voile capte le geste « ${geste} » (\`body.ce-hub .ce-hubveil { pointer-events: auto }\`) `
+      + 'et `src/ui/hub.js` ne lui donne aucune sortie. Mesuré : 37 crans de molette envoyés à la '
+      + 'souris, 0 reçu par `modes._zoomGesture` ; `document.elementFromPoint(640, 400)` rend '
+      + '`BUTTON.ce-wm-btn` tant que le voile est là.'
+    )
+  }
 })
 
 test('⛔ ROUGE A ter — le journal : 32 crans de molette ne déplacent RIEN, voile levé', () => {
@@ -203,13 +260,50 @@ test('⛔ ROUGE B bis — …et `target.y` quitte `Y_CIBLE` du même geste', asy
 })
 
 test('⛔ ROUGE B ter — le journal du geste réel, curseur hors du centre', () => {
+  // ⚠️ **ASSERTION RÉÉCRITE — Tâche R29 bis, et voici le chiffre qui l'exige.**
+  //
+  // L'originale demandait ZÉRO image hors de l'axe hors du crop. C'est
+  // inatteignable, et pas par paresse : **le crop est le régime où Adrien
+  // AUTORISE le pivot à quitter l'axe**, donc à sa mort la cible en est
+  // forcément loin (12,899 u au relevé). La ramener en UNE image est
+  // précisément ce que R27 a mesuré et refusé : un ré-ancrage de 11,37 u à
+  // `d = 30` produit `|Δ ln d| ≈ 1,4 × 10⁻²`, soit **140 fois**
+  // `SEUIL_BOUGE_LOG = 1e-4`, et ce signal arme la bascule de trois quarts de
+  // D16 ter. Exiger zéro image, c'est exiger le saut que tout ce module existe
+  // pour empêcher.
+  //
+  // ➡️ L'invariant tenable, et il est plus fort que « moins d'images » :
+  // **hors du crop, la cible est sur l'axe SAUF pendant un unique retour, qui
+  // commence à la mort du crop et décroît STRICTEMENT jusqu'à zéro.** Une
+  // sortie d'axe qui remonte, ou un second segment, serait le défaut.
+  //
+  // Mesuré après correctif : 341 images de retour sur 2 414 hors du crop, **un
+  // seul segment**, de 12,899 u à 0, **zéro remontée**, puis 2 073 images à
+  // exactement 0. Avant : 2 279 sur 2 369 (96,2 %), sans structure.
   const j = journal('.banc/R30/molette-hors-centre-px.json')
   const hors = j.frames.filter((x) => x.mode === 'surface' && !x.crop)
-  const fautives = hors.filter((x) => x.ecartAxe > 0.01)
+  assert.ok(hors.length > 100, `journal trop court : ${hors.length} images hors du crop`)
+  // ① le retour est en TÊTE : une fois sur l'axe, on n'en ressort plus
+  let i = 0
+  while (i < hors.length && hors[i].ecartAxe > 0.01) i++
+  const retour = hors.slice(0, i)
+  const apres = hors.slice(i)
+  const rechutes = apres.filter((x) => x.ecartAxe > 0.01)
   assert.equal(
-    fautives.length, 0,
-    `${fautives.length} images sur ${hors.length} (${(100 * fautives.length / hors.length).toFixed(1)} %) `
-    + `ont la cible hors de l’axe HORS DU CROP ; pire écart ${Math.max(...hors.map((x) => x.ecartAxe)).toFixed(4)} u`
+    rechutes.length, 0,
+    `${rechutes.length} images sur ${apres.length} ressortent de l’axe APRÈS y être revenues `
+    + `(pire ${Math.max(0, ...rechutes.map((x) => x.ecartAxe)).toFixed(4)} u) — le zoom translate encore la cible`
+  )
+  // ② et le retour lui-même ne remonte jamais
+  let remontees = 0
+  for (let k = 1; k < retour.length; k++) if (retour[k].ecartAxe > retour[k - 1].ecartAxe + 1e-9) remontees++
+  assert.equal(
+    remontees, 0,
+    `le retour à l’axe remonte ${remontees} fois sur ${retour.length} images — il ne converge pas`
+  )
+  assert.ok(
+    retour.length < hors.length / 2,
+    `le retour occupe ${retour.length} images sur ${hors.length} : ce n’est plus un retour, c’est le régime`
   )
 })
 
@@ -276,29 +370,69 @@ test('⛔ ROUGE C bis — même un balayage VIOLENT en un seul événement ne so
 
 const BORNE_R23_U = -0.9577
 
+// ⚠️ **CES DEUX GARDES LISENT DÉSORMAIS LA POSE *DESSINÉE* — Tâche R29 bis, et
+// voici pourquoi, avec le témoin qui interdit de s'en servir comme d'une excuse.**
+//
+// ⛔ **LA SONDE DE R30 EST BRANCHÉE SUR `controls.update`, ET CE N'EST PAS LA FIN
+// DE L'IMAGE.** `redresserSurLeSol` (main.js) écrit `camera.position` **sans**
+// rappeler `controls.update()` : la butée de sol s'applique donc APRÈS le dernier
+// `controls.update()` de l'image, et une sonde branchée dessus relève une pose
+// qui **va être corrigée**. Le signe qui l'a trahi : **toutes** les images
+// fautives portent `phi > maxPhi`, la butée dépassée de 0,9° à 8,2° — la loi
+// SAIT, elle n'avait simplement pas encore parlé.
+//
+// ➡️ La sonde relève donc aussi au seul endroit qui ne ment pas, juste avant que
+// l'image parte au GPU (`composer.render`). Mêmes gestes, même session, deux
+// séries — et c'est la seconde qui décrit ce qu'un utilisateur voit :
+//
+//   dans `controls.update` : 24 / 16 743 sous le sol (0,143 %), pire −4,4590 u
+//   AU RENDU               :  0 / 10 341 sous le sol (0,000 %), pire  0,0000 u
+//
+// ⚡ **ET CE N'EST PAS UN ARTEFACT QUI EXCUSE TOUT.** Témoin mesuré en retirant
+// le second `redresserSurLeSol()` de `tick()`, tout le reste égal : **16 images
+// DESSINÉES sous le sol, pire −3,5993 u, 3 configurations hors borne**. Le
+// défaut était donc bien réel à l'écran, et c'est ce correctif qui le ferme ; ce
+// que la sonde d'origine surestimait, c'est son AMPLEUR — −8,50 u annoncés
+// contre −3,60 u réellement dessinés.
+
 test('⛔ ROUGE D — la borne de −0,9577 u publiée par R23 est dépassée, aux cinq lieux', () => {
   const j = journal('.banc/R30/sol.json')
   const fautifs = []
+  let vus = 0
   for (const L of j.lieux) {
-    for (const [k, b] of Object.entries(L.parTag)) {
+    for (const [k, b] of Object.entries(L.parTagDessin ?? {})) {
+      vus++
       if (b.hmin != null && b.hmin < BORNE_R23_U) fautifs.push(`${k} : ${b.hmin.toFixed(4)} u`)
     }
   }
+  assert.ok(vus > 0, 'le journal ne porte pas la série AU RENDU — rejoue `--manche sol`')
   assert.deepEqual(
     fautifs, [],
-    `${fautifs.length} configurations passent sous la borne publiée de ${BORNE_R23_U} u :\n  `
-    + fautifs.join('\n  ')
+    `${fautifs.length} configurations passent sous la borne publiée de ${BORNE_R23_U} u SUR L'IMAGE `
+    + `DESSINÉE :\n  ` + fautifs.join('\n  ')
   )
 })
 
 test('⛔ ROUGE D bis — et le compte d’images sous le sol dépasse les 0,16 % publiés', () => {
   const j = journal('.banc/R30/sol.json')
   let n = 0, sous = 0
-  for (const L of j.lieux) for (const b of Object.values(L.parTag)) { n += b.n; sous += b.sous }
+  for (const L of j.lieux) for (const b of Object.values(L.parTagDessin ?? {})) { n += b.n; sous += b.sous }
+  assert.ok(n > 0, 'le journal ne porte pas la série AU RENDU — rejoue `--manche sol`')
   const part = sous / n
   assert.ok(
     part <= 0.0016,
-    `${sous} images sous le sol sur ${n} (${(100 * part).toFixed(2)} %), contre 0,16 % publiés par R23 §②`
+    `${sous} images DESSINÉES sous le sol sur ${n} (${(100 * part).toFixed(2)} %), contre 0,16 % publiés par R23 §②`
+  )
+  // ⚠️ **ET LA SÉRIE INTERMÉDIAIRE RESTE SURVEILLÉE**, parce qu'elle n'est pas
+  // nulle : elle dit que la butée corrige APRÈS coup au lieu d'empêcher. Qu'elle
+  // remonte au-dessus du relevé d'aujourd'hui serait un signal, même si l'écran
+  // reste propre.
+  let ni = 0, si = 0, pire = 0
+  for (const L of j.lieux) for (const b of Object.values(L.parTag)) { ni += b.n; si += b.sous; if (b.hmin != null) pire = Math.min(pire, b.hmin) }
+  assert.ok(
+    si / ni <= 0.0020 && pire >= -5,
+    `la série intermédiaire (dans controls.update) a empiré : ${si}/${ni} images, pire ${pire.toFixed(4)} u `
+    + '— relevé de référence 24/16 743 et −4,4590 u'
   )
 })
 
