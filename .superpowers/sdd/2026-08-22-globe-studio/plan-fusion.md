@@ -177,3 +177,23 @@ chargement de cette même page.
 mesure d'ombre, de grain ou de nuages doit relever `window.__palierMachine`
 **dans le même relevé**, sinon elle attribue au curseur ce que fait le palier.
 → signalé à **R21**.
+
+### ✅ ③ La réserve de R22 sur la vue orbitale est levée — vérifié à l'écran
+
+R22 écrivait : *« rien de vérifié à l'écran sur la vue orbitale (invariance
+prouvée arithmétiquement seulement) »*. Fait le 2026-09-01 sur `regroupement`
+fusionné, `modes.enterOrbit()`, altitude **5 795 km**, océan Indien / Madagascar :
+
+- `gridOpacity = 0,9` → **le graticule se voit**, méridiens et parallèles
+  distincts sur l'océan comme sur la terre ;
+- `gridOpacity = 0` → **ils disparaissent entièrement**, aucun résidu.
+
+Le fond marin de R18 se lit aussi en clair à cette altitude (zones de fracture
+de la dorsale), et le relief de Madagascar est hypsométrique, pas nu.
+
+⚠️ **Un point à ne PAS confondre avec la planète nue** : juste après
+`enterOrbit()`, la caméra se pose à **29 381 m** (`dist = 100,46` pour
+`R_GLOBE = 100`) et l'écran est alors un **aplat olive uniforme** — c'est le
+niveau de tuile non encore raffiné à cette altitude, pas D15 qui aurait lâché.
+Dès qu'on dézoome, le relief et la bathymétrie arrivent. **Mesurer avant de
+crier au retour du défaut filmé.**
