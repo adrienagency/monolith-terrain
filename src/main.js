@@ -5267,6 +5267,14 @@ function poserVisibiliteSocle(v) {
   // étaient écrites. Les nuages répondent à la question des BOUTONS.
   clouds.setVisible(vue.nuages)
   plinth.setVisible(vue.socle && params.plinth && !params.regionMode)
+  // ⚠️ **ET LES PAROIS DE LA DÉCOUPE SUIVENT LE MÊME RÉGLAGE — Tâche R22,
+  // option 48.** ⛔ **SANS `vue.socle` DANS LE PRODUIT, ET C'EST LA DIFFÉRENCE
+  // DE FOND** : la ligne du dessus éteint le socle du bloc PLAT, dont
+  // `vue.socle` dit s'il est dessiné ; les parois du crop, elles, vivent dans la
+  // scène du globe, qui est dessinée précisément quand `vue.socle` est faux.
+  // Les accrocher à `vue.socle` les aurait éteintes exactement là où on veut
+  // les voir.
+  globe?.setParoisVisibles?.(!!params.plinth && !params.regionMode)
   if (regionSkirt) regionSkirt.mesh.visible = vue.socle
   groundInfo.setVisible(vue.cartouche && params.groundInfo)
   traffic.setVisible(vue.socle)
@@ -5920,6 +5928,31 @@ function contexteCrop() {
       }),
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,
+      // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ════════════
+      //
+      // ⛔ **CES DEUX CURSEURS N'AVAIENT AUCUN RECEVEUR : LE NUANCEUR DU CROP
+      // N'AVAIT PAS UNE LIGNE DE GRILLE.** Ce n'était donc pas un
+      // rebranchement mais une écriture (`globe.js`, bloc « LA GRILLE DE
+      // RELEVE DU BLOC »). Mesuré avant, fenêtre 1:1 512 × 320 : **0,0000**
+      // pour l'opacité comme pour la taille.
+      //
+      // ⚠️ **ON LIT LES UNIFORMES DU SOCLE, PAS `params`** — même règle que
+      // pour les dix curseurs d'Atlas et pour l'intervalle des courbes
+      // au-dessus : `ui/map-panel.js` écrit `terrain.mapUniforms.uGridStep`
+      // EN DIRECT, sans repasser par `params` à tous les coups.
+      //
+      // ⚠️ **LA VALEUR PART EN UNITÉS DE BLOC, ET C'EST VOULU** : la
+      // conversion en mètres a besoin de la largeur au sol du crop
+      // (`largeurCropM`), que seul le globe possède. Elle est donc faite dans
+      // `poserHabillage`, avec sa formule écrite dans `pasGrilleBloc`.
+      // ⛔ Ne PAS la faire ici avec `dem.extentMeters` : les deux largeurs
+      // diffèrent de **0,0079 %** (27 354,3 m contre 27 356,4 m à La Réunion,
+      // relevé), et le compte de cellules cesserait d'être celui du socle.
+      gridStepBloc: terrain.mapUniforms.uGridStep.value,
+      gridOpacite: terrain.mapUniforms.uGridOpacity.value,
+      gridCouleur: `#${terrain.mapUniforms.uGridColor.value.getHexString()}`,
+      // le span du bloc VIVANT — même expression que `contourIntervalM`
+      gridSpanBloc: TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1),
       // ══════ LA NORMALE PAR FRAGMENT — Tâche P9 ═══════════════════════════
       //
       // ⚠️ **VRAI DÈS QU'IL Y A UN CROP, ET PAS UN RÉGLAGE.** Ce n'est pas une
@@ -11886,6 +11919,19 @@ const panelCtx = {
   onPlinthToggled: () => {
     groundInfo.rerender?.()
     applyRaceToBlock()
+    // ══════ ET LES PAROIS DE LA DÉCOUPE — Tâche R22, option 48 ═════════════
+    //
+    // ⛔ **LE CURSEUR NE PARLAIT QU'AU SOCLE DU BLOC PLAT, QUI N'EST PLUS
+    // RENDU.** `plinth.setVisible` pilote un objet de la scène de surface, et
+    // cette scène est éteinte sous la sphère ; ce qu'on voit à l'écran, ce sont
+    // les parois de `parois-crop.js`. Mesuré avant : l'interrupteur déplaçait
+    // **0,0004** de pixel sur une fenêtre 1:1 de 512 × 320 (plancher 0,0000).
+    //
+    // ⚠️ **UN SEUL SITE, ET C'EST CELUI-CI.** Le `set:` du panneau appelle déjà
+    // ce rappel ; `poserVisibiliteSocle` le rejoue au changement de mode, et
+    // `construireParoisCrop` réapplique l'état retenu à chaque mesh neuf. Un
+    // quatrième site aurait été une quatrième chance de diverger.
+    globe?.setParoisVisibles?.(!!params.plinth && !params.regionMode)
   },
 }
 
