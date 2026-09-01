@@ -5907,6 +5907,46 @@ function contexteCrop() {
       // `CHAMPS_HABILLAGE` impose à tout ce qui n'est ni scalaire ni chaîne.
       ambianteCoef: coefAmbiante(renderer, scene.environment),
       ambianteIntensite: scene.environmentIntensity,
+      // ══════ L'APPOINT — Tâche R21, options 69 à 73 de l'inventaire ════════
+      //
+      // ⛔ **CINQ CURSEURS VISIBLES ET INERTES.** L'appoint est une seconde
+      // `THREE.DirectionalLight` de la scène du BLOC PLAT (`fillLight`), et le
+      // crop ne reçoit pas des lampes mais des IRRADIANCES. Mesuré aux deux
+      // bouts des cinq, mouvement ambiant coupé, plancher de bruit **0,0000** :
+      // écart moyen **0,000** et gradient **0,000**.
+      //
+      // ⚠️ **ON LIT LA LAMPE, PAS `params` — MÊME RÈGLE QUE POUR LE SOLEIL
+      // TRENTE LIGNES PLUS HAUT, ET POUR LA MÊME RAISON, CHIFFRÉE.**
+      // `fillLightIntensity` (`daycycle.js`) porte deux choses que `params` ne
+      // porte pas : l'interrupteur — elle rend **0 exactement** quand
+      // `fillEnabled` est faux, sans retirer la lampe — et l'écrêtage à
+      // **[0 ; 4]**. Passer `params.fillIntensity` aurait éclairé le crop avec
+      // un appoint éteint, et l'aurait laissé monter à 12 sur un gabarit à 12.
+      //
+      // ⚠️ **L'AZIMUT PASSE EN ÉCART, PAS EN ABSOLU** : `fillDirection` fait la
+      // somme `sunAzimuth + offset` et l'écrêtage d'élévation, et
+      // `directionAppointMonde` (`monde/lumiere-sphere.js`) l'appelle. Envoyer
+      // l'azimut déjà sommé aurait été une seconde écriture de cette somme.
+      appointAzimut: params.fillAzimuthOffset ?? 150,
+      appointElevation: params.fillElevation ?? 20,
+      appointCouleur: `#${fillLight.color.getHexString()}`,
+      appointIntensite: fillLight.intensity,
+      // ══════ L'OMBRAGE DES PENTES — Tâche R21, option 30 ═══════════════════
+      //
+      // ⛔ **« AUCUN CÔTÉ GLOBE »**, disait l'inventaire, et `naturel-crop.js`
+      // avait DÉCLARÉ ce poste laissé, à raison pour son époque : *« les tuiles
+      // du globe ne portent que `vNormalW`, la normale de la SPHÈRE »*. La
+      // Tâche P9 a créé `nMonde`, la normale par fragment, et D15 l'allume
+      // partout : la pente existe, la transcription est littérale.
+      //
+      // ⚠️ **ZÉRO EN MODE ATLAS, ET C'EST `uColorMode` QUI LE DIT, PAS
+      // `params.colorMode`.** Le socle range ce brunissage dans le `else` de
+      // `uColorMode == 1` ; la ligne de l'interface est déjà cachée en Atlas
+      // (`visibleWhen(slopeRow, () => !isNatural())`). ⛔ **Et le gater sur
+      // `uAnalysisOn` du globe aurait fait CLIGNOTER le brun** : en mode Atlas
+      // `uAnalysisOn` reste à 0 pendant les ~464 ms où le travailleur cuit
+      // l'analyse, alors qu'`uColorMode`, lui, vaut 1 dès le premier instant.
+      slopeTint: terrain.mapUniforms.uColorMode.value === 1 ? 0 : terrain.mapUniforms.uSlopeTint.value,
       // ══════ ET L'AMBIANTE DE LA PAROI, QUI N'EST PAS CELLE-LÀ — Tâche P8 ═══
       //
       // ⛔ **LE COMMENTAIRE JUSTE AU-DESSUS NE TIRE QUE LA MOITIÉ DE SA PROPRE
@@ -11964,6 +12004,15 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
       sun.shadow.radius = v
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
     },
+    // ══════ CE QUI EST DESSINÉ, ET DONC CE QUI PEUT AGIR — Tâche R21 ════════
+    //
+    // ⚠️ **LE PANNEAU DEMANDE « LE BLOC PLAT EST-IL DESSINÉ », PAS « QUEL EST LE
+    // MODE ».** C'est la même question que `visibiliteSurface` tranche déjà pour
+    // le maillage, et sa réponse sous le drapeau est `socle = false` — relevé à
+    // l'écran, `terrain.mesh.visible = false`. Un curseur qui ne pilote QUE ce
+    // maillage n'a donc plus de receveur, et c'est `monde/lumiere-sphere.js` qui
+    // dit lesquels : la table y est, exécutée par le test, pas relue dans le DOM.
+    surSphere: () => terreUniqueBranchee,
     // Les deux interrupteurs. Le panneau n'a pas à savoir que l'un libère au
     // passage une carte d'ombre de 16 Mo : il dit ON/OFF.
     setSunEnabled,

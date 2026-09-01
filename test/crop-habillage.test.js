@@ -591,6 +591,7 @@ import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 import { NATUREL_MONDE } from '../src/monde/naturel-crop.js'
 import { ECLAIRAGE_MONDE } from '../src/monde/eclairage-crop.js'
 import { APPARENCE_MONDE } from '../src/monde/melange-crop.js'
+import { APPOINT_MONDE_ETEINT, PENTE_MONDE_NULLE } from '../src/monde/lumiere-sphere.js'
 
 // ══════════ ⑨ poserHabillage / retirerHabillage, EXERCÉES ══════════════════
 //
@@ -698,6 +699,16 @@ function globeStub(crop = REPERE) {
       uParoiSolIrr: val(vec3(...ECLAIRAGE_MONDE.solIrr)),
       uAlbedoBase: val(vec3(...ECLAIRAGE_MONDE.albedoBase)),
       uAlbedoTeinte: val(ECLAIRAGE_MONDE.albedoTeinte),
+      // ══════ L'APPOINT ET L'OMBRAGE DES PENTES — Tâche R21 ═════════════════
+      //
+      // ⚠️ **AUX MÊMES VALEURS QUE LE CONSTRUCTEUR**, pour la raison écrite
+      // plus haut : c'est ce qui rend ⑨h capable de voir un `retirerHabillage`
+      // qui oublierait de les rendre. `uSlopeTint` est le plus exposé des trois
+      // — il est PARTAGÉ par toutes les tuiles et son bloc n'a pas d'autre garde
+      // que sa propre valeur, exactement comme `uContourInterval`.
+      uAppointDir: val(vec3(...APPOINT_MONDE_ETEINT.dir)),
+      uAppointIrr: val(vec3(...APPOINT_MONDE_ETEINT.irr)),
+      uSlopeTint: val(PENTE_MONDE_NULLE),
       uParoiCouleur: val(couleurStub('#d8d4cc')),
       uSurfaceFx: val(APPARENCE_MONDE.surfaceFx),
       uFxBlend: val(APPARENCE_MONDE.fxBlend),
