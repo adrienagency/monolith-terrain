@@ -220,6 +220,28 @@ export function buildEffectsPanel(ctx) {
     cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
     cloudBaked('Étalement en altitude', 'cloudAltSpread', 0, 1, 0.05),
     cloudLive('Vitesse de dérive', 'cloudDrift', 0, 4, 0.1),
+    // ⛔ **CURSEUR MORT, MESURÉ — Tâche R20.** `cloudDriftVar` est déclaré dans
+    // `params` (`main.js`), sauvegardé dans les templates (`templates-user.js`)
+    // et servi ici — mais **aucune ligne de `clouds2.js` ni de `clouds-sim.js`
+    // ne le lit** (`grep -rn cloudDriftVar src/` : trois occurrences, aucune de
+    // lecture). La mesure le confirme par DEUX grandeurs, prises sur les
+    // entités elles-mêmes et non à l'écran (`.banc/R20/cout/diag-vent.json`,
+    // déplacement sur 3 s, 20 nuages) :
+    //
+    //   | valeur | déplacement moyen | écart-type | dispersion |
+    //   |---|---|---|---|
+    //   | 0 | 0,6715 | 0,3339 | 0,4972 |
+    //   | 1 | 0,6681 | 0,3301 | 0,4941 |
+    //
+    // ⚠️ **LA MOYENNE NE SUFFISAIT PAS À LE JUGER** : ce curseur est censé
+    // porter la VARIANCE des vitesses, à laquelle une moyenne est aveugle par
+    // construction. C'est la DISPERSION qui tranche, et elle ne bouge pas non
+    // plus (×0,99). Ses deux voisins, eux, répondent sur le même banc :
+    // `windSpeed` ×42,4 et `cloudDrift` ×22,2.
+    //
+    // ⛔ **ON NE LE RETIRE PAS** : `templates-user.js` le sérialise, et des
+    // templates déjà enregistrés le portent. Il est DÉCLARÉ ici, avec sa
+    // mesure, comme R18 a déclaré les siens.
     cloudLive('Variation de dérive', 'cloudDriftVar', 0, 1, 0.05),
   ]
   sCld.body.append(...cloudRows)
