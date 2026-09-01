@@ -15,8 +15,8 @@ travail et comment le recoudre. Les branches, elles, survivent dans git.
 ## L'ÉTAT AU 2026-09-01, 00 h
 
 **Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`.**
-**4 544 tests · 0 échec · `audit:tests` 236 = 236** (R20 bis, R22, l'arbitrage du ciel, R23, R24).
-**Seul R21 (l'éclairage) est encore dehors.**
+**4 572 tests · 0 échec · `audit:tests` 237 = 237.**
+✅ **LES CINQ TÂCHES SONT FUSIONNÉES.** Il n'y a plus de branche dehors.
 
 ⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
 démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
@@ -34,12 +34,7 @@ démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
 | **R20 ter** | **le ciel par défaut se voit — ×2,3 à ×16 de pixels selon le lieu** | `nuages-globe` |
 | **R23** | **le geste continu, la caméra hors du sol, et le retour à l'orbite** | `vitesse-camera` |
 | **R24** | **les points cotés (0 → 14), les sommets bornés, `cities.json` supprimé** | `toponymie-globe` |
-
-### En cours — quatre arbres, quatre agents
-
-| tâche | sujet | branche | arbre |
-|---|---|---|---|
-| **R21** | l'éclairage : ombres, lampe d'appoint, ombrage des pentes (8 options) | `lumiere-crop` | `C:\Dev\wt-lum` |
+| **R21** | **l'éclairage — 6 branchés, 1 déjà vivant, 1 sans objet et caché** | `lumiere-crop` |
 
 **Périmètres attribués, pour que les fusions ne se battent pas :**
 - R21 → `light-panel.js`, `eclairage-crop.js`, le nuanceur de `globe.js`
@@ -53,12 +48,9 @@ structurelles, l'éclairage de R21 se posera dessus.
 
 ---
 
-## L'ORDRE DE FUSION
+## L'ORDRE DE FUSION — épuisé
 
-1. ~~R22~~ **fusionné**.
-2. **R21** (`lumiere-crop`) — l'éclairage, par-dessus.
-3. ~~R23~~ **fusionné**.
-4. ~~R24~~ **fusionné**.
+R22, puis l'arbitrage du ciel, puis R23, R24 et R21. **Tout est rentré.**
 
 ---
 
@@ -80,7 +72,7 @@ contenu du disque. Un écart = un test qui ne tourne pas.
 
 ## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 544 · 0 échec**
+1. `npm test` — **base à battre : 4 572 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
 3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
    `t39.jpg`) : elles sont l'état AVANT de cette campagne.
@@ -256,3 +248,34 @@ terrain… »* avec `globe._crop = false` et une pluie de 404 et de
 ➡️ **Le réseau était dégradé, pas le code** : la page a fini par se charger seule.
 ⚠️ Mais quatre agents plus moi tapions les mêmes fournisseurs en parallèle —
 **une mesure de chargement prise pendant une campagne parallèle ne vaut rien.**
+
+---
+
+## LA SEULE COLLISION DE LA VAGUE, ET LE GARDE-FOU QU'ELLE A PRODUIT
+
+R21 et R22 se partageaient `poserHabillage` — le recouvrement annoncé. Résultat à
+la fusion : **six tests de GRILLE en échec, aucun ne parlant de lumière**, sur
+`TypeError: Cannot set properties of undefined (setting 'value')`.
+
+Cause : R21 ajoute `uAppointDir`, `uAppointIrr`, `uSlopeTint` ; la **table
+d'uniformes factices** de `test/grille-crop.test.js` ne les déclarait pas.
+
+⚠️ **C'est la DEUXIÈME fois** : R22 avait déjà vu treize tests tomber d'un coup
+sur la même table. ⛔ **Ajouter l'uniforme manquant ne suffit pas** — c'est ce
+qu'on a fait deux fois.
+
+✅ **Garde ⑨ ajoutée** : elle extrait le corps de `poserHabillage` dans
+`src/globe.js`, y relève tout `u.uXxx`, et compare à la table du test. **Vérifiée
+en la cassant** : elle rend *« la table factice de ce fichier ne déclare pas :
+uSlopeTint »* — le nom du coupable, que l'erreur d'origine ne donnait pas.
+
+### ⚠️ Et j'ai payé un piège d'édition en l'écrivant
+
+Mon script Python a écrit la regex `/\bu\./` avec un `\b` **interprété comme un
+retour arrière** (0x08) : le test trouvait **0 uniforme sur 68** et se déclarait
+« garde inopérante ». Il ne servait à rien tout en étant vert de justesse.
+
+➡️ **C'est le cousin exact de l'incident CRLF** déjà consigné : *un script
+d'édition qui écrit du texte non littéral corrompt en silence*. Écrire en
+binaire ne suffit pas — **relire l'octet écrit** (`grep | cat -A`) quand on pose
+une expression régulière ou une séquence d'échappement.
