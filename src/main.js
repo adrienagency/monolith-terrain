@@ -143,6 +143,7 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 // par image relevées dans l'application vivante — voir le §3 du module.
 import { creerVeilleRepos } from './monde/veille-repos.js'
 import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
+import { decalageRecentrage } from './monde/pivot-terre.js'
 import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
@@ -6623,6 +6624,16 @@ modes = new Modes({
     // signal de LIEU. Son front descendant rend la vue au nadir, pour que la
     // sortie d'orbite n'ait plus rien à faire claquer. Voir `_armerRetourNadir`.
     surLeBloc: () => !!veilleCrop?.pose,
+    // ⚡ **ET LE PRÉDICAT DU PIVOT — R27.** *« Il doit toujours viser le centre
+    // de la Terre. Il change uniquement quand on passe en mode bloc croppé. »*
+    //
+    // ⛔ **CE N'EST PAS `!surLeBloc()`, ET LA DIFFÉRENCE EST UN RÉGIME ENTIER.**
+    // Sans `terre unique` il n'y a pas de crop du tout : `veilleCrop` est nulle,
+    // donc `surLeBloc()` rend faux POUR TOUJOURS, et viser l'axe deviendrait la
+    // loi du mode plat hérité — où viser un point EST le produit. Le terme
+    // `terreUniqueBranchee` est donc la moitié de la question, pas une prudence.
+    // `?terre=deux` rend le dépôt d'avant, au bit près.
+    horsDuCrop: () => terreUniqueBranchee && !veilleCrop?.pose,
     // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
     // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
     // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à
@@ -13090,6 +13101,7 @@ function updateCameraMotion(dt) {
     const _azAvantUpdate = controls.getAzimuthalAngle()
     controls.update() // orbital-mode camera is driven by the mode machine
     pivoterAutourDuBloc(_azAvantUpdate)
+    recentrerSurLaTerre()
   }
   // ⚠️ **HORS DES BRANCHES, ET C'EST UNE MESURE QUI L'A DÉPLACÉ ICI.** Posé dans
   // la seule branche `surface`, le redressement sautait les images où une AUTRE
@@ -13171,6 +13183,84 @@ function pivoterAutourDuBloc(azAvant) {
   controls.target.z += dec.z
   camera.position.x += dec.x
   camera.position.z += dec.z
+  camera.lookAt(controls.target)
+}
+
+// ══════════ LE PIVOT RESTE LE CENTRE DE LA TERRE JUSQU'AU CROP — R27 ═══════
+//
+// > **Adrien :** *« Il doit toujours viser le centre de la Terre. Il change
+// > uniquement quand on passe en mode bloc croppé. Si on dézoome depuis le mode
+// > croppé, la caméra revient automatiquement avec une orbite autour du centre
+// > de la Terre. »*
+//
+// ⛔ **R13 bis A CONCLU « RIEN À FAIRE », ET LA MESURE LE DÉMENT.** Sa preuve ne
+// portait que sur l'AZIMUT, où le `y` du pivot ne compte pas ; elle laissait
+// ouvert le terme qui manque vraiment — **`controls.target` n'est pas sur
+// l'axe**. Relevé DANS la boucle (`scripts/sonde-pivot-r27.mjs`) : jusqu'à
+// **12,898 unités** d'écart pendant la descente, et le centre du bloc à
+// **188,7 px** du centre de l'écran à la naissance du crop.
+//
+// ➡️ **LE PAS EST RIGIDE ET BORNÉ EN ANGLE VU** — la loi, ses deux nombres et
+// leur mesure vivent dans `monde/pivot-terre.js`. Caméra ET cible reçoivent le
+// MÊME décalage : la distance caméra → cible est invariante **par
+// construction** — `(P + δ) − (T + δ) = P − T` —, donc `veille-repos`
+// (`SEUIL_BOUGE_LOG = 1e-4`) ne voit rigoureusement rien et D16 ter n'est pas
+// dépensé. C'est la garantie de la rotation rigide de R13, prise par l'autre
+// bout.
+//
+// ⚠️ **LE PRÉDICAT EST `hooks.horsDuCrop`, ET IL EST ÉNONCÉ UNE SEULE FOIS** —
+// là où le hook est écrit, à côté de `surLeBloc`. Il vaut `terre unique
+// branchée ET crop non posé` : `veilleCrop.pose` est le point unique
+// d'alimentation (`branchement-crop.js`), et `veilleSocle` n'est jamais mise à
+// jour sous le mode sphère — elle resterait fausse pour toujours.
+//
+// ⚠️ **ET RIEN NE BOUGE HORS DU RÉGIME DU CROP.** Sans `terre unique` il n'y a
+// pas de crop du tout : le recentrage forcerait alors la cible sur l'axe dans le
+// mode plat hérité, où la visée d'un point EST le produit. `?terre=deux` reste
+// donc le dépôt d'avant, au bit près — c'est le second terme du hook.
+//
+// ⚠️ **ET IL COURT PENDANT LE BALAYAGE DE POSE, CONTRAIREMENT À LA CORRECTION
+// DE PIVOT — MESURÉ.** Le balayage de retour au nadir est armé exactement sur le
+// front descendant du crop : sans ce terme, le recentrage restait **bloqué
+// 138 images** (relevé au navigateur, premier jet de R27) et n'aboutissait que
+// par accident, au cran suivant. Le retour d'Adrien commençait donc deux
+// secondes trop tard.
+//
+// ⛔ **CE N'EST PAS UNE BAGARRE, ET C'EST CE QUI LE REND SÛR.** On ne réécrit
+// pas la caméra que le balayage vient de poser : on **translate le balayage
+// lui-même**, sa cible comprise. `poseFonduArrivee` rend
+// `cible.xz + direction_h × r` à `camY` constant ; translater `cible` en x/z
+// translate sa sortie du même vecteur, sans toucher ni `camY`, ni `direction`,
+// ni l'avancement. **L'inclinaison balayée est donc identique au bit**, et
+// D16 ter ne voit rien — c'est vérifié sur la remontée complète, pas supposé.
+// Le tween de plongée et les chargements, eux, restent exclus : ils
+// INTERPOLENT deux poses absolues, qu'une translation ferait dériver.
+function recentrerSurLaTerre() {
+  if (!modes || modes.mode !== 'surface') return
+  // ⛔ Mêmes gardes que la correction de pivot, MOINS le balayage de pose —
+  // voir juste au-dessus.
+  if (modes.busy || modes.travel || modes._diveTween) return
+  // ⚠️ **LE MÊME PRÉDICAT QUE `_cibleVisee`, ET LA MÊME DÉFINITION** : sur le
+  // crop, le pivot appartient au bloc — c'est l'exception qu'Adrien nomme. Deux
+  // écritures de la même question finiraient par diverger d'une version ; le
+  // hook est le seul énoncé.
+  if (!modes.hooks?.horsDuCrop?.()) return
+  const dec = decalageRecentrage({
+    cibleX: controls.target.x,
+    cibleZ: controls.target.z,
+    distance: controls.getDistance(),
+  })
+  if (dec.x === 0 && dec.z === 0) return
+  controls.target.x += dec.x
+  controls.target.z += dec.z
+  camera.position.x += dec.x
+  camera.position.z += dec.z
+  // ⚠️ **ET LA CIBLE DU BALAYAGE AVEC**, sinon `_avancerFonduPose` reposerait la
+  // caméra sur l'ancienne à l'image même : le décalage cesserait d'être rigide,
+  // la distance changerait, et `veille-repos` verrait passer exactement ce que
+  // tout ce module est fait pour lui cacher.
+  const balayage = modes._fonduPose
+  if (balayage?.cible) { balayage.cible.x += dec.x; balayage.cible.z += dec.z }
   camera.lookAt(controls.target)
 }
 
