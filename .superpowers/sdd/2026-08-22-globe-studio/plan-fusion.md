@@ -352,3 +352,83 @@ chargements avant de corriger : entre la fermeture de la porte corrigée (1,7 s)
 et la 45ᵉ seconde, **0 tuile n'arrive et 0 requête ne part**. En revanche un
 temps de PRÉPARATION relevé avant R26 ne se compare plus à un relevé d'après :
 c'est le banc qui a changé, pas la scène.
+
+---
+
+# ÉTAT AU 2026-09-01, SOIR — 4 667 tests · 0 échec · audit 241 = 241
+
+**Seize tâches fusionnées.** Aucune branche dehors.
+
+## ⚡ LE RÉSULTAT QUI VAUT POUR TOUTE LA SUITE
+
+**« Viser le centre de la Terre » et « zoomer vers le curseur » sont la MÊME
+quantité, et donc incompatibles.** Démontré, pas supposé : une homothétie de
+centre `P` et de rapport `f` se décompose **exactement** en
+
+> *(recul pur autour de la cible)* + *(translation rigide `δ = (1−f)(P−T)`)*
+
+La sortie d'axe **est** `δ`. Et `δ` est **aussi** ce qui garde immobile le point
+sous le curseur. **Retirer l'un retire l'autre.**
+
+✅ **Arbitrage d'Adrien, 2026-09-01 : « je garde ».** Hors du crop, `δ` est
+abandonné — zoom radial, comme le bouton. **Sur le crop, le zoom vers le curseur
+est intact.** Coût accepté : au-dessus de 40 343 m la molette zoome vers le
+centre de la Terre. Le prédicat est **une ligne isolée** si l'arbitrage change.
+
+Mesuré : **96,2 % → 14,1 %** d'images hors axe, les 341 restantes formant **un
+seul segment** de 12,899 u à 0, **zéro remontée**.
+
+## ⛔ POURQUOI DEUX PASSES ONT DÉCLARÉ CE DÉFAUT RÉGLÉ À TORT
+
+**Elles ont mesuré `cranZoom` — le chemin des boutons — qui ne touche JAMAIS la
+cible.** Elles ont donc prouvé la règle sur le seul chemin où elle était déjà
+vraie, et publié « écart : exactement 0 ». Le chemin de la molette est
+`_applyZoom`, qui met **caméra ET cible** à l'échelle autour du curseur : la
+cible sortait de l'axe sur **2 291 images / 2 361 hors crop (97 %)**, jusqu'à
+**12,8964 u = 50 375 m = 616 px**.
+
+➡️ **RÈGLE : un correctif de geste se mesure sur le GESTE, jamais sur l'API qui
+lui ressemble.** Compter les appels côté gestionnaire, maillon par maillon.
+
+## LES TROIS DÉFAUTS D'INSTRUMENT DE CETTE PASSE, tous chez le mesureur
+
+1. ⛔ **Le voile d'accueil `.ce-hubveil` avale TOUS les gestes** — 32 crans
+   envoyés, **0 reçus**. `d = 145,5` n'est que `150 × 0,97`. Mes quatre nombres
+   « le zoom est bloqué » étaient **les trois premiers crans derrière un voile**.
+   ⚠️ Les quatre sondes de la campagne le retiraient en première ligne :
+   **personne n'avait mesuré ce que voit un visiteur.** `hub.js` n'avait aucun
+   écouteur `wheel` — ajouté depuis.
+2. ⛔ **La pose de démarrage arrive après un vol de 8,3 s**, et la caméra est
+   **immobile à 26,38 pendant cinq secondes AVANT** ce vol. « Attendre la
+   stabilité » ne suffit donc pas : on mesure un état qui n'est pas l'état final.
+3. ⛔ **Une sonde posée dans `controls.update` lit trop tôt** :
+   `redresserSurLeSol` écrit `camera.position` **sans** rappeler
+   `controls.update()`. Sol sous la caméra, mêmes gestes :
+
+| | dans `controls.update` | **AU RENDU** |
+|---|---|---|
+| avant | 42/16 761 · −8,1405 u | 16/10 343 · **−3,5993 u** |
+| après | 24/16 743 · −4,4590 u | **0/10 341 · 0,0000 u** |
+
+⚠️ **Le témoin interdit d'en faire une excuse** : **16 images DESSINÉES** sous le
+sol avant correctif. Le défaut était réel ; c'est son amplitude qui était
+surestimée.
+
+**La cause du sol** : la butée tournait **57 lignes AVANT `_applyZoom`** dans
+`tick()` — le dernier code à poser la caméra était le zoom, et plus rien ne
+regardait le sol après lui. **C'était un ordre d'appel**, et c'était la réserve
+n° 1 d'un rapport précédent, mot pour mot.
+
+## RESTE OUVERT
+
+- **Arbitrages d'Adrien** : `cloudAltitude` en unités de bloc (le corriger
+  déplace le ciel de tous les gabarits) · le pivot/contraste de rampe **gradés
+  sur le domaine du socle et consommés sur celui du globe** (ils ne coïncident
+  qu'à z13 ; à z9 l'écart vaut 0,835 à La Réunion, 1,271 à l'Everest — le bloc
+  n'a pas le même rendu selon le zoom d'ouverture).
+- `target.y` garde **0,65 u** d'écart hérité du crop · la butée de sol **corrige
+  au lieu d'empêcher** (24 images entre deux écritures) · le retour du pivot dure
+  **5,7 s** · `GL_INVALID_OPERATION` par image composée · le clic sur le globe
+  qui saute onze fois.
+- ⚠️ **Sept des 72 options ✅ de l'inventaire ont leurs deux grandeurs sous le
+  bruit du banc** (98, 36, 91, 120, 11, 56, 24). À remesurer avant de s'y fier.
