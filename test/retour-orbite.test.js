@@ -186,3 +186,55 @@ test('② loin des butées, le budget suit le DÉPLACEMENT, pas l’intention �
   assert.ok(Math.abs(m.zoomNiveau() - b0 - Math.log(controls.getDistance() / d0)) < 1e-9)
   assert.equal(etat.charges.length, 0)
 })
+
+// ══════════ ③ LE MÊME DÉFAUT SUR L'AUTRE CHEMIN — Tâche R27 ═════════════════
+//
+// ⛔ **R23 A CORRIGÉ `_applyZoom` (LA MOLETTE) ET A LAISSÉ `cranZoom` (LE BOUTON
+// ET LE PINCEMENT).** Relevé au navigateur sous le protocole de R27
+// (`.banc/R27/avant2.json`) : remontée pilotée par `cranZoom`, la caméra collée
+// à `d = 150` contre un plafond de 150, **1 174 images, bloqué à z8, l'orbite
+// jamais atteinte**. Exactement le §④ de R23, sur le chemin qu'elle n'avait pas
+// mesuré.
+
+test('③ au plafond, `cranZoom` vers l’extérieur compte quand même son niveau', async () => {
+  const { m, camera, controls } = await machine()
+  poser(camera, controls, controls.maxDistance)
+  const d0 = controls.getDistance()
+  const b0 = m.zoomNiveau()
+  m.cranZoom(-1) // vers l'extérieur
+  // le DÉPLACEMENT est nul — la butée a tout mangé, et c'est voulu
+  assert.equal(controls.getDistance(), d0, 'la butée tient toujours la caméra')
+  // ⚡ mais l'INTENTION est comptée : un cran vaut `ln √2`
+  assert.ok(Math.abs(m.zoomNiveau() - b0 - Math.log(Math.SQRT2)) < 1e-9,
+    `budget ${m.zoomNiveau() - b0} au lieu de ${Math.log(Math.SQRT2)}`)
+})
+
+test('③ bis et il finit par ouvrir la porte orbitale, au lieu de geler', async () => {
+  const { m, camera, controls } = await machine({ coarsen: false })
+  poser(camera, controls, controls.maxDistance)
+  let orbite = 0
+  m.enterOrbit = async () => { orbite++ }
+  for (let i = 0; i < 3 && orbite === 0; i++) m.cranZoom(-1)
+  assert.equal(orbite, 1, 'plus de niveau plus large : la porte orbitale s’ouvre')
+})
+
+test('③ ter au plancher, `cranZoom` vers l’intérieur NE compte PAS — même asymétrie', async () => {
+  // au zoom fin il n'y a plus rien à affiner : laisser courir le compteur en
+  // ferait un compteur qui ne se dépense jamais, et l'aller-retour deviendrait
+  // asymétrique. C'est la règle de R23, reprise mot pour mot.
+  const { m, camera, controls } = await machine({ refine: false })
+  poser(camera, controls, controls.minDistance)
+  const b0 = m.zoomNiveau()
+  m.cranZoom(1)
+  assert.equal(m.zoomNiveau(), b0, `budget parti à ${m.zoomNiveau()} alors qu’il n’y a rien à affiner`)
+})
+
+test('③ quater loin des butées, `cranZoom` compte le déplacement — elles sont égales', async () => {
+  const { m, camera, controls } = await machine()
+  poser(camera, controls, 40)
+  const d0 = controls.getDistance()
+  const b0 = m.zoomNiveau()
+  m.cranZoom(-1)
+  assert.ok(controls.getDistance() > d0, 'la caméra doit reculer')
+  assert.ok(Math.abs(m.zoomNiveau() - b0 - Math.log(controls.getDistance() / d0)) < 1e-9)
+})
