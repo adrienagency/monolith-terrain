@@ -257,12 +257,16 @@ function loi(expr, noms) {
     .replace(/\bcos\s*\(/g, 'Math.cos(')
     .replace(/\bclamp\s*\(/g, 'CLAMP(')
     .replace(/\bradians\s*\(/g, 'RADIANS(')
+    // ⚠️ `mix` EST ARRIVÉ AVEC LA TÂCHE R19 : `minFade` est désormais fondu vers
+    // 1 dans le crop. Sans cette ligne, ④d lèverait « mix is not defined ».
+    .replace(/\bmix\s*\(/g, 'MIX(')
     .trim()
   const CLAMP = (v, a, b) => Math.min(b, Math.max(a, v))
   const RADIANS = (d) => (d * Math.PI) / 180
+  const MIX = (a, b, t) => a * (1 - t) + b * t
   // eslint-disable-next-line no-new-func
-  const f = new Function(...noms, 'CLAMP', 'RADIANS', `return (${js});`)
-  return (args) => f(...noms.map((n) => args[n]), CLAMP, RADIANS)
+  const f = new Function(...noms, 'CLAMP', 'RADIANS', 'MIX', `return (${js});`)
+  return (args) => f(...noms.map((n) => args[n]), CLAMP, RADIANS, MIX)
 }
 
 test('④a `texel` bascule sur `uMppFacteur`, et l’ÉTEINT est la loi du dépôt', () => {
@@ -313,14 +317,22 @@ test('④c-bis le nuanceur de SOMMETS rend la PROFONDEUR, pas la longueur du vec
 test('④d `minFade` garde la courbe du dépôt : 1 près, 0 loin, et le genou à 1,09', () => {
   // ⚠️ La courbe ne change pas — seule son ENTRÉE change. Une mutation qui
   // toucherait 1.6 ou 0.55 déplacerait le fondu de moitié.
-  const f = loi(affectation('minFade'), ['texel'])
-  assert.equal(f({ texel: 0 }), 1)
-  assert.ok(Math.abs(f({ texel: 1.5 }) - (1.6 - 1.5 * 0.55)) < 1e-12)
-  assert.equal(f({ texel: 1.6 / 0.55 }), 0)
-  assert.equal(f({ texel: 100 }), 0)
+  //
+  // ⚠️ **`dedansCrop = 0` PARTOUT DANS CE TEST, ET C'EST LE SUJET.** La Tâche
+  // R19 a neutralisé ce fondu DANS le crop, où il éteignait les courbes de
+  // niveau (mesuré : 3,57/255 sur les terres). Hors crop — la vue orbitale, la
+  // planète nue, tout ce que cette Tâche K garde — la courbe doit rester celle
+  // du dépôt, AU BIT PRÈS. `test/courbes-crop.test.js` garde l'autre moitié.
+  const f = loi(affectation('minFade'), ['texel', 'dedansCrop'])
+  assert.equal(f({ texel: 0, dedansCrop: 0 }), 1)
+  assert.ok(Math.abs(f({ texel: 1.5, dedansCrop: 0 }) - (1.6 - 1.5 * 0.55)) < 1e-12)
+  assert.equal(f({ texel: 1.6 / 0.55, dedansCrop: 0 }), 0)
+  assert.equal(f({ texel: 100, dedansCrop: 0 }), 0)
+  // et DANS le crop, ce fondu ne coupe plus rien — c'est la loi du socle
+  assert.equal(f({ texel: 100, dedansCrop: 1 }), 1)
   // le genou (là où le fondu s'amorce) : texel = 0,6/0,55 = 1,0909…
-  assert.ok(Math.abs(f({ texel: 0.6 / 0.55 }) - 1) < 1e-12)
-  assert.ok(f({ texel: 1.2 }) < 1)
+  assert.ok(Math.abs(f({ texel: 0.6 / 0.55, dedansCrop: 0 }) - 1) < 1e-12)
+  assert.ok(f({ texel: 1.2, dedansCrop: 0 }) < 1)
 })
 
 test('④e `grainX` / `grainY` du GLSL sont le JUMEAU EXACT de `coordonneeGrain`', () => {

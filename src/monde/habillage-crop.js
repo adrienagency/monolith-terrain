@@ -367,3 +367,44 @@ export function intervalleCourbes(amplitudeM, courbesVoulues = 20) {
   for (const p of PAS_CARTO) if (p >= brut) return p
   return PAS_CARTO[PAS_CARTO.length - 1]
 }
+
+/**
+ * La tirette « Intervalle des courbes », en UNITÉS DE BLOC → des MÈTRES.
+ *
+ * ⚠️ **C'EST LA CLASSE DE DÉFAUT N° 1 DE CE CHANTIER, PRISE PAR LE BON BOUT.**
+ * Le socle divise `vWorldPos.y` — des unités de scène — par `uContourInterval` ;
+ * le globe divise `h`, des MÈTRES, par le même nom d'uniforme. Poser la valeur
+ * de la tirette telle quelle des deux côtés, c'est comparer **0,29 mètre** à un
+ * relief de 2 584 m : neuf mille courbes, donc une bouillie, donc rien.
+ *
+ * ⚡ **ET LE FACTEUR NE SE POSE PAS, IL SE DÉRIVE.** `loi-altitude.js` porte
+ * déjà la loi de hauteur du socle, lue par douze appelants :
+ *
+ *     echelleBloc = (span / extentMeters) × exagération   [unités de scène / mètre]
+ *
+ * Les deux `ch` sont égaux quand `hM × echelleBloc / valeurBloc = hM / intervalleM`,
+ * c'est-à-dire **`intervalleM = valeurBloc / echelleBloc`**. La formule est
+ * écrite ici et **exercée contre `echelleBloc` lui-même** dans
+ * `test/courbes-crop.test.js` (⑥a, ⑥b) : un oracle indépendant, écrit avant
+ * cette tâche, pas une recopie.
+ *
+ * ⚠️ **REND `null` SUR TOUTE ENTRÉE ABSURDE**, jamais 0 : `poserHabillage` lit
+ * `contourIntervalM > 0` et retombe alors sur la calibration automatique
+ * (`intervalleCourbes` sur l'amplitude). Un zéro, lui, deviendrait `h / 0` dans
+ * le nuanceur, donc un NaN — et le § « écrêtage de Mercator » de `globe.js` dit
+ * où mène un NaN ici : une comparaison FAUSSE, donc le contraire du but.
+ *
+ * @param {{valeurBloc:number, extentMeters:number, exageration:number, span?:number}} o
+ * @returns {number|null} l'intervalle en mètres, ou `null`
+ */
+export function intervalleCourbesBloc({ valeurBloc, extentMeters, exageration, span = COTE_CROP_UNITES } = {}) {
+  const v = Number(valeurBloc)
+  const e = Number(extentMeters)
+  const x = Number(exageration)
+  const s = Number(span)
+  if (!(v > 0) || !(e > 0) || !(x > 0) || !(s > 0)) return null
+  const echelle = (s / e) * x // unités de scène par mètre — la loi de `loi-altitude.js`
+  if (!(echelle > 0) || !Number.isFinite(echelle)) return null
+  const m = v / echelle
+  return Number.isFinite(m) && m > 0 ? m : null
+}

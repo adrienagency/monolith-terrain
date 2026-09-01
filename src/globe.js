@@ -2380,7 +2380,39 @@ void main() {
   float texelTuile = max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx; // la loi du depot
   float texelMonde = mppEcran / max(uResRefM, 1e-6);
   float texel = uMppFacteur > 0.0 ? texelMonde : texelTuile;
-  float minFade = clamp(1.6 - texel * 0.55, 0.0, 1.0);
+  // ══════ ⛔ ET C'EST ICI QUE LES COURBES DU CROP MOURAIENT — Tache R19 ══════
+  //
+  // ⛔ **UNE GARDE JUSTE POUR LA PLANETE NUE, ET FAUSSE POUR LE BLOC.**
+  // minFade eteint les courbes quand l'ecran ne resout plus la donnee. Sous le
+  // crop, ce n'est pas une precaution : c'est une impossibilite de naissance.
+  // Le crop MEURT au-dessus de 40,3 km, et des ~26 km la loi de monde rend deja
+  // texel > 1,09 — donc minFade = 0 sur PRESQUE TOUTE la plage de vie du bloc.
+  //
+  // ⚠️ MESURE, PAS DEDUCTION (scripts/diag-r19-sonde.mjs : une valeur de sortie
+  // FORCEE a chaque etage, relue hors composeur sur une passe brute de
+  // sceneGlobe). Sur les TERRES du crop, cadrage d'ouverture :
+  //   minor    12,26 / 255 en moyenne, 255 au maximum  → les bandes EXISTENT
+  //   crowd   250,21 / 255                             → il ne coupe rien
+  //   minFade   3,57 / 255, 43 au mieux                → ZERO
+  //   contour   0,14 / 255                             → ce qui reste : rien
+  // et texel y vaut 3,00 en moyenne, donc clamp(1,6 - 3,0 x 0,55) = 0.
+  //
+  // ⚡ **ET LE SOCLE EST LE MODELE, TERME A TERME** (terrain.js, bloc « contour
+  // lines ») : meme 1.4 x uContourWeight, meme 0.55 sur le mineur, meme
+  // clamp(1 - dch x 0.22) de foule — **et AUCUN minFade**. Le seul terme que le
+  // globe ajoutait est celui qui eteignait tout. Le neutraliser DANS le crop,
+  // c'est rendre au bloc la loi de trait du socle, et rien d'autre.
+  //
+  // ⚠️ **dedansCrop ET NON partBloc** : c'est une couche de CARTE, pas
+  // d'eclairage — le meme argument que la photo aerienne. dedansCrop vaut ZERO
+  // hors decoupe, et mix(x, 1.0, 0.0) rend x AU BIT PRES : la planete nue et la
+  // vue orbitale sont intouchees. C'est de plus une COUVERTURE DOUCE, donc le
+  // bord du bloc fond au lieu de poser une arete d'un pixel.
+  //
+  // ⚠️ **ET LE SCINTILLEMENT QUE minFade REPARE NE REVIENT PAS PAR LA** : il
+  // vit dans la vue orbitale et de voyage, ou dedansCrop vaut zero. Le
+  // supersampling de decodeMetersAA, lui, reste en place des deux cotes.
+  float minFade = mix(clamp(1.6 - texel * 0.55, 0.0, 1.0), 1.0, dedansCrop);
   float contour = max(minor * minorK, major) * uContourOpacity * crowd * minFade;
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
   col = mix(col, uInk, contour);

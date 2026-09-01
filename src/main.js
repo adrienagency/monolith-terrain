@@ -166,6 +166,10 @@ import { creerFlux, zoomEffectif, demanderEmprise, debitObserve, revisionFlux, r
 // uniformes et n'en écrit aucun. C'est `majReglagesMer` qui pose.
 import { empriseCalotte, PORTEE_CROP, couleursFondDuSocle } from './monde/mer-sphere.js'
 import { repereCrop } from './monde/crop-sphere.js'
+// ⚠️ **UNE SEULE FONCTION, ET C'EST LA CONVERSION DE LA TIRETTE DES COURBES**
+// (Tâche R19) : `params.contourInterval` est en unités de BLOC, `uContourInterval`
+// du globe est en MÈTRES. La loi est écrite dans le module pur, jamais ici.
+import { intervalleCourbesBloc } from './monde/habillage-crop.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -5791,6 +5795,27 @@ function contexteCrop() {
       // moyen 93,6/255**.
       aerialCoastFade: terrain.mapUniforms.uAerialCoastFade.value,
       amplitudeM: amplitudeM > 0 ? amplitudeM : null,
+      // ══════ L'INTERVALLE DES COURBES — Tâche R19 ═════════════════════════
+      //
+      // ⚠️ **LA TIRETTE EST EN UNITÉS DE BLOC, LE GLOBE EST EN MÈTRES**, et
+      // c'est la classe de défaut n° 1 de ce chantier. `poserHabillage` porte
+      // déjà la préférence (`contourIntervalM > 0` d'abord, l'amplitude
+      // ensuite) : il ne lui manquait QUE cette valeur.
+      //
+      // ⚠️ **LE `span` EST CELUI DU BLOC VIVANT** — `TERRAIN_SIZE × empriseCote`,
+      // la même expression que `mapLayers.poserFabricantDePoseur` et que
+      // `poseurDesReperes` : en mode continu le bloc couvre plusieurs emprises,
+      // et un `span` figé à 56 diviserait l'intervalle par cette même emprise.
+      //
+      // ⚠️ **`null` SI LE MNT N'EST PAS LÀ**, et alors la calibration
+      // automatique sur l'amplitude reprend la main — c'est le repli, pas une
+      // panne.
+      contourIntervalM: intervalleCourbesBloc({
+        valeurBloc: terrain.mapUniforms.uContourInterval.value,
+        extentMeters: dem?.extentMeters,
+        exageration: lireExageration(params),
+        span: TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1),
+      }),
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,
       // ══════ LA NORMALE PAR FRAGMENT — Tâche P9 ═══════════════════════════

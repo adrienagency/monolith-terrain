@@ -82,32 +82,33 @@ export function buildMapPanel(ctx) {
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
 
   const sContour = panel.addSection(section('Courbes & grille'))
-  // ══════ ⛔ CE QUE CES CINQ CURSEURS FONT SOUS LA SPHÈRE — Tâche R18 ═══════
+  // ══════ ✅ CE QUE CES CINQ CURSEURS FONT SOUS LA SPHÈRE — Tâche R19 ═══════
   //
-  // ⚠️ **DEUX TRAVERSENT ET NE SE VOIENT PAS ; TROIS N'ONT AUCUN RECEVEUR.**
+  // ⚡ **TROIS SONT VIVANTS DEPUIS R19, ET DEUX N'ONT TOUJOURS PAS DE RECEVEUR.**
   //
-  //   · `contourOpacity` et `contourWeight` ARRIVENT bien sur le globe (relevé
-  //     avant/après sur `globe.uniforms` : `uContourOpacity` passe de 0 à 1,
-  //     `uContourWeight` suit). **Et rien ne se dessine sur les terres.**
-  //     Poussé à bout par le chemin réel — opacité 1, intervalle forcé,
-  //     évanouissement de minification neutralisé, graticule à 1 — l'écran ne
-  //     bouge que de **0,014** niveau de gris moyen. Captures :
-  //     `.banc/R18/courbes2-reel-1.png`, `.banc/R18/courbes-graticule1.png`.
-  //     ➡️ **C'EST UN SEUL DÉFAUT DERRIÈRE TROIS CURSEURS**, et il est en amont
-  //     d'eux : le bloc d'encre du nuanceur de tuile ne peint pas sur les
-  //     tuiles de terre du crop. Régler l'intervalle avant de l'avoir trouvé,
-  //     ce serait empiler un réglage sur une panne.
-  //   · `contourInterval` : le globe cale son intervalle sur l'AMPLITUDE du
-  //     crop (`poserHabillage` → `intervalleCourbes`, relevé à **250 m**) et ne
-  //     lit pas cette tirette. ⚠️ La brancher demande une conversion —
-  //     l'une est en unités de BLOC, l'autre en MÈTRES : c'est la classe de
-  //     défaut n° 1 de ce chantier (sept occurrences).
+  //   · `contourOpacity`, `contourInterval` et `contourColor` **gravent
+  //     désormais les terres du crop**. Le défaut unique était `minFade`, le
+  //     fondu de minification du nuanceur de tuile : sous le crop il rendait
+  //     **3,57/255 en moyenne** (mesuré, sonde de nuanceur), donc zéro, alors
+  //     que les bandes de courbe, elles, existaient (`minor` : 255 au maximum).
+  //     Le socle, qui est le modèle, n'a **aucun** fondu de ce genre. Il est
+  //     neutralisé dans le crop et intouché au-dehors (`globe.js`, bloc R19).
+  //     Mesuré au banc (condensé 256 × 160, plancher 0,0000) : opacité 0 → 1
+  //     **1,2275** (avant : 0,0146), intervalle 0,29 → 0,10 **1,3202**, couleur
+  //     noir → rouge **0,6677**. Captures : `.banc/R19/`.
+  //   · `contourInterval` passe par une CONVERSION — la tirette est en unités
+  //     de BLOC, le globe en MÈTRES : `intervalleCourbesBloc`
+  //     (`monde/habillage-crop.js`), dérivée de `echelleBloc` et non posée.
+  //     ⚠️ Elle PREND LE PAS sur la calibration automatique du crop
+  //     (`intervalleCourbes` sur l'amplitude), qui reste le repli sans MNT.
+  //   · `contourWeight` traverse (`uContourWeight`) et porte le trait des deux
+  //     côtés — même `1.4 × uContourWeight` que `terrain.js`.
   //   · `gridStep` / `gridOpacity` : la découpe de sphère n'a pas de
   //     quadrillage en unités de bloc. Sa grille cartographique EXISTE et n'est
   //     pas celle-là — c'est le graticule lat/lon (`uGraticuleOpacity`).
   const noteCourbes = document.createElement('div')
   noteCourbes.className = 'ce-bg-note on'
-  noteCourbes.textContent = 'Sur la carte sphérique, les courbes ne se gravent pas encore et la grille du bloc n’existe pas — ces réglages n’ont pas d’effet visible.'
+  noteCourbes.textContent = 'Sur la carte sphérique, la grille du bloc n’existe pas — ses deux réglages n’ont pas d’effet visible. Les courbes, elles, se gravent.'
   sContour.body.append(noteCourbes)
   // ⚠️ CES CINQ CURSEURS ÉCRIVENT LES UNIFORMES DU BLOC CENTRAL EN DIRECT —
   // `u()` est `terrain.mapUniforms`, pas un réglage de `params` qu'une fonction

@@ -182,7 +182,17 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // (SEPT conversions ratées, dont un facteur 121,6). Le compte de `main.js`
   // passe de 6 à 7, EN PLACE ; les quatre autres lignes n'ont pas bougé d'un
   // caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 7, 'src/globe.js': 2 }
+  // ⚠️ **ET LE DIX-HUITIÈME EST ARRIVÉ AVEC LA TÂCHE R19, POUR LA MÊME RAISON
+  // ENCORE.** La tirette « Intervalle des courbes » est en unités de BLOC et le
+  // nuanceur du globe compare des MÈTRES : `contexteCrop` (`main.js`) la
+  // convertit par `intervalleCourbesBloc`, dont le facteur est
+  // `(span / extentMeters) × exagération` — la loi de hauteur du socle. Une
+  // exagération FIGÉE y donnerait des courbes espacées d'un autre pas que le
+  // relief qu'elles dessinent, au facteur `exagAvant / exagApres`, et le crop
+  // et le socle cesseraient de tracer les mêmes lignes. Le compte de `main.js`
+  // passe de 7 à 8, EN PLACE ; les quatre autres lignes n'ont pas bougé d'un
+  // caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 8, 'src/globe.js': 2 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))
