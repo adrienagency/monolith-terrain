@@ -781,7 +781,16 @@ test('⑤e l’albédo est fabriqué AVANT l’apparence et les traits de carte'
   // le trait de côte, les courbes et le graticule. Poser le mélange après eux
   // fait repasser le motif dans `mix(fond, x, teinte)` : mesuré, l'apparence
   // n'assombrissait plus le crop qu'à 0,73 contre 0,58 pour le socle.
-  const iAlbedo = FRAG_NU.indexOf('albedoCrop(col, uAlbedoBase')
+  // ⚠️ **L'ANCRE A CHANGÉ DE FORME AVEC LA TÂCHE R25, PAS DE SENS** — même
+  // remarque que celle de R21 quinze lignes plus bas. La matière du relief
+  // ajoute UN FACTEUR à la base (`baseMat = uAlbedoBase × texture de matière`)
+  // et une ombre de peinture explicite, donc l'appel est
+  // `albedoCropMat(col, baseMat, …)` — la variante à ombre explicite, à laquelle
+  // `albedoCrop` DÉLÈGUE, donc toujours une seule écriture du mélange. C'est
+  // toujours l'étape « on fabrique l'albédo », et elle doit toujours venir en
+  // premier. ⛔ Sans matière (`uMatOn = 0`), `baseMat` EST `uAlbedoBase` et
+  // l'ombre EST `natOmbrePeinture(natLuminance(fondCrop))` : la même valeur.
+  const iAlbedo = FRAG_NU.indexOf('albedoCropMat(col, baseMat')
   const iFx = FRAG_NU.indexOf('fxBlend(col, fxc, uFxBlend)')
   const iCote = FRAG_NU.indexOf('col = mix(col, uInk, cote * 0.55);')
   const iContour = FRAG_NU.indexOf('col = mix(col, uInk, contour);')
@@ -798,7 +807,7 @@ test('⑤e l’albédo est fabriqué AVANT l’apparence et les traits de carte'
   assert.ok(iLumiere > iContour, 'la lumière multiplie en DERNIER')
 })
 
-test('⑤f le compte de samplers — DIX, pour un plafond de seize', () => {
+test('⑤f le compte de samplers — DOUZE, pour un plafond de seize', () => {
   // ⚠️ La Tâche P3 n'ajoutait AUCUNE texture — que des uniformes scalaires et
   // vectoriels — et ce test disait HUIT. La Tâche R9 en ajoute **UNE**,
   // `uAerial`, et le compte est passé à NEUF. La Tâche R16 en ajoute **UNE**,
@@ -817,8 +826,16 @@ test('⑤f le compte de samplers — DIX, pour un plafond de seize', () => {
   // du globe est un `ShaderMaterial` NU — ni matériau de surface, ni
   // environnement, ni carte d'ombre — donc les dix sont les dix, sans
   // supplément caché. Six unités restent libres.
+  //
+  // ⚠️⚠️ **DOUZE DEPUIS LA TACHE R25, ET LE MEME ARGUMENT VAUT** : la matiere du
+  // relief ajoute DEUX samplers — uMatMap (son albedo) et uMatNormal (sa carte
+  // de normales) —, une seule paire pour tout le bloc, mise en cache par dossier
+  // dans terrain._loadTextureSet. ⛔ La carte de RUGOSITE aurait fait treize et
+  // elle n est PAS la : le crop est eclaire par BRDF_Lambert seul, il n a aucun
+  // terme speculaire pour la recevoir (monde/matiere-crop.js). Quatre unites
+  // restent libres.
   const n = (FRAG_NU.match(/uniform sampler2D /g) || []).length
-  assert.equal(n, 10)
+  assert.equal(n, 12)
 })
 
 test('⑤g les défauts MONDE sont ceux des modules, pas des nombres recopiés', () => {

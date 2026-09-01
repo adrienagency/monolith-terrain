@@ -183,6 +183,16 @@ import {
   hautLocal,
   irradianceAmbiante,
 } from './monde/eclairage-crop.js'
+// ══════════ LA MATIÈRE DU RELIEF — Tâche R25 ═══════════════════════════════
+//
+// ⛔ **L'INVENTAIRE DISAIT « LE GLOBE N'A PAS DE MATIÈRE PBR DE RELIEF », ET LA
+// MESURE DIT PIRE** : les quinze matières opaques rendaient LA MÊME image (0,025
+// à 0,338 d'écart entre elles, pour un plancher de bruit du banc à 0,231), parce
+// que le seul effet qui traversait était `m.color = blanc` et `uTint = 0`. Le
+// sélecteur était un interrupteur à deux positions. L'en-tête du module porte le
+// tableau complet, les conversions d'unité avec leur facteur, et le coût mesuré
+// de la transmission qui fait borner le VERRE.
+import { GLSL_MATIERE, MATIERE_MONDE_ETEINTE } from './monde/matiere-crop.js'
 // ══════════ L'ÉCUME DE LA MER — Tâche P4 ═══════════════════════════════════
 //
 // > **Le noteur, 2026-08-22 :** « l'écume est 7,7 fois trop étendue — et elle
@@ -1291,8 +1301,16 @@ uniform vec3 uHazeColor;
 // ⚠️ NEUVIEME SAMPLER, ET LE COMPTE EST REFAIT ICI. Le bloc du masque de cote
 // comptait CINQ liens (uTex, uRamp, uCoastMask, uSol, uSolLut) ; le fond du crop
 // a fait SIX ; uAnalysis et uRampCrop ont fait HUIT. uAerial fait NEUF, et
-// uPhoto (Tache R16, la photo de la SURFACE) fait DIX, pour un
-// plafond de seize. Le raisonnement du bloc du masque de cote (ShaderMaterial
+// uPhoto (Tache R16, la photo de la SURFACE) fait DIX ; et uMatMap / uMatNormal
+// (Tache R25, la matiere du relief) font DOUZE, pour un
+// plafond de seize.
+//
+// ⚠️ ET LE PLAFOND N'EST PAS THEORIQUE : terrain.js a DEJA plante dessus (« le
+// gabarit java passait de 17 a 18 unites, au-dessus des 16 que la machine offre
+// — le terrain ne linkait plus et disparaissait »). Il reste QUATRE unites. La
+// carte de rugosite de la matiere aurait fait treize, et elle n'est pas la —
+// mais c'est parce qu'elle n'a pas de receveur (voir monde/matiere-crop.js), pas
+// pour tenir le compte. Le raisonnement du bloc du masque de cote (ShaderMaterial
 // NU : ni materiau de surface, ni environnement, ni carte d'ombre) tient tel
 // quel, et test/crop-eclairage.test.js COMPTE les sampler2D de ce fragment
 // plutot que de croire ce commentaire.
@@ -1491,6 +1509,43 @@ ${GLSL_NATUREL}
 // (fxShade, la valeur par sommet). test/crop-eclairage.test.js va la relire
 // dans node_modules/three plutot que de croire ce commentaire.
 ${GLSL_ECLAIRAGE}
+
+// ══════ LA MATIERE DU RELIEF — Tache R25, option 38 ═══════════════════════
+//
+// ⛔ LES DOUZE UNIFORMES SONT ICI ET PAS DANS LE MODULE, ET UNE GARDE L A
+// IMPOSE. La premiere ecriture les mettait dans GLSL_MATIERE ; « ②d ter » de
+// test/crop-rampe.test.js a rougi (« uniformes lus mais jamais declares »)
+// parce qu elle lit le texte BRUT du fragment, ou l injection n est pas encore
+// substituee. Aucun des sept autres modules injectes ne declare d uniforme : la
+// convention du depot est « un module porte des FONCTIONS, globe.js porte les
+// declarations ». Affaiblir la garde pour y faire entrer mon ecriture aurait
+// ete le contraire du travail.
+//
+// ⚠️ DEUX ECHANTILLONNEURS DE PLUS, ET LE COMPTE EST TENU : le fragment des
+// tuiles en avait DIX (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp,
+// uAnalysis, uRampCrop, uAerial, uPhoto), il en a DOUZE. La machine en offre 16
+// au minimum — c est exactement le plafond que terrain.js a deja touche (« le
+// gabarit java passait de 17 a 18 unites, le terrain ne linkait plus et
+// disparaissait »). La marge est de quatre.
+uniform float uMatOn;          // 0 = aucune matiere : image du depot au bit pres
+uniform sampler2D uMatMap;     // l albedo de la matiere (diff.jpg)
+uniform sampler2D uMatNormal;  // sa carte de normales (nor_gl.jpg)
+uniform float uMatNormalOn;    // 0 = pas de carte de normales
+uniform float uMatRepeat;      // repetitions par LARGEUR DE BLOC — facteur 1
+uniform float uMatBump;        // l amplitude de la normale (normalScale du socle)
+uniform float uMatNoiseOn;
+uniform float uMatNoiseCut;
+uniform float uMatNoiseSoft;
+uniform float uMatNoiseScale;
+uniform float uMatAboveZero;
+uniform float uMatBandeM;      // la demi-bande du niveau zero, EN METRES
+
+// ⚠️ INJECTE, PAS RECOPIE — Tache R25, et il vient APRES GLSL_ECLAIRAGE parce
+// que la matiere se pose dans albedoCropMat, la variante a ombre explicite que
+// le module d eclairage porte desormais (albedoCrop la DELEGUE : une ecriture).
+// Les deux lignes de bruit sont celles de terrain.js au caractere pres, et les
+// trois conversions d unite sont ecrites avec leur facteur dans le module.
+${GLSL_MATIERE}
 
 // ⚠️ INJECTE, PAS RECOPIE — Tache P10. Le champ de hauteur pose sur le plan
 // tangent : N = normalize(haut - gEst.est - gNord.nord). Elle REMPLACE la loi
@@ -2211,11 +2266,69 @@ void main() {
       col = teintePente(col, penteSol(nMonde, haut), uSlopeTint);
     }
   }
-  float nduCrop = dot(nMonde, uHemiHaut);
+  // ══════ LA MATIERE DU RELIEF — Tache R25, option 38 ══════════════════════
+  //
+  // ⛔ QUINZE VIGNETTES RENDAIENT LA MEME IMAGE. Mesure du 2026-09-01, La
+  // Reunion, pleine resolution, les dix-sept CLIQUEES une par une : chaque
+  // matiere opaque s ecarte de « Aucune » de 3,29 a 3,57, et des QUATORZE
+  // AUTRES de 0,025 a 0,338 — pour un plancher de bruit du banc a 0,231. Tout
+  // ce qui traversait etait m.color mis a BLANC et uTint mis a ZERO : la
+  // peinture hypsometrique retiree, et rien mis a la place.
+  //
+  // ⚡ ET LE FACTEUR QUI MANQUAIT EST UN SEUL. terrain.js ecrit
+  // mix(diffuseColor.rgb, mapCol * paintShade, effTint) ou diffuseColor.rgb
+  // contient DEJA material.map (three le multiplie dans map_fragment) ; ici
+  // albedoCrop ecrit le meme mix avec uAlbedoBase a la place. Il ne manquait
+  // que la TEXTURE. Ce n est pas une seconde loi, c est un produit.
+  //
+  // ⚠️ uMatOn A 0 : baseMat vaut uAlbedoBase, teinteMat vaut uAlbedoTeinte,
+  // ombreMat vaut natOmbrePeinture(natLuminance(fondCrop)) et nMat vaut
+  // nMonde — donc la ligne d origine AU BIT PRES, meme garde que uCropOn /
+  // uHabOn / uEclairageOn / uNormaleFineOn.
+  //
+  // ⚠️ nMat SERT A L ECLAIRAGE, PAS A LA CARTE. La carte de normales de la
+  // matiere doit modeler la LUMIERE (nduCrop, le terme soleil) ; la donner a
+  // penteSol ou au peigne de cretes ferait croire au relief des bosses de
+  // toile. C est pour ca qu elle est prise ICI, apres l ombrage des pentes.
+  vec3 baseMat = uAlbedoBase;
+  float teinteMat = uAlbedoTeinte;
+  vec3 nMat = nMonde;
+  float revele = 0.0;
+  if (uMatOn > 0.5 && dedansCrop > 0.0) {
+    vec2 uvMat = uvMatiere(qCrop);
+    baseMat = uAlbedoBase * texture2D(uMatMap, uvMat).rgb;
+    // ⚠️ vEstW ET NON est : est vit DANS le bloc uNormaleFineOn, il n est pas
+    // en portee ici. normaleMatiere orthonormalise de toute facon sa tangente
+    // sur nMonde (Gram-Schmidt), donc le varying brut suffit — et c est le SEUL
+    // vecteur d est disponible quand la normale fine est eteinte.
+    if (uMatNormalOn > 0.5) nMat = normaleMatiere(nMonde, vEstW, uvMat);
+    // le bruit qui revele la carte dessous — champ en UNITES DE SCENE, la MEME
+    // expression que la couche d apparence (facteur uFxDemiBloc = 28, sans quoi
+    // les taches seraient vingt-huit fois trop grandes)
+    if (uMatNoiseOn > 0.5) {
+      float mn = mnNoise((qCrop * uFxDemiBloc + uFxFenetre) * uMatNoiseScale);
+      revele = 1.0 - smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
+    }
+    // « au-dessus du niveau zero » : sous la mer, la peinture repasse devant.
+    // ⚠️ uMatBandeM EST EN METRES, et h aussi. Le socle ecrit 0,05 UNITE DE
+    // SCENE ; a La Reunion, exageration 2, cela vaut 12,21 m. Recopier 0,05
+    // aurait donne cinq centimetres de fondu, donc une marche franche.
+    if (uMatAboveZero > 0.5) {
+      revele = max(revele, 1.0 - smoothstep(-uMatBandeM, uMatBandeM, h));
+    }
+    teinteMat = mix(uAlbedoTeinte, 1.0, revele);
+  }
+  float nduCrop = dot(nMat, uHemiHaut);
+  float grisCrop = natGris(hNormRelief, max(nduCrop, 0.0));
   float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
-  vec3 fondCrop = uAlbedoBase * natGris(hNormRelief, max(nduCrop, 0.0));
+  vec3 fondCrop = baseMat * grisCrop;
   if (partBloc > 0.0) {
-    col = mix(col, albedoCrop(col, uAlbedoBase, natGris(hNormRelief, max(nduCrop, 0.0)), uAlbedoTeinte), partBloc);
+    // ⚠️ L OMBRE DE PEINTURE EST TIREE VERS 1 LA OU LE BRUIT REVELE, comme
+    // terrain.js : « la carte revelee est ramenee vers sa clarte naturelle, pas
+    // ombree par l albedo de la matiere ». A revele = 0 c est natOmbrePeinture
+    // du fond, donc l ancienne loi au bit pres.
+    float ombreMat = mix(natOmbrePeinture(natLuminance(fondCrop)), 1.0, revele);
+    col = mix(col, albedoCropMat(col, baseMat, grisCrop, teinteMat, ombreMat), partBloc);
   }
 
   // ══════ LA PHOTO AERIENNE — Tache R9 ══════════════════════════════════════
@@ -2673,8 +2786,12 @@ void main() {
   //
   // ⚠️ uAppointIrr A (0,0,0) : la somme est inchangee terme a terme, quelle que
   // soit uAppointDir. C'est la garde, et c'est l'etat de repos.
-  vec3 irrBloc = irradianceCrop(dot(nMonde, uSoleilDir), nduCrop, uSoleilIrr, uCielIrr, uSolIrr)
-               + irradianceAppoint(dot(nMonde, uAppointDir), uAppointIrr);
+  // ⚠️ nMat ET NON nMonde — Tache R25 : c est la normale PERTURBEE par la carte
+  // de la matiere qui doit recevoir le soleil et l appoint, sinon la tirette
+  // « Relief de la matiere » n aurait rien a moduler. uMatOn a 0, nMat EST
+  // nMonde (meme objet, meme valeur) : la somme est inchangee au bit pres.
+  vec3 irrBloc = irradianceCrop(dot(nMat, uSoleilDir), nduCrop, uSoleilIrr, uCielIrr, uSolIrr)
+               + irradianceAppoint(dot(nMat, uAppointDir), uAppointIrr);
   vec3 colBloc = col * irrBloc * 0.3183098861837907;
   col = mix(colPlanete, colBloc, partBloc);
 
@@ -3635,6 +3752,28 @@ export class Globe {
       uParoiSolIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.solIrr) },
       uAlbedoBase: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.albedoBase) },
       uAlbedoTeinte: { value: ECLAIRAGE_MONDE.albedoTeinte },
+      // ══════ LA MATIÈRE DU RELIEF — Tâche R25, option 38 ═══════════════════
+      //
+      // ⚠️ **LES DÉFAUTS PARTENT DE `matiere-crop.js`, PAS D'UN LITTÉRAL** —
+      // même contrat qu'⑨i impose à l'appoint, aux pentes et à la paroi : un
+      // défaut recopié ici ET dans `retirerHabillage` finit par diverger, et
+      // l'aller-retour bit à bit devient faux sans prévenir.
+      //
+      // ⚠️ **`null` POUR LES DEUX TEXTURES, comme `uCoastMask` / `uSol` /
+      // `uAerial` / `uAnalysis`** : `three` lie alors sa texture vide, et
+      // `uMatOn = 0` garantit qu'on ne l'échantillonne jamais.
+      uMatOn: { value: MATIERE_MONDE_ETEINTE.on },
+      uMatMap: { value: null },
+      uMatNormal: { value: null },
+      uMatNormalOn: { value: MATIERE_MONDE_ETEINTE.normalOn },
+      uMatRepeat: { value: MATIERE_MONDE_ETEINTE.repeat },
+      uMatBump: { value: MATIERE_MONDE_ETEINTE.bump },
+      uMatNoiseOn: { value: MATIERE_MONDE_ETEINTE.noiseOn },
+      uMatNoiseCut: { value: MATIERE_MONDE_ETEINTE.noiseCut },
+      uMatNoiseSoft: { value: MATIERE_MONDE_ETEINTE.noiseSoft },
+      uMatNoiseScale: { value: MATIERE_MONDE_ETEINTE.noiseScale },
+      uMatAboveZero: { value: MATIERE_MONDE_ETEINTE.aboveZero },
+      uMatBandeM: { value: MATIERE_MONDE_ETEINTE.bandeM },
       // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════
       uSurfaceFx: { value: APPARENCE_MONDE.surfaceFx },
       uFxBlend: { value: APPARENCE_MONDE.fxBlend },
@@ -4419,6 +4558,23 @@ export class Globe {
     paroiAmbianteIntensite = null,
     albedoBase = null,
     albedoTeinte = null,
+    // ══════ LA MATIÈRE DU RELIEF — Tâche R25, option 38 ══════════════════════
+    //
+    // ⚠️ **MÊME PATRON QUE PARTOUT ICI : L'INTERRUPTEUR EST L'ABSENCE DE
+    // DONNÉE.** Un appelant qui ne passe pas `matMap` laisse `uMatOn` à zéro,
+    // donc l'image d'avant cette tâche AU BIT PRÈS — c'est ce que
+    // `test/crop-habillage.test.js` verrouille, et ce qui rend la mutation « on
+    // oublie de la poser » visible en test.
+    matMap = null,
+    matNormal = null,
+    matRepeat = null,
+    matBump = null,
+    matNoiseOn = null,
+    matNoiseCut = null,
+    matNoiseSoft = null,
+    matNoiseScale = null,
+    matAboveZero = null,
+    matBandeM = null,
     // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
     //
     // ⚠️ **`fxTime` N'EST PAS DANS CETTE LISTE, ET C'EST DÉLIBÉRÉ** : il avance
@@ -4453,6 +4609,43 @@ export class Globe {
     // de terre sur chaque lagune. Sans crop posé, il n'y a pas d'emprise d'où la
     // tirer : la marge reste alors nulle et le masque décide seul.
     u.uMargeCoteM.value = this._crop ? margeCoteDuCrop(this._crop) : 0
+
+    // ══════ LA MATIÈRE DU RELIEF — Tâche R25, option 38 ═════════════════════
+    //
+    // ⛔ **QUINZE VIGNETTES RENDAIENT LA MÊME IMAGE**, et le module porte le
+    // tableau qui le prouve (0,025 à 0,338 entre elles, pour un plancher de
+    // bruit de banc à 0,231). Ce qui manquait était **la texture** : le globe
+    // recevait `uAlbedoBase` mis à blanc par `setMaterialMode` et `uTint` mis à
+    // zéro, c'est-à-dire la peinture retirée et rien mis à la place.
+    //
+    // ⚠️ **ICI ET PAS DANS `if (aLumiere)`, MÊME ARGUMENT QUE LA PHOTO
+    // AÉRIENNE** : une matière est une couche de CARTE. Ce sont
+    // `uEclairageOn`/`partBloc` qui décident ensuite si elle est éclairée, dans
+    // le nuanceur, comme pour `uAlbedoBase`.
+    //
+    // ⚠️ **`uMatRepeat` NE SE DÉRIVE PAS ICI** : `contexteCrop` lit
+    // `material.map.repeat.x` VIVANT, qui porte déjà `preset.repeat × scale ×
+    // zoomRepeat(demZoom)`. La conversion est écrite dans `tuilageMatiere` —
+    // **facteur 1**, parce que les deux grandeurs sont des répétitions par
+    // largeur de bloc. C'est la seule des trois conversions de cette tâche qui
+    // vaille 1, et c'est pour ça qu'elle est écrite plutôt que supposée.
+    u.uMatOn.value = matMap ? 1 : 0
+    u.uMatMap.value = matMap || null
+    u.uMatNormal.value = matNormal || null
+    u.uMatNormalOn.value = matMap && matNormal ? 1 : MATIERE_MONDE_ETEINTE.normalOn
+    if (Number.isFinite(matRepeat) && matRepeat > 0) u.uMatRepeat.value = matRepeat
+    if (Number.isFinite(matBump)) u.uMatBump.value = matBump
+    u.uMatNoiseOn.value = matNoiseOn ? 1 : MATIERE_MONDE_ETEINTE.noiseOn
+    if (Number.isFinite(matNoiseCut)) u.uMatNoiseCut.value = matNoiseCut
+    if (Number.isFinite(matNoiseSoft)) u.uMatNoiseSoft.value = matNoiseSoft
+    if (Number.isFinite(matNoiseScale)) u.uMatNoiseScale.value = matNoiseScale
+    u.uMatAboveZero.value = matAboveZero ? 1 : MATIERE_MONDE_ETEINTE.aboveZero
+    // ⚠️ **EN MÈTRES, ET LA CONVERSION EST FAITE PAR L'APPELANT** — même
+    // partage que `contourIntervalM` : elle a besoin de l'exagération VIVANTE et
+    // de `dem.extentMeters`, que le globe n'a pas. `bandeZeroMatiereM` porte le
+    // facteur (4,094 4e−3 à La Réunion, exagération 2 ⇒ **12,211 m** pour les
+    // 0,05 unité de scène du socle).
+    u.uMatBandeM.value = Number.isFinite(matBandeM) && matBandeM > 0 ? matBandeM : MATIERE_MONDE_ETEINTE.bandeM
 
     // ══════ LA GRILLE DE RELEVÉ — Tâche R22, options 19 et 20 ═══════════════
     //
@@ -4907,6 +5100,22 @@ export class Globe {
     u.uAppointDir.value.fromArray(APPOINT_MONDE_ETEINT.dir)
     u.uAppointIrr.value.fromArray(APPOINT_MONDE_ETEINT.irr)
     u.uSlopeTint.value = PENTE_MONDE_NULLE
+    // ⚠️ **ET LA MATIÈRE AUSSI — Tâche R25**, pour la raison que ce bloc porte
+    // déjà : l'aller-retour bit à bit d'⑨h porte sur les VALEURS. Une matière
+    // restée posée sur un crop mort est un état qui traîne — et `uMatMap` est
+    // en plus une TEXTURE retenue en mémoire vidéo pour rien.
+    u.uMatOn.value = MATIERE_MONDE_ETEINTE.on
+    u.uMatMap.value = null
+    u.uMatNormal.value = null
+    u.uMatNormalOn.value = MATIERE_MONDE_ETEINTE.normalOn
+    u.uMatRepeat.value = MATIERE_MONDE_ETEINTE.repeat
+    u.uMatBump.value = MATIERE_MONDE_ETEINTE.bump
+    u.uMatNoiseOn.value = MATIERE_MONDE_ETEINTE.noiseOn
+    u.uMatNoiseCut.value = MATIERE_MONDE_ETEINTE.noiseCut
+    u.uMatNoiseSoft.value = MATIERE_MONDE_ETEINTE.noiseSoft
+    u.uMatNoiseScale.value = MATIERE_MONDE_ETEINTE.noiseScale
+    u.uMatAboveZero.value = MATIERE_MONDE_ETEINTE.aboveZero
+    u.uMatBandeM.value = MATIERE_MONDE_ETEINTE.bandeM
     // ⚠️ **LES DEUX DE LA PAROI AUSSI — Tâche P8**, et pour la raison que ce
     // bloc porte déjà : l'aller-retour bit-à-bit porte sur les VALEURS. Une
     // paroi restée sur le studio d'un crop mort est un état qui traîne.

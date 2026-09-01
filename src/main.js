@@ -172,6 +172,11 @@ import { repereCrop } from './monde/crop-sphere.js'
 // (Tâche R19) : `params.contourInterval` est en unités de BLOC, `uContourInterval`
 // du globe est en MÈTRES. La loi est écrite dans le module pur, jamais ici.
 import { intervalleCourbesBloc } from './monde/habillage-crop.js'
+// ⚠️ **UNE SEULE FONCTION, ET C'EST L'AUTRE CONVERSION DU MÊME GENRE** (Tâche
+// R25) : la bande de fondu du niveau zéro est en unités de BLOC côté socle
+// (0,05, sur un relief déjà exagéré) et en MÈTRES côté globe — 12,211 m à La
+// Réunion à exagération 2. La loi et son facteur vivent dans le module.
+import { bandeZeroMatiereM, BANDE_ZERO_BLOC } from './monde/matiere-crop.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -5884,6 +5889,50 @@ function empriseZoomMer() {
   return { emprise, zoom: zoomPourEmprise(emprise, { zoomMax: params.demZoom, tuilesMax: TUILES_MER_MAX }) }
 }
 
+// ══════════ LA MATIÈRE DU RELIEF, LUE SUR LE MATÉRIAU — Tâche R25 ══════════
+//
+// ⚠️ **UN BLOC À PART PLUTÔT QUE DIX LIGNES DANS `contexteCrop`, POUR UNE RAISON
+// PRÉCISE** : il a **un refus** (le verre) et **une conversion d'unité**, et les
+// deux méritent d'être lisibles sans dérouler cinq cents lignes de contexte.
+//
+// ⛔ **LE VERRE SORT PAR LE HAUT, ET CE N'EST PAS UNE PRUDENCE.**
+// `setMaterialMode('glass')` REMPLACE `mesh.material` et **ne touche ni
+// `material.map` ni `uTint`** : sans ce refus, choisir « Verre » après « Roche
+// brute » aurait laissé le globe peindre de la roche — un défaut qui ressemble
+// à « la vignette ne réagit pas » alors que c'est l'inverse.
+function matiereDuCrop() {
+  const m = terrain.material
+  if (terrain.materialMode === 'glass' || !terrain.materialMode || !m?.map) return {}
+  // ⚠️ `repeat.x` EST DÉJÀ LE PRODUIT COMPLET (`preset.repeat × scale ×
+  // zoomRepeat(demZoom)`), et `normalScale.x` déjà `bump × preset.normalScale`.
+  // Les redériver depuis `params` serait une seconde écriture des deux lois.
+  return {
+    matMap: m.map,
+    matNormal: m.normalMap || null,
+    matRepeat: m.map.repeat?.x ?? null,
+    matBump: m.normalScale?.x ?? null,
+    // ⚠️ **ON LIT LES UNIFORMES DU SOCLE, PAS `params`** : `setMatNoise` porte
+    // les trois dérivations (`×1,0`, `×0,55`, `0,12 + ×0,16`) que
+    // `params.terrainMatNoise` ne porte pas.
+    matNoiseOn: terrain.mapUniforms.uMatNoiseOn.value > 0.5,
+    matNoiseCut: terrain.mapUniforms.uMatNoiseCut.value,
+    matNoiseSoft: terrain.mapUniforms.uMatNoiseSoft.value,
+    matNoiseScale: terrain.mapUniforms.uMatNoiseScale.value,
+    matAboveZero: terrain.mapUniforms.uMatAboveZero.value > 0.5,
+    // ⚠️ **LA CONVERSION EST FAITE ICI, comme `contourIntervalM`, et pour la
+    // même raison** : elle a besoin de `dem.extentMeters` et de l'exagération
+    // VIVANTE, que le globe n'a pas. Et **le `span` est celui du bloc VIVANT**
+    // (`TERRAIN_SIZE × empriseCote`), la même expression que les deux voisins :
+    // en mode continu le bloc couvre plusieurs emprises.
+    matBandeM: bandeZeroMatiereM({
+      bandeBloc: BANDE_ZERO_BLOC,
+      extentMeters: dem?.extentMeters,
+      exageration: lireExageration(params),
+      span: TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1),
+    }),
+  }
+}
+
 function contexteCrop() {
   const a = assietteCrop()
   if (!a) return null
@@ -6242,6 +6291,35 @@ function contexteCrop() {
       // le fond contre lequel `mapTint` dose la peinture — `terrain.js:1137`
       albedoBase: `#${terrain.material.color.getHexString()}`,
       albedoTeinte: terrain.mapUniforms.uTint.value,
+      // ══════ LA MATIÈRE DU RELIEF — Tâche R25, option 38 ═══════════════════
+      //
+      // ⛔ **QUINZE VIGNETTES SUR DIX-SEPT RENDAIENT LA MÊME IMAGE.** Mesuré le
+      // 2026-09-01 en cliquant les dix-sept une par une, La Réunion, pleine
+      // résolution (`scripts/sonde-r25.mjs`) : chaque matière opaque s'écarte de
+      // « Aucune » de **3,29 à 3,57**, et des quatorze autres de **0,025 à
+      // 0,338** — pour un plancher de bruit du banc à **0,231**. La seule chose
+      // qui traversait était `setMaterialMode` posant `material.color` à BLANC
+      // et `uTint` à ZÉRO : la peinture hypsométrique retirée, rien mis à la
+      // place. Les deux lignes juste au-dessus transmettaient donc fidèlement
+      // une PERTE.
+      //
+      // ⚠️ **ON LIT LE MATÉRIAU, PAS `params` — même règle que `paroiCouleur`,
+      // que les dix curseurs d'Atlas et que les lampes, et ici elle porte TROIS
+      // choses que `params` ne porte pas** : (1) `map.repeat.x` contient déjà
+      // `preset.repeat × terrainMatScale × zoomRepeat(demZoom)`, (2)
+      // `normalScale.x` contient déjà `terrainSurfaceBump × preset.normalScale`,
+      // (3) le chargement des JPEG est PARESSEUX — `params.terrainSurfaceMat`
+      // est vrai bien avant que la texture existe, et `material.map` est le seul
+      // à dire quand elle est là.
+      //
+      // ⚠️ **ET `materialMode === 'glass'` DOIT SORTIR ICI.** Le verre remplace
+      // le matériau du maillage (`mesh.material = glassMaterial`) au lieu de le
+      // muter : `terrain.material.map` garderait alors la texture de la matière
+      // opaque PRÉCÉDENTE, et le globe peindrait de la roche sous une vignette
+      // « Verre ». Le verre est de toute façon sans objet sur la sphère — sa
+      // transmission coûte ×3,87 (crop) à ×4,78 (orbite) du temps d'image,
+      // mesuré (`matiere-crop.js`, `COUT_TRANSMISSION`).
+      ...matiereDuCrop(),
       // ══════ LA COULEUR DES PAROIS — Tâche P3, manque n° 2 ═══════════════
       //
       // ⛔ **`params.plinthColor` EST LE MAUVAIS NOMBRE, ET LE NOTEUR L'A MESURÉ
@@ -12212,6 +12290,11 @@ const shadersPanel = buildShadersPanel({
     blockGrid?.diffuseDuCentre()
   },
   // live glass knobs (only shown when the relief material is Glass)
+  // ⚠️ **LE MÊME PRÉDICAT QUE LE PANNEAU DE LUMIÈRE (R21), ET C'EST VOULU** :
+  // `terreUniqueBranchee` est ce qui dit qu'on est sur la sphère. Deux panneaux
+  // qui répondraient chacun à leur façon divergeraient le jour où ce drapeau
+  // change de nom — et ce jour-là un curseur inerte réapparaîtrait sans bruit.
+  surSphere: () => terreUniqueBranchee,
   glassControls: [
     { k: 'terrainGlassFrost', label: 'Givre', min: 0, max: 1 },
     { k: 'terrainGlassThickness', label: 'Épaisseur', min: 1, max: 20 },

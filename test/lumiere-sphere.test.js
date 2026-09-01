@@ -357,7 +357,13 @@ test('③d le vecteur rendu est UNITAIRE, et `null` quand une donnée manque', (
 test('④a le nuanceur AJOUTE l’appoint dans la MÊME somme que le soleil', () => {
   // ⚠️ Un uniforme déclaré que le nuanceur n'additionne pas n'allume rien : c'est
   // exactement la panne des cinq curseurs. On vérifie la SOMME, pas le nom.
-  assert.match(FRAG_NU, /vec3 irrBloc = irradianceCrop\([^;]*\)\s*\n\s*\+ irradianceAppoint\(dot\(nMonde, uAppointDir\), uAppointIrr\);/)
+  // ⚠️ **`nMat` ET NON `nMonde` DEPUIS LA TÂCHE R25, ET C'EST LA MÊME NORMALE
+  // QUAND IL N'Y A PAS DE MATIÈRE.** `vec3 nMat = nMonde;` est posé juste
+  // au-dessus, et la carte de normales de la matière ne le perturbe que sous
+  // `uMatOn > 0.5` : à matière éteinte, la somme est inchangée AU BIT PRÈS.
+  // ⚡ **Et c'est ce qui rend « Relief de la matière » vivant** — une carte de
+  // normales qui ne recevrait pas le soleil ne modulerait rien du tout.
+  assert.match(FRAG_NU, /vec3 irrBloc = irradianceCrop\([^;]*\)\s*\n\s*\+ irradianceAppoint\(dot\(nMat, uAppointDir\), uAppointIrr\);/)
   assert.match(FRAG_NU, /vec3 colBloc = col \* irrBloc \* 0\.3183098861837907;/)
   // et le GLSL du module est INJECTÉ, pas recopié dans globe.js
   assert.match(GLOBE_NU, /\$\{GLSL_LUMIERE_SPHERE\}/)
@@ -369,7 +375,13 @@ test('④b le nuanceur applique l’ombrage des pentes SUR LA TERRE, et gardé',
   // ⚠️ **ET IL EST DANS LE BLOC DE LA NORMALE FINE** : `nMonde` n'existe que là.
   const iNormale = FRAG_NU.indexOf('if (uNormaleFineOn > 0.5) {')
   const iPente = FRAG_NU.indexOf('col = teintePente(col, penteSol(nMonde, haut), uSlopeTint);')
-  const iFinNormale = FRAG_NU.indexOf('float nduCrop = dot(nMonde, uHemiHaut);')
+  // ⚠️ **L'ANCRE DE FIN A CHANGÉ DE NOM AVEC R25, PAS DE PLACE** : la ligne
+  // `float nduCrop = …` est toujours la première APRÈS le bloc de la normale
+  // fine ; elle lit désormais `nMat`, la normale que la carte de matière peut
+  // avoir perturbée (et qui vaut `nMonde` quand il n'y en a pas). Ce que cette
+  // garde surveille — que l'ombrage des pentes reste DANS le bloc où `nMonde`
+  // existe — est inchangé.
+  const iFinNormale = FRAG_NU.indexOf('float nduCrop = dot(nMat, uHemiHaut);')
   assert.ok(iNormale > 0 && iPente > iNormale && iPente < iFinNormale,
     'l’ombrage des pentes est sorti du bloc où la normale fine existe')
 })

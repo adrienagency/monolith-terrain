@@ -192,7 +192,20 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // et le socle cesseraient de tracer les mêmes lignes. Le compte de `main.js`
   // passe de 7 à 8, EN PLACE ; les quatre autres lignes n'ont pas bougé d'un
   // caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 8, 'src/globe.js': 2 }
+  // ⚠️ **ET LE DIX-NEUVIEME EST ARRIVE AVEC LA TACHE R25, POUR LA RAISON DU
+  // DIX-HUITIEME, MOT POUR MOT.** La bascule « Au-dessus du niveau zero » pose
+  // au socle une demi-bande de fondu de 0,05 UNITE DE SCENE, sur un relief deja
+  // exagere ; le nuanceur du globe compare des METRES et son niveau de la mer
+  // vaut 0. `matiereDuCrop` (`main.js`) la convertit par `bandeZeroMatiereM`,
+  // dont le facteur est `(span / extentMeters) × exagération` — la MÊME loi de
+  // hauteur que l'intervalle des courbes, et le test `②` de
+  // `matiere-sphere.test.js` vérifie que les deux fonctions rendent la MÊME
+  // valeur sur la même entrée. Une exagération FIGÉE y donnerait une bande
+  // fausse du facteur `exagAvant / exagApres` : à exagération 2 elle vaut
+  // **12,21 m**, à exagération 4 elle vaut **6,11 m**. Le compte de `main.js`
+  // passe de 8 à 9, EN PLACE ; les quatre autres lignes n'ont pas bougé d'un
+  // caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 9, 'src/globe.js': 2 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))
