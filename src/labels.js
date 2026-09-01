@@ -4,6 +4,42 @@ import { BASIN_BLEND } from './terrain.js'
 
 // Map-style typography draped flat on the terrain: place names + spot elevations,
 // drawn to canvas textures so they read like printed cartography.
+//
+// ══════════ CE QUE CE FICHIER PORTE, ET CE QU'IL NE DOIT PAS PORTER ═════════
+//
+// ⛔ **`PLACE_NAMES` EST LA TOPONYMIE DE MONUMENT VALLEY, ET ELLE EST FAUSSE
+// PARTOUT AILLEURS.** HUNTS MESA, RAIN GOD MESA, THREE SISTERS, EAR OF THE
+// WIND… : des noms de l'Arizona, posés au hasard (`mulberry32`) sur le terrain
+// courant. C'est un décor de démonstration, pas de la cartographie.
+//
+// ⚡ **ILS NE SORTENT QUE SUR LE TERRAIN PROCÉDURAL** — `if (!real)` — c'est-à-
+// dire sur un relief inventé, où un nom inventé est à sa place. **Mesuré,
+// Tâche R24** : sous le mode sphère `params.source` vaut `'real'` (relevé à La
+// Réunion, `dem.lat = −21,26`), donc **aucun nom fictif n'a jamais atteint la
+// sphère**. La garde ci-dessous rend cette impossibilité EXPLICITE au lieu de
+// la laisser dépendre de la coïncidence de deux drapeaux — et
+// `test/cotes-globe.test.js` la tient.
+//
+// ⚡ **CE QUE LE CURSEUR « Points cotés » SERT VRAIMENT, C'EST LA SECONDE
+// MOITIÉ DE CE FICHIER** : des COTES D'ALTITUDE lues dans le MNT — de la vraie
+// donnée, en mètres, sur le vrai relief. C'est elle qu'on reloge sur la sphère.
+//
+// ══════════ ⚠️ LES DEUX CONVERSIONS DE LA SPHÈRE, ET IL N'Y EN A PAS TROIS ══
+//
+// Ce fichier raisonne en unités de BLOC et il continue : c'est le poseur
+// (`monde/sol-globe.js`) qui sait qu'il y a deux mondes. Deux longueurs
+// seulement traversent, et les deux par le MÊME `k` :
+//   ① **la position** — `poseur.placer(x, z, y)` ; c'est lui qui porte
+//      `R_GLOBE + altitudeM × (R_GLOBE / EARTH_RADIUS_M) × exagération`, la
+//      forme de `rayonAncre` (`monde/frontiere-rendu.js`), celle qui marche ;
+//   ② **la taille du plan** — `mesh.scale = k`. Un plan de 1,5 unité de BLOC
+//      laissé tel quel dans l'espace du GLOBE serait, à z12
+//      (`k = 7,667 071 e−3` mesuré à La Réunion), **1 / k = 130,4 fois trop
+//      grand** — et 130,4 est nommément l'un des sept facteurs de conversion
+//      déjà attrapés sur ce chantier.
+// ⛔ **LE DÉGAGEMENT NE SE CONVERTIT PAS À PART** : il est en unités de bloc et
+// traverse DANS `y`, donc par ①. L'écrire une seconde fois en mètres en ferait
+// une troisième loi, et deux écritures d'une même loi divergent en silence.
 
 const PLACE_NAMES = [
   'HUNTS MESA',
@@ -67,12 +103,105 @@ function settleHeight(sample, x, z, halfW) {
   return h + 0.14
 }
 
-export function createLabels(sample, seed, { real = false, toFeet, ink } = {}) {
+// Dégagement d'une cote au-dessus du sol, en unités de BLOC. C'était un `0.12`
+// nu dans le corps de la boucle ; il devient une constante parce que la sphère
+// le fait traverser et qu'une valeur qui traverse doit avoir un nom.
+export const DEGAGEMENT_COTE = 0.12
+
+// Pas de la dérivée qui donne l'EST local, en unités de bloc. `TERRAIN_SIZE/1000`
+// : assez grand pour que la différence de deux positions de globe reste très
+// au-dessus du bruit du double (à z12, 0,056 × k = 4,3e−4 unité de globe contre
+// des coordonnées de l'ordre de 100 — six ordres de grandeur de marge), assez
+// petit pour que la direction soit celle du point et non celle du bloc.
+const PAS_EST = 56 / 1000
+
+const _a = new THREE.Vector3()
+const _b = new THREE.Vector3()
+const _est = new THREE.Vector3()
+const _haut = new THREE.Vector3()
+const _sud = new THREE.Vector3()
+const _m = new THREE.Matrix4()
+
+/**
+ * LE REPÈRE LOCAL D'UNE COTE, PRIS AU POINT LUI-MÊME.
+ *
+ * ⛔ **PAS `poseur.repereLocal()`, ET C'EST MESURÉ, PAS SUPPOSÉ.** Celui-là est
+ * le repère du CENTRE du bloc. Sur une emprise large, le nord local du coin
+ * n'est plus celui du centre : à z8 (emprise 330 km) l'écart angulaire vaut
+ * ~1,5°, et à z4 (10 600 km) il vaut 48° — la cote se coucherait sur la
+ * tangente d'un autre endroit. `frontiere-rendu.js` porte la même mise en garde
+ * pour la caméra (« le bloc plat est au-dessus de la sphère de 538 km à z4 »).
+ *
+ * ⚡ **ET IL SE PREND SANS LATITUDE.** `placer` est la seule loi de passage ; on
+ * lui demande DEUX points au lieu d'un, et la direction de l'est tombe toute
+ * seule. Rien à recopier, donc rien à désaccorder.
+ *
+ * @returns {{est: THREE.Vector3, haut: THREE.Vector3, sud: THREE.Vector3}}
+ */
+export function repereCote(poseur, x, z, y) {
+  const p0 = poseur.placer(x, z, y)
+  const p1 = poseur.placer(x + PAS_EST, z, y)
+  _a.set(p0.x, p0.y, p0.z)
+  _b.set(p1.x, p1.y, p1.z)
+  // le HAUT local est la verticale de la sphère : la position, normalisée
+  _haut.copy(_a).normalize()
+  _est.copy(_b).sub(_a)
+  // orthogonalisation : `placer` a fait monter les deux points d'une hauteur
+  // qui n'est pas la même (le sol change), donc la corde n'est pas horizontale
+  _est.addScaledVector(_haut, -_est.dot(_haut))
+  if (_est.lengthSq() < 1e-24) _est.set(1, 0, 0) // dégénéré : n'arrive qu'au pôle
+  _est.normalize()
+  // `sud = est × haut` — vérifié contre `repereGlobe` de `monde/frontiere-rendu.js`
+  // (est × haut = (sla·slo, −cla, sla·clo) = sud), et le test le confronte.
+  _sud.copy(_est).cross(_haut)
+  return { est: _est.clone(), haut: _haut.clone(), sud: _sud.clone() }
+}
+
+/**
+ * La pose complète d'une cote sur le globe : position, orientation, échelle.
+ *
+ * @param {object} poseur celui de `monde/sol-globe.js` (`globe: true`)
+ * @param {number} x @param {number} z coordonnées de BLOC
+ * @param {number} y altitude de BLOC (sol dessiné + dégagement)
+ * @returns {{position: THREE.Vector3, quaternion: THREE.Quaternion, echelle: number}}
+ */
+export function poseCoteGlobe(poseur, x, z, y) {
+  const { est, haut, sud } = repereCote(poseur, x, z, y)
+  const p = poseur.placer(x, z, y)
+  // ⚠️ **LES COLONNES SONT L'IMAGE DES AXES DU BLOC** — `makeBasis(X, Y, Z)`
+  // attend exactement ça, et c'est `rotationVersGlobe` mot pour mot :
+  // colonneX = est, colonneY = haut, colonneZ = sud.
+  _m.makeBasis(est, haut, sud)
+  const q = new THREE.Quaternion().setFromRotationMatrix(_m)
+  return { position: new THREE.Vector3(p.x, p.y, p.z), quaternion: q, echelle: poseur.rapportSimilitude() }
+}
+
+/**
+ * @param {object} [opts.poseur] le poseur de `monde/sol-globe.js`. `null` ou
+ *   plat ⇒ le drapage du dépôt, au bit près.
+ */
+export function createLabels(sample, seed, { real = false, toFeet, ink, poseur = null } = {}) {
   const group = new THREE.Group()
   const rng = mulberry32(seed * 13 + 29)
+  const surGlobe = !!poseur?.globe
+  // ⛔ **LA MARQUE QUI INTERDIT LE PAS DE FENÊTRE.** `f3AncreAuSol` /
+  // `f3SuitAuSol` (main.js) ajoutent le décalage de fenêtre aux positions des
+  // enfants et translatent le groupe de −fenêtre : c'est juste tant que les
+  // enfants sont en coordonnées de BLOC. Sur la sphère ils portent des points de
+  // GLOBE à ~100 unités de l'origine ; leur ajouter une fenêtre de bloc les
+  // enverrait à des centaines de kilomètres, et le test d'octogone
+  // (`|x| > demi`) les masquerait tous. Le drapeau se lit là-bas.
+  group.userData.espaceGlobe = surGlobe
+  // le sol à consulter : celui que le GLOBE dessine quand il y en a un, celui du
+  // bloc sinon. `poseur.hauteur` rend déjà des unités de bloc et retombe tout
+  // seul sur `sample` quand aucune tuile ne couvre (`monde/sol-globe.js`).
+  const sol = surGlobe ? (x, z) => poseur.hauteur(x, z) : sample
 
-  // fictional cartography only in procedural mode — real-world maps get real data only
-  if (!real) {
+  // ⛔ **LA TOPONYMIE FICTIVE NE SORT QUE SUR LE TERRAIN PROCÉDURAL, ET JAMAIS
+  // SUR LA SPHÈRE.** `!real` disait déjà la première moitié ; `!surGlobe` dit
+  // la seconde, à voix haute, pour que « plaquer Monument Valley sur les
+  // Alpes » soit impossible par CONSTRUCTION et pas par coïncidence.
+  if (!real && !surGlobe) {
     const region = makeLabelMesh('N A V A J O   P L A T E A U', { size: 110, italic: false, spacing: 0.9, opacity: 0.78, color: ink }, 22)
     region.rotation.x = -Math.PI / 2
     region.position.set(0, 0, -12.5)
@@ -105,12 +234,31 @@ export function createLabels(sample, seed, { real = false, toFeet, ink } = {}) {
     const dist = minDist + rng() * (24 - minDist)
     const x = Math.cos(angle) * dist
     const z = Math.sin(angle) * dist
-    const h = sample(x, z)
+    // ⚡ **LA COTE EST CELLE DU RELIEF QU'ON REGARDE.** Sur la sphère c'est le
+    // sol DESSINÉ par le globe, pas celui du bloc plat : les deux diffèrent de
+    // −72 m à +98,7 m à La Réunion (mesure en tête de `peaks.js`), et une cote
+    // qui annonce l'altitude d'une autre surface que celle qu'elle touche est
+    // exactement le mensonge que ce curseur est censé corriger.
+    const h = sol(x, z)
     const feet = toFeet ? toFeet(h) : Math.round(4800 + h * 420 + rng() * 40)
     const metres = Math.round(feet / 3.28084)
     const mesh = makeLabelMesh(`· ${metres.toLocaleString('fr-FR')} m`, { size: 78, italic: false, spacing: 0.06, opacity: 0.85, color: ink ?? '#2a241c' }, 1.5)
-    mesh.rotation.x = -Math.PI / 2
-    mesh.position.set(x, h + 0.12, z)
+    if (surGlobe) {
+      // ⚠️ **LA ROTATION PART DANS LA GÉOMÉTRIE, PAS DANS LE MESH.** Le
+      // quaternion du repère local écrase `mesh.rotation` en entier — c'est le
+      // même piège que le `translateX(-50%)` des cartouches de sommet. En la
+      // cuisant dans la géométrie, la normale du plan devient `+Y` du mesh, et
+      // le repère local n'a plus qu'à envoyer `+Y` sur le haut local.
+      mesh.geometry.rotateX(-Math.PI / 2)
+      const pose = poseCoteGlobe(poseur, x, z, h + DEGAGEMENT_COTE)
+      mesh.position.copy(pose.position)
+      mesh.quaternion.copy(pose.quaternion)
+      // ② la SEULE longueur qui se convertit à la main : voir l'en-tête.
+      mesh.scale.setScalar(pose.echelle)
+    } else {
+      mesh.rotation.x = -Math.PI / 2
+      mesh.position.set(x, h + DEGAGEMENT_COTE, z)
+    }
     group.add(mesh)
   }
 

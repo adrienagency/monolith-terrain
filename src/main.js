@@ -2051,25 +2051,72 @@ const boats = new Boats(scene)
 // test vérifie qu'il n'a pas disparu.
 const mapLayers = new MapLayers(scene, camera) // water/places overlays, populated per zone
 
+// ══════ LES COTES NE VIVENT PLUS DANS LA SCÈNE DU BLOC — Tâche R24 ═════════
+//
+// ⛔ **C'EST LE §5 DE `monde/visibilite-surface.js` UNE CINQUIÈME FOIS.** Le
+// curseur « Points cotés » passait par `socleAffiche()`, borné à FAUX sous le
+// mode sphère : le groupe était peuplé — **14 cotes mesurées à La Réunion,
+// `groupeVisible: false` aux cinq altitudes** (`.banc/R24/avant.json`) — et
+// dessiné dans une scène que D16-a ne rend plus (`passeSurface.enabled = false`).
+// Le rendre `visible` n'aurait rien montré : c'est le défaut du cartouche et
+// celui des nuages, mot pour mot.
+//
+// ⚡ Les cotes pendent donc d'un groupe d'ANCRAGE que le branchement de la
+// frontière de rendu fait adopter par `sceneGlobe`. ⚠️ **Et contrairement au
+// cartouche et au ciel, ce groupe ne reçoit AUCUNE similitude** : une cote est
+// posée sur le RELIEF, pas sur un plan, et la tangente n'est bonne qu'au centre
+// (`frontiere-rendu.js` : le bloc plat est au-dessus de la sphère de **2,1 km à
+// z8**, 538 km à z4). Chaque cote porte donc sa propre pose, calculée par
+// `poseur.placer` — la loi du dépôt, celle des rivières et des toponymes.
+//
+// ⚠️ **HORS MODE SPHÈRE, CE GROUPE EST L'IDENTITÉ DANS `scene`** : matrice
+// unité, même parent qu'avant, comportement du dépôt au bit près.
+const groupeCotes = new THREE.Group()
+groupeCotes.name = 'ancrage-cotes'
+scene.add(groupeCotes)
+
+// ⚠️ **LA ZONE MORTE EST RÉELLE, PAS THÉORIQUE.** `poseurDesReperes` est une
+// DÉCLARATION de fonction (donc hissée), mais son corps lit `poseurReperes` et
+// `globe`, déclarés en `let` deux mille lignes plus bas : l'appeler à la
+// première construction des cotes — qui a lieu ICI, avant le globe — lèverait
+// une `ReferenceError` de zone morte temporelle, et `typeof` n'y échappe pas.
+// La toute première pose est donc PLATE ; `regenerateLabels()`, appelée dès le
+// premier relief, donne la vraie. Ce drapeau est le seul témoin de l'ordre du
+// fichier, et il est plus honnête qu'un `try` qui avalerait autre chose.
+let poseurCotesPret = false
+const poseurDesCotes = () => (poseurCotesPret ? poseurDesReperes() : null)
+
 const labelOpts = () => ({
   real: params.source === 'real',
   toFeet: (h) => terrain.heightToFeet(h),
   // dark mode: printed cartography flips to light ink or it vanishes on the
   // near-black terrain; light mode keeps the labels' own vintage browns
   ink: params.darkMode ? '#e8e2d2' : undefined,
+  // ⚡ **LE MÊME POSEUR QUE LES SOMMETS ET QUE LA CARTO**, pas un second : il
+  // porte les deux conversions (`monde/sol-globe.js`) et lit la hauteur que le
+  // GLOBE dessine. `null` hors mode sphère ⇒ drapage du dépôt.
+  poseur: poseurDesCotes(),
 })
 let labels = createLabels(terrain.sample, params.seed, labelOpts())
 labels.visible = params.labels
-scene.add(labels)
+groupeCotes.add(labels)
 
 function regenerateLabels() {
-  scene.remove(labels)
+  groupeCotes.remove(labels)
   disposeLabels(labels)
-  labels = createLabels(terrain.sample, params.seed, labelOpts())
+  const opts = labelOpts()
+  // ⚠️ **`refus` COMPTE LES POINTS QUI SONT RETOMBÉS SUR LE BLOC PLAT** — c'est
+  // `monde/sol-globe.js` qui le tient, et c'est le seul moyen de savoir si cette
+  // construction-ci a vu les hauteurs du globe ou seulement son repli. La veille
+  // ci-dessous s'arrête là-dessus au lieu de rebâtir indéfiniment.
+  const refus0 = opts.poseur?.globe ? opts.poseur.refus : null
+  labels = createLabels(terrain.sample, params.seed, opts)
+  labels.userData.refusCotes = refus0 == null ? null : opts.poseur.refus - refus0
   // a rebuild can run while in orbit (dive preload, GUI) — stay hidden there
-  labels.visible = params.labels && socleAffiche()
+  // ⛔ **PAS `socleAffiche()` — Tâche R24.** Voir `poserCotesVisibles`.
+  labels.visible = params.labels && cotesAffichees()
   f3AncreAuSol(labels) // mode continu : les cotes s'accrochent à leur point du sol
-  scene.add(labels)
+  groupeCotes.add(labels)
 }
 
 // ------------------------------------------------------------------ HUD + interactivity
@@ -3459,8 +3506,15 @@ function f3Fige() {
 //
 // ⚠️ Appelé APRÈS chaque (re)construction de ces groupes, jamais deux fois sur
 // le même — une double addition les enverrait à deux fenêtres de là.
+// ⛔ **UN GROUPE MARQUÉ `espaceGlobe` NE SUIT PAS LA FENÊTRE — Tâche R24.** Ses
+// enfants ne sont plus en coordonnées de bloc mais en points de SPHÈRE, à une
+// centaine d'unités de l'origine : leur ajouter le décalage de fenêtre les
+// enverrait à des centaines de kilomètres, et le test d'octogone ci-dessous
+// (`|x| > demi`) les masquerait tous — le défaut exact que `places-layer.js`
+// documente pour son désencombrement (« le comparer à HALF = 28 rejetterait
+// TOUS les noms, à tous les zooms »). C'est `labels.js` qui pose la marque.
 function f3AncreAuSol(group) {
-  if (!group || !(dem?.empriseCote > 1)) return
+  if (!group || group.userData?.espaceGlobe || !(dem?.empriseCote > 1)) return
   const f = terrain.fenetre
   for (const o of group.children) {
     o.position.x += f.x
@@ -3474,7 +3528,7 @@ function f3AncreAuSol(group) {
 // construction ; passé un demi-socle de défilement, la moitié d'entre eux
 // flotterait au-delà du bord, au-dessus du vide.
 function f3SuitAuSol(group, f) {
-  if (!group || !(dem?.empriseCote > 1)) return
+  if (!group || group.userData?.espaceGlobe || !(dem?.empriseCote > 1)) return
   group.position.set(-f.x, 0, -f.z)
   const bloc = terrain.blockFootprint()
   for (const o of group.children) {
@@ -4805,6 +4859,13 @@ if (fusionDesPasses) {
   // retire de `scene` au passage — jamais deux parents, jamais deux ciels.
   // `majNuagesGlobe` lui donne sa pose et sa caméra à chaque image.
   sceneGlobe.add(groupeNuages)
+  // ⚡ **ET LES COTES D'ALTITUDE AVEC EUX — Tâche R24.** Même geste, même
+  // raison : le groupe portait ses 14 plans et était dessiné dans une scène que
+  // plus personne ne rend. ⚠️ **Mais celui-ci ne reçoit AUCUNE pose par
+  // image** : chaque cote porte déjà sa position de sphère, calculée par
+  // `poseur.placer` à la construction, parce qu'une similitude de groupe
+  // poserait le relief sur le plan tangent — 2,1 km d'écart à z8.
+  sceneGlobe.add(groupeCotes)
   // ⚡ **ET LES EFFETS LISENT MAINTENANT LA BONNE CAMÉRA.** La profondeur du
   // tampon est celle de `camGlobe` ; un effet qui la linéariserait avec les
   // `near`/`far` de la caméra du bloc se tromperait d'espace — c'est exactement
@@ -5255,7 +5316,13 @@ function poserMiseAuPoint(distanceBloc = params.focusDistance, porteeBloc = para
 function poserVisibiliteSocle(v) {
   const vue = visibiliteSurface({ terreUnique: terreUniqueBranchee, surface: v })
   terrain.mesh.visible = vue.socle
-  labels.visible = vue.socle && params.labels
+  // ⛔ **PLUS `vue.socle` — Tâche R24, et c'est le §6 la seconde moitié.**
+  // `socle` est borné à FAUX sous le mode sphère : accroché à lui, le groupe des
+  // cotes était éteint à toutes les altitudes alors qu'il portait ses 14 plans
+  // (`.banc/R24/avant.json`). Une cote se pose sur le relief qu'on REGARDE, et
+  // le relief qu'on regarde est le crop — la question des repères, pas celle du
+  // maillage plat.
+  labels.visible = vue.reperes && params.labels
   hud3.group.visible = vue.socle
   // GPX sprites draw with depthTest:false — hidden with the surface or
   // they'd float on top of the planet
@@ -5396,6 +5463,26 @@ function reperesAffiches() {
   return visibiliteSurface({ terreUnique: terreUniqueBranchee, surface }).reperes
 }
 
+// LES COTES D'ALTITUDE SONT-ELLES À L'ÉCRAN ? — Tâche R24, et c'est le §6 la
+// SECONDE moitié. R18 a rebranché les SOMMETS sur `reperes` et laissé les COTES
+// sur `socleAffiche()` : exactement le partage à moitié fait que le §4 raconte
+// pour le cartouche. Les deux interrupteurs sont côte à côte dans le panneau,
+// sous le même titre « Repères », et ils répondent à la même question.
+//
+// ⛔ **MESURÉ, PAS DÉDUIT** (`.banc/R24/avant.json`, La Réunion, mode sphère par
+// défaut, cinq altitudes de 18 km à 730 m) : `cotes.total = 14` — le groupe est
+// PEUPLÉ — et `groupeVisible = false` **aux cinq**, y compris devant le crop.
+const cotesAffichees = () => reperesAffiches()
+
+// ⚠️ **UN SEUL CORPS POUR LES DEUX PANNEAUX.** `setLabelsVisible` était écrit
+// DEUX fois — panneau Studio et panneau Carte — avec le même corps recopié.
+// Deux écritures d'une même loi divergent en silence, et celle-ci portait
+// justement le prédicat à corriger.
+function poserCotesVisibles(v) {
+  labels.visible = !!v && cotesAffichees()
+  return labels.visible
+}
+
 // ══════════ LE POSEUR DES SOMMETS — Tâche R18 ═══════════════════════════════
 //
 // ⚠️ **MÉMORISÉ, ET LA RAISON EST CHIFFRÉE PAR LE MODULE LUI-MÊME** :
@@ -5429,6 +5516,47 @@ function poseurDesReperes() {
     actif: true,
   })
   return poseurReperes
+}
+
+// ⚡ **LA SORTIE DE LA ZONE MORTE — Tâche R24.** À partir d'ici, `globe` ET les
+// deux mémoires ci-dessus existent : les cotes peuvent demander le poseur sans
+// lever. Voir `poseurDesCotes`, tout en haut, pour pourquoi ce drapeau existe.
+poseurCotesPret = true
+
+// ══════════ LES COTES ATTENDENT LES HAUTEURS DU GLOBE — Tâche R24 ══════════
+//
+// ⛔ **UNE COTE EST DE LA GÉOMÉTRIE : ELLE EST POSÉE UNE FOIS, ET ELLE Y RESTE.**
+// C'est ce qui la sépare des sommets, qui sont du DOM reprojeté à chaque image
+// et que `PeaksLayer.update` ré-ancre tout seul toutes les 30 images. Les
+// hauteurs du globe arrivent du RÉSEAU : les cotes construites avant elles sont
+// posées sur le repli — le sol du bloc plat — et rien ne les reprendrait jamais,
+// puisque `regenerateLabels()` n'est rappelé qu'à la reconstruction suivante.
+//
+// ⚡ **LA REPRISE EST BORNÉE, ET C'EST LE POINT.** Au plus `COTES_REPRISES`
+// reconstructions par MNT, une par seconde, et elle s'arrête dès que le poseur
+// ne refuse plus aucun point (`poseur.refus`). ⛔ Une reprise non bornée, sur un
+// endroit que les tuiles ne couvriront jamais, rebâtirait 14 canevas par seconde
+// pour toujours — le genre de gaspillage silencieux que ce chantier collectionne.
+const COTES_REPRISES = 5
+const COTES_PERIODE_MS = 1000
+let cotesDem = null
+let cotesEssais = 0
+let cotesT = 0
+function majCotesGlobe() {
+  if (!terreUniqueBranchee) return
+  if (cotesDem !== dem) { cotesDem = dem; cotesEssais = 0; cotesT = 0 }
+  if (cotesEssais >= COTES_REPRISES) return
+  const t = performance.now()
+  if (t - cotesT < COTES_PERIODE_MS) return
+  const p = poseurDesCotes()
+  // `poseurPourReconstruction` rend le poseur PLAT tant qu'aucune tuile ne porte
+  // ses hauteurs : tant qu'il est plat, il n'y a rien de neuf à poser.
+  if (!p?.globe) return
+  // rien à reprendre si la dernière construction n'a essuyé aucun refus
+  if (labels?.userData?.refusCotes === 0) { cotesEssais = COTES_REPRISES; return }
+  cotesT = t
+  cotesEssais++
+  regenerateLabels()
 }
 
 // ⚠️ **L'ENTRÉE EST UNE ALTITUDE GÉOMÉTRIQUE, PAS UNE FRACTION D'ÉCRAN — RÈGLE
@@ -6654,6 +6782,15 @@ const peaksLayer = new PeaksLayer({
     modes.announce(`FOCUS — ${name.toUpperCase()}`)
     focusOnPeak(world.x, world.y, world.z)
   },
+  // ⚡ **LE POSEUR À LA CONSTRUCTION, PAS SEULEMENT À LA PROJECTION — Tâche
+  // R24.** `update()` l'avait depuis R18 ; `refresh()` ne l'avait pas, et c'est
+  // là que l'altitude d'ancrage se décide. Voir `ancrageSommet` (`peaks.js`) :
+  // le sol du bloc plat est SOUS le sol dessiné sur 25 % des points relevés.
+  getPoseur: () => poseurDesReperes(),
+  // ⚡ **ET LE ZOOM, POUR LE SEUIL D'IMPORTANCE (D18, règle 2).** C'est le
+  // patron de `filterByZoom` / `min_zoom` déjà en service sur les rivières,
+  // transposé à l'altitude d'un sommet — et l'entrée est CONTINUE.
+  getZoom: () => params.demZoom,
 })
 // Le défaut est désormais « éteint » (params.peaksEnabled, plus haut), mais
 // cette ligne compte toujours : `params` a déjà pu être écrasé par la
@@ -11827,7 +11964,7 @@ const panelCtx = {
     syncUiTheme()
   },
   peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && socleAffiche()),
+  setLabelsVisible: (v) => poserCotesVisibles(v),
   saveZoomExag,
   saveZoomDetail,
   resetZoomExag: () => {
@@ -12117,7 +12254,7 @@ const mapPanel = buildMapPanel({
   terrain,
   refreshAerial,
   peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && socleAffiche()),
+  setLabelsVisible: (v) => poserCotesVisibles(v),
 })
 
 // L'onglet « Couches » — la vitrine du Gardien. Il ne calcule rien : il
@@ -12569,6 +12706,15 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
   // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
   veilleCrop, terreUniqueBranchee, contexteCrop,
+  // LES REPÈRES ET LES COTES — Tâche R24, exposés pour la MÊME raison que les
+  // blocs ci-dessus : `main.js` n'est chargé par aucun test, et le poseur des
+  // repères est **le seul moyen de lire la hauteur d'un sommet en mètres** pour
+  // la confronter à `globe.hauteurDessinee` — c'est-à-dire de PROUVER qu'un
+  // repère n'est pas sous le sol au lieu de le supposer.
+  poseurDesReperes, reperesAffiches,
+  // ⚠️ **LE MÊME CHEMIN QUE LE CURSEUR DU STUDIO**, pas une recopie : la sonde
+  // doit actionner ce qu'actionne un doigt, sinon elle mesure autre chose.
+  setLabelsVisible: (v) => poserCotesVisibles(v),
   // LE REPOS DE LA VUE — Tâche N, exposé pour la même raison que les quatre
   // blocs ci-dessus : `main.js` n'est chargé par aucun test, et
   // `veilleRepos.auRepos` / `.bascules` sont **la seule façon de vérifier à
@@ -13084,6 +13230,7 @@ function tick() {
     reperesAffiches(),
     poseurDesReperes(),
   )
+  majCotesGlobe()
 
   // city-label declutter is screen-space (depends on camera projection), so it
   // goes stale as soon as the camera moves — re-run the visibility-only pass

@@ -223,8 +223,19 @@ test('③ LE COMPTE DES LECTEURS — la garde de CLASSE, pas de cas particulier'
   // lecteur SANS toucher a ce compte, et les quatre assertions de forme plus
   // ce compte ont rougi ensemble. C'est la seule chose qui separe une
   // redistribution voulue d'un calque de bloc plat rallume par accident.
-  assert.equal(compte('socle'), 8,
-    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 8 -- un calque du bloc plat a change de grandeur`)
+  // ⚡ **SEPT, ET NON HUIT : UNE QUATRIEME REDISTRIBUTION VOULUE — Tache R24.**
+  //   · R24 : `labels` (les COTES D'ALTITUDE, curseur « Points cotes ») est
+  //     passe de `vue.socle` a `vue.reperes`, pour la MEME raison que les trois
+  //     ci-dessus — le groupe a quitte la scene du bloc plat et pend d'un groupe
+  //     d'ancrage (`groupeCotes`) que `sceneGlobe` adopte. Mesure :
+  //     `.banc/R24/avant.json`, cinq altitudes de 18 km a 730 m, La Reunion,
+  //     `cotes.total = 14` et `groupeVisible = false` AUX CINQ.
+  // ⚡ **ET CETTE GARDE A FAIT SON TRAVAIL UNE FOIS DE PLUS** : R24 a rebranche
+  // le lecteur, et ce compte a rougi avant que rien ne soit ecrit ici.
+  assert.equal(compte('socle'), 7,
+    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 7 -- un calque du bloc plat a change de grandeur`)
+  assert.equal(compte('reperes'), 1,
+    `${compte('reperes')} lecteur de \`vue.reperes\` au lieu de 1 (labels seul -- les sommets sont du DOM, pas un calque de cette fonction)`)
   assert.equal(compte('nuages'), 1,
     `${compte('nuages')} lecteur de \`vue.nuages\` au lieu de 1 (clouds seul)`)
   assert.equal(compte('cartouche'), 1,
@@ -374,8 +385,12 @@ test('④ LES SOMMETS ONT CHANGÉ DE PRÉDICAT, DE CAMÉRA ET D’ESPACE', () =>
   // qu'ils sont sortis vers le bon prédicat, la bonne caméra, le bon espace.
   const sansCommentaires = MAIN.replace(/\/\/[^\n]*/g, '')
   assert.ok(/function reperesAffiches\(\)/.test(sansCommentaires), 'le prédicat des repères n’existe pas')
-  assert.equal((sansCommentaires.match(/reperesAffiches\(\)/g) || []).length, 2,
-    'le prédicat des repères n’a pas exactement son lecteur (plus sa définition)')
+  // ⚠️ **TROIS, ET NON DEUX — Tâche R24.** La définition, le lecteur des SOMMETS
+  // (`peaksLayer.update`), et celui des COTES (`cotesAffichees`, qui n'est que
+  // son alias de lecture : les deux interrupteurs sont côte à côte sous le même
+  // titre « Repères » et répondent à la même question).
+  assert.equal((sansCommentaires.match(/reperesAffiches\(\)/g) || []).length, 3,
+    'le prédicat des repères n’a pas exactement ses deux lecteurs (plus sa définition)')
   // ⛔ **ET IL NE LIT PAS `veilleSocle`** — jamais nourrie sous la sphère, elle
   // reste FAUSSE pour toujours : c'est le piège n° 1 de ce chantier.
   const iPred = MAIN.indexOf('function reperesAffiches()')
@@ -393,12 +408,22 @@ test('④ LES SOMMETS ONT CHANGÉ DE PRÉDICAT, DE CAMÉRA ET D’ESPACE', () =>
   assert.ok(/reperesAffiches\(\)/.test(appel), 'les sommets ne lisent pas le prédicat des repères')
   assert.ok(/poseurDesReperes\(\)/.test(appel), 'les sommets n’ont pas d’adaptateur bloc ↔ globe')
 
-  // ⛔ **CE QUI RESTE, ET IL FAUT LE DIRE** : « Points cotés » (`labels`) est un
-  // GROUPE DE GÉOMÉTRIE dans la scène du bloc plat, pas des marqueurs de DOM.
-  // Le rallumer ne montrerait rien — c'est le §4 du module (le cartouche) : il
-  // lui faudrait être ADOPTÉ par la scène du globe, avec son repère local.
-  // Paquet (b), DÉCLARÉ ET NON FAIT ; ce test le grave pour que personne ne
-  // croie que R18 l'a réparé.
-  assert.ok(/setLabelsVisible: \(v\) => \(labels\.visible = v && socleAffiche\(\)\)/.test(MAIN),
-    'les points cotés ont changé de prédicat sans être relogés dans la scène du globe')
+  // ⚡ **CE QUI RESTAIT EST FAIT — Tâche R24, et la garde change de sens.**
+  // R18 avait écrit ici : « Points cotés (`labels`) est un GROUPE DE GÉOMÉTRIE
+  // dans la scène du bloc plat, pas des marqueurs de DOM ; le rallumer ne
+  // montrerait rien — il lui faudrait être ADOPTÉ par la scène du globe. »
+  // ⛔ **CETTE ASSERTION EXIGEAIT DONC LE DÉFAUT**, exprès, pour que personne
+  // ne rebranche le prédicat sans faire le relogement. Elle est retournée : on
+  // exige maintenant LES DEUX ENSEMBLE, et jamais l'un sans l'autre.
+  assert.ok(!/labels\.visible = v && socleAffiche\(\)/.test(MAIN),
+    'les points cotés lisent encore `socleAffiche()`, borné à faux sous la sphère')
+  assert.ok(/setLabelsVisible: \(v\) => poserCotesVisibles\(v\)/.test(MAIN),
+    'les deux panneaux ne passent pas par le MÊME corps : deux écritures d’une loi divergent en silence')
+  assert.ok(/sceneGlobe\.add\(groupeCotes\)/.test(sansCommentaires),
+    'le groupe des cotes n’est PAS adopté par la scène du globe — le rallumer ne montre rien')
+  // ⛔ **ET SON POSEUR EST CELUI DU DÉPÔT, PAS UN SECOND.** Une cote posée par
+  // une similitude de groupe tomberait sur le plan tangent — 2,1 km d'écart à
+  // z8 (`monde/frontiere-rendu.js`, table de la courbure).
+  assert.ok(/poseur: poseurDesCotes\(\)/.test(sansCommentaires),
+    'les cotes n’ont pas d’adaptateur bloc ↔ globe')
 })
