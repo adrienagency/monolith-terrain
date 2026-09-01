@@ -15,7 +15,8 @@ travail et comment le recoudre. Les branches, elles, survivent dans git.
 ## L'ÉTAT AU 2026-09-01, 00 h
 
 **Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`.**
-**4 525 tests · 0 échec · `audit:tests` 234 = 234** (après R20 bis, R22, l'arbitrage du ciel et R23).
+**4 544 tests · 0 échec · `audit:tests` 236 = 236** (R20 bis, R22, l'arbitrage du ciel, R23, R24).
+**Seul R21 (l'éclairage) est encore dehors.**
 
 ⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
 démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
@@ -32,13 +33,13 @@ démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
 | **R22** | **les parois du bloc et la grille — 4 sur 4, + l'encre de grille en prime** | `parois-grille` |
 | **R20 ter** | **le ciel par défaut se voit — ×2,3 à ×16 de pixels selon le lieu** | `nuages-globe` |
 | **R23** | **le geste continu, la caméra hors du sol, et le retour à l'orbite** | `vitesse-camera` |
+| **R24** | **les points cotés (0 → 14), les sommets bornés, `cities.json` supprimé** | `toponymie-globe` |
 
 ### En cours — quatre arbres, quatre agents
 
 | tâche | sujet | branche | arbre |
 |---|---|---|---|
 | **R21** | l'éclairage : ombres, lampe d'appoint, ombrage des pentes (8 options) | `lumiere-crop` | `C:\Dev\wt-lum` |
-| **R24** | la toponymie : sommets et points cotés (2 options) | `toponymie-globe` | `C:\Dev\wt-top` |
 
 **Périmètres attribués, pour que les fusions ne se battent pas :**
 - R21 → `light-panel.js`, `eclairage-crop.js`, le nuanceur de `globe.js`
@@ -57,7 +58,7 @@ structurelles, l'éclairage de R21 se posera dessus.
 1. ~~R22~~ **fusionné**.
 2. **R21** (`lumiere-crop`) — l'éclairage, par-dessus.
 3. ~~R23~~ **fusionné**.
-4. **R24** (`toponymie-globe`) — le plus additif, donc le dernier.
+4. ~~R24~~ **fusionné**.
 
 ---
 
@@ -79,7 +80,7 @@ contenu du disque. Un écart = un test qui ne tourne pas.
 
 ## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 525 · 0 échec**
+1. `npm test` — **base à battre : 4 544 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
 3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
    `t39.jpg`) : elles sont l'état AVANT de cette campagne.
@@ -93,6 +94,18 @@ compté « 0 image en 3,7 s ». **Un Chrome sans tête capture l'image composée
 patron dans `scripts/sonde-demarrage.mjs`.
 
 ---
+
+## ⚠️ L'INVENTAIRE SE CONTREDIT LUI-MÊME EN UN POINT — vérifié
+
+R24 a trouvé que l'option **21 (Sommets)** était donnée ⛔ dans le tableau brut
+(lignes 272-273) alors que la **ligne 131 du même fichier dit « ✅ FAIT »** :
+R18 l'avait déjà relogée, et le tableau gardait le relevé d'AVANT R18.
+
+➡️ J'ai cherché si d'autres lignes étaient dans ce cas : **`grep` sur les
+marqueurs « FAIT » rend une seule occurrence**, celle-là. Le compte des
+47 options mortes n'est donc pas surestimé en général — mais **le tableau brut
+est un relevé daté, pas un état courant**. Avant chaque nouvelle tranche :
+relire la colonne de commentaire, pas seulement le pictogramme.
 
 ## CE QUI RESTE OUVERT APRÈS CETTE VAGUE
 
