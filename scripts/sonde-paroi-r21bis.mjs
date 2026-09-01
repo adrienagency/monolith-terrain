@@ -222,12 +222,16 @@ try {
   await dodo(1500)
   await page.evaluate(poserInstrumentPlein)
   await page.evaluate(() => { window.__exp.params.animations = false })
+  // ⛔ **TROISIÈME COPIE DE LA MÊME PORTE FAUSSE — corrigée par R26.** Le brief
+  // de R26 n'en annonçait que deux ; un `grep` sur la formule en a rendu trois.
+  // C'est l'argument de la définition unique, en une ligne : une formule recopiée
+  // se corrige autant de fois qu'elle a été recopiée, et on en oublie une.
+  // `state === 'loading' || state === 'empty'` à zéro ne peut PAS arriver — il
+  // reste 4 à 9 `empty` périmées que plus personne ne demande. Cette attente
+  // expirait donc à ses 45 s, à chaque chargement.
   await page.waitForFunction(() => {
-    const t = window.__exp.globe?.tiles
-    if (!t) return true
-    let n = 0
-    for (const v of t.values()) if (v.state === 'loading' || v.state === 'empty') n++
-    return n === 0
+    const g = window.__exp.globe
+    return !g || g.tuilesEnVol() === 0
   }, { polling: 250, timeout: 45000 }).catch(() => {})
   await dodo(4000)
 
