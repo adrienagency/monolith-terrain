@@ -124,3 +124,33 @@ profondeur de champ travaillent dessus.**
 
 ⚠️ **Ce n'est pas deux erreurs au chargement : c'est soixante fois par seconde.**
 **Tâche à ouvrir.**
+
+---
+
+# ⛔ RÉTRACTATION — « la molette simulée n'atteint pas l'appli » ÉTAIT FAUX
+
+**Ce que j'ai écrit dans quatre briefs d'affilée**, en le donnant chaque fois
+comme le piège numéro un :
+
+> *« `Input.dispatchMouseEvent` type `mouseWheel` n'atteint PAS le gestionnaire
+> de l'appli : 0 cran sur 175 dans un banc réel. Ne pilote pas le zoom comme
+> ça. »*
+
+**R23 l'a mesuré : 40 crans envoyés, 40 reçus.** La molette simulée fonctionne
+parfaitement.
+
+⚡ **Le vrai coupable est le voile d'accueil `.ce-hubveil`.** Il mange **tous**
+les gestes — **0 `pointerdown` sur 20**, pas seulement la molette. Le banc
+d'origine mesurait un voile, pas un gestionnaire de molette, et a nommé le
+symptôme d'après le seul geste qu'il avait essayé.
+
+➡️ **La règle qui remplace celle-là :** avant de conclure qu'un événement
+n'arrive pas, **essaie un second type d'événement**. Si les deux échouent, ce
+n'est pas l'événement — c'est quelque chose entre le curseur et l'appli. Et
+**ferme le voile d'accueil** (Échap) avant tout banc d'interaction.
+
+⚠️ **La leçon de méthode est plus large, et elle vise ce dossier :** un constat
+faux, écrit dans un rapport, se recopie ensuite dans tous les briefs sans que
+personne ne le remesure — parce qu'il a l'air d'être une leçon durement acquise.
+Celui-ci a survécu à **quatre tâches**. **Un piège d'instrument qui n'a jamais
+été reproduit par un second banc est une hypothèse, pas une leçon.**
