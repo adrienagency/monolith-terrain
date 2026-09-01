@@ -73,6 +73,11 @@
 export const MONDE_NU = Object.freeze({
   merZeroSousEau: 0,
   normaleFine: 0,
+  // ⚠️ **`texShade: 0` EST `NATUREL_MONDE.texShade`, PAS UN ZÉRO CHOISI ICI** —
+  // Tâche R28. Les deux écritures ne peuvent pas diverger : `test/planete-
+  // eclairee.test.js` compare les deux constantes. C'est la garde du drapeau
+  // baissé pour le peigne du monde, exactement comme `normaleFine`.
+  texShade: 0,
 })
 
 /**
@@ -82,6 +87,21 @@ export const MONDE_NU = Object.freeze({
 export const MONDE_ECLAIRE = Object.freeze({
   merZeroSousEau: 1,
   normaleFine: 1,
+  // ══════ LE PEIGNE DES CRÊTES SURVIT AU CROP — Tâche R28 ═════════════════
+  //
+  // ⛔ **SANS CETTE LIGNE, LA MOITIÉ DE LA TÂCHE NE SE VOIT PAS.**
+  // `retirerHabillage` est appelé À CHAQUE MORT DU CROP, c'est-à-dire chaque
+  // fois qu'on remonte au-dessus de 32 274 m — donc précisément dans la vue
+  // qu'Adrien appelle « au-dessus de Z10 ». Rendre `uTexShade` à zéro là
+  // éteindrait le peigne du monde à l'instant même où on le regarde. C'est mot
+  // pour mot le défaut que la Tâche R6 a refermé sur `uNormaleFineOn`, une
+  // ligne plus haut.
+  //
+  // ⚠️ **ET `1` N'EST PAS UN GOÛT : C'EST `look.texShade` DU GABARIT
+  // D'OUVERTURE** (`public/templates/defaults/shibustart.json`), c'est-à-dire ce
+  // que le produit montre à quelqu'un qui n'a rien réglé. Un crop vivant, lui,
+  // repose la valeur de l'utilisateur par `poserHabillage`.
+  texShade: 1,
 })
 
 /**
@@ -106,7 +126,28 @@ export const POSTES_MONDE = Object.freeze({
   uCropOn: Object.freeze({ global: false, motif: 'la decoupe elle-meme' }),
   uHabOn: Object.freeze({ global: false, motif: 'uCoastMask et uSol, cuits sur le crop' }),
   uAnalysisOn: Object.freeze({ global: false, motif: 'uAnalysis, cuite sur le MNT du crop' }),
-  uRampCropOn: Object.freeze({ global: false, motif: 'uRampCrop indexe sur uAnalysis en Y' }),
+  // ⚡ **CORRIGÉ PAR R11 PUIS PAR R28, ET LE MOTIF D'ORIGINE ÉTAIT FAUX.**
+  // « `uRampCrop` indexé sur `uAnalysis` en Y » : hors du crop l'analyse rend son
+  // NEUTRE (0,5), donc `natHumiditeY(0,5 ; 0,5 ; …)` rend 0,5 exactement,
+  // c'est-à-dire la LIGNE MÉDIANE du LUT — la rampe historique. L'axe Y n'a
+  // jamais empêché quoi que ce soit, et le chiffre le dit : neutralisée seule sur
+  // le bloc, l'humidité vaut **ΔE 2,89** quand les bornes en valent 25,82 et la
+  // loi X 20,76 (`rampe-crop.js`, §⑤). R11 a donc mis `GRADE_MONDE` sur la
+  // planète SANS crop ; R28 le fait AVEC, en mélangeant les deux régimes sur
+  // `dedansCrop`.
+  uRampCropOn: Object.freeze({ global: true, motif: 'le LUT est celui du socle ; hors crop, Y rend sa mediane' }),
+  // ⚡ **R28 — ET IL COÛTE UNE SEULE LECTURE DE TEXTURE.** D15 l'annonçait
+  // (« se calcule depuis cette même texture de hauteur ») sans dire à quel prix :
+  // la normale par fragment lit DÉJÀ les quatre voisins, un laplacien discret
+  // demande les mêmes quatre plus le centre. Mesuré à la minuterie du pilote,
+  // différences appariées : **+0,013 à +0,017 ms** par image de tuiles aux trois
+  // altitudes (crop z13, z10, orbite 300 km).
+  //
+  // ⚠️ **CE N'EST PAS LE MÊME OPÉRATEUR QUE CELUI DU SOCLE, ET C'EST DIT** :
+  // `terrain-analysis.js` cuit un laplacien FRACTIONNAIRE multi-échelle ; ici
+  // c'est un laplacien d'ordre 2 à une seule échelle. Le crop garde donc le sien
+  // (meilleur, et déjà payé), le monde prend celui-ci, et `dedansCrop` départage.
+  uTexShade: Object.freeze({ global: true, motif: 'laplacien discret sur uTex, propre a la tuile' }),
   uEclairageOn: Object.freeze({ global: false, motif: 'sans effet : partBloc = dedansCrop = 0' }),
 })
 

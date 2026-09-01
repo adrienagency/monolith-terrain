@@ -372,7 +372,12 @@ test('②f natLuminance porte EXACTEMENT les coefficients Rec. 709 du module', (
 
 test('③a les deux nuanceurs INJECTENT le module, ils ne le recopient pas', () => {
   assert.match(TERRAIN_SRC, /import \{ GLSL_NATUREL \} from '\.\/monde\/naturel-crop\.js'/)
-  assert.match(GLOBE_SRC, /import \{ GLSL_NATUREL, NATUREL_MONDE \} from '\.\/monde\/naturel-crop\.js'/)
+  // ⚠️ **ON ÉLARGIT, ON NE REMPLACE PAS** (règle des listes du §0) : la Tâche R28
+  // ajoute `GAIN_PEIGNE_MONDE` et `GAIN_OMBRE_MONDE`, deux CONSTANTES du module,
+  // à la même importation. Ce que ③a garde est qu'il n'y en a qu'UNE, et qu'elle
+  // vient bien du module partagé — pas la longueur de sa liste.
+  assert.match(GLOBE_SRC, /import \{ GLSL_NATUREL, NATUREL_MONDE(?:, \w+)* \} from '\.\/monde\/naturel-crop\.js'/)
+  assert.equal((GLOBE_SRC.match(/from '\.\/monde\/naturel-crop\.js'/g) || []).length, 1)
   assert.match(TERRAIN_SRC, /\$\{GLSL_NATUREL\}/)
   assert.match(GLOBE_SRC, /\$\{GLSL_NATUREL\}/)
 })

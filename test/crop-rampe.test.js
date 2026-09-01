@@ -869,9 +869,24 @@ test('⑥b `rampe-crop.js` n’importe rien qui décide d’un cadrage', () => {
   // raison VÉRIFIÉE juste en dessous, pas par confiance : il n'importe RIEN, et
   // il ne rend que des réglages d'APPARENCE (`mapTint`, `heightContrast`,
   // `heightPivot`, `slopeTint`). Aucune décision de cadrage ne peut en sortir.
-  assert.deepEqual(imports.sort(), ['../relief-grade.js', './crop-sphere.js', './habillage-crop.js'])
+  // ⚠️ **ET `naturel-crop.js` EST ENTRÉ AVEC LA TÂCHE R28**, pour `plancherPivot`
+  // et `rampeT` — la loi de rampe DU SOCLE, importée au lieu d'être recopiée une
+  // seconde fois ici. Il est admissible pour la MÊME raison que `relief-grade.js`,
+  // et elle est vérifiée juste en dessous, pas prise de confiance : il n'importe
+  // RIEN, et il ne rend que des lois d'APPARENCE.
+  assert.deepEqual(imports.sort(), ['../relief-grade.js', './crop-sphere.js', './habillage-crop.js', './naturel-crop.js'])
   const grade = readFileSync(new URL('../src/relief-grade.js', import.meta.url), 'utf8')
-  assert.equal([...grade.matchAll(/from '([^']+)'/g)].length, 0, 'relief-grade.js doit rester une feuille')
+  // ⛔ **LE `\b` ÉTAIT UN RETOUR ARRIÈRE (0x08), ET L'ASSERTION ÉTAIT TOUJOURS
+  // VRAIE — trouvé par R28.** `/\x08from …/` ne peut RIEN trouver dans une source
+  // ; `matchAll` rendait donc systématiquement une liste vide et le `assert.equal
+  // (…, 0)` passait quoi qu'il arrive. C'est la QUATRIÈME occurrence de cet
+  // incident sur ce chantier (deux dans `plan-fusion.md`, une cette nuit), et la
+  // première qui dormait dans un test COMMITÉ. **Relire l'octet écrit
+  // (`grep | cat -A`) est la seule parade : un `\b` dans une chaîne non brute est
+  // un retour arrière dans tous les langages de ce dépôt.**
+  // ⚠️ Vérifiée en la cassant : avec le `\b` rendu, ajouter une importation à
+  // `relief-grade.js` fait rougir la ligne ; avant, non.
+  assert.equal([...grade.matchAll(/\bfrom '([^']+)'/g)].length, 0, 'relief-grade.js doit rester une feuille')
   // ⚠️ **LES MÊMES NOMS QUE ⑥a, ET PAS DES MOTS DE PROSE.** Une première version
   // cherchait « altitude » et « distance » : `relief-grade.js` en parle dans ses
   // commentaires (« contraste d'altitude », « les altitudes émergées ») et le test
@@ -880,6 +895,25 @@ test('⑥b `rampe-crop.js` n’importe rien qui décide d’un cadrage', () => {
     !/uLandBas|uLandMax|uOceanDepth|uReliefBas|uPlancherRampeM|rampe-crop|seuil-socle|descente-bornee|camera|controls/.test(grade),
     'relief-grade.js touche à une grandeur de cadrage — R1 est rompue',
   )
+  // ⚠️ **LA MÊME VÉRIFICATION POUR `naturel-crop.js`, ET AU MÊME PRIX** : une
+  // feuille, et aucune grandeur de cadrage. C'est ce qui rend son entrée dans la
+  // liste ci-dessus admissible plutôt que tolérée.
+  const naturel = readFileSync(new URL('../src/monde/naturel-crop.js', import.meta.url), 'utf8')
+  assert.equal([...naturel.matchAll(/\bfrom '([^']+)'/g)].length, 0, 'naturel-crop.js doit rester une feuille')
+  // ⚠️ **ET ON RETIRE LES COMMENTAIRES AVANT DE CHERCHER — la mise en garde de
+  // ⑥a, payée une seconde fois.** `naturel-crop.js` CITE `uLandBas`, `uLandMax`
+  // et `uPlancherRampeM` dans son en-tête, en toutes lettres, pour dire dans
+  // quelle unité chaque grandeur normalisée arrive. La première rédaction de
+  // cette ligne rougissait donc sur de la PROSE. Ce qui compte est ce que le
+  // CODE lit.
+  const naturelCode = naturel.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert.ok(
+    !/uLandBas|uLandMax|uOceanDepth|uReliefBas|uPlancherRampeM|rampe-crop|seuil-socle|descente-bornee|controls/.test(naturelCode),
+    'naturel-crop.js touche à une grandeur de cadrage — R1 est rompue',
+  )
+  // ⚠️ **ET LA GARDE SE PROUVE** : sans le retrait des commentaires, la même
+  // recherche trouve bien ces noms — donc le retrait n'est pas décoratif.
+  assert.ok(/uLandBas/.test(naturel), 'l’en-tête cite bien uLandBas : la garde ci-dessus a un objet')
 })
 
 

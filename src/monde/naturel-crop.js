@@ -114,6 +114,61 @@ export const PART_OMBRAGE = 0.35
 /** La largeur de l'extinction de la végétation au-dessus de la limite des arbres. */
 export const BANDE_VEGETATION = 0.18
 
+// ══════════ LE PEIGNE DU MONDE — Tâche R28 ═════════════════════════════════
+//
+// ⛔ **`uAnalysis` EST CUITE SUR L'EMPRISE DU CROP** (D15 le dit, et le nuanceur
+// fond vers le neutre 0,5 hors de son domaine) : le peigne des crêtes s'arrête
+// donc au bord du bloc, et c'est une moitié de ce qu'Adrien voit comme « deux
+// styles ». D15 dit aussi pourquoi il PEUT devenir global : *« se calcule depuis
+// cette même texture de hauteur »*, celle que chaque tuile porte déjà.
+//
+// ⚡ **ET IL NE COÛTE PRESQUE RIEN, PARCE QUE LES ÉCHANTILLONS SONT DÉJÀ LUS.**
+// La normale par fragment (Tâche P9, globale sous D15) lit **quatre** hauteurs
+// voisines pour sa différence centrée. Un laplacien discret demande les mêmes
+// quatre **plus le centre** : le peigne du monde coûte donc **UNE lecture de
+// texture**, pas cinq.
+//
+// ⚠️ **CE N'EST PAS LE MÊME OPÉRATEUR QUE CELUI DU SOCLE, ET IL FAUT LE DIRE.**
+// `terrain-analysis.js` cuit un laplacien FRACTIONNAIRE (ordre ~0,5, une pile de
+// sept flous) : il répond à la courbure en gardant les grandes formes. Ici on
+// n'a qu'un laplacien d'ordre 2 à une seule échelle — plus nerveux, plus local.
+// Le crop garde donc SON peigne (meilleur, et déjà payé) ; le monde prend
+// celui-ci. C'est le départage de D15 appliqué à la lettre : ce qui se recalcule
+// depuis la tuile devient global, ce qui exige la cuisson reste au crop.
+//
+// ⚠️ **LE SIGNE : POSITIF SUR UNE CRÊTE.** Le laplacien discret
+// `Σvoisins − 4·centre` est POSITIF dans un talweg (le centre est plus bas que
+// ses voisins) ; le canal du socle, lui, est positif sur une croupe convexe
+// (`terrain-analysis.js`, `texShade`). Le nuanceur passe donc
+// `4·centre − Σvoisins`, et c'est à l'appelant de le faire — ce module ne voit
+// qu'un nombre déjà orienté.
+
+/**
+ * Le gain de courbure du peigne du monde.
+ *
+ * ⚠️ **SA VALEUR NEUTRE EST 0** : à zéro, `peigneMonde` rend `[0,5 ; 0,5]`,
+ * `ecartPeigne` rend 0,5, `natSoftLight(c, 0,5)` rend `c` **au bit près**
+ * (`step(0.5, 0.5)` vaut 1, donc la branche `b + 0·(d − b)`), et la planète est
+ * celle d'avant. C'est la même garde que `RELIEF_MONDE_NUL`.
+ *
+ * ⚠️ **L'ENTRÉE EST SANS DIMENSION** : le nuanceur multiplie le laplacien, en
+ * mètres, par le MÊME facteur `k` que la différence centrée de la normale —
+ * `uUnitesParMetre / (2 · pas · uniteParUv)`. Ce qui entre ici est donc un
+ * ÉCART DE PENTE, pas une hauteur, et le gain ne dépend ni du niveau de tuile,
+ * ni de la latitude, ni de l'exagération.
+ */
+export const GAIN_PEIGNE_MONDE = 0.25
+
+/**
+ * Le gain d'ombrage du peigne du monde — le second canal (`anl.g` au crop).
+ *
+ * ⚠️ **IL PORTE LA MÊME GRANDEUR QUE `ombrageReliefMonde`** (`n·L − haut·L`,
+ * l'écart de l'éclairement à celui d'un sol plat), qui vaut `±1` au pire. Le
+ * canal du LUT, lui, est un `[0 ; 1]` centré sur 0,5 : le gain le ramène dans la
+ * plage utile sans saturer sur une pente ordinaire. Neutre à 0, même garde.
+ */
+export const GAIN_OMBRE_MONDE = 1.1
+
 /** La marge que le plancher de pivot ajoute au niveau de la mer. */
 export const MARGE_PIVOT = 0.02
 
@@ -259,6 +314,33 @@ export function peigne(col, canalR, canalG, k) {
   return c + (softLight(c, ecartPeigne(canalG)) - c) * (k * PART_OMBRAGE)
 }
 
+/**
+ * UN canal du peigne du monde, fabriqué sans la texture d'analyse — Tâche R28.
+ *
+ * ⚠️ **UNE SEULE LOI POUR LES DEUX CANAUX, ET C'EST DÉLIBÉRÉ.** Le canal R
+ * (peigné) reçoit la COURBURE, le canal G (ombrage) reçoit l'ÉCART
+ * D'ÉCLAIREMENT `n·L − haut·L` : deux écarts signés autour de zéro, que le même
+ * recentrage ramène autour de 0,5. Écrire deux fonctions aurait donné deux
+ * neutres à tenir d'accord.
+ *
+ * ⚠️ **ET ELLE EST SCALAIRE, PAS VECTORIELLE.** `test/crop-naturel.test.js`
+ * TRADUIT le texte GLSL et l'EXÉCUTE ; son traducteur ne connaît que `float`,
+ * `vec3` et `vec4`. Un `vec2` l'aurait fait échouer au chargement — c'est
+ * arrivé, et c'est la raison de cette signature.
+ *
+ * ⚠️ **CES CANAUX ENTRENT LÀ OÙ `anl.r` ET `anl.g` ENTRENT**, c'est-à-dire dans
+ * `peigne` / `natPeigne`, et rien d'autre du nuanceur ne change : le crop garde
+ * ses canaux cuits, le monde prend ceux-ci, et un `mix` sur `dedansCrop`
+ * départage — une seule loi de peinture, deux sources.
+ *
+ * @param {number} ecart écart signé autour de zéro (courbure, ou `n·L − haut·L`)
+ * @param {number} gain  `GAIN_PEIGNE_MONDE` ou `GAIN_OMBRE_MONDE`, neutres à 0
+ * @returns {number} dans [0, 1], exactement 0,5 à gain nul
+ */
+export function peigneMondeCanal(ecart, gain) {
+  return clamp01(0.5 + ecart * gain)
+}
+
 /** La luminance Rec. 709 d'une couleur `[r, g, b]`. */
 export function luminance(rgb) {
   return rgb[0] * LUMA_709[0] + rgb[1] * LUMA_709[1] + rgb[2] * LUMA_709[2]
@@ -345,6 +427,11 @@ vec3 natSoftLight(vec3 b, vec3 s) {
 vec3 natPeigne(vec3 col, float canalR, float canalG, float k) {
   vec3 c = mix(col, natSoftLight(col, vec3(natEcartPeigne(canalR))), k);
   return mix(c, natSoftLight(c, vec3(natEcartPeigne(canalG))), k * ${PART_OMBRAGE.toFixed(2)});
+}
+// LE PEIGNE DU MONDE — R28. Un canal, sans la texture d analyse : la courbure
+// pour le peigne, l ecart d eclairement pour l ombrage. Meme loi, deux entrees.
+float natPeigneMonde(float ecart, float gain) {
+  return clamp(0.5 + ecart * gain, 0.0, 1.0);
 }
 float natLuminance(vec3 c) {
   return dot(c, vec3(${LUMA_709[0]}, ${LUMA_709[1]}, ${LUMA_709[2]}));

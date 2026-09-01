@@ -69,6 +69,13 @@ import {
 // quatre garde-fous et la conversion des quantiles en `pivot` / `contraste`.
 // Il n'importe rien lui-même, donc aucun cycle.
 import { gradeForDem } from '../relief-grade.js'
+// LA LOI DE RAMPE DU SOCLE — Tâche R28, §⑥. ⚠️ **IMPORTÉE, JAMAIS RECOPIÉE**, et
+// SOUS ALIAS parce que ce fichier a déjà un `rampeT` : celui de la Tâche D, qui
+// est l'index de la rampe 1D du globe et n'a ni le même sens ni la même
+// signature. Deux lois du même nom dans un même module, c'est la classe de
+// défaut que ce chantier a payée quatre fois. `naturel-crop.js` n'importe rien,
+// donc aucun cycle.
+import { plancherPivot, rampeT as rampeTSocle } from './naturel-crop.js'
 
 // ══════════ ① LE PLANCHER D'AMPLITUDE — CONVERTI, PAS CHOISI ═══════════════
 
@@ -527,3 +534,114 @@ export const GRADE_MONDE = Object.freeze(
 export function plancherRampeDuCrop(repere, exageration = EXAG_SOCLE_NOMINALE) {
   return plancherAmplitudeM(largeurCropM(repere) / COTE_CROP_UNITES, exageration)
 }
+
+// ══════════ ⑥ LE RÉGIME DU MONDE, HORS DE LA DÉCOUPE — Tâche R28 ═══════════
+//
+// ══════════ CE QUE ÇA RÉPARE, ET LE CHIFFRE EST DANS LE NUANCEUR ═══════════
+//
+// > **Adrien, 2026-09-01 :** *« Pourquoi y a-t-il une zone verte tout autour des
+// > côtes ? »*
+//
+// ⛔ **LA CAUSE EST `natRampT`, ET ELLE EST MESURÉE, PAS SUPPOSÉE.** Le §⑤
+// au-dessus a mis `GRADE_MONDE` sur la planète **quand aucun crop ne vit**
+// (`Globe._majRampeMonde`). Mais tant qu'un crop VIT, `poserHabillage` écrit
+// `uHeightPivot`, `uHeightContrast`, `uReliefBas` et `uLandMax` — mesurés sur le
+// crop — dans des uniformes **PARTAGÉS PAR LES 1 700 MATÉRIAUX DE TUILE**. La
+// planète entière prend alors l'échelle d'une île.
+//
+// ⚡ **RELEVÉ DANS L'APPLICATION VIVANTE** (`scripts/diag-r28-bande.mjs`,
+// pilote NVIDIA RTX 3080, `.banc/R28/bande.json`) :
+//
+// | | La Réunion z12 | Bornéo z10 |
+// |---|---|---|
+// | `uReliefBas` / `uLandMax` | 107,5 / 3 009,6 m | −93,2 / 3 957,3 m |
+// | `uHeightPivot` / `uHeightContrast` | 0,41 / 2,2 | 0,14 / 3,3 |
+// | `natRampT` **saturé à 0** jusqu'à | **637,8 m** | — |
+// | `natRampT` à 0 m / 300 m | 0,000 / 0,000 | 0,114 / 0,358 |
+//
+// ➡️ **À La Réunion, TOUTE terre de 0 à 637,8 m — partout sur la planète — reçoit
+// le PREMIER texel du LUT**, c'est-à-dire la première butée de la palette :
+// `#93a074`, relevé `rgb(147, 160, 115)` à l'écran. **Un olive vert.** C'est la
+// bande. À Bornéo elle ne sature pas, mais les 300 premiers mètres tiennent dans
+// les **36 % bas** de la table, qui sont les verts de la palette : même bande,
+// même cause, un cran plus doux.
+//
+// ⚠️ **LA DÉCISION 4 D'ADRIEN N'EST PAS EN CAUSE.** « La rampe se calcule sur le
+// crop, et les alentours la suivent » parle des ALENTOURS — l'emprise voisine
+// d'une affiche, sans couture au bord. Elle n'a jamais dit « la planète ». C'est
+// exactement ce que le §⑤ écrit déjà : *« poser les valeurs du bloc sur la
+// planète entière peindrait le monde avec l'échelle d'une île »*.
+//
+// ➡️ **LE DÉPARTAGE EST DONC `dedansCrop`**, la couverture douce de la
+// superellipse que les parois et l'éclairage suivent déjà : le crop garde son
+// régime, le monde reprend celui-ci, et le fondu est celui du bord du bloc —
+// donc il n'y a pas de couture à inventer.
+
+/**
+ * Le régime de rampe du MONDE : les ancres de `RAMPE_MONDE` et le grade de
+ * `GRADE_MONDE`, en un seul objet.
+ *
+ * ⚠️ **DÉRIVÉ, JAMAIS ÉCRIT EN DUR** — même discipline que `uReliefBas` au
+ * constructeur du globe (Tâche P11) : `5 600`, `6 000`, `4,5` et `0,56` n'ont
+ * qu'une seule écriture, au-dessus.
+ */
+export const REGIME_MONDE = Object.freeze({
+  reliefBas: RAMPE_MONDE.terreBas - RAMPE_MONDE.creux,
+  landMax: RAMPE_MONDE.terreHaut,
+  profondeur: RAMPE_MONDE.profondeur,
+  pivot: GRADE_MONDE.heightPivot,
+  contraste: GRADE_MONDE.heightContrast,
+})
+
+/**
+ * L'indice de rampe du MONDE pour une hauteur en mètres — le jumeau JS de la
+ * ligne du nuanceur, vérifiable sous node.
+ *
+ * ⚠️ **IL PASSE PAR `plancherPivot`, COMME CELUI DU CROP.** Le niveau de la mer
+ * du monde tombe à `6 000 / 11 600 = 0,5172` ; son plancher de pivot vaut donc
+ * `0,5372`, et `GRADE_MONDE.heightPivot` (0,56) le dépasse — le plancher ne mord
+ * pas. Il est là quand même : une palette future qui abaisserait le pivot
+ * remettrait la bande, et c'est précisément ce que ce plancher existe pour
+ * empêcher (`terrain.js` : *« with a low pivot the whole coastal band rides the
+ * top of the ramp »*).
+ *
+ * @param {number} h hauteur en mètres, zéro = niveau de la mer
+ * @returns {number} dans [0, 1]
+ */
+export function rampeTMonde(h) {
+  const amplitude = Math.max(REGIME_MONDE.landMax - REGIME_MONDE.reliefBas, RAMPE_MONDE.plancherM)
+  const hNorm = Math.min(Math.max((h - REGIME_MONDE.reliefBas) / amplitude, 0), 1)
+  const pivot = Math.max(REGIME_MONDE.pivot, plancherPivot((0 - REGIME_MONDE.reliefBas) / amplitude))
+  return rampeTSocle(hNorm, pivot, REGIME_MONDE.contraste)
+}
+
+/**
+ * Le texte GLSL du régime du monde — les cinq nombres, une seule écriture.
+ *
+ * ⚠️ **DES CONSTANTES, PAS DES UNIFORMES, ET C'EST UNE DÉCISION CHIFFRÉE.**
+ * Elles ne changent JAMAIS : `RAMPE_MONDE` et `GRADE_MONDE` sont `Object.freeze`
+ * et personne ne les repose. Six uniformes de plus auraient coûté six lignes
+ * dans **trois** tables factices de test (`crop-habillage`, `crop-naturel`,
+ * `grille-crop`) — la table qui a fait tomber onze tests muets à R25 — pour
+ * transporter des littéraux. Le compilateur, lui, les replie.
+ *
+ * ⚠️ **ET LE PLANCHER DE PIVOT EST ÉVALUÉ ICI, EN JS, PAS DANS LE NUANCEUR** :
+ * ses entrées sont toutes constantes, donc le GPU calculerait soixante fois par
+ * seconde un nombre connu à la compilation. `rampeTMonde` ci-dessus et cette
+ * constante lisent la MÊME expression, et le test l'exige.
+ */
+export const GLSL_REGIME_MONDE = /* glsl */ `
+// LE REGIME DE RAMPE DU MONDE — src/monde/rampe-crop.js §⑥, injecte tel quel.
+const float MONDE_RELIEF_BAS = ${REGIME_MONDE.reliefBas.toFixed(1)};
+const float MONDE_LAND_MAX = ${REGIME_MONDE.landMax.toFixed(1)};
+const float MONDE_PROFONDEUR = ${REGIME_MONDE.profondeur.toFixed(1)};
+const float MONDE_CONTRASTE = ${REGIME_MONDE.contraste};
+const float MONDE_PIVOT = ${Math.max(
+  REGIME_MONDE.pivot,
+  plancherPivot((0 - REGIME_MONDE.reliefBas) / Math.max(REGIME_MONDE.landMax - REGIME_MONDE.reliefBas, RAMPE_MONDE.plancherM))
+)};
+float natRampTMonde(float h) {
+  float hNorm = clamp((h - MONDE_RELIEF_BAS) / (MONDE_LAND_MAX - MONDE_RELIEF_BAS), 0.0, 1.0);
+  return natRampT(hNorm, MONDE_PIVOT, MONDE_CONTRASTE);
+}
+`

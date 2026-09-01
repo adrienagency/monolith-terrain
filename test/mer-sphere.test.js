@@ -775,27 +775,44 @@ test('⑧c la rampe nautique du FOND, dans le nuanceur du globe, transcrit le M�
   // du module, l'était (⑨d). Une mutation qui change cet exposant en `1.0`
   // survivait à 44/44. Même patron que ⑧a : on extrait le texte, on le
   // confronte À LA FONCTION PURE sur un balayage.
-  const expr = extraitGlsl('dMer01')
-  const js = expr
-    .replace(/pow\(/g, 'POW(')
-    .replace(/clamp\(/g, 'CLAMP(')
-    .replace(/max\(/g, 'MAX(')
-    .replace(/uMerFondBudgetM/g, 'budget')
-    .replace(/uPlancherRampeM/g, 'plancher')
+  // ⚡ **ET DEPUIS R28 L'EXPRESSION PORTE DEUX RÉGIMES, DONC ON L'EXÉCUTE DEUX
+  // FOIS.** `dMer01` mélange la profondeur normalisée du CROP et celle du MONDE
+  // sur `dedansCrop` : à 1 c'est la loi du dépôt au bit près (le budget du bloc),
+  // à 0 c'est le budget mondial. Un test qui n'exercerait qu'un des deux
+  // laisserait l'autre sans garde — la faute que ⑤d de `crop-naturel` a payée.
+  const js = [extraitGlsl('dMerCrop'), extraitGlsl('dMerMonde'), extraitGlsl('dMer01')]
+    .map((e) => e
+      .replace(/pow\(/g, 'POW(')
+      .replace(/clamp\(/g, 'CLAMP(')
+      .replace(/max\(/g, 'MAX(')
+      .replace(/mix\(/g, 'MIX(')
+      .replace(/uMerFondBudgetM/g, 'budget')
+      .replace(/uPlancherRampeM/g, 'plancher'))
   // eslint-disable-next-line no-new-func
-  const f = new Function('h', 'budget', 'plancher', 'POW', 'CLAMP', 'MAX', `return ${js}`)
+  const f = new Function('h', 'budget', 'plancher', 'dedansCrop', 'MONDE_PROFONDEUR', 'POW', 'CLAMP', 'MAX', 'MIX',
+    `const dMerCrop = ${js[0]}; const dMerMonde = ${js[1]}; return ${js[2]}`)
   const CLAMP = (x, a, b) => Math.min(b, Math.max(a, x))
+  const MIX = (a, b, t) => a * (1 - t) + b * t
+  const crop = (h, budget) => f(h, budget, 1e-6, 1, 6000, Math.pow, CLAMP, Math.max, MIX)
+  const monde = (h, prof) => f(h, 1, 1e-6, 0, prof, Math.pow, CLAMP, Math.max, MIX)
   let vus = 0
   for (let prof = 0; prof <= 1000; prof += 5) {
     const attendu = abscisseNautique(prof, 1000)
-    const rendu = f(-prof, 1000, 1e-6, Math.pow, CLAMP, Math.max)
-    assert.ok(Math.abs(rendu - attendu) < 1e-9, `profondeur ${prof} : ${rendu} contre ${attendu}`)
+    assert.ok(Math.abs(crop(-prof, 1000) - attendu) < 1e-9, `crop, profondeur ${prof}`)
+    // ⚠️ **LE MÊME EXPOSANT DES DEUX CÔTÉS** : hors découpe la seule chose qui
+    // change est le BUDGET, jamais la loi.
+    assert.ok(Math.abs(monde(-prof, 1000) - attendu) < 1e-9, `monde, profondeur ${prof}`)
     vus++
   }
   assert.ok(vus > 150, `le balayage doit être dense : ${vus} points`)
   // un exposant de 1,0 rendrait 0,1 à 10 % de profondeur — c'est la mutation
   // que ce test tue, comme ⑨d le fait déjà pour la loi pure.
-  assert.ok(Math.abs(f(-100, 1000, 1e-6, Math.pow, CLAMP, Math.max) - Math.pow(0.1, 0.55)) < 1e-9)
+  assert.ok(Math.abs(crop(-100, 1000) - Math.pow(0.1, 0.55)) < 1e-9)
+  // ⛔ **ET LES DEUX RÉGIMES SE DISTINGUENT VRAIMENT** — sinon ce test ne
+  // prouverait rien de neuf : au budget du monde (6 000 m), 100 m de fond ne
+  // valent pas ce qu'ils valent au budget d'un crop de 113 m (Bornéo, relevé).
+  assert.ok(Math.abs(monde(-100, 6000) - crop(-100, 113.3)) > 0.4,
+    'le budget du monde et celui du crop rendent la même couleur — le mélange ne mélange rien')
 })
 
 test('⑧d le fondu de rivage du nuanceur GARDE son seuil de 0,10, pas approximatif', () => {
@@ -960,7 +977,11 @@ test('⑩d le nuanceur du globe garde la rampe nautique DERRIÈRE son interrupte
   assert.match(bloc[0], /uOceanShallow/)
   assert.match(bloc[0], /uOceanMid/)
   assert.match(bloc[0], /uOceanDeep/)
-  assert.match(bloc[0], /pow\(clamp\(-h \/ max\(uMerFondBudgetM/)
+  // ⚠️ **LE BUDGET DU CROP EST TOUJOURS LU PAR LA MÊME EXPRESSION** — R28 ne l'a
+  // pas remplacé, il lui a ADJOINT celui du monde, et `dedansCrop` départage.
+  assert.match(bloc[0], /float dMerCrop = clamp\(-h \/ max\(uMerFondBudgetM, uPlancherRampeM\), 0\.0, 1\.0\);/)
+  assert.match(bloc[0], /float dMerMonde = clamp\(-h \/ MONDE_PROFONDEUR, 0\.0, 1\.0\);/)
+  assert.match(bloc[0], /float dMer01 = pow\(mix\(dMerMonde, dMerCrop, dedansCrop\), 0\.55\);/)
   // et l uniforme part À ZÉRO : sans `poserMer`, la production est intouchée
   assert.match(src, /uMerRampeOn: \{ value: 0 \}/)
 })

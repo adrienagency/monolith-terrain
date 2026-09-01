@@ -42,6 +42,10 @@ import {
 } from '../src/monde/planete-eclairee.js'
 import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
+// ⚠️ **LA LOI D'HUMIDITÉ, IMPORTÉE ET EXÉCUTÉE** — Tâche R28 : le motif de
+// `uRampCropOn` reposait sur elle, et il fallait la FAIRE TOURNER pour montrer
+// que son neutre vaut 0,5 au lieu de le déclarer.
+import { humiditeY as natHumiditeY } from '../src/monde/naturel-crop.js'
 
 // ⚠️ **`new Globe()` NE TIENT PAS SOUS NODE SANS CE POSTICHE** : `rebuildRamp`
 // appelle `document.createElement('canvas')` au constructeur. C'est le patron de
@@ -424,8 +428,17 @@ test('⑤ drapeau LEVÉ, un habillage SANS normale fine ne l’éteint pas', () 
 
 // ══════════ ⑥ ⚡ LE DÉPARTAGE DE D15, ÉVALUÉ SUR LE NUANCEUR ════════════════
 
-test('⑥ les postes déclarés globaux sont exactement les deux qu’on allume', () => {
-  assert.deepEqual(postesGlobalisables(), ['uMerZeroSousEau', 'uNormaleFineOn'])
+test('⑥ les postes déclarés globaux sont exactement ceux qu’on allume', () => {
+  // ⚠️ **LE TABLEAU EST UN RELEVÉ DATÉ, PAS UN ÉTAT COURANT** — `plan-fusion.md`
+  // le dit noir sur blanc après que R24 y eut trouvé une ligne qui se
+  // contredisait. Deux tâches l'ont depuis élargi, chacune avec sa mesure :
+  //   · **R11** — `uRampCropOn` : le LUT 2D est celui du SOCLE, pas une texture de
+  //     crop, et hors emprise son axe Y rend sa MÉDIANE (voir juste en dessous).
+  //   · **R28** — `uTexShade` : le peigne se recalcule depuis `uTex`, la texture
+  //     de hauteur que chaque tuile porte déjà, pour UNE lecture de plus.
+  // **On élargit, on ne remplace pas** — les deux postes d'origine sont toujours
+  // là, et l'ordre est celui de la table.
+  assert.deepEqual(postesGlobalisables(), ['uMerZeroSousEau', 'uNormaleFineOn', 'uRampCropOn', 'uTexShade'])
 })
 
 test('⑥ uEclairageOn hors crop est un NO-OP, et c’est le nuanceur qui le dit', () => {
@@ -472,10 +485,22 @@ test('⑥ le peigne des crêtes LIT l’analyse cuite, il ne dérive pas la tuil
   assert.equal(POSTES_MONDE.uAnalysisOn.global, false)
 })
 
-test('⑥ la rampe 2D indexe son axe Y sur l’analyse, donc elle non plus', () => {
+test('⑥ la rampe 2D indexe son axe Y sur l’analyse — mais hors crop l’analyse rend sa MÉDIANE', () => {
+  // ⛔ **LE MOTIF D'ORIGINE ÉTAIT FAUX, ET C'EST ARITHMÉTIQUE, PAS UNE OPINION.**
+  // « `uRampCrop` indexé sur `uAnalysis` en Y » supposait que l'axe Y interdisait
+  // le global. Hors du crop, `anl` est fondu vers son NEUTRE (0,5 sur les quatre
+  // canaux), et `natHumiditeY(0,5 ; 0,5 ; …)` rend **0,5 exactement** : la ligne
+  // médiane du LUT, c'est-à-dire la rampe historique. L'axe Y n'empêchait rien.
+  //
+  // ⚡ **ET LE CHIFFRE LE CONFIRME** : neutralisée seule sur le bloc, l'humidité
+  // vaut **ΔE 2,89** quand les bornes en valent 25,82 et la loi X 20,76
+  // (`rampe-crop.js`, §⑤). C'est l'axe X qui fait le style, et il est global.
   assert.match(FRAG_NU, /natHumiditeY\(anl\.b, anl\.a,/)
   assert.match(FRAG_NU, /col = texture2D\(uRampCrop, vec2\(rampT, wetY\)\)\.rgb;/)
-  assert.equal(POSTES_MONDE.uRampCropOn.global, false)
+  // le neutre EST 0,5, exécuté et non déclaré
+  assert.equal(natHumiditeY({ canalB: 0.5, canalA: 0.5, hNorm: 0.3, wetK: 0.96, expoK: 0.02, hemi: -1, treeLine: 0.92 }), 0.5)
+  assert.match(FRAG_NU, /anl = mix\(vec4\(0\.5\), texture2D\(uAnalysis, qCrop \* 0\.5 \+ 0\.5\), dansCrop\);/)
+  assert.equal(POSTES_MONDE.uRampCropOn.global, true)
 })
 
 test('⑥ le zéro de la mer est un NO-OP tant que la rampe NAUTIQUE dort', () => {
@@ -548,11 +573,20 @@ function extraireOmbrageMonde(frag) {
   const cond = bloc(frag, i, '(', ')')
   const corps = bloc(frag, cond.fin, '{', '}')
   const js = corps.texte.replace(/\bvec3\b|\bfloat\b/g, 'let')
+  // ⚡ **`lampe` A ÉTÉ HISSÉE HORS DE LA GARDE — Tâche R28**, parce que le peigne
+  // du monde la lit aussi. Elle n'est donc plus DANS le corps gardé, et le corps
+  // seul ne compile plus : on l'extrait à son tour, au même titre que la valeur
+  // de repos d'`ombreRelief`. ⚠️ **On l'EXTRAIT, on ne la recopie pas** — c'est
+  // toute la discipline de ce fichier : si le nuanceur change de lampe, ceci
+  // change avec lui ou rougit.
+  const mLampe = /vec3 lampe = ([^;]+);/.exec(frag)
+  assert.ok(mLampe, 'la lampe du relief de monde a disparu du fragment')
   const f = new Function(
     'est', 'nord', 'haut', 'nMonde',
     'uReliefMondeGain', 'uReliefMondeAz', 'uReliefMondeEl',
     'lampeReliefMonde', 'ombrageReliefMonde',
     `let ombreRelief = ${mInit[1]};
+     let lampe = ${mLampe[1]};
      if (${cond.texte}) {${js}}
      return ombreRelief`
   )
