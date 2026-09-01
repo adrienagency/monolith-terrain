@@ -1407,8 +1407,18 @@ test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, monnaie, pas, et
   assert.match(bloc, /vec2 dqU = vec2\(qParUv \* pas, 0\.0\);/)
   assert.match(bloc, /vec2 dqV = vec2\(0\.0, -qParUv \* pas\);/)
   // ⑦ les quatre lectures sont CENTRÉES : `+pas` contre `−pas`, sur les deux axes
-  assert.match(bloc, /float dhU = hauteurEchant\(vUv \+ vec2\(pas, 0\.0\), qCrop \+ dqU\) - hauteurEchant\(vUv - vec2\(pas, 0\.0\), qCrop - dqU\);/)
-  assert.match(bloc, /float dhV = hauteurEchant\(vUv \+ vec2\(0\.0, pas\), qCrop \+ dqV\) - hauteurEchant\(vUv - vec2\(0\.0, pas\), qCrop - dqV\);/)
+  //
+  // ⚠️ **ELLES SONT NOMMÉES DEPUIS R28, PLUS SOUSTRAITES À LA VOLÉE** — le peigne
+  // du monde a besoin de leur SOMME autant que de leurs différences, et les
+  // nommer est ce qui lui évite de les relire. On vérifie donc les DEUX moitiés :
+  // les quatre appels aux quatre voisins, ET les deux différences centrées qui en
+  // sortent. La loi vérifiée est la même, terme à terme.
+  assert.match(bloc, /float hUp = hauteurEchant\(vUv \+ vec2\(pas, 0\.0\), qCrop \+ dqU\);/)
+  assert.match(bloc, /float hUm = hauteurEchant\(vUv - vec2\(pas, 0\.0\), qCrop - dqU\);/)
+  assert.match(bloc, /float hVp = hauteurEchant\(vUv \+ vec2\(0\.0, pas\), qCrop \+ dqV\);/)
+  assert.match(bloc, /float hVm = hauteurEchant\(vUv - vec2\(0\.0, pas\), qCrop - dqV\);/)
+  assert.match(bloc, /float dhU = hUp - hUm;/)
+  assert.match(bloc, /float dhV = hVp - hVm;/)
   // ⑧ ⚡ ET `hauteurEchant` EST LA MÊME LOI QUE `main()` — une seule écriture du
   // fond marin et du grain. Un second `texture2D(uFondChamp` dans le fragment
   // serait la « seconde écriture jumelle » que `terrain.js` documente.

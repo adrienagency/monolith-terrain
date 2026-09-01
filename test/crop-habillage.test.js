@@ -569,7 +569,13 @@ test('⑧ l’occupation du sol MODULE la luminance, elle ne pose pas un aplat',
   assert.match(FRAG, /blSetLum\(lavis\.rgb, mix\(blLum\(col\), blLum\(lavis\.rgb\), 0\.55\)\)/)
   assert.match(TERRAIN_SRC, /blSetLum\(lavis\.rgb, mix\(lumFond, blLum\(lavis\.rgb\), 0\.55\)\)/)
   // et le plafond à 1 est là : la tirette Force monte à 2, et mix() extrapole
-  assert.match(FRAG, /float k = min\(1\.0, lavis\.a \* uSolOpacite\);/)
+  //
+  // ⚠️ **ET LA COUCHE EST BORNÉE AU CROP DEPUIS R28.** `sUv` est bâti sur
+  // `qCrop` : hors de l'emprise il sort de [0 ; 1] et la mosaïque, en
+  // ClampToEdge, prolongerait sa dernière ligne sur toute la planète estompée.
+  // C'est le piège que `uFondChamp` et `uAnalysis` documentent déjà, et D15
+  // range `uSol` parmi ce qui NE PEUT PAS devenir global pour cette raison.
+  assert.match(FRAG, /float k = min\(1\.0, lavis\.a \* uSolOpacite\) \* dedansCrop;/)
 })
 
 test('⑧ le décodage de classe garde les trois précautions du socle', () => {
