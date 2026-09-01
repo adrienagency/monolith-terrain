@@ -63,6 +63,7 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
 import { ancrageCartouche, baseCartoucheEnBloc } from './monde/cartouche-globe.js'
+import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
@@ -1995,7 +1996,35 @@ cartoucheRef = groundInfo
 // bruit global en repli. Les deux exposent la MÊME interface
 // (build/update/setVisible/setSunDir/reroll) — le reste du fichier ne sait pas
 // lequel tourne.
-clouds = new Clouds2(scene, terrain, params)
+//
+// ══════ LE CIEL NE VIT PLUS DANS LA SCÈNE DU BLOC — Tâche R20 ═════════════
+//
+// ⛔ **IL Y AVAIT DEUX SYSTÈMES DE NUAGES, ET LES QUINZE CURSEURS PILOTAIENT
+// CELUI QUI N'EST PAS SOUMIS AU GPU.** Mesuré, pas lu
+// (`.banc/R20/diag-deux-systemes.json`) : une image du dépôt soumet quatre
+// rendus — `sceneGlobe` avec `camGlobe`, puis trois quadrilatères plein écran
+// du compositeur. **La scène du bloc plat n'y figure pas**
+// (`passeSurface.enabled = false`, D16-a). `clouds2` y vivait, avec **16
+// instances vivantes** : un système complet, allumé, correctement peuplé,
+// dessiné dans un tampon que personne ne regarde. Forcé `visible = true`,
+// l'écart à l'écran valait **0,000 / 0,000**.
+//
+// ⛔ **ET LA COQUILLE DU GLOBE NE LE REMPLAÇAIT PAS.** À 18 km comme à
+// 1 200 km, `uFade = 0,0000` et écart **0,000 / 0,000** ; garde LEVÉE, `uFade`
+// forcé à 1 en vue de surface, l'écart vaut **encore 0,000 / 0,000**, parce
+// qu'elle est à **95 565 m** — hors champ d'une caméra qui regarde le sol — et
+// que son texel vaut **78 184 m** (`.banc/R20/diag-voie1.json`).
+//
+// ⚡ Le ciel pend donc d'un groupe d'ANCRAGE, que le branchement de la
+// frontière de rendu fait adopter par `sceneGlobe`, et que `majNuagesGlobe`
+// pose à chaque image par la MÊME similitude que le cartouche.
+//
+// ⚠️ **HORS MODE SPHÈRE, CE GROUPE EST L'IDENTITÉ DANS `scene`** : matrice
+// unité, même parent qu'avant, comportement du dépôt au bit près.
+const groupeNuages = new THREE.Group()
+groupeNuages.name = 'ancrage-nuages'
+scene.add(groupeNuages)
+clouds = new Clouds2(groupeNuages, terrain, params)
 clouds.setSunDir(sun.position)
 
 // ambient airliners + SpaceX pad watcher (models fetched, see public/models)
@@ -4767,6 +4796,11 @@ if (fusionDesPasses) {
   // retire de `scene` au passage : il n'y a jamais deux parents, donc jamais
   // deux cartouches. `majCartoucheGlobe` lui donne sa pose à chaque image.
   sceneGlobe.add(groupeCartouche)
+  // ⚡ **ET LE CIEL AVEC LUI — Tâche R20.** Même geste, même raison : le volume
+  // de nuages était dessiné dans une scène qui ne l'est plus, et `add` le
+  // retire de `scene` au passage — jamais deux parents, jamais deux ciels.
+  // `majNuagesGlobe` lui donne sa pose et sa caméra à chaque image.
+  sceneGlobe.add(groupeNuages)
   // ⚡ **ET LES EFFETS LISENT MAINTENANT LA BONNE CAMÉRA.** La profondeur du
   // tampon est celle de `camGlobe` ; un effet qui la linéariserait avec les
   // `near`/`far` de la caméra du bloc se tromperait d'espace — c'est exactement
@@ -5061,6 +5095,69 @@ function majCartoucheGlobe() {
   groupeCartouche.scale.setScalar(a.echelle)
 }
 
+// ══════ LE CIEL SUIT LA MÊME SIMILITUDE QUE LE CARTOUCHE — Tâche R20 ═══════
+//
+// ⚡ **UNE SEULE HOMOTHÉTIE PORTE TOUTES LES LONGUEURS DU CIEL** : altitude,
+// rayon des nuages, étalement, taille des pas de marche, portée du vent. Le
+// volume continue de vivre, de se peupler, de dériver et de se dessiner **en
+// unités de bloc**, dans le repère de son groupe. Il n'y a donc PAS quinze
+// conversions à écrire, pas de constante à recopier dans le nuanceur, et aucun
+// réglage sauvegardé à ré-échelonner.
+//
+// ⛔ **ET SANS ELLE, LA COUCHE DE NUAGES EST EN ORBITE BASSE.** Le curseur
+// « Altitude » vaut 13,5 unités de bloc au démarrage ; portées telles quelles
+// en unités de globe elles font **860 085 m** — deux fois l'altitude de la
+// station spatiale, et le ciel quitte l'écran par le haut. Multipliées par
+// `k`, elles font **6 594 m**, un plafond de cumulus. `1/k` vaut 130,43 à
+// La Réunion et dépasse 3 700 aux zooms continentaux
+// (`monde/nuages-globe.js` §2, et le test tue la mutation qui met 1).
+let _ancreNuages = null
+function majNuagesGlobe() {
+  if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
+  // ⚠️ **MÊME PRÉDICAT QUE LE CARTOUCHE, ET `dem` Y EST POUR LA MÊME RAISON** :
+  // `entrerEnVol` le met à `null`, et un ciel resté accroché au palier qu'on
+  // quitte dériverait pendant toute la descente.
+  const voulu = !!params.cloudsEnabled && !!dem && cartoucheAffiche()
+  if (voulu !== clouds.group.visible) clouds.setVisible(voulu)
+  // ⚠️ **SORTIE SÈCHE QUAND LE CIEL EST CACHÉ**, comme pour le cartouche : ce
+  // n'est qu'arithmétique, mais ça n'a aucune raison de tourner en orbite —
+  // et c'est CE bornage qui rend la voie 3 gratuite (`nuages-globe.js` §0 ter).
+  if (!voulu) { _ancreNuages = null; return }
+  const ancre = latLonOrigineBloc()
+  if (!ancre) { _ancreNuages = null; return }
+  const largeur = largeurBlocM()
+  if (!(largeur > 0)) { _ancreNuages = null; return }
+  const a = ancrageNuages({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  groupeNuages.position.set(a.position[0], a.position[1], a.position[2])
+  groupeNuages.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
+  groupeNuages.scale.setScalar(a.echelle)
+  _ancreNuages = a
+}
+
+// LA CAMÉRA DU CIEL, EN UNITÉS DE BLOC — la SEULE grandeur qui traverse la
+// frontière dans le sens globe → bloc, et le nuanceur ne peut pas s'en passer :
+// il lance son rayon depuis l'œil.
+//
+// ⛔ **LE SENS DE LA DIVISION EST LE PIÈGE.** `k` vaut 0,0077 : la caméra du
+// globe est à ~100 unités de l'origine du monde, mais à ~0,77 unité-globe du
+// crop, soit **~75,6 unités de BLOC** — et le relevé du bloc PLAT en vue posée
+// donne `y = 72,72` (`monde/visibilite-surface.js` §3). **Deux chemins, 4 %
+// d'écart.** Multiplier au lieu de diviser mettrait la caméra à 0,0059 unité de
+// bloc du ciel : DANS le nuage à tous les coups, et la marche s'éteindrait sur
+// son garde-fou de remplissage (6 pas).
+//
+// ⚠️ **Hors mode sphère on rend `null`, et `clouds.update` sert alors
+// `camera.position` — le comportement du dépôt, au bit près.**
+const _camNuages = new THREE.Vector3()
+function camNuagesBloc() {
+  if (!fusionDesPasses || !_ancreNuages) return null
+  const p = positionCameraEnBloc(
+    [camGlobe.position.x, camGlobe.position.y, camGlobe.position.z],
+    _ancreNuages
+  )
+  return _camNuages.set(p[0], p[1], p[2])
+}
+
 // ══════ LA LONGUEUR QUI TRAVERSE — TÂCHE D16-a, LA CLASSE `1/k` ════════════
 //
 // ⛔ **UNE LONGUEUR MESURÉE DANS L'ESPACE DU BLOC ET CONSOMMÉE PAR LA CAMÉRA QUI
@@ -5159,7 +5256,12 @@ function poserVisibiliteSocle(v) {
   // GPX sprites draw with depthTest:false — hidden with the surface or
   // they'd float on top of the planet
   gpxLayer.setVisible(vue.socle && params.gpxVisible)
-  clouds.setVisible(vue.socle)
+  // ⚡ **`vue.nuages` ET PLUS `vue.socle` — Tâche R20**, et c'est le §5 de
+  // `visibilite-surface.js` une QUATRIÈME fois. `socle` est borné à faux sous
+  // le drapeau : accroché à lui, le ciel était éteint à toutes les altitudes et
+  // à tous les zooms, alors que sa simulation tournait et que ses 16 instances
+  // étaient écrites. Les nuages répondent à la question des BOUTONS.
+  clouds.setVisible(vue.nuages)
   plinth.setVisible(vue.socle && params.plinth && !params.regionMode)
   if (regionSkirt) regionSkirt.mesh.visible = vue.socle
   groundInfo.setVisible(vue.cartouche && params.groundInfo)
@@ -9912,7 +10014,7 @@ let loopPaused = false
 function stepScene(t, dt) {
   if (pilote.active || shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
-    clouds.update(dt, params, camera)
+    clouds.update(dt, params, camera, camNuagesBloc())
     traffic.update(dt)
   }
   camera.updateMatrixWorld()
@@ -12831,6 +12933,7 @@ function tick() {
   // où il est regardé. Sans drapeau, `majCameraFond` rend la main tout de suite.
   majCameraFond()
   majCartoucheGlobe() // D16-c : le cartouche suit la même similitude que la caméra
+  majNuagesGlobe() // R20 : le ciel suit la MÊME similitude que le cartouche
   majLoiTextureMonde()
   if (frontiereActive && modes.mode === 'surface') {
     // ⚠️ **LE GLOBE STREAME MAINTENANT EN MODE SURFACE, ET C'EST UN COÛT
@@ -12939,7 +13042,7 @@ function tick() {
     // le peuplement du ciel suit la puissance de la machine (Adrien) : le
     // palier du gouverneur de perf pilote le nombre de nuages instanciés
     clouds.setTier?.(aq?.tier ?? 0)
-    clouds.update(dtAmb, params, camera)
+    clouds.update(dtAmb, params, camera, camNuagesBloc())
     traffic.update(dtAmb)
     terrain.tickSurfaceFx(dtAmb, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
     terrain.tickLiquidMetal(dtAmb, params.lmSpeed) // molten flow when liquid metal is on

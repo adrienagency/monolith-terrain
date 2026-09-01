@@ -255,7 +255,13 @@ test('⑤ le nuanceur marche en unités de BLOC, pas en unités de monde', () =>
 test('⑤ hors mode sphère, la caméra de bloc est servie TELLE QUELLE', () => {
   // ⚠️ Neutralité au bit près : sans frontière de rendu, `uCamBloc` doit valoir
   // exactement `camera.position`, sans quoi le mode plat change de rendu.
-  const corps = CLOUDS.slice(CLOUDS.indexOf('update(dt, params, camera)'))
-  assert.ok(/uCamBloc/.test(corps.slice(0, 4000)),
+  const corps = CLOUDS.slice(CLOUDS.indexOf('update(dt, params, camera'))
+  assert.ok(/uCamBloc\.value\.set\(/.test(corps.slice(0, 4000)),
     '`update` ne pose pas `uCamBloc` : il resterait figé à sa valeur de départ')
+  assert.ok(/camBloc \?\? camera\?\.position/.test(corps.slice(0, 4000)),
+    'sans `camBloc`, `update` ne retombe pas sur `camera.position` : le mode plat change de rendu')
+  // ⚠️ le TRI arrière→avant doit lire le MÊME espace, sinon il devient muet et
+  // deux nuages transparents laissent une couture
+  assert.ok(/_writeInstances\(cam\)/.test(corps.slice(0, 4000)),
+    'le tri des instances lit encore la caméra de MONDE : deux espaces mélangés')
 })

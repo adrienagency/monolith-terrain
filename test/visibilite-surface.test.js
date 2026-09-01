@@ -55,14 +55,14 @@ test('① DRAPEAU LEVÉ : le ciné est le SEUL éteint — l’exception ne déb
   // BOUT** : Adrien demandait ces boutons, on n'en retire qu'un, et pour une
   // raison mesurée.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: true }),
-    { socle: false, boutons: true, cine: false, cartouche: true, carto: true, reperes: true })
+    { socle: false, boutons: true, cine: false, cartouche: true, carto: true, reperes: true, nuages: true })
 })
 
 test('① DRAPEAU LEVÉ, hors surface : tout s’éteint, boutons compris', () => {
   // ⚠️ En orbite la planète EST le sujet : un raccourci isométrique « sur le
   // bloc » n'a plus de bloc, et le coin cartographie n'a plus de carte.
   assert.deepEqual(visibiliteSurface({ terreUnique: true, surface: false }),
-    { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false })
+    { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false, nuages: false })
 })
 
 test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se confondent', () => {
@@ -71,7 +71,7 @@ test('① DRAPEAU BAISSÉ : la production est INCHANGÉE, les deux réponses se 
   // booléen, celui d'avant la tâche, au bit près.
   for (const surface of [true, false]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface }),
-      { socle: surface, boutons: surface, cine: surface, cartouche: surface, carto: surface, reperes: surface },
+      { socle: surface, boutons: surface, cine: surface, cartouche: surface, carto: surface, reperes: surface, nuages: surface },
       'sans drapeau, les QUATRE réponses doivent être le même booléen')
   }
 })
@@ -82,11 +82,11 @@ test('① les entrées molles sont ramenées à des booléens, pas propagées te
   // loin, pas ici. On borne au bord.
   for (const e of [undefined, null, 0, '', NaN]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false })
+      { socle: false, boutons: false, cine: false, cartouche: false, carto: false, reperes: false, nuages: false })
   }
   for (const e of [1, 'oui', {}]) {
     assert.deepEqual(visibiliteSurface({ terreUnique: false, surface: e }),
-      { socle: true, boutons: true, cine: true, cartouche: true, carto: true, reperes: true })
+      { socle: true, boutons: true, cine: true, cartouche: true, carto: true, reperes: true, nuages: true })
   }
 })
 
@@ -210,15 +210,23 @@ test('③ LE COMPTE DES LECTEURS — la garde de CLASSE, pas de cas particulier'
   // seul lecteur. Deux champs dont l'un préfixe l'autre suffisent à rendre ce
   // compte — la seule garde de CLASSE de cette fonction — silencieusement faux.
   const compte = (n) => (corps.match(new RegExp('vue\\.' + n + '\\b', 'g')) || []).length
-  // ⚠️ **NEUF, ET NON ONZE : DEUX REDISTRIBUTIONS VOULUES SE SONT CROISÉES.**
+  // ⚠️ **HUIT, ET NON ONZE : TROIS REDISTRIBUTIONS VOULUES SE SONT CROISEES.**
   //   · D16-c : `groundInfo` est passe de `vue.socle` a `vue.cartouche` ;
   //   · D16-b : `mapLayers` est passe de `vue.socle` a `vue.carto`, parce que
   //     les calques de carte ont quitte la scene du bloc plat : ils sont poses
-  //     sur la sphere (`monde/sol-globe.js`).
-  // Ce compte est exactement l'endroit ou ces deux-la devaient se declarer, et
-  // il continue de rougir sur toute redistribution qui ne le ferait pas.
-  assert.equal(compte('socle'), 9,
-    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 9 -- un calque du bloc plat a change de grandeur`)
+  //     sur la sphere (`monde/sol-globe.js`) ;
+  //   · R20 : `clouds` est passe de `vue.socle` a `vue.nuages`, pour la MEME
+  //     raison — le volume a quitte la scene du bloc plat et pend d'un groupe
+  //     que `sceneGlobe` adopte (`monde/nuages-globe.js`). Mesure : force
+  //     visible dans l'ancienne scene, l'ecart a l'ecran valait 0,000 / 0,000.
+  // ⚡ **ET CETTE GARDE A FAIT SON TRAVAIL** : R20 a d'abord rebranche le
+  // lecteur SANS toucher a ce compte, et les quatre assertions de forme plus
+  // ce compte ont rougi ensemble. C'est la seule chose qui separe une
+  // redistribution voulue d'un calque de bloc plat rallume par accident.
+  assert.equal(compte('socle'), 8,
+    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 8 -- un calque du bloc plat a change de grandeur`)
+  assert.equal(compte('nuages'), 1,
+    `${compte('nuages')} lecteur de \`vue.nuages\` au lieu de 1 (clouds seul)`)
   assert.equal(compte('cartouche'), 1,
     `${compte('cartouche')} lecteur de \`vue.cartouche\` au lieu de 1 (groundInfo seul)`)
   assert.equal(compte('boutons'), 2,
