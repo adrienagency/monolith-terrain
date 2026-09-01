@@ -14,8 +14,8 @@ travail et comment le recoudre. Les branches, elles, survivent dans git.
 
 ## L'ÉTAT AU 2026-09-01, 00 h
 
-**Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`, à `15e4d1a`.**
-**4 442 tests · 0 échec · `audit:tests` 230 = 230.**
+**Arbre de fusion : `C:\Dev\wt-merge`, branche `regroupement`.**
+**4 480 tests · 0 échec · `audit:tests` 231 = 231** (après R20 bis et R22).
 
 ⚡ **Les sept drapeaux sont levés dans `src/flags.js`** — la sphère est le mode de
 démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
@@ -29,13 +29,13 @@ démarrage. L'URL `?terre=unique&globe=continu&…` ne sert plus à rien.
 | R18 | le fond marin | fusionnée |
 | R19 | les courbes de niveau du crop | `courbes-crop` |
 | **R20 bis** | **les nuages — 14 curseurs sur 15 vivants** | `nuages-globe` |
+| **R22** | **les parois du bloc et la grille — 4 sur 4, + l'encre de grille en prime** | `parois-grille` |
 
 ### En cours — quatre arbres, quatre agents
 
 | tâche | sujet | branche | arbre |
 |---|---|---|---|
 | **R21** | l'éclairage : ombres, lampe d'appoint, ombrage des pentes (8 options) | `lumiere-crop` | `C:\Dev\wt-lum` |
-| **R22** | les parois du bloc et la grille (4 options) | `parois-grille` | `C:\Dev\wt-par` |
 | **R23** | les deux sauts de caméra restants (×66,67 et la butée à 88,2°) | `vitesse-camera` | `C:\Dev\wt-vit` |
 | **R24** | la toponymie : sommets et points cotés (2 options) | `toponymie-globe` | `C:\Dev\wt-top` |
 
@@ -53,7 +53,7 @@ structurelles, l'éclairage de R21 se posera dessus.
 
 ## L'ORDRE DE FUSION
 
-1. **R22** (`parois-grille`) — touche la structure du nuanceur.
+1. ~~R22~~ **fusionné**.
 2. **R21** (`lumiere-crop`) — l'éclairage, par-dessus.
 3. **R23** (`vitesse-camera`) — disjoint, mais c'est celui qui change ce qu'on
    ressent : le fusionner tard permet de le juger seul.
@@ -79,7 +79,7 @@ contenu du disque. Un écart = un test qui ne tourne pas.
 
 ## LA VÉRIFICATION DE FIN
 
-1. `npm test` — **base à battre : 4 442 · 0 échec**
+1. `npm test` — **base à battre : 4 480 · 0 échec**
 2. `npm run audit:tests` — **aucun écart**
 3. **À l'écran**, comparé aux 39 images d'Adrien (`…\scratchpad\video\t01.jpg` …
    `t39.jpg`) : elles sont l'état AVANT de cette campagne.
