@@ -158,5 +158,30 @@ export function visibiliteSurface({ terreUnique, surface }) {
     // le ciné parce qu'il MANQUE quelque chose au crop (un plancher). La carto,
     // elle, ne manque de rien : `monde/sol-globe.js` lui donne le sol du globe.
     carto: s,
+    // ══════════ 6. LES REPÈRES — Tâche R18, et c'est le §5 UNE TROISIÈME FOIS
+    //
+    // > **Adrien, 2026-08-31 :** « On a plein de choses qui ne fonctionnent pas
+    // > encore en mode sphère. »
+    //
+    // ⛔ **LES DEUX INTERRUPTEURS DE « Repères » PASSAIENT PAR `socleAffiche()`.**
+    // `setLabelsVisible: (v) => (labels.visible = v && socleAffiche())` et
+    // `peaksLayer.update(camera, w, h, socleAffiche())` : borné à faux sous le
+    // drapeau, donc éteints à toutes les altitudes et à tous les zooms.
+    //
+    // ⚡ **MESURÉ, PAS DÉDUIT** (`.banc/R18/fige-defaut`, mouvement ambiant
+    // coupé, plancher de bruit **0,0000 sur six relevés consécutifs**) : aux
+    // deux bouts de chaque interrupteur, écart moyen **0,000** et gradient
+    // **0,000** — l'image est identique au bit près.
+    //
+    // ⚡ **ET LEUR QUESTION EST CELLE DES BOUTONS**, pas celle du maillage : un
+    // sommet nommé se pose sur le relief qu'on REGARDE, et le relief qu'on
+    // regarde est le crop. Même raisonnement qu'au §4 et au §5.
+    //
+    // ⚠️ **LE DRAPEAU NE SUFFIT PAS POUR LES SOMMETS, ET C'EST LE §4 ENCORE.**
+    // Ce sont des marqueurs de DOM projetés avec une caméra : sous la sphère il
+    // faut leur donner **la caméra du globe** et **une position de globe**
+    // (`monde/sol-globe.js`, l'adaptateur bloc ↔ globe que la carto utilise
+    // déjà). Ce booléen ouvre la porte ; le câblage est dans `main.js`.
+    reperes: s,
   }
 }

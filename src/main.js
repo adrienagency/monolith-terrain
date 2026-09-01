@@ -5268,6 +5268,63 @@ function cartoucheAffiche() {
   return visibiliteSurface({ terreUnique: terreUniqueBranchee, surface }).cartouche
 }
 
+// LES REPÈRES SONT-ILS À L'ÉCRAN ? — Tâche R18, et c'est la MÊME question que
+// le cartouche et que les trois boutons du bas : « sommes-nous devant un
+// bloc ». Un sommet nommé se pose sur le relief qu'on REGARDE.
+//
+// ⛔ **CE N'EST PAS `socleAffiche()`**, qui répond à « le maillage du bloc PLAT
+// est-il dessiné » — non, sous la sphère, à toutes les altitudes. Mesuré aux
+// deux bouts de l'interrupteur « Sommets », mouvement ambiant coupé
+// (`.banc/R18/fige-defaut`, plancher de bruit 0,0000 sur six relevés) : écart
+// moyen **0,000**, gradient **0,000**.
+//
+// ⛔ **ET ON NE PEUT PAS LIRE `veilleSocle` SOUS LA SPHÈRE** — elle n'est jamais
+// nourrie, son état reste FAUX pour toujours. Le prédicat de la base est le
+// même que celui du cartouche, pour la même raison, et il est écrit UNE fois.
+function reperesAffiches() {
+  const surface = terreUniqueBranchee
+    ? modes?.mode !== 'orbital' && globe?.baseYCrop != null
+    : seuilSocleBranche
+      ? veilleSocle.visible
+      : modes?.mode !== 'orbital'
+  return visibiliteSurface({ terreUnique: terreUniqueBranchee, surface }).reperes
+}
+
+// ══════════ LE POSEUR DES SOMMETS — Tâche R18 ═══════════════════════════════
+//
+// ⚠️ **MÉMORISÉ, ET LA RAISON EST CHIFFRÉE PAR LE MODULE LUI-MÊME** :
+// `poseurPourReconstruction` prend la liste des tuiles portant leurs hauteurs
+// (`globe.tuilesAvecHauteurs()`), et son propre commentaire dit pourquoi elle
+// n'est prise qu'UNE fois par reconstruction — « sans elle, chacun des milliers
+// de sommets d'un calque reparcourrait `globe.tiles` ». Ici c'est par IMAGE que
+// la question se poserait : les marqueurs sont projetés à chaque tour.
+//
+// ⚠️ **500 ms, ET C'EST UN CHOIX DE FRAÎCHEUR, PAS DE PERFORMANCE PURE.** Les
+// tuiles arrivent du réseau ; un poseur construit une fois pour toutes ne
+// verrait jamais celles qui manquaient au démarrage, et les sommets resteraient
+// posés sur le repli (le sol du bloc). Un demi-tour de seconde est invisible à
+// l'œil sur un marqueur qui suit déjà sa crête.
+let poseurReperes = null
+let poseurReperesT = 0
+function poseurDesReperes() {
+  if (!terreUniqueBranchee) return null
+  const t = performance.now()
+  if (poseurReperes && t - poseurReperesT < 500) return poseurReperes
+  poseurReperesT = t
+  poseurReperes = poseurPourReconstruction({
+    globe,
+    dem,
+    sample: terrain.sample,
+    // ⚠️ **LA MÊME ÉCHELLE QUE LA CARTO, AU CARACTÈRE PRÈS** — recopiée d'une
+    // ligne au-dessus (`mapLayers.poserFabricantDePoseur`) et non réinventée :
+    // deux écritures de cette conversion divergeraient en silence le jour où
+    // l'exagération bougerait.
+    echelleBloc: dem ? (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1) / dem.extentMeters) * lireExageration(params) : 0,
+    actif: true,
+  })
+  return poseurReperes
+}
+
 // ⚠️ **L'ENTRÉE EST UNE ALTITUDE GÉOMÉTRIQUE, PAS UNE FRACTION D'ÉCRAN — RÈGLE
 // R1**, et c'est la seule ligne de ce branchement qui ne se rattrape pas.
 // `altitudeCadrageM()` est l'instrument que la Tâche 1b a purgé de `dem.meanM`
@@ -12889,7 +12946,16 @@ function tick() {
     terrain.tickSurfaceMaterial(dtAmb) // drifting sand (relief material flow)
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
-  peaksLayer.update(camera, window.innerWidth, window.innerHeight, socleAffiche())
+  // ⚠️ **LA CAMÉRA SUIT LA SCÈNE, comme pour le désencombrement des toponymes**
+  // (`mapLayers.setCamera(camGlobe)`) : projeter des points de sphère avec la
+  // caméra du bloc calculerait sur un autre monde.
+  peaksLayer.update(
+    terreUniqueBranchee ? camGlobe : camera,
+    window.innerWidth,
+    window.innerHeight,
+    reperesAffiches(),
+    poseurDesReperes(),
+  )
 
   // city-label declutter is screen-space (depends on camera projection), so it
   // goes stale as soon as the camera moves — re-run the visibility-only pass
