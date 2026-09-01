@@ -432,3 +432,31 @@ n° 1 d'un rapport précédent, mot pour mot.
   qui saute onze fois.
 - ⚠️ **Sept des 72 options ✅ de l'inventaire ont leurs deux grandeurs sous le
   bruit du banc** (98, 36, 91, 120, 11, 56, 24). À remesurer avant de s'y fier.
+
+---
+
+# ÉTAT AU 2026-09-01, 20 h — sept agents en vol
+
+**`regroupement` : 4 667 tests · 0 échec · audit 241 = 241.** Règles nouvelles :
+**D19** (contrôles Google Earth : glisser = la Terre tourne autour de son centre ;
+molette = vers le point au centre de l'écran) et **D20** (profondeur de champ :
+même flou apparent à tout zoom, mise au point sous le pointeur avec repli au
+centre, **active partout** — l'exception à « les effets seulement en crop »).
+
+| tâche | sujet | arbre | branche |
+|---|---|---|---|
+| **R32** | le pivot = centre de la Terre jusqu'au crop — **confusion d'espace** : quatre passes ont mesuré l'axe du BLOC (le point de surface, `(0,y,0)` en unités de bloc) en l'appelant l'axe de la Terre | `wt-orb3` | `orbite-jusquau-crop` |
+| **R33** | attaquant : le pivot **en mètres du centre de la Terre**, la signature orbite/lacet (lat/lon sous la caméra), tests rouges en espace globe | `wt-att2` | `attaque-pivot-globe` |
+| **PF1** | le profil : qui consomme, trois postes de vue × trois machines émulées, sonde commune `scripts/profil-pf1.mjs` | `wt-pp1` | `perf-profil` |
+| **PF2** | priorité des tuiles : visible d'abord, centre d'abord, à la Cesium (SSE, file de priorité, annulation) | `wt-pp2` | `perf-priorite` |
+| **PF3** | mer et effets seulement en crop — **sauf `dofPass`, active partout (D20)** | `wt-pp3` | `perf-crop-seul` |
+| **PF4** | les bugs qui coûtent : `GL_INVALID_OPERATION`, rotation propre vs rendu à la demande, palier 0×0, clic qui saute, voile | `wt-pp4` | `perf-bugs` |
+| **R34** | profondeur de champ (D20) : autofocus, chaîne d'unités, flou en px aux trois altitudes | `wt-dof` | `flou-zoom` |
+
+⚠️ **Nommage** : la campagne performance s'appelle **PF1→PF4** — les `brief-P2.md`
+/ `rapport-P2.md`… sont une campagne **antérieure**, ne pas confondre.
+
+**Ordre de fusion prévu** : R33 (tests rouges, `src/` vide) → R32 → PF4 (format
+de profondeur) → PF3 (passes) → R34 (paramètres du flou, dépend de PF3 laissant
+`dofPass` active) → PF2 (`globe.js` cache) → PF1 (sondes seules).
+Le script `fusion-test.py` pour `package.json` à chaque fois, puis `audit:tests`.
