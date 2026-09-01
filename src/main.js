@@ -142,7 +142,8 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
 // par image relevées dans l'application vivante — voir le §3 du module.
 import { creerVeilleRepos } from './monde/veille-repos.js'
-import { deltaAzimut, decalagePivot } from './monde/pivot-bloc.js'
+import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
+import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
 // risque de cycle depuis `main.js`, qui est en bout de chaîne.
@@ -1412,7 +1413,11 @@ controls.enableDamping = true
 // élan sur le drag (retour Adrien) : le résidu de rotation décroît lentement,
 // une rotation à la souris a de la lancée au lieu de s'arrêter net. τ ≈ 0.35 s
 controls.dampingFactor = 0.03
-controls.maxPolarAngle = Math.PI * 0.49
+// ⚠️ LE PLAFOND DUR, ET PLUS LA LOI — Tâche R23. `Math.PI × 0,49` vivait ici et
+// dans `modes.js` ; le nombre est le même mais il ne se recopie plus, et la
+// VRAIE butée est recalculée à chaque image par `polaireMaxSol` (boucle
+// d'image, plus bas) parce qu'elle dépend de la distance et du relief.
+controls.maxPolarAngle = POLAIRE_MAX_DURE
 // ⚠️ QUATRIÈME ET DERNIER SITE DE `minDistance` — Tâche 1b, Étape 3. Les trois
 // autres vivaient dans `modes.js` et sont devenus `Modes._poseButees()` ; celui-ci
 // est la pose de DÉPART, avant qu'aucun mode n'ait parlé. La valeur ne se recopie
@@ -12832,12 +12837,117 @@ function updateCameraMotion(dt) {
     // Le bloc dérivait donc de **68,324 px** à l'écran pour 100 px de souris,
     // là où la Terre ne bouge jamais.
     //
+    // ══════ ET LA BUTÉE POLAIRE SUIT LE SOL — Tâche R23 ═══════════════════
+    //
+    // ⛔ **`maxPolarAngle = Math.PI × 0,49` LAISSAIT LA CAMÉRA PASSER SOUS LE
+    // TERRAIN.** Mesuré au navigateur (`scripts/sonde-vitesse-r23.mjs`, glissé
+    // poussé à la butée puis 360° d'azimut À la butée, bloc z12) :
+    // **−11,7616 unités** au Mont-Blanc sur **450 images de 505**, −11,8422 à
+    // l'Everest, −8,6115 au Cervin. Le nombre qui manquait à `0,49π` n'est pas
+    // un facteur, ce sont la DISTANCE et le RELIEF — voir `monde/butee-sol.js`.
+    //
+    // ⚠️ **RECALCULÉE À CHAQUE IMAGE, ET AVANT `update()`** : c'est `update()`
+    // qui applique le clamp de `φ`, donc une butée posée après serait celle de
+    // l'image d'avant — la « sonde lue APRÈS la fonction », dans l'autre sens.
+    // Elle varie continûment avec la distance, donc `φ` est ramené en douceur
+    // quand on se rapproche ; le pas par image est relevé dans le rapport.
+    //
+    // ⚠️ **AUCUNE ÉCRITURE SUR `controls.target` NI SUR LA DISTANCE** : une
+    // butée d'angle ne touche ni l'un ni l'autre, donc `veille-repos` ne voit
+    // rigoureusement rien et D16 ter n'est pas dépensé.
+    // ⚠️ **ET LE PLANCHER DE DISTANCE SUIT LE SOL LUI AUSSI — R23, tour 2.**
+    // La butée d'angle ne peut rien quand la CIBLE est enterrée : `_cibleVisee`
+    // pose `y = Y_CIBLE = −0,3` alors que le sol y monte à 14 unités sur un bloc
+    // de montagne, si bien qu'à `d = 6` la caméra est sous le terrain à TOUS les
+    // angles (mesuré : −5,0982 u sur 504 images de 504 au Mont-Blanc).
+    //
+    // ⚠️ **SECOND SITE D'ÉCRITURE DE `minDistance`, ET IL EST ASSUMÉ.** La
+    // Tâche 1b avait rassemblé les quatre recopies littérales dans
+    // `Modes._poseButees` ; ce site-ci n'est pas une recopie mais une LOI, elle
+    // vit dans un module pur et testé, et elle doit courir par image parce que
+    // le relief sous la cible change quand la fenêtre glisse. `_poseButees`
+    // reste le seul endroit qui pose la VALEUR DE BASE, et c'est elle qu'on
+    // passe en `plancher`.
+    if (terrain?.sample) {
+      controls.minDistance = distanceMinSol({
+        cibleX: controls.target.x,
+        cibleY: controls.target.y,
+        cibleZ: controls.target.z,
+        sol: terrain.sample,
+        plancher: DISTANCE_MIN_SURFACE,
+        plafond: controls.maxDistance,
+        pivotX: PIVOT_BLOC_X,
+        pivotZ: PIVOT_BLOC_Z,
+      })
+    }
+    controls.maxPolarAngle = terrain?.sample
+      ? polaireMaxSol({
+        distance: controls.getDistance(),
+        cibleX: controls.target.x,
+        cibleY: controls.target.y,
+        cibleZ: controls.target.z,
+        azimut: controls.getAzimuthalAngle(),
+        sol: terrain.sample,
+      })
+      : POLAIRE_MAX_DURE
     // ⚠️ **L'AZIMUT EST LU AVANT `update()`** : c'est lui qui applique la
     // rotation du glissé, et le delta ne se lit qu'en encadrant l'appel.
     const _azAvantUpdate = controls.getAzimuthalAngle()
     controls.update() // orbital-mode camera is driven by the mode machine
     pivoterAutourDuBloc(_azAvantUpdate)
   }
+  // ⚠️ **HORS DES BRANCHES, ET C'EST UNE MESURE QUI L'A DÉPLACÉ ICI.** Posé dans
+  // la seule branche `surface`, le redressement sautait les images où une AUTRE
+  // écriture tient la caméra — le tween de vol, et surtout le balayage de pose
+  // de D16 ter (`_avancerFonduPose`, `modes.js`), qui écrit la position ET
+  // appelle `controls.update()` lui-même. Le banc voyait alors **une image** par
+  // geste passer sous le sol, jusqu'à −3,5735 u, pendant que les ~503 autres
+  // étaient dégagées. Ici, il court sur toutes les images du mode surface.
+  if (modes.mode === 'surface') redresserSurLeSol()
+}
+
+// ══════════ ET ON REDRESSE APRÈS LE PIVOT — Tâche R23, tour de correction ═══
+//
+// ⛔ **LA BUTÉE SEULE NE SUFFIT PAS, ET C'EST MESURÉ.** Premier jet : butée
+// posée avant `update()`, et le banc rendait encore **−7,3730 unités** au
+// Mont-Blanc sur 276 images de 504 — mieux que les −11,76 d'avant, mais pas
+// « jamais ».
+//
+// ⚡ **LA CAUSE EST LA ROTATION RIGIDE DE R13.** `pivoterAutourDuBloc` ajoute le
+// MÊME vecteur à la caméra et à la cible (`δ = (I − Ry(d))·(P − T)`, voir
+// `monde/pivot-bloc.js`) : la butée avait été calculée pour une rotation autour
+// de la CIBLE, mais la caméra tourne autour de l'AXE DU BLOC et survole donc un
+// tout autre sol. Avec une cible à 20 unités de l'axe et 10,7° d'azimut par pas
+// de souris, la translation vaut ~3,7 unités PAR IMAGE — la caméra change de
+// montagne entre deux images.
+//
+// ➡️ **ON RECALCULE APRÈS LE PIVOT, ET ON REDRESSE À DISTANCE CONSTANTE.**
+// Réduire `φ` autour de la cible ne change ni la cible ni le rayon : la
+// distance caméra → cible est invariante **par construction**, donc
+// `veille-repos` (`SEUIL_BOUGE_LOG = 1e-4`) ne voit rigoureusement rien et
+// D16 ter n'est pas dépensé. C'est la même garantie, et pour la même raison,
+// que celle de la rotation rigide elle-même.
+function redresserSurLeSol() {
+  if (!terrain?.sample) return
+  const d = controls.getDistance()
+  if (!(d > 0)) return
+  const phi = controls.getPolarAngle()
+  const az = controls.getAzimuthalAngle()
+  const max = polaireMaxSol({
+    distance: d,
+    cibleX: controls.target.x,
+    cibleY: controls.target.y,
+    cibleZ: controls.target.z,
+    azimut: az,
+    sol: terrain.sample,
+  })
+  if (!(phi > max)) return
+  const s = Math.sin(max)
+  camera.position.set(
+    controls.target.x + d * s * Math.sin(az),
+    controls.target.y + d * Math.cos(max),
+    controls.target.z + d * s * Math.cos(az)
+  )
 }
 
 // ══════════ LA CORRECTION DE PIVOT, ET LES TROIS GARDES QUI LA BORNENT ═════
