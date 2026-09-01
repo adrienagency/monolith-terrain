@@ -356,6 +356,8 @@ test('⑤b `poserRampe`, LUI, RESTE SUR `hauteurSurface` — la couleur lit la D
       uOceanDepth: { value: 6000 }, uReliefBas: { value: -6000 },
       uPlancherRampeM: { value: 0 }, uMerZeroSousEau: { value: 0 },
       uMerRampeOn: { value: 0 }, uMerFondBudgetM: { value: 6000 },
+      // ⚠️ **AJOUTÉ PAR LA TÂCHE R31**, écrit par `_poserUniformesRampe`.
+      uRecollage: { value: 0 },
     },
     hauteurSurface(...a) { nSurface++; return Globe.prototype.hauteurSurface.apply(this, a) },
     hauteurDessinee(...a) { nDessinee++; return Globe.prototype.hauteurDessinee.apply(this, a) },

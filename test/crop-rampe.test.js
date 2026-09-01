@@ -54,7 +54,17 @@ import {
   echelleRampe,
   rampeT,
   saturation,
+  CRAN_RECOLLAGE_BAS,
+  CRAN_RECOLLAGE_HAUT,
+  poidsRecollage,
+  rampeTMonde,
 } from '../src/monde/rampe-crop.js'
+// ⚠️ **IMPORTÉ PAR LE TEST, PAS PAR LA SOURCE — et c'est R1.** `seuil-socle.js`
+// décide du CADRAGE ; ⑥b interdit à `rampe-crop.js` de l'importer. Le lien entre
+// les deux crans du recollage et les seuils de vie du crop est donc VÉRIFIÉ ici
+// (⑧b), là où une dépendance ne crée aucune boucle.
+import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
+import { plancherPivot, rampeT as rampeTSocleTest } from '../src/monde/naturel-crop.js'
 import { unitesEnMetres, margeCoteM, MARGE_COTE_UNITES } from '../src/monde/habillage-crop.js'
 import { repereCrop, latLonDeLocal, localCrop, dansCrop } from '../src/monde/crop-sphere.js'
 import { Globe } from '../src/globe.js'
@@ -446,7 +456,7 @@ test('②d bis `uReliefBas` naît de `RAMPE_MONDE` et `retirerRampe` l’y ramè
   // module documente déjà (« il y en avait DEUX, plus un troisième »).
   const ecritures = globeSrc.split('uReliefBas.value =').length - 1
   assert.equal(ecritures, 2, 'uReliefBas doit s’écrire exactement dans _poserUniformesRampe et retirerRampe')
-  const poseur = globeSrc.slice(globeSrc.indexOf('  _poserUniformesRampe(e) {'))
+  const poseur = globeSrc.slice(globeSrc.indexOf('  _poserUniformesRampe(e, altitudeM = null) {'))
   assert.ok(poseur.slice(0, 1400).includes('u.uReliefBas.value = e.terreBas - e.creux'),
     '_poserUniformesRampe ne pose pas l’ancre basse du relief')
 })
@@ -539,6 +549,11 @@ function faussGlobe(crop, hauteur) {
       uMerZeroSousEau: val(0),
       uMerRampeOn: val(0),
       uMerFondBudgetM: val(RAMPE_MONDE.profondeur),
+      // ⚠️ **AJOUTÉ PAR LA TÂCHE R31**, et c'est la même raison qu'au-dessus :
+      // `_poserUniformesRampe` l'ÉCRIT désormais, donc un faux globe qui ne le
+      // porte pas fait lever la méthode empruntée au vrai prototype. La table
+      // factice suit l'écrivain, elle ne le contourne pas.
+      uRecollage: val(0),
     },
     _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
     _poserUniformesRampe: Globe.prototype._poserUniformesRampe,
@@ -1042,4 +1057,194 @@ test('⑦e `retirerHabillage` rend la loi du MONDE, pas le neutre — quand elle
   // ⛔ et le voile NE suit PAS : `natVoile` lit `length(qCrop)`, une distance au
   // centre d'un crop qui n'existe plus
   assert.match(corps, /u\.uHazeAmt\.value = NATUREL_MONDE\.hazeAmt/)
+})
+
+
+// ══════════ ⑧ LE RECOLLAGE DES DEUX ÉCHELLES — Tâche R31 ═══════════════════
+//
+// > **Adrien, 2026-09-01 :** *« Il doit y avoir un lien entre ce que l'on voit en
+// > crop et ce que l'on voit à grande échelle. »*
+//
+// ⛔ **SA PRÉMISSE EST FAUSSE, ET C'EST MESURÉ** : les COULEURS suivaient déjà le
+// gabarit de loin — les deux régimes lisent la MÊME table `uRampCrop`. Ce qui ne
+// suivait pas, c'est l'ÉCHELLE D'ALTITUDE, donc l'INDICE. Relevé le 2026-09-01
+// (`scripts/diag-r31-ecart.mjs`, `.banc/R31/ecart-avant.json`, même point du sol,
+// même table) : **ΔE 18,0 au rivage, 25,4 à 300 m, 38,5 à 800 m** à La Réunion ;
+// **35,8 et 52,4** à Bornéo. Le seuil de perception vaut 2,3.
+
+test('⑧a `poidsRecollage` : nul à la station de l’affiche, plein au cran haut, monotone', () => {
+  // ⛔ **LA GARDE DE L'AFFICHE.** Sous 2 048 m le poids est EXACTEMENT zéro, donc
+  // `mix(x, y, 0.0)` rend `x` : la vue de composition ne bouge pas d'un bit.
+  assert.equal(poidsRecollage(2 ** CRAN_RECOLLAGE_BAS), 0)
+  assert.equal(poidsRecollage(1000), 0)
+  assert.equal(poidsRecollage(0), 0)
+  assert.equal(poidsRecollage(-5), 0)
+  assert.equal(poidsRecollage(NaN), 0)
+  assert.equal(poidsRecollage(2 ** CRAN_RECOLLAGE_HAUT), 1)
+  assert.equal(poidsRecollage(1e9), 1)
+  // strictement croissante entre les deux, et jamais hors de [0 ; 1]
+  let precedent = -1
+  for (let c = CRAN_RECOLLAGE_BAS; c <= CRAN_RECOLLAGE_HAUT; c += 0.05) {
+    const w = poidsRecollage(2 ** c)
+    assert.ok(w >= 0 && w <= 1, `poids hors bornes au cran ${c} : ${w}`)
+    assert.ok(w >= precedent, `le poids RECULE au cran ${c}`)
+    precedent = w
+  }
+  // ⚠️ **C'EST BIEN UN `smoothstep`, PAS UNE RAMPE LINÉAIRE** : à mi-chemin il
+  // vaut 0,5 (les deux courbes s'y croisent), mais au quart il vaut 0,15625 et
+  // non 0,25. Une rampe linéaire poserait une cassure de pente aux deux bouts.
+  const milieu = 2 ** ((CRAN_RECOLLAGE_BAS + CRAN_RECOLLAGE_HAUT) / 2)
+  assert.ok(Math.abs(poidsRecollage(milieu) - 0.5) < 1e-12)
+  const quart = 2 ** (CRAN_RECOLLAGE_BAS + (CRAN_RECOLLAGE_HAUT - CRAN_RECOLLAGE_BAS) / 4)
+  assert.ok(Math.abs(poidsRecollage(quart) - 0.15625) < 1e-12)
+})
+
+test('⑧b le recollage est ACHEVÉ avant que le crop puisse mourir — exécuté contre seuil-socle', () => {
+  // ⛔ **C'EST LA CONDITION QUI INTERDIT UNE MARCHE.** `retirerRampe` rend le
+  // régime mondial d'un seul coup à la mort du crop ; si le recollage n'était pas
+  // fini, cette bascule serait visible. Elle ne l'est pas parce que l'image porte
+  // DÉJÀ le régime mondial quand elle survient.
+  const satureA = 2 ** CRAN_RECOLLAGE_HAUT
+  assert.ok(satureA >= SEUIL_NAISSANCE_M,
+    `le recollage sature à ${satureA} m, avant même la naissance du crop (${SEUIL_NAISSANCE_M} m)`)
+  assert.ok(satureA < SEUIL_MORT_M,
+    `le recollage sature à ${satureA} m, APRÈS la mort du crop (${SEUIL_MORT_M} m) — il y aurait une marche`)
+  // ⚠️ **ET LA BORNE EST CONDITIONNELLE, DONC ON L'ÉCRIT.** Le poids se mesure
+  // au-dessus du SOL du crop : il sature à `satureA + terreBas`. La condition
+  // tient tant que la terre la plus basse du bloc est sous ce seuil-ci.
+  const solMax = SEUIL_MORT_M - satureA
+  assert.ok(solMax > 7500, `la marge de sol ne vaut que ${solMax} m`)
+  // le point le plus bas d'un bloc de 10,4 km ne peut pas dépasser 7 575 m sur
+  // Terre : le sommet du monde est à 8 848 m et aucun plateau n'est à ce niveau.
+  assert.ok(solMax < 8848)
+})
+
+test('⑧c CE QUE J’AI CRU PUIS RÉFUTÉ : l’altitude de recollage n’est PAS `modes.altM`', () => {
+  // ⛔ **J'AI D'ABORD RETRANCHÉ LE SOL DU CROP**, en croyant que l'altitude brute
+  // donnerait à l'Everest un poids plus fort parce que son sol est haut :
+  // `modes.altM` valait 6 138 · 9 331 · 10 864 · 15 094 m aux quatre lieux.
+  //
+  // ⛔ **FAUX** : ce qui arrive à `poidsRecollage` est `altitudeCadrageM()`, une
+  // hauteur AU-DESSUS DE LA SURFACE DU BLOC — la même grandeur que celle sur
+  // laquelle `seuil-socle.js` fait naître et mourir le crop. Retourné depuis le
+  // poids posé dans l'application vivante (2026-09-01) : **9 310 m à La Réunion
+  // (sol 540 m) et 8 796 m à l'Everest (sol 4 928 m)** — neuf kilomètres tous les
+  // deux, alors que leurs altitudes d'ellipsoïde diffèrent de 4,2 km.
+  const inverse = (w) => {
+    // smoothstep⁻¹ : 3t² − 2t³ = w, par bissection — le test ne fait confiance
+    // à aucune formule qu'il n'exécute pas.
+    let a = 0, b = 1
+    for (let k = 0; k < 60; k++) { const m = (a + b) / 2; if (3 * m * m - 2 * m * m * m < w) a = m; else b = m }
+    return 2 ** (CRAN_RECOLLAGE_BAS + (a + b) / 2 * (CRAN_RECOLLAGE_HAUT - CRAN_RECOLLAGE_BAS))
+  }
+  // ⚠️ `inverse` rend l'ENTRÉE de la loi, c'est-à-dire ce que la version fautive
+  // lui donnait : `altitudeCadrage − terreBas`. On rajoute donc le sol pour
+  // retrouver l'altitude de cadrage elle-même.
+  const cadrageReunion = inverse(0.5372682359090186) + 539.6
+  const cadrageEverest = inverse(0.13590698503811202) + 4928
+  assert.ok(Math.abs(cadrageReunion - 9316) < 20, `La Réunion : ${cadrageReunion} m`)
+  assert.ok(Math.abs(cadrageEverest - 8819) < 20, `Everest : ${cadrageEverest} m`)
+  // ⛔ **LES DEUX SONT À NEUF KILOMÈTRES**, à 500 m près, quand leurs altitudes
+  // d'ellipsoïde diffèrent de 4,2 km (10 864 contre 15 094). C'est la preuve que
+  // `altitudeCadrageM()` ne porte PAS l'élévation du sol.
+  assert.ok(Math.abs(cadrageReunion - cadrageEverest) < 600)
+  assert.ok(Math.abs(10864 - 15094) > 4000)
+  // ⛔ **ET LA CONSÉQUENCE CHIFFRÉE DE L'ERREUR** : retrancher un sol de 4 928 m à
+  // une altitude qui ne le contient pas faisait tomber le poids de 0,54 à 0,14 —
+  // le recollage s'éteignait sur le seul lieu haut, sans raison visuelle.
+  assert.ok(Math.abs(poidsRecollage(cadrageEverest) - 0.54) < 0.01, `${poidsRecollage(cadrageEverest)}`)
+  assert.ok(Math.abs(poidsRecollage(cadrageEverest - 4928) - 0.1359) < 0.01, `${poidsRecollage(cadrageEverest - 4928)}`)
+  // ➡️ **LA FONCTION A ÉTÉ RETIRÉE, PAS CORRIGÉE**, et le module ne lit plus
+  // aucune grandeur de terrain pour décider du poids.
+  const src = readFileSync(new URL('../src/monde/rampe-crop.js', import.meta.url), 'utf8')
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  assert.ok(!/hauteurSurSolCrop/.test(code), 'la fonction réfutée est encore dans le code')
+  assert.ok(!/terreBas/.test(code.slice(code.indexOf('export function poidsRecollage'))),
+    'poidsRecollage ne doit lire aucune grandeur de terrain')
+})
+
+test('⑧d le nuanceur MÉLANGE les deux INDICES sur `uRecollage` — extrait et exécuté', () => {
+  // ⚠️ **ON EXÉCUTE LA LIGNE DU NUANCEUR, ON NE CHERCHE PAS SON NOM** — c'est le
+  // protocole de ②b, et c'est ce qui a évité huit assertions vertes sur de la
+  // prose ailleurs dans ce fichier.
+  const ligne = /rampT = mix\(rampT, rampTMonde, uRecollage\);/.exec(globeSrc)
+  assert.ok(ligne, 'le mélange de recollage a disparu du nuanceur')
+  const MIX = (x, y, t) => x * (1 - t) + y * t
+  // eslint-disable-next-line no-new-func
+  const f = new Function('rampT', 'rampTMonde', 'uRecollage', 'MIX',
+    `${ligne[0].replace(/^rampT = mix\(/, 'rampT = MIX(')} return rampT`)
+  // ⛔ **À POIDS NUL, L'AFFICHE EST INTOUCHÉE AU BIT PRÈS** — `Object.is`, pas
+  // une tolérance : `mix(x, y, 0.0)` vaut `x·1 + y·0`.
+  for (const t of [0, 0.13, 0.5, 0.77, 1]) {
+    assert.ok(Object.is(f(t, 0.9, 0, MIX), t), `poids nul : ${t} devient ${f(t, 0.9, 0, MIX)}`)
+  }
+  assert.equal(f(0.13, 0.9, 1, MIX), 0.9, 'poids plein : c’est le régime du monde')
+  // et le mélange est BORNÉ par ses deux entrées, donc jamais hors de [0 ; 1]
+  for (let w = 0; w <= 1; w += 0.05) {
+    const v = f(0.13, 0.9, w, MIX)
+    assert.ok(v >= 0.13 - 1e-12 && v <= 0.9 + 1e-12, `mélange hors bornes à w=${w} : ${v}`)
+  }
+  // ⚠️ **ET LE DÉPARTAGE SPATIAL RESTE LE DERNIER** : le recollage vit DANS le
+  // crop, `dedansCrop` décide ensuite du dedans et du dehors. Inverser les deux
+  // aurait fait glisser la planète entière avec l'altitude du bloc.
+  const iRec = globeSrc.indexOf('rampT = mix(rampT, rampTMonde, uRecollage);')
+  const iCrop = globeSrc.indexOf('rampT = mix(rampTMonde, rampT, dedansCrop);')
+  assert.ok(iRec > 0 && iCrop > iRec, 'le mélange `dedansCrop` doit venir APRÈS le recollage')
+})
+
+test('⑧e sans altitude `uRecollage` reste NUL ; avec elle il suit la loi ; `retirerRampe` le rend', () => {
+  // ⚠️ **EXERCÉ SUR LE VRAI POSEUR**, pas grepé — même patron que ②g.
+  const g = faussGlobe(REPERE, () => 800)
+  assert.equal(g.uniforms.uRecollage.value, 0)
+  // le chemin des bancs et du réglage manuel : pas d'altitude, pas de recollage
+  poser(g, { echelle: { terreBas: 0, terreHaut: 3000, profondeur: 100, creux: 100, plancherM: 0 } })
+  assert.equal(g.uniforms.uRecollage.value, 0, 'poserRampe sans altitude ne doit RIEN recoller')
+  // avec une altitude, il vaut la loi — évaluée, pas approchée
+  const e = { terreBas: 539.6, terreHaut: 3052.3, profondeur: 0, creux: 0, plancherM: 0 }
+  poser(g, { echelle: e, altitudeM: 10864 })
+  assert.equal(g.uniforms.uRecollage.value, poidsRecollage(10864))
+  assert.ok(g.uniforms.uRecollage.value > 0.63 && g.uniforms.uRecollage.value < 0.66)
+  // ⛔ **ET IL RETOMBE AVEC LA RAMPE** : un poids vivant au-dessus d'un état mort
+  // est le défaut C-3 de la Tâche C, et `retirerRampe` est appelé à chaque mort
+  // de crop.
+  Globe.prototype.retirerRampe.call({
+    uniforms: g.uniforms,
+    _echelleContinue: g._echelleContinue,
+    planeteEclairee: false,
+  })
+  assert.equal(g.uniforms.uRecollage.value, 0, 'retirerRampe laisse un poids de recollage vivant')
+})
+
+test('⑧f LE CHIFFRE DE L’APLAT : 990 m de terre d’une seule couleur, et ce que le recollage en fait', () => {
+  // ⚡ **RELEVÉ DANS L'APPLICATION VIVANTE**, La Réunion z13, 2026-09-01,
+  // `.banc/R31/ecart-avant.json` — les uniformes VIVANTS, pas une hypothèse.
+  const U = { reliefBas: 539.6, landMax: 3052.3, pivot: 0.39, contraste: 2.4, altM: 10864 }
+  const amplitude = U.landMax - U.reliefBas
+  const hNorm = (h) => CLAMP((h - U.reliefBas) / amplitude, 0, 1)
+  const pivot = Math.max(U.pivot, plancherPivot((0 - U.reliefBas) / amplitude))
+  assert.equal(pivot, U.pivot, 'le plancher de pivot ne mord pas ici — sinon le chiffre change')
+  const tCrop = (h) => rampeTSocleTest(hNorm(h), pivot, U.contraste)
+  // ⛔ **AVANT : L'INDICE EST CONSTANT — DONC UNE SEULE COULEUR — DE 0 À 990 m.**
+  for (const h of [0, 100, 300, 500, 800, 990]) assert.equal(tCrop(h), 0, `${h} m devrait saturer`)
+  const seuil = (pivot - 0.5 / U.contraste) * amplitude + U.reliefBas
+  assert.ok(Math.abs(seuil - 996) < 1.5, `la sortie de saturation vaut ${seuil} m`)
+
+  // ⚡ **APRÈS** : à l'altitude relevée, le poids vaut ce que la loi dit, et le
+  // mélange rend l'indice STRICTEMENT croissant sur toute la tranche.
+  // ⚠️ **LE POIDS EST CELUI QUI A ÉTÉ RELEVÉ DANS LA PAGE**, pas une valeur
+  // choisie : `uRecollage` valait 0,5373 à cette vue (altitude de cadrage
+  // 9 310 m). On le recalcule par la loi pour que le test tombe avec elle.
+  const w = poidsRecollage(9310)
+  assert.ok(w > 0.55 && w < 0.58, `le poids relevé vaut ${w}`)
+  const tRecolle = (h) => tCrop(h) * (1 - w) + rampeTMonde(h) * w
+  let precedent = -1
+  for (let h = 0; h <= 990; h += 10) {
+    const t = tRecolle(h)
+    assert.ok(t > precedent, `l’indice recollé n’avance pas à ${h} m`)
+    precedent = t
+  }
+  // et l'amplitude gagnée est LISIBLE : la table fait 512 texels de large.
+  const gagne = tRecolle(990) - tRecolle(0)
+  assert.ok(gagne > 0.2, `le recollage n’étale la tranche que de ${gagne}`)
+  assert.ok(gagne * 512 > 100, 'moins de cent texels de rampe : ce serait encore un aplat')
 })

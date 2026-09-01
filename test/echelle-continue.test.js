@@ -393,6 +393,10 @@ function faussGlobe(crop = REPERE, hauteur = () => 400) {
       uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
       uPlancherRampeM: val(RAMPE_MONDE.plancherM),
       uMerFondBudgetM: val(RAMPE_MONDE.profondeur),
+      // ⚠️ **AJOUTÉ PAR LA TÂCHE R31** : `_poserUniformesRampe` écrit désormais
+      // le poids de recollage, et la table factice suit l'écrivain unique — la
+      // contourner ferait passer une pose qui n'écrit rien.
+      uRecollage: val(0),
       uMerRampeOn: val(0),
       uMerZeroSousEau: val(0),
       uCropOn: val(1),

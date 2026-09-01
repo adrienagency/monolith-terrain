@@ -41,6 +41,10 @@ import {
   // GRADE_MONDE sont geles et personne ne les repose. Le pourquoi chiffre est
   // au point d'injection.
   GLSL_REGIME_MONDE,
+  // LE RECOLLAGE DES DEUX ECHELLES — Tache R31, §⑦ de rampe-crop.js.
+  // ⚠️ **DEUX FONCTIONS PURES, PAS UNE REGLE RECOPIEE ICI** : la loi se
+  // verifie sous node, et `globe.js` ne fait que poser sa valeur.
+  poidsRecollage,
 } from './monde/rampe-crop.js'
 // L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis. Pur lui aussi : il ne rend que
 // des nombres. ⚠️ **C'EST LUI QUI TIENT LES QUATRE NOMBRES DE RAMPE, ET PLUS
@@ -1288,6 +1292,18 @@ uniform sampler2D uRampCrop;
 uniform float uRampCropOn;
 uniform float uHeightContrast; // le contraste de rampe du socle
 uniform float uHeightPivot;    // son pivot, en hNorm
+// ══════ LE RECOLLAGE DES DEUX ECHELLES — Tache R31 ════════════════════════
+//
+// ⚠️ LE POIDS DU REGIME MONDIAL DANS L'INDICE DE RAMPE DU CROP, dans [0 ; 1].
+// Zero = l'echelle du bloc, celle de l'affiche ; un = celle de la planete.
+// La loi et ses deux crans vivent dans monde/rampe-crop.js (poidsRecollage) ;
+// ici il n'y a qu'un melange, parce que le poids est CONSTANT sur l'image et
+// que le GPU n'a donc rien a evaluer soixante fois par seconde par fragment.
+//
+// ⚠️ ZERO PAR DEFAUT, comme uCropOn, uHabOn et uRampCropOn : sans altitude
+// passee a poserRampe, le globe peint EXACTEMENT ce qu'il peignait — mix(x, y,
+// 0.0) vaut x*1 + y*0. La garde est la loi elle-meme, pas seulement un drapeau.
+uniform float uRecollage;
 uniform float uHazeAmt;        // perspective aerienne (Imhof) — force globale
 uniform float uHazeAlt;
 uniform float uHazeDist;
@@ -2004,7 +2020,30 @@ void main() {
     // ⚠️ ON MELANGE L'INDICE, PAS LA COULEUR : les deux regimes lisent la MEME
     // table, rampT y est continu, et un seul echantillonnage suffit. Melanger
     // deux couleurs aurait coute une seconde lecture de texture par fragment.
-    rampT = mix(natRampTMonde(h), rampT, dedansCrop);
+    // ══════ ⚡ LE RECOLLAGE DES DEUX ECHELLES — Tache R31 ═══════════════
+    //
+    // > Adrien, 2026-09-01 : « Il doit y avoir un lien entre ce que l'on voit
+    // > en crop et ce que l'on voit a grande echelle. »
+    //
+    // ⛔ LES COULEURS SUIVAIENT DEJA LE GABARIT — c'est L'ECHELLE D'ALTITUDE
+    // qui ne suivait pas. Les deux lignes ci-dessus lisent la MEME table
+    // uRampCrop ; elles n'en different que par l'INDICE. Mesure du 2026-09-01
+    // (diag-r31-ecart.mjs), meme point du sol, meme table : DeltaE 18,0 au
+    // rivage, 25,4 a 300 m, 38,5 a 800 m a La Reunion ; 35,8 et 52,4 a Borneo.
+    // Le seuil de perception vaut 2,3. Ce n'etait donc pas un ecart de nuance.
+    //
+    // ⚡ ET LE MELANGE EST MONOTONE PAR CONSTRUCTION : avant ecretage les deux
+    // indices sont AFFINES en h, donc leur melange l'est aussi. La courbe reste
+    // croissante pour tout poids — seules sa pente et son origine changent.
+    // C'est ce qui interdit une marche, et c'est pourquoi on melange l'INDICE
+    // et non deux couleurs : une seule lecture de texture, aucune inversion.
+    //
+    // ⚠️ natRampTMonde(h) ETAIT DEJA CALCULE pour la ligne de dessous : le prix
+    // de ce bloc est UN mix, c'est-a-dire deux ALU. Nomme, il n'est plus evalue
+    // deux fois.
+    float rampTMonde = natRampTMonde(h);
+    rampT = mix(rampT, rampTMonde, uRecollage);
+    rampT = mix(rampTMonde, rampT, dedansCrop);
     float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
     col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
   }
@@ -3885,6 +3924,14 @@ export class Globe {
       uRampCropOn: { value: 0 },
       uHeightContrast: { value: NATUREL_MONDE.heightContrast },
       uHeightPivot: { value: NATUREL_MONDE.heightPivot },
+      // ⚠️ **`uRecollage: 0` : SANS ALTITUDE, RIEN NE CHANGE** — Tâche R31,
+      // même discipline que `uCropOn: 0` (Tâche A), `uHabOn: 0` (Tâche C) et
+      // `uRampCropOn: 0` (Tâche P2). Le nuanceur écrit `mix(rampT, rampTMonde,
+      // uRecollage)`, et `mix(x, y, 0.0)` vaut `x·1 + y·0` : le chemin des
+      // bancs et du réglage manuel (`poserRampe({ echelle })`, sans altitude)
+      // rend donc l'image d'avant **au bit près**, et `crop-rampe.test.js` ⑧
+      // l'exige sur un balayage plutôt que de le promettre.
+      uRecollage: { value: 0 },
       uHazeAmt: { value: NATUREL_MONDE.hazeAmt },
       uHazeAlt: { value: NATUREL_MONDE.hazeAlt },
       uHazeDist: { value: NATUREL_MONDE.hazeDist },
@@ -5424,7 +5471,7 @@ export class Globe {
     if (Number.isFinite(altitudeM)) {
       ancrerMesure(this._echelleContinue, altitudeM, e)
       const v = majEchelle(this._echelleContinue, altitudeM)
-      this._poserUniformesRampe(v)
+      this._poserUniformesRampe(v, altitudeM)
       this._rampe = e
       return { refus: null, echelle: e, mesure, posee: v }
     }
@@ -5445,7 +5492,7 @@ export class Globe {
    * ligne d'origine de `poserMer`) : ce n'est pas un plancher neuf, c'est celui
    * du dépôt, déplacé ici pour qu'il n'y en ait qu'un.
    */
-  _poserUniformesRampe(e) {
+  _poserUniformesRampe(e, altitudeM = null) {
     const u = this.uniforms
     u.uLandBas.value = e.terreBas
     u.uLandMax.value = e.terreHaut
@@ -5467,6 +5514,17 @@ export class Globe {
     if (u.uMerRampeOn.value > 0.5 && Number.isFinite(e.fondBudget)) {
       u.uMerFondBudgetM.value = Math.max(e.fondBudget, 1)
     }
+    // ══════ LE RECOLLAGE — Tâche R31 ═════════════════════════════════════
+    //
+    // ⚠️ **ICI, ET NULLE PART AILLEURS** : c'est déjà l'écrivain unique des
+    // quatre nombres de rampe, et le poids de recollage est le CINQUIÈME —
+    // même famille, même cadence, même appelant. Un second écrivain aurait
+    // rejoué le défaut que ce site existe pour avoir supprimé.
+    //
+    // ⛔ **SANS ALTITUDE, ZÉRO — ET C'EST LA GARDE DE L'AFFICHE.**
+    // `poserRampe({ echelle })` (les bancs, le réglage manuel, les tests) ne
+    // passe pas d'altitude : le globe rend alors l'image d'avant AU BIT PRÈS.
+    u.uRecollage.value = Number.isFinite(altitudeM) ? poidsRecollage(altitudeM) : 0
   }
 
   /**
@@ -5486,7 +5544,7 @@ export class Globe {
     const partage = this._echelleContinue
     if (!partage || partage.ancres.size === 0) return null
     const v = majEchelle(partage, altitudeM)
-    this._poserUniformesRampe(v)
+    this._poserUniformesRampe(v, altitudeM)
     return v
   }
 
@@ -5518,6 +5576,11 @@ export class Globe {
     // reposerait à l'image suivante et `retirerRampe` ne retirerait rien — une
     // méthode qui ment sur ce qu'elle fait. Le lieu, lui, est déjà parti : ce
     // site n'est appelé que par `retirerCrop`.
+    // ⚠️ **ET LE RECOLLAGE RETOMBE AVEC ELLES — Tâche R31.** Sans cette
+    // ligne, `retirerRampe` rendrait les quatre ancres du monde en laissant
+    // un poids de mélange qui ne mélange plus rien : un uniforme vivant
+    // au-dessus d'un état mort, exactement le défaut C-3 de la Tâche C.
+    this.uniforms.uRecollage.value = 0
     oublierAncres(this._echelleContinue)
     this._rampe = null
   }

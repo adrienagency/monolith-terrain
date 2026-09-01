@@ -645,3 +645,126 @@ float natRampTMonde(float h) {
   return natRampT(hNorm, MONDE_PIVOT, MONDE_CONTRASTE);
 }
 `
+
+// ══════════ ⑦ LE RECOLLAGE DES DEUX ÉCHELLES — Tâche R31 ════════════════════
+//
+// > **Adrien, 2026-09-01 :** « Il doit y avoir un lien entre ce que l'on voit en
+// > crop et ce que l'on voit à grande échelle. Applique les couleurs choisies
+// > pour la grande échelle aussi. »
+//
+// ⛔ **SA PRÉMISSE EST FAUSSE ET LA MESURE LE DIT : les COULEURS suivent déjà le
+// gabarit de loin — les deux régimes lisent la MÊME table `uRampCrop`. Ce qui ne
+// suit pas, c'est l'ÉCHELLE D'ALTITUDE, c'est-à-dire l'INDICE avec lequel on lit
+// cette table.** Relevé le 2026-09-01 (`scripts/diag-r31-ecart.mjs`,
+// `.banc/R31/ecart-avant.json`), même point du sol, même table, deux indices :
+//
+// | lieu (crop vivant) | h = 0 m | h = 300 m | h = 800 m |
+// |---|---|---|---|
+// | La Réunion z13 | ΔE **18,0** | ΔE **25,4** | ΔE **38,5** |
+// | Bornéo z13 | ΔE **18,0** | ΔE **35,8** | ΔE **52,4** |
+// | Everest z13 | ΔE **18,0** | ΔE **25,4** | ΔE **38,5** |
+//
+// (CIE76 L*a*b* D65 ; le seuil de perception courant vaut 2,3.) **L'écart n'est
+// donc pas petit : il vaut huit à vingt-trois fois le seuil.** Il y a une tâche.
+//
+// ══════════ LA LOI, EN UNE PHRASE ══════════════════════════════════════════
+//
+// **L'indice de rampe du crop glisse vers celui du monde à mesure que la caméra
+// monte** — `mix(rampTCrop, rampTMonde, poidsRecollage(hauteurSurSol))` — de
+// sorte qu'en bas c'est l'affiche d'Adrien AU BIT PRÈS, et qu'en haut la même
+// terre porte la même couleur qu'après la mort du crop.
+//
+// ⚠️ **DEUX LOIS AFFINES, DONC UN MÉLANGE MONOTONE.** Avant écrêtage, les deux
+// indices sont affines en `h` ; leur mélange l'est aussi. Aucun repli, aucune
+// marche : la courbe reste croissante pour tout poids, et la seule chose qui
+// change est sa PENTE et son ORIGINE. C'est pour ça qu'on mélange l'INDICE et
+// non deux couleurs — une seule lecture de texture, et pas d'inversion possible.
+//
+// ⚠️ **ET C'EST LE MÉLANGE DES VALEURS ÉCRÊTÉES, PAS DES LOIS.** `natRampT`
+// écrête à [0 ; 1] ; on mélange APRÈS. C'est ce qui garantit deux choses que le
+// mélange des lois ne donnerait pas : le résultat reste dans [0 ; 1] sans second
+// écrêtage, et à poids nul il vaut `rampTCrop` AU BIT PRÈS (`mix(x, y, 0.0)` =
+// `x·1 + y·0`). L'aplat, lui, disparaît quand même : un plat mélangé à une
+// fonction strictement croissante est strictement croissant.
+
+/**
+ * Le cran BAS du recollage — au-dessous, le crop garde son échelle entière.
+ *
+ * ⚠️ **C'EST LA STATION DE L'AFFICHE, ET ELLE VIENT DU DÉPÔT** : `globe.js`
+ * chiffre la couverture du bloc « à la station 2 km » (2 048 m = 2¹¹). C'est la
+ * vue de composition, celle qu'Adrien règle ; elle ne doit pas bouger d'un bit.
+ *
+ * ⚠️ **LE CRAN, PAS LE MÈTRE** — `echelle-continue.js` mesure déjà l'altitude en
+ * `log2`, et une échelle de couleur qui glisserait linéairement en mètres
+ * passerait tout son intervalle dans les cent premiers mètres du recul.
+ */
+export const CRAN_RECOLLAGE_BAS = 11
+
+/**
+ * Le cran HAUT — au-dessus, le crop porte l'échelle du MONDE, exactement.
+ *
+ * ⚠️ **2¹⁵ = 32 768 m, ET CE N'EST PAS UN NOMBRE ROND CHOISI POUR SA BEAUTÉ** :
+ * le crop NAÎT à `SEUIL_NAISSANCE_M` = 32 274 m et MEURT à `SEUIL_MORT_M` =
+ * 40 343 m (`seuil-socle.js`, relevé). Le recollage est donc achevé **avant** que
+ * le bloc puisse disparaître : à sa mort, `retirerRampe` rend le régime mondial
+ * à une image qui le portait déjà. **Il n'y a pas de marche à la mort du crop.**
+ *
+ * ⛔ **ET LA BORNE SE VÉRIFIE, ELLE NE SE PROMET PAS** : le poids se mesure sur
+ * la hauteur AU-DESSUS DU SOL du crop, donc l'altitude où il sature vaut
+ * `32 768 + terreBas`. Elle reste sous `SEUIL_MORT_M` tant que le sol le plus
+ * BAS du crop est sous **7 575 m** — c'est-à-dire partout sauf sur un bloc
+ * entièrement au-dessus de 7 575 m, qui n'existe sur aucune terre émergée.
+ * `test/crop-rampe.test.js` ⑧ l'exécute contre `seuil-socle.js`.
+ *
+ * ⚠️ **`seuil-socle.js` N'EST PAS IMPORTÉ ICI, ET C'EST R1** : c'est le module
+ * qui décide du CADRAGE. `test/crop-rampe.test.js` ⑥b épingle la liste des
+ * importations de ce fichier. La dépendance est donc VÉRIFIÉE par le test, qui
+ * lit les deux modules, au lieu d'être créée dans le code.
+ */
+export const CRAN_RECOLLAGE_HAUT = 15
+
+/**
+ * ⛔ **CE QUE J'AI CRU PUIS RÉFUTÉ — ET LA MESURE QUI L'A TUÉ.**
+ *
+ * J'ai d'abord écrit `hauteurSurSolCrop(altitudeM, echelle)` = `altitudeM −
+ * terreBas`, en croyant qu'une loi sur l'altitude BRUTE donnerait à l'Everest un
+ * poids plus fort **parce que son sol est haut**. Les altitudes que
+ * `modes.altM` rendait le disaient : Pays-Bas 6 138 m, Bornéo 9 331 m, La
+ * Réunion 10 864 m, Everest 15 094 m.
+ *
+ * ⛔ **FAUX : L'ALTITUDE QUI ARRIVE ICI N'EST PAS `modes.altM`.** C'est
+ * `altitudeCadrageM()`, et elle est déjà une hauteur AU-DESSUS DE LA SURFACE DU
+ * BLOC (`altitudeSurfaceM({ camY, extentMeters, … })`) — la même que celle sur
+ * laquelle `seuil-socle.js` fait naître et mourir le crop. Relevé en retournant
+ * le poids posé : **9 310 m à La Réunion (sol 540 m) et 8 796 m à l'Everest
+ * (sol 4 928 m)** — les deux à neuf kilomètres, alors que leurs altitudes
+ * d'ellipsoïde diffèrent de 4,2 km. Retrancher `terreBas` était donc une
+ * SECONDE soustraction : elle affaiblissait le recollage de 0,54 à **0,14** sur
+ * le seul lieu haut, sans aucune raison visuelle.
+ *
+ * ➡️ **La fonction est retirée plutôt que corrigée** : `poidsRecollage` prend
+ * l'altitude de cadrage telle quelle, et le module ne lit plus `terreBas` pour
+ * décider quoi que ce soit. `test/crop-rampe.test.js` ⑧c tient le constat.
+ */
+
+/**
+ * Le poids du régime MONDIAL dans l'indice de rampe du crop, dans [0, 1].
+ *
+ * ⚠️ **L'ENTRÉE EST L'ALTITUDE DE CADRAGE**, celle que `veilleCrop` reçoit et sur
+ * laquelle `seuil-socle.js` décide de la vie du crop — donc déjà une hauteur
+ * au-dessus de la surface du bloc, indépendante de l'élévation du sol. Voir le
+ * bloc « cru puis réfuté » juste au-dessus.
+ *
+ * @param {number} altitudeCadrageM altitude de cadrage, en mètres
+ * @returns {number} 0 = l'échelle du crop, 1 = celle du monde
+ */
+export function poidsRecollage(altitudeCadrageM) {
+  const h = Number(altitudeCadrageM)
+  if (!(h > 0)) return 0
+  const bas = CRAN_RECOLLAGE_BAS
+  const haut = CRAN_RECOLLAGE_HAUT
+  const t = clamp01((Math.log2(h) - bas) / (haut - bas))
+  // ⚠️ **LA MÊME COURBE QUE `smoothstep` DU NUANCEUR**, écrite ici parce que le
+  // poids se calcule en JS et se pose en uniforme : le GPU n'évalue rien.
+  return t * t * (3 - 2 * t)
+}
