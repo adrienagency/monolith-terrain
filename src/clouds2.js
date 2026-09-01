@@ -48,8 +48,12 @@ const _v = new THREE.Vector3()
 // La MÊME valeur sert côté JS (boîte englobante) et côté GLSL (uElongAngle).
 const elongAngle = (params) => ((params?.windDir ?? 45) * Math.PI) / 180
 
+// ⛔ JAMAIS DE BACKTICK DANS UN COMMENTAIRE GLSL — le nuanceur vit dans un
+// template literal : un backtick le TERMINE, et l erreur qu on lit
+// (« Unexpected identifier ») ne pointe pas vers la cause. La page ne demarre
+// simplement plus. Ca a coute une execution de banc a la Tache R20.
 const VERT = /* glsl */ `
-  out vec3 vWorldPos;
+  out vec3 vLocalPos; // en unités de BLOC — voir monde/nuages-globe.js §2
   flat out vec3 vCenter;
   flat out vec3 vHalf;
   flat out vec4 vInfo;   // x = graine, y = densité (vie incluse), z = filandreux, w = allongement
@@ -72,9 +76,17 @@ const VERT = /* glsl */ `
     float c = cos(th), s = sin(th);
     float b = vHalf.x / sqrt(e * e * c * c + s * s);
     vAxes = vec3(e * b, b, th);
-    vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
-    vWorldPos = wp.xyz;
-    gl_Position = projectionMatrix * viewMatrix * wp;
+    // ⛔ LA MARCHE RESTE EN UNITÉS DE BLOC — Tâche R20.
+    // Le groupe porte désormais la similitude bloc → globe (k ≈ 0,0077 à
+    // La Réunion). Toutes les constantes du nuanceur sont en unités de bloc
+    // (world / 0.42, near * 3.0, smoothstep(1.5, 4.0, …), uMapMin /
+    // uMapSize) : les laisser lire un espace 130 fois plus petit les
+    // rendrait TOUTES fausses d'un coup, sans erreur ni message. On sort donc
+    // la position AVANT modelMatrix, et la caméra arrive divisée par k.
+    // ⚠️ Hors mode sphère modelMatrix est l'identité : neutre au bit près.
+    vec4 lp = instanceMatrix * vec4(position, 1.0);
+    vLocalPos = lp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * lp;
   }
 `
 
@@ -89,12 +101,19 @@ const FRAG = /* glsl */ `
   // le facteur de mise à l'échelle des instances (_writeInstances)
   #define BOX_PAD 1.15
 
-  in vec3 vWorldPos;
+  in vec3 vLocalPos;
   flat in vec3 vCenter;
   flat in vec3 vHalf;
   flat in vec4 vInfo;
   flat in vec3 vAxes; // demi-axe long, demi-axe court, angle de l'allongement
   out vec4 outColor;
+
+  // LA CAMÉRA, EN UNITÉS DE BLOC — Tâche R20. cameraPosition est en unités
+  // de MONDE ; sous la similitude du globe ce n'est plus l'espace où le ciel
+  // est décrit. monde/nuages-globe.js porte la conversion ET le SENS de sa
+  // division (multiplier au lieu de diviser met la caméra DANS le nuage).
+  // Hors mode sphère elle vaut exactement camera.position.
+  uniform vec3 uCamBloc;
 
   uniform sampler3D uVolume;
   uniform float uDensity;
@@ -310,7 +329,7 @@ const FRAG = /* glsl */ `
     float thick = texture(uVolume, vec3(fract(q * 0.16 + F.wOff * 1.9), 0.47)).g;
     dens *= mix(0.10, 1.5, smoothstep(0.12, 0.85, thick));
     // jamais de nuage colle a l'objectif
-    dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
+    dens *= smoothstep(1.5, 4.0, distance(wp, uCamBloc));
     return dens * uDensity * vInfo.y;
   }
 
@@ -392,8 +411,8 @@ const FRAG = /* glsl */ `
   void main() {
     vec3 bmin = vCenter - vHalf;
     vec3 bmax = vCenter + vHalf;
-    vec3 ro = cameraPosition;
-    vec3 rd = normalize(vWorldPos - cameraPosition);
+    vec3 ro = uCamBloc;
+    vec3 rd = normalize(vLocalPos - uCamBloc);
     vec2 span = boxSpan(ro, rd, bmin, bmax);
     span.x = max(span.x, 0.0);
     if (span.y <= span.x) discard;
@@ -408,7 +427,7 @@ const FRAG = /* glsl */ `
     // l'empreinte de CE nuage, une seule fois pour tout le rayon ; le
     // detail fin ne se paie que de pres (il ne se voit pas de loin)
     Foot F = footprintOf(vInfo.x, vInfo.z);
-    float detailOn = distance(cameraPosition, vCenter) < max(vHalf.x, vHalf.y) * 7.0 ? 1.0 : 0.0;
+    float detailOn = distance(uCamBloc, vCenter) < max(vHalf.x, vHalf.y) * 7.0 ? 1.0 : 0.0;
 
     vec3 toSun = -normalize(uSunDir);
     float cosA = dot(rd, -toSun);
@@ -422,7 +441,7 @@ const FRAG = /* glsl */ `
     // verticale) — la page se fige. On raccourcit la marche quand la caméra
     // est dans ou contre le nuage : à cette distance le détail ne se voit pas
     // de toute façon, la densité étant déjà éteinte autour de l'objectif.
-    float camDist = distance(cameraPosition, vCenter);
+    float camDist = distance(uCamBloc, vCenter);
     // PAS ADAPTATIF À LA TAILLE DE LA BOÎTE. Une grappe, c'est 3 à 7 boîtes qui
     // se recouvrent : marcher chacune en 26 pas quelle que soit sa taille
     // multipliait le remplissage jusqu'à écrouler la fréquence d'images (2 fps
@@ -591,6 +610,8 @@ export class Clouds2 {
       side: THREE.BackSide,
       uniforms: {
         uVolume: { value: vol.tex },
+        // Tâche R20 : posée à chaque image par `update`, en unités de BLOC.
+        uCamBloc: { value: new THREE.Vector3() },
         uDensity: { value: params?.cloudOpacity ?? 1 },
         uScale: { value: params?.cloudScale ?? 3 },
         uContrast: { value: params?.cloudContrast ?? 1 },
@@ -653,12 +674,17 @@ export class Clouds2 {
   // Écrit les matrices d'instance, TRIÉES de l'arrière vers l'avant : un
   // InstancedMesh ne trie pas ses instances, et deux nuages transparents qui se
   // recouvrent dans le mauvais ordre laissent une couture visible.
-  _writeInstances(camera = null) {
+  // ⚠️ `camPos` EST EN UNITÉS DE BLOC, comme les nuages — Tâche R20. Le tri
+  // arrière→avant compare des distances : mélanger deux espaces le rendrait
+  // muet (un InstancedMesh ne trie pas, et deux nuages transparents dans le
+  // mauvais ordre laissent une couture). Hors mode sphère c'est exactement
+  // `camera.position`.
+  _writeInstances(camPos = null) {
     const mesh = this.mesh
     if (!mesh || !this.sky) return
     const list = this.sky.clouds
-    if (camera) {
-      const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z
+    if (camPos) {
+      const cx = camPos.x, cy = camPos.y, cz = camPos.z
       list.sort((a, b) =>
         ((b.x - cx) ** 2 + (b.y - cy) ** 2 + (b.z - cz) ** 2) -
         ((a.x - cx) ** 2 + (a.y - cy) ** 2 + (a.z - cz) ** 2))
@@ -757,9 +783,16 @@ export class Clouds2 {
     this.build(this._params)
   }
 
-  update(dt, params, camera) {
+  // ⚡ `camBloc` — LA CAMÉRA EN UNITÉS DE BLOC, Tâche R20. Sous le mode sphère
+  // le groupe porte la similitude bloc → globe : `camera.position` n'est plus
+  // dans l'espace où le ciel est décrit, et le nuanceur lance son rayon depuis
+  // l'œil. `main.js` la calcule par `positionCameraEnBloc`. **Omise, on sert
+  // `camera.position` — c'est-à-dire le comportement du dépôt, au bit près.**
+  update(dt, params, camera, camBloc = null) {
     if (!this.mesh || !this.group.visible || !this.sky) return
     const u = this.mesh.material.uniforms
+    const cam = camBloc ?? camera?.position ?? null
+    if (cam) u.uCamBloc.value.set(cam.x, cam.y, cam.z)
     // vent : direction en degrés + force, réglables dans Éléments (phase 1) ;
     // la même donnée pilotera l'orographie en phase 2
     const dir = ((params?.windDir ?? 45) * Math.PI) / 180
@@ -774,7 +807,7 @@ export class Clouds2 {
     const want = this._targetCount(params)
     if (this.sky.target !== want) resizeSky(this.sky, want)
 
-    this._writeInstances(camera)
+    this._writeInstances(cam)
     u.uTime.value = this.sky.t
     // le niveau de l'eau bouge avec la carte (et vaut -9999 sans mer) : on le
     // relit du terrain a chaque image plutot que de le figer au build
