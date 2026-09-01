@@ -23,7 +23,7 @@
 // l'utilisateur les compte). Au-delà les grappes se recouvrent et
 // l'individualité — tout l'intérêt de cette refonte — se perd.
 export const CLOUD_COUNT_MIN = 2
-export const CLOUD_COUNT_MAX = 5
+export const CLOUD_COUNT_MAX = 6 // 5 avant le 2026-09-01 — voir COUNT_BY_TIER
 
 // Taille d'une grappe : un cœur + 2 à 6 compagnons (Adrien : « chaque nuage
 // naît avec au moins deux nuages, max six, dans le même corps »).
@@ -40,7 +40,60 @@ export const CLOUD_HARD_MAX = 34
 
 // Nombre de GRAPPES selon la puissance de la machine (palier de perf.js :
 // 0 = desktop, 1 = tablette, 2/3 = délestage, 3 = téléphone).
-const COUNT_BY_TIER = [4, 3, 2, 2]
+//
+// ══════ LE PALIER 0 PASSE DE 4 À 7 — arbitrage du 2026-09-01 ═══════════════
+//
+// **Le ciel par défaut doit se voir.** Quinze curseurs de nuages existent dans
+// le studio ; un système allumé, correctement peuplé et invisible à l'écran,
+// c'est un réglage qui ne fait rien sous une autre forme.
+//
+// ⚠️ **MESURÉ EN COMPTANT LES PIXELS DU TAMPON ENTIER** (1280 × 800 ; pas de
+// vignette — un condensé annule les motifs fins), **sur CINQ dispositions**,
+// parce qu'à ce nombre de grappes l'écart entre deux tirages du MÊME réglage
+// dépasse l'écart entre deux réglages : la même configuration a rendu 497 et
+// 11 628 pixels selon la graine. Médianes, .banc/R20/defaut/diag-graines.json :
+//
+//   | grappes | entités | pixels touchés (médiane) | part de l'écran |
+//   |---|---|---|---|
+//   | 3 *(l'ancien défaut)* | 11–21 | 5 594 | 0,55 % |
+//   | 4 | 11–25 | 7 025 | 0,69 % |
+//   | **6** | 19–34 | **12 891** | **1,26 %** |
+//   | 8 | 30–34 | 14 710 | 1,44 % |
+//
+// ⚡ **6 EST LE GENOU** : +83 % de ciel visible sur 4, quand 8 n'ajoute que
+// +14 % de plus et **épingle CLOUD_HARD_MAX** (34 entités sur 4 tirages sur 5),
+// c'est-à-dire le plafond que ce fichier décrit dix lignes plus haut comme
+// celui où les recouvrements écroulent la fréquence d'images.
+//
+// ⛔ **ET ÇA SE PAIE, EN FRAGMENTS.** Minuterie du pilote
+// (EXT_disjoint_timer_query_webgl2), mesure APPARIÉE ET ENTRELACÉE, témoin de
+// sensibilité aux fragments validé aux deux bouts (×16 de fragments ⇒ ×8,2 puis
+// ×5,2 de temps) — .banc/R20/defaut/diag-cout2.json :
+//
+//   | grappes | temps GPU de la scène, avec ÷ sans le ciel |
+//   |---|---|
+//   | 3 | ×1,57 |
+//   | 4 | ×1,71 |
+//   | **6** | **×2,04** |
+//   | 8 | ×2,23 |
+//
+// ➡️ **Le ciel DOUBLE le temps GPU de la scène** au lieu de l'augmenter de
+// moitié. Sur la carte du relevé (RTX 3080, 1,02 Mpx) cela reste 0,61 ms par
+// image — mais c'est un coût de FRAGMENT, donc il suit la surface de rendu, et
+// il ne se transpose pas tel quel sur un petit circuit intégré.
+//
+// ⛔ **C'EST POURQUOI SEUL LE PALIER 0 MONTE.** Les trois autres ne bougent pas
+// d'une grappe : une machine qui a déjà besoin d'être délestée ne paie pas ce
+// choix. ⚠️ Et ce n'est pas théorique — la bannière « PERFORMANCE — ESSENTIAL
+// MODE » s'affiche pendant le chargement avant que le palier ne remonte :
+// quelqu'un qui reste à T3 garde exactement le ciel d'avant.
+//
+// ⚠️ **7 ET NON 6, PARCE QUE LA DENSITÉ MULTIPLIE.** cloudCountForTier rend
+// round(base × densité) avec densité = 0,65 + opacité × 0,18 : à l'opacité par
+// défaut (1,4) le facteur vaut 0,902, donc une base de 6 rendrait 5 et non 6.
+// Base 7 × 0,902 = 6,31 → **6**, plafonné par CLOUD_COUNT_MAX. Les trois autres
+// paliers rendent le même nombre qu'avant : 3 × 0,902 → 3, et 2 × 0,902 → 2.
+const COUNT_BY_TIER = [7, 3, 2, 2]
 export function cloudCountForTier(tier = 0, density = 1) {
   const base = COUNT_BY_TIER[Math.max(0, Math.min(3, tier | 0))]
   return Math.round(clamp(base * density, CLOUD_COUNT_MIN, CLOUD_COUNT_MAX))

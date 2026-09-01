@@ -265,3 +265,182 @@ test('⑤ hors mode sphère, la caméra de bloc est servie TELLE QUELLE', () => 
   assert.ok(/_writeInstances\(cam\)/.test(corps.slice(0, 4000)),
     'le tri des instances lit encore la caméra de MONDE : deux espaces mélangés')
 })
+
+// ═══════════════════════════ ⑥ LE CIEL PAR DÉFAUT — arbitrage du 2026-09-01
+//
+// **Le ciel par défaut doit se voir.** Un système allumé, correctement peuplé
+// et invisible à l'écran, c'est un réglage qui ne fait rien sous une autre
+// forme — et c'est précisément ce dont Adrien vient de faire relever les 127
+// options une par une.
+
+import { cloudCountForTier, CLOUD_COUNT_MAX, CLOUD_HARD_MAX } from '../src/clouds-sim.js'
+
+const DEPART = JSON.parse(
+  readFileSync(new URL('../public/templates/defaults/shibustart.json', import.meta.url), 'utf8')
+)
+
+test('⑥ ⛔ LE DÉFAUT N’EST PAS DANS `main.js` — c’est `shibustart.json`', () => {
+  // ⛔ Le littéral `params` de `main.js` pose `cloudsEnabled: false`,
+  // `cloudAltitude: 1`, `cloudOpacity: 2.25` — et l’application démarre avec
+  // `true`, `13,5`, `0,6`. **Mesuré au navigateur, profil vierge, aucun
+  // `localStorage`.** Le gabarit d’ouverture écrase le littéral : régler le
+  // littéral n’aurait RIEN changé à l’écran. Ce test garde le chemin réel.
+  assert.ok(/import SHIBU_START from '.*shibustart\.json'/.test(MAIN),
+    'main.js n’importe plus le gabarit d’ouverture : le défaut a changé de source')
+  assert.equal(DEPART.look.cloudsEnabled, true, 'le ciel d’ouverture est éteint')
+})
+
+test('⑥ le ciel d’ouverture porte les trois valeurs de l’arbitrage', () => {
+  // ⚠️ **CE SONT LES DEUX LEVIERS QUE LA MESURE ACCUSE**, et rien d’autre :
+  //   · l’opacité — le ciel était transparent (0,6) ;
+  //   · l’étalement — à 0,97 la colonne peuplée descend jusqu’au sol, donc la
+  //     moitié du ciel était ENTERRÉE dans le relief (le sommet de La Réunion
+  //     monte à 8,87 unités de bloc, le plafond est à 13,5).
+  //   · les trouées — 0,80 est le bout « masses pleines » de la tirette.
+  assert.equal(DEPART.look.cloudOpacity, 1.4)
+  assert.equal(DEPART.look.cloudAltSpread, 0.45)
+  assert.equal(DEPART.look.cloudCoverage, 0.8)
+  // ⛔ LA MUTATION QUI REMET L’ANCIEN CIEL DOIT TUER
+  assert.notEqual(DEPART.look.cloudOpacity, 0.6, 'l’opacité d’avant est revenue')
+  assert.notEqual(DEPART.look.cloudAltSpread, 0.97, 'l’étalement d’avant est revenu')
+})
+
+test('⑥ le ciel CHEVAUCHE les sommets — ni enterré, ni détaché', () => {
+  // La base de la colonne peuplée vaut `plafond × (1 − étalement)`
+  // (`clouds2.js`, `build`). Le relief de La Réunion monte à **8,875** unités
+  // de bloc (relevé du 2026-08-31 : `uTerrainMin` −10,447 + `uTerrainRange`
+  // 19,322), et le niveau de la mer y est à **−1,80**.
+  //
+  // ⛔ **UNE PREMIÈRE VERSION DE CE TEST EXIGEAIT QUE TOUT LE CIEL PASSE
+  // AU-DESSUS DU SOMMET. Elle était rouge, et elle avait tort.** Le réglage
+  // retenu met la base à 7,425 — SOUS le sommet, délibérément : le dépôt écrit
+  // en toutes lettres « clouds — thick and low, clinging to the summits », et
+  // un pont de nuages entièrement au-dessus du point culminant se lit comme un
+  // décor décollé. ⚡ Ce que la mesure reprochait à l'ancien réglage n'était pas
+  // le contact avec le relief, c'était que la base tombait à **0,405** — sous
+  // le niveau de la mer, donc la moitié du ciel enterrée.
+  const base = (spr) => DEPART.look.cloudAltitude * (1 - spr)
+  const SOMMET = 8.875
+  const MER = -1.8
+  assert.ok(base(0.97) < MER + 2.5,
+    'le témoin est faux : l’ancien étalement devait poser la base au ras de la mer')
+  const b = base(DEPART.look.cloudAltSpread)
+  assert.ok(b > MER + 5, `la base du ciel (${b}) est encore au ras de l’eau`)
+  assert.ok(b < SOMMET, `la base du ciel (${b}) passe au-dessus des sommets : ciel décollé`)
+  assert.ok(DEPART.look.cloudAltitude > SOMMET,
+    'le plafond est passé sous les sommets : le ciel serait entièrement dans le relief')
+  // et la colonne peuplée reste une VRAIE colonne, pas un plan
+  assert.ok(DEPART.look.cloudAltitude - b > 4, 'la couche est devenue une galette')
+})
+
+test('⑥ SEUL le palier 0 monte — les trois autres ne paient pas ce choix', () => {
+  // ⚠️ Le coût est un coût de FRAGMENT : le ciel passe de ×1,57 à ×2,04 du
+  // temps GPU de la scène (minuterie du pilote, mesure appariée). Une machine
+  // déjà délestée ne doit pas le payer.
+  const d = 0.65 + DEPART.look.cloudOpacity * 0.18 // le facteur de densité
+  assert.equal(cloudCountForTier(0, d), 6, 'le palier 0 ne rend plus 6 grappes')
+  assert.equal(cloudCountForTier(1, d), 3, 'le palier 1 a bougé : il ne devait pas')
+  assert.equal(cloudCountForTier(2, d), 2, 'le palier 2 a bougé : il ne devait pas')
+  assert.equal(cloudCountForTier(3, d), 2, 'le palier 3 a bougé : il ne devait pas')
+})
+
+test('⑥ le peuplement reste MONOTONE et sous le plafond dur', () => {
+  const d = 0.65 + DEPART.look.cloudOpacity * 0.18
+  const l = [0, 1, 2, 3].map((t) => cloudCountForTier(t, d))
+  for (let i = 1; i < l.length; i++) assert.ok(l[i] <= l[i - 1], `palier ${i} dépasse ${i - 1}`)
+  assert.ok(l[0] <= CLOUD_COUNT_MAX, 'le palier 0 dépasse son propre plafond')
+  // ⛔ 6 grappes pleines = 42 entités > CLOUD_HARD_MAX. Le plafond dur DOIT
+  // rester en travers : c’est lui qui empêche les recouvrements de 48 boîtes
+  // que ce fichier chiffre à 3 fps. Mesuré : 6 grappes rendent 19 à 34 entités.
+  assert.ok(l[0] * 7 > CLOUD_HARD_MAX,
+    'le témoin est faux : à ce compte, le plafond dur ne mord plus jamais')
+  assert.equal(CLOUD_HARD_MAX, 34, 'le plafond dur a bougé sans mesure')
+})
+
+test('⑥ la tirette de densité MODULE encore le peuplement au palier 0', () => {
+  // ⚠️ Un palier 0 qui rendrait 6 quoi qu’il arrive ferait un DIX-SEPTIÈME
+  // curseur mort. Aux deux bouts de la tirette, le compte doit différer.
+  const bas = cloudCountForTier(0, 0.65 + 0.05 * 0.18)
+  const haut = cloudCountForTier(0, 0.65 + 2.5 * 0.18)
+  assert.ok(bas < haut, `la densité ne module plus rien au palier 0 (${bas} = ${haut})`)
+})
+
+// ═══════════════ ⑦ LA COLONNE AU-DESSUS DE LA MER — la classe « unités », 9ᵉ
+//
+// ⛔ **UNE ALTITUDE EN UNITÉS DE BLOC N'EST PAS LA MÊME ALTITUDE PARTOUT.** Le
+// bloc normalise sa verticale sur l'amplitude LOCALE du relief, donc la surface
+// de l'eau ne tombe pas au même endroit selon le lieu. Relevé au navigateur,
+// même réglage, trois lieux (`.banc/R20/preuve/`, uniforme `uWaterY`).
+
+const CLOUDS2 = readFileSync(new URL('../src/clouds2.js', import.meta.url), 'utf8')
+
+// niveau de la mer, en unités de BLOC, mesuré le 2026-09-01
+const MER = { reunion: -1.8007, alpes: -6.9056, pacifique: 13.0489 }
+
+// la loi telle que `clouds2.build` l'écrit
+const colonne = (ceil, spread, eau) => {
+  const baseVoulue = ceil * (1 - spread)
+  const epaisseur = Math.max(ceil - baseVoulue, 1e-3)
+  const baseY = Number.isFinite(eau) ? Math.max(baseVoulue, eau + 0.5) : baseVoulue
+  return { baseY, topY: baseY + epaisseur, epaisseur }
+}
+
+test('⑦ ⛔ AU LARGE, LA COLONNE DEMANDÉE EST SOUS L’EAU', () => {
+  // C'est le défaut : au Pacifique le fond est de la bathymétrie pure
+  // (amplitude 3,9 unités contre 19,3 à La Réunion) et le zéro marin remonte à
+  // +13,05 — au-dessus du plafond de nuages, qui est à 13,5.
+  const ceil = DEPART.look.cloudAltitude
+  const spread = DEPART.look.cloudAltSpread
+  assert.ok(ceil * (1 - spread) < MER.pacifique,
+    'le témoin est faux : la colonne demandée devait plonger sous la mer au large')
+  assert.ok(ceil * (1 - spread) > MER.reunion,
+    'le témoin est faux : à La Réunion la colonne était déjà au-dessus de l’eau')
+})
+
+test('⑦ le plancher marin est NEUTRE là où la mer est déjà dessous', () => {
+  // ⚡ C'est ce qui rend le geste sûr : partout où il y a du relief émergé, la
+  // colonne ne bouge pas d'un flottant. Mesuré à l'écran : La Réunion 12 881
+  // pixels avant le plancher, 12 881 après ; les Alpes 12 871 puis 12 860.
+  const ceil = DEPART.look.cloudAltitude
+  const spread = DEPART.look.cloudAltSpread
+  const nu = colonne(ceil, spread, undefined)
+  for (const lieu of ['reunion', 'alpes']) {
+    const c = colonne(ceil, spread, MER[lieu])
+    assert.equal(c.baseY, nu.baseY, `${lieu} : la base a bougé, le geste n'est plus neutre`)
+    assert.equal(c.topY, nu.topY, `${lieu} : le plafond a bougé, le geste n'est plus neutre`)
+  }
+})
+
+test('⑦ au large, la colonne remonte EN BLOC et garde son épaisseur', () => {
+  const ceil = DEPART.look.cloudAltitude
+  const spread = DEPART.look.cloudAltSpread
+  const nu = colonne(ceil, spread, undefined)
+  const c = colonne(ceil, spread, MER.pacifique)
+  assert.ok(c.baseY > MER.pacifique, 'la base est encore sous la mer')
+  // ⚠️ **L'ÉPAISSEUR EST LA GRANDEUR QUI DOIT SURVIVRE.** Relever la base sans
+  // relever le plafond écraserait la colonne en galette — et une grappe
+  // entièrement plate se lit comme une flaque.
+  assert.ok(Math.abs(c.epaisseur - nu.epaisseur) < 1e-9,
+    `l'épaisseur a changé : ${c.epaisseur} au lieu de ${nu.epaisseur}`)
+  assert.ok(c.epaisseur > 4, 'la couche est devenue une galette')
+})
+
+test('⑦ le plancher lit le niveau de la mer du TERRAIN, pas une constante', () => {
+  // ⛔ Une constante marcherait à La Réunion et serait fausse au large : c'est
+  // exactement le défaut qu'on répare. Le niveau vient de `uSeaY`, relu à
+  // chaque construction.
+  assert.ok(CLOUDS2.includes('const eau = this.terrain?.mapUniforms?.uSeaY?.value'),
+    'le niveau de la mer n’est plus lu sur le terrain')
+  assert.ok(CLOUDS2.includes('Math.max(baseVoulue, eau + 0.5)'),
+    'le plancher marin a disparu de build()')
+  assert.ok(CLOUDS2.includes('const topY = baseY + epaisseur'),
+    'le plafond ne suit plus la base : la colonne peut s’écraser en galette')
+})
+
+test('⑦ sans terrain, la loi rend la colonne d’avant — pas NaN', () => {
+  const nu = colonne(13.5, 0.45, undefined)
+  assert.equal(nu.baseY, 13.5 * 0.55)
+  assert.equal(nu.topY, 13.5)
+  const nul = colonne(13.5, 0.45, NaN)
+  assert.equal(nul.baseY, 13.5 * 0.55, 'un niveau de mer non fini doit être ignoré')
+})

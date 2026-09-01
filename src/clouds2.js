@@ -564,12 +564,49 @@ export class Clouds2 {
     // dit quelle part de la colonne est peuplée (1 = jusqu'au sol).
     const ceilY = params?.cloudAltitude ?? 4.5
     const spread = Math.max(0, Math.min(1, params?.cloudAltSpread ?? 0.85))
+    //
+    // ══════ LA COLONNE EST RELEVÉE AU-DESSUS DE LA MER — 2026-09-01 ═════════
+    //
+    // ⛔ **UNE ALTITUDE EN UNITÉS DE BLOC N'EST PAS LA MÊME ALTITUDE PARTOUT.**
+    // Le bloc normalise sa verticale sur l'amplitude LOCALE du relief : la
+    // surface de l'eau ne tombe donc pas au même endroit selon le lieu.
+    // Mesuré au navigateur, même réglage, trois lieux
+    // (`.banc/R20/preuve/`, uniforme `uWaterY`) :
+    //
+    //   | lieu | mer | sommet | colonne demandée |
+    //   |---|---|---|---|
+    //   | La Réunion | **−1,80** | 8,88 | 7,43 → 13,50 |
+    //   | Alpes (Interlaken) | **−6,91** | 7,61 | 7,43 → 13,50 |
+    //   | **Pacifique (au large)** | **+13,05** | 3,10 | 7,43 → 13,50 |
+    //
+    // ⛔ **AU LARGE, TOUTE LA COLONNE EST SOUS L'EAU.** Le fond y est de la
+    // bathymétrie pure (amplitude 3,9 unités contre 19,3 à La Réunion), et le
+    // zéro marin remonte à 13,05 — au-dessus du plafond de nuages. La
+    // simulation ne descend jamais un nuage sous cette surface et le nuanceur
+    // éteint la marche dessous : **le ciel du plein océan rendait 0 pixel sur
+    // 1 024 000, à la médiane de cinq dispositions, AVANT comme APRÈS.** C'est
+    // la classe de défaut « unités » de ce chantier, dans un neuvième endroit.
+    //
+    // ⚡ **LE GESTE EST UN PLANCHER, PAS UNE NOUVELLE LOI.** Là où la mer est
+    // déjà sous la colonne — c'est-à-dire partout où il y a du relief émergé —
+    // `Math.max` rend la valeur d'avant **au bit près** : La Réunion et les
+    // Alpes ne bougent pas d'un flottant. Là où elle est au-dessus, la colonne
+    // remonte EN BLOC, en gardant son épaisseur : un ciel au large est un ciel
+    // au-dessus de l'eau, pas un ciel noyé.
+    const eau = this.terrain?.mapUniforms?.uSeaY?.value
+    const baseVoulue = ceilY * (1 - spread)
+    const epaisseur = Math.max(ceilY - baseVoulue, 1e-3)
+    // ⚠️ LA MARGE N'EST PAS COSMÉTIQUE : posée EXACTEMENT sur `uWaterY`, la
+    // base est le cas limite que la simulation et le nuanceur traitent tous
+    // deux comme « sous l'eau ». Un demi-unité de bloc suffit à l'en sortir.
+    const baseY = Number.isFinite(eau) ? Math.max(baseVoulue, eau + 0.5) : baseVoulue
+    const topY = baseY + epaisseur
     const sky = createSky({
       count: this._targetCount(params),
       seed: (params?.seaSeed ?? 1) | 0 || 1,
       half: half * 0.92,
-      baseY: ceilY * (1 - spread),
-      topY: ceilY,
+      baseY,
+      topY,
       sizeMin: 2.2,
       sizeMax: 6.0,
       // bande d'apparition/disparition HORS carte : les grappes de passage

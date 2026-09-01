@@ -298,3 +298,191 @@ les 10 sur 16 du nuanceur des tuiles sont intactes.
    nuanceur du bloc PLAT. Sous la sphère le crop ne la lit pas : **les nuages ne
    projettent pas d'ombre sur le crop.** C'est mesuré (c'est une partie de
    l'écart du mode plat), et c'est hors périmètre de R20.
+
+---
+
+# R20 bis — le ciel par défaut doit se voir (arbitrage du 2026-09-01)
+
+Le coordinateur a tranché ma réserve n° 2. Ce qui suit s'ajoute au rapport
+ci-dessus ; rien n'y est retiré.
+
+## ⛔ Le défaut n'était pas là où on le cherche
+
+**Le littéral `params` de `main.js` n'est pas le défaut.** Il pose
+`cloudsEnabled: false`, `cloudAltitude: 1`, `cloudOpacity: 2.25` — et
+l'application démarre avec `true`, `13,5`, `0,6`. **Mesuré au navigateur, profil
+vierge, `localStorage` vide** (une seule clé, `shibumap-workmode`).
+
+La vraie source est **`public/templates/defaults/shibustart.json`**, le gabarit
+d'ouverture (`main.js` : `import SHIBU_START from '…/shibustart.json'`). Il a
+fallu comparer les dix-sept gabarits par défaut pour l'identifier : c'est le seul
+dont les quatorze valeurs de nuages coïncident exactement avec ce que la page
+charge. **Régler le littéral n'aurait rien changé à l'écran**, et un test garde
+désormais ce chemin.
+
+## ① Le nouveau défaut, prouvé à l'écran
+
+**Instrument** : `scripts/instrument-r20-pleine.js`. Il lit le **tampon de dessin
+entier** (1 280 × 800 = 1 024 000 pixels), compare pixel à pixel et **compte**.
+⛔ Pas de condensé : une bouffée de 900 pixels pèse 0,0009 en moyenne et
+disparaît dans l'arrondi, alors qu'elle se voit. La taille du tampon est
+imprimée à chaque relevé. **Plancher de bruit vérifié à 0 pixel exactement.**
+
+⚠️ **Médiane de CINQ dispositions par lieu**, et c'est indispensable : à 3–6
+grappes, deux tirages du **même** réglage s'écartent plus que deux réglages — la
+même configuration a rendu **491** et **11 646** pixels selon la graine. Une pose
+unique ne prouve rien.
+
+| lieu | position vérifiée | AVANT | APRÈS | gain |
+|---|---|---|---|---|
+| **La Réunion** — île volcanique, le lieu d'ouverture | −21,26 / 55,74 | 5 576 px — **0,5445 %** | 12 881 px — **1,2579 %** | **×2,3** |
+| **Alpes** — massif continental (Interlaken) | 46,686 / 7,863 | 4 937 px — **0,4821 %** | 12 860 px — **1,2559 %** | **×2,6** |
+| **Pacifique** — plein océan, au large des Marquises | −8,50 / −140,0 | 1 041 px — **0,1017 %** | 16 826 px — **1,6432 %** | **×16** |
+
+Captures : `.banc/R20/preuve/`. AVANT porte **aussi** l'ancien budget de grappes
+(3), sans quoi ce serait un avant qui n'a jamais existé.
+
+## ⚡ Le Pacifique a révélé la classe « unités » une NEUVIÈME fois
+
+**Une altitude en unités de bloc n'est pas la même altitude partout.** Le bloc
+normalise sa verticale sur l'amplitude **locale** du relief. Relevé de `uSeaY`,
+même réglage, trois lieux :
+
+| lieu | niveau de la mer | sommet | colonne demandée |
+|---|---|---|---|
+| La Réunion | **−1,80** | 8,88 | 7,43 → 13,50 |
+| Alpes | **−6,91** | 7,61 | 7,43 → 13,50 |
+| **Pacifique** | **+13,05** | 3,10 | 7,43 → 13,50 |
+
+⛔ **Au large, toute la colonne est sous l'eau** — le fond y est de la
+bathymétrie pure (amplitude 3,9 unités contre 19,3 à La Réunion) et le zéro marin
+remonte au-dessus du plafond de nuages. Le ciel du plein océan rendait **0 pixel
+sur 1 024 000, à la médiane, AVANT COMME APRÈS**.
+
+Le correctif est un **plancher**, pas une nouvelle loi : `Math.max(base,
+mer + 0,5)`. Là où la mer est déjà sous la colonne il rend la valeur d'avant **au
+bit près** — La Réunion et les Alpes ne bougent pas d'un flottant, vérifié à
+l'écran. Là où elle est au-dessus, la colonne remonte **en bloc**, en gardant son
+épaisseur : relever la base sans le plafond écraserait le ciel en galette.
+
+## ② Le coût du nouveau défaut
+
+Même minuterie de pilote qu'à la première manche, **mesure appariée et
+entrelacée** (AVEC/SANS alternés huit fois, médiane des différences appariées :
+toute dérive plus lente qu'un couple se soustrait d'elle-même). Témoin de
+sensibilité aux fragments validé **aux deux bouts** : ×16 de fragments ⇒ **×8,2**
+puis **×5,2** de temps.
+
+| grappes | entités | temps GPU de la scène, avec ÷ sans le ciel |
+|---|---|---|
+| 3 *(l'ancien défaut)* | 13 | **×1,57** |
+| 4 | 16 | ×1,71 |
+| **6 — retenu** | **25** | **×2,04** |
+| 8 | 34 | ×2,23 |
+
+➡️ **Le ciel double le temps GPU de la scène** au lieu de l'augmenter de moitié :
+**+0,28 ms par image** sur RTX 3080 à 1,02 Mpx. Une seconde passe indépendante
+confirme : ×1,65 et ×2,03.
+
+⚡ **6 est le genou** : +83 % de ciel visible sur 4, quand 8 n'ajoute que +14 % de
+plus et **épingle `CLOUD_HARD_MAX`** (34 entités sur 4 tirages sur 5) —
+c'est-à-dire le plafond que `clouds-sim.js` décrit lui-même comme celui où les
+recouvrements écroulent la fréquence d'images.
+
+⚠️ **Le compromis, s'il en faut un** : redescendre à 4 grappes rend ×1,71 au lieu
+de ×2,04 et coûte 45 % du ciel gagné. Je ne le recommande pas au palier 0 — il y
+a de la marge —, mais c'est l'unique cran disponible sans revenir sur
+l'arbitrage.
+
+## ③ Le palier machine ne me contredit pas
+
+`nuages: 0` en pleine qualité est bien un **indice**, pas un budget nul —
+`palier-machine.js:122` le dit et je l'ai vérifié : l'indice monte quand la
+qualité baisse.
+
+**Mesuré aux quatre paliers** (en pilotant `aq.setTier`, seul chemin qui tienne —
+voir le piège ② ci-dessous) :
+
+| palier | grappes | entités | changement |
+|---|---|---|---|
+| **0 — pleine qualité** | **6** | 27 | **4 → 6** |
+| 1 — équilibré | 3 | 9 | inchangé |
+| 2 — délestage | 2 | 6 | inchangé |
+| 3 — plancher | 2 | 6 | inchangé |
+
+⚡ **Seul le palier 0 monte.** La bannière « PERFORMANCE — ESSENTIAL MODE »
+s'affiche pendant le chargement avant que le palier ne remonte : **qui reste à T3
+garde exactement le ciel d'avant**, à la grappe près. Le coût mesuré est un coût
+de **fragment** — il suit la surface de rendu, et c'est précisément pourquoi il
+ne descend pas d'un cran vers les machines qu'on délestait déjà.
+
+⚠️ **La tirette de densité module encore** au palier 0 (5 grappes au minimum,
+6 au maximum) : un palier qui rendrait 6 quoi qu'il arrive aurait fabriqué un
+seizième curseur mort. Un test le tient.
+
+## ④ `cloudDriftVar` reste mort
+
+Rien de ce tour ne le rend mesurable : il porte la variance des vitesses, et ni
+la moyenne (×0,99) ni la dispersion (0,4972 → 0,4941) ne bougeaient. Il reste
+déclaré dans `src/ui/effects-panel.js` avec sa mesure. **Non rouvert.**
+
+## Trois pièges d'instrument — tous miens, tous mesurés
+
+① ⛔ **`loadRealTerrain({ centreSur })` ne déplace pas la carte.** Il recentre la
+découpe autour de `params.demLat/demLon`, qu'il ne touche pas. Trois lieux
+demandés, **trois fois le même relief, comptes identiques au pixel près**. Il
+faut poser `demLat`, `demLon`, `demZoom` avant — ce que fait `modes.loadSurface`,
+qui n'est pas exposée. **C'est le cousin exact des trois captures d'une autre
+tâche prises au-dessus de l'Ukraine en croyant viser la Suisse**, et j'ai failli
+publier trois lieux qui n'en étaient qu'un.
+
+② ⛔ **La boucle de rendu réimpose `clouds.setTier(aq.tier)` à chaque image.**
+Écrire `clouds._tier` depuis une sonde ne tient pas une image : les quatre
+paliers rendaient 6 grappes et un `_tier` relu à 0. Troisième membre de la même
+famille, après `setVisible` que `majNuagesGlobe` rallume et `cloudCoverage`
+poussé à l'envers.
+
+③ ⛔ **Un AVANT rejoué sur le nouveau tableau de paliers rend 5 grappes au lieu
+de 3.** Ce n'est pas l'avant : il flattait le point de départ de moitié.
+
+⚠️ **Et ma propre garde de validité a invalidé deux relevés par ailleurs
+cohérents** : le témoin de fragments doit être joué **après une chauffe** et
+**après un premier cycle de redimensionnement**, sinon il rend 1,5 à 3 là où la
+mesure chaude rend 8. Les deux relevés concernés ne sont pas publiés comme
+valides ; seuls ceux dont le témoin tient aux deux bouts le sont.
+
+## Fichiers touchés (ce tour)
+
+| fichier | ce qui change |
+|---|---|
+| `public/templates/defaults/shibustart.json` | opacité 0,6 → 1,4 ; étalement 0,97 → 0,45 ; trouées 0,85 → 0,80 |
+| `src/clouds-sim.js` | `COUNT_BY_TIER` `[4,3,2,2]` → `[7,3,2,2]`, `CLOUD_COUNT_MAX` 5 → 6, avec les deux tableaux de mesure |
+| `src/clouds2.js` | plancher marin sur la colonne (`Math.max(base, mer + 0,5)`), épaisseur conservée |
+| `test/nuages-globe.test.js` | +11 tests (⑥ le défaut et les paliers, ⑦ le plancher marin) |
+| `scripts/instrument-r20-pleine.js` | **nouveau** — comptage de pixels pleine résolution |
+| `scripts/diag-r20-defaut.mjs`, `-arbitrage`, `-graines`, `-cout2`, `-preuve` | les sondes |
+
+⚠️ **Toujours rien touché à `src/globe.js` ni au bloc `uContourWeight`/`minFade`,
+ni à l'éclairage, ni aux parois, ni à la caméra, ni à la toponymie.**
+
+## Tests
+
+`npm test` : **4 453 / 4 453, 0 échec** (base 4 442).
+`npm run audit:tests` : **230 listés · 230 sur disque, aucun écart.**
+
+## Réserves (ce tour)
+
+1. **Trois lieux, un seul zoom (z12) et une seule heure.** Le ciel se lit contre
+   le fond ; une heure rasante ou un zoom continental n'ont pas été mesurés.
+2. **Le coût est relevé sur une RTX 3080 à 1,02 Mpx.** C'est un coût de fragment :
+   il ne se transpose pas tel quel sur un circuit intégré, et le palier 0 est
+   précisément celui qui n'en a pas besoin.
+3. **Le plancher marin corrige le symptôme, pas la cause.** La cause est que
+   `cloudAltitude` est exprimée en unités de bloc, dont la verticale dépend de
+   l'amplitude locale du relief. Exprimer la tirette **en mètres réels** la
+   rendrait stable partout ; c'est une conversion de plus dans la classe déjà
+   comptée neuf fois, et elle déplacerait le ciel de tous les gabarits
+   enregistrés. **Je ne l'ai pas faite seul.**
+4. **La loterie de disposition reste énorme** : à 6 grappes, la médiane est
+   12 881 pixels mais l'étendue va de 10 586 à 23 759. Un utilisateur peut
+   tomber sur un tirage deux fois plus fourni que la médiane — ou l'inverse.
