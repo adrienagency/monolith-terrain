@@ -75,17 +75,26 @@ const NOOP = () => {}
 // the globe: z7 @ 600 km, then the regional/local tiers. Corsica-sized views
 // (~150 km) still get z8.
 //
-// ⚠️ LE PLANCHER EST z3 (Adrien : « Z1 et Z2 ne doivent pas exister »). Le
-// filtre est appliqué ICI et sa règle vit dans escalier-zoom.js : la table brute
-// reste lisible, et changer d'avis sur le plancher ne demande de toucher qu'à
-// `ZOOM_PALIER_MIN`.
+// ⚠️ LE PLANCHER EST z4 DEPUIS R27 (Adrien : « Il faudrait passer en mode orbite
+// pour tout ce qui est supérieur à Z4 » — et « supérieur » désigne chez lui la
+// vue la plus ÉLOIGNÉE). Il valait z3 depuis « Z1 et Z2 ne doivent pas
+// exister ». Le filtre est appliqué ICI et sa règle vit dans escalier-zoom.js :
+// la table brute reste lisible — la marche z3 ci-dessous est donc TOUJOURS
+// écrite, et TOUJOURS filtrée — et changer d'avis sur le plancher ne demande de
+// toucher qu'à `ZOOM_PALIER_MIN`.
 //
-// ⚠️ CE PARAGRAPHE A ÉTÉ FAUX. Il annonçait que z4 et z5 avaient été RETIRÉS et
-// que la porte orbitale s'ouvrait « au-dessus de 1 600 km ». Les deux ont cessé
-// d'être vrais le jour où la marche z3 a été ajoutée à la table : z4 et z5 sont
-// bel et bien là (16 lignes plus bas), et le palier le plus large est désormais
-// z3 à 16 000 km. C'est donc à 16 000 km, et non à 1 600, que plus aucun palier
-// ne correspond à l'altitude — c'est-à-dire que la porte orbitale s'ouvre.
+// ⚠️ CE PARAGRAPHE A ÉTÉ FAUX DEUX FOIS. Il annonçait d'abord que z4 et z5
+// avaient été RETIRÉS et que la porte orbitale s'ouvrait « au-dessus de
+// 1 600 km » ; puis, la marche z3 ajoutée, que le palier le plus large était z3
+// à 16 000 km. **Le palier le plus large est maintenant z4**, et sa marche de
+// plongée est à 8 000 000 m.
+//
+// ⛔ **ET CE 8 000 000 m N'EST PAS LE SEUIL D'ORBITE.** C'est le seuil de
+// PLONGÉE (orbite → surface), lu par `pickDiveTier`. La porte orbitale
+// (surface → orbite) est GÉOMÉTRIQUE et prise dans l'autre sens : elle s'ouvre
+// quand `getCoarsenTarget()` rend `null` et que le budget de niveau réclame un
+// cran de plus. Les deux nombres ne sont pas la même grandeur ; celui de la
+// porte est relevé au navigateur dans `rapport-R27.md`.
 //
 // `DIVE_ALT_M` (le seuil du zoom fin) ne bouge pas — c'est DIVE_TIERS[0], et lui
 // n'a jamais été concerné.
@@ -99,10 +108,13 @@ export const DIVE_TIERS = paliersRetenus([
   { altM: 1600000, zoom: 6 },
   { altM: 4000000, zoom: 5 },
   { altM: 8000000, zoom: 4 },
-  // ⚠️ z3 EST LE PLANCHER, il lui fallait donc sa marche. La table s'arrêtait à
-  // z4 : filtrée par un plancher plus bas, elle laissait z4 comme palier le plus
-  // large, et le clic depuis l'orbite haute n'atteignait jamais z3. Le seuil
-  // d'altitude prolonge la progression géométrique de la table (×2 par cran).
+  // ⚠️ CETTE MARCHE EST ÉCRITE ET FILTRÉE — R27. Elle a été ajoutée le jour où
+  // z3 était le plancher (sans elle, le clic depuis l'orbite haute n'atteignait
+  // jamais z3) ; depuis que le plancher vaut z4, `paliersRetenus` la retire. On
+  // la garde parce que la table brute doit rester lisible et que le plancher est
+  // le seul endroit où l'on décide — la retirer ferait deux sources pour une
+  // seule règle. Le seuil d'altitude prolonge la progression géométrique de la
+  // table (×2 par cran).
   { altM: 16000000, zoom: 3 },
 ])
 
@@ -549,8 +561,29 @@ export class Modes {
     }
     const c = this.controls
     const dist = c.getDistance()
-    const nouvelle = THREE.MathUtils.clamp(dist * f, c.minDistance, c.maxDistance)
-    this._levelZoom += Math.log(Math.max(nouvelle, 1e-6) / Math.max(dist, 1e-6))
+    const voulue = dist * f
+    const nouvelle = THREE.MathUtils.clamp(voulue, c.minDistance, c.maxDistance)
+    // ══════ LE BUDGET COMPTE L'INTENTION ICI AUSSI — R27 ═══════════════════
+    //
+    // ⛔ **R23 A CORRIGÉ `_applyZoom` ET A LAISSÉ CE CHEMIN-CI, ET LA MESURE
+    // L'ATTRAPE.** Rejoué au navigateur sous le protocole de R27
+    // (`.banc/R27/avant2.json`, remontée pilotée par `cranZoom`) : la caméra se
+    // colle à `d = 150 / plafond 150`, `log(nouvelle/dist)` vaut alors **zéro**,
+    // le compteur de niveau gèle, `_franchirSiBesoin` ne franchit plus rien —
+    // **1 174 images, bloqué à z8, l'orbite JAMAIS atteinte.** C'est le défaut
+    // §④ de R23, mot pour mot, sur le chemin qu'elle n'avait pas mesuré : le
+    // BOUTON et le PINCEMENT, pas la molette.
+    //
+    // ➡️ Même règle, même asymétrie, même justification que là-bas : vers
+    // l'extérieur un niveau existe toujours (un cran plus large, ou la porte
+    // orbitale) ; vers l'intérieur, au zoom fin, il n'y a plus rien à affiner et
+    // laisser courir le compteur en ferait un compteur qui ne se dépense jamais.
+    let dBudget = Math.log(Math.max(nouvelle, 1e-6) / Math.max(dist, 1e-6))
+    if (nouvelle !== voulue) {
+      const intention = Math.log(Math.max(voulue, 1e-6) / Math.max(dist, 1e-6))
+      if (intention > 0 || !!this.hooks.getRefineTarget?.()) dBudget = intention
+    }
+    this._levelZoom += dBudget
     _zoomDir.copy(this.camera.position).sub(c.target).normalize()
     this.camera.position.copy(c.target).addScaledVector(_zoomDir, nouvelle)
     c.update()
@@ -936,7 +969,34 @@ export class Modes {
   //
   // Sans le hook (banc de test, source procédurale) on retombe exactement sur
   // l'ancienne pose : le centre du socle.
+  // ══════ ET HORS DU CROP, ON VISE LA VERTICALE DU CENTRE DE LA TERRE — R27 ══
+  //
+  // > **Adrien :** *« Il doit toujours viser le centre de la Terre. Il change
+  // > uniquement quand on passe en mode bloc croppé. »*
+  //
+  // ⚠️ **C'EST ICI QUE LA DESCENTE SE JOUE, PAS DANS LA BOUCLE D'IMAGE.**
+  // `_arrivalPose` et `_rescale` reposent la cible à CHAQUE cran ; sans cette
+  // ligne, le recentrage de `main.js` la ramènerait bien sur l'axe, mais en
+  // GLISSANT pendant ~2 s après chaque cran — un tassement visible à chaque
+  // niveau franchi. Ici, la descente arrive sur l'axe du premier coup, et le
+  // recentrage par image ne sert plus qu'à ce pour quoi il est fait : le RETOUR
+  // depuis le crop.
+  //
+  // ⚠️ **LE `y` NE CHANGE PAS, ET C'EST MESURÉ** — voir `monde/pivot-terre.js` :
+  // tout point de la droite `x = z = 0` vise le centre de la Terre, et forcer
+  // `y = 0` déplacerait `camera.position.y`, donc `altitudeCadrageM()`, donc le
+  // seuil de naissance du crop contre lequel ce correctif est jugé.
+  //
+  // ⚠️ **LE PRÉDICAT EST `horsDuCrop`, PAS `!surLeBloc()`.** Sans `terre
+  // unique` il n'y a pas de crop : `surLeBloc()` rendrait faux pour toujours et
+  // le mode plat hérité perdrait sa visée. Le hook porte les DEUX termes.
+  //
+  // ⚠️ **SANS LE HOOK, RIEN NE CHANGE** — banc de test, source procédurale,
+  // régime hérité `?terre=deux` : on retombe sur la pose d'avant, au bit près.
   _cibleVisee(lieu) {
+    if (this.hooks.horsDuCrop?.()) {
+      return new THREE.Vector3(0, Y_CIBLE, 0)
+    }
     const p = lieu && this.hooks.viseeDuLieu ? this.hooks.viseeDuLieu(lieu.lat, lieu.lon) : null
     return new THREE.Vector3(p?.x ?? 0, Y_CIBLE, p?.z ?? 0)
   }

@@ -40,7 +40,33 @@
 //
 // ⚠️ RIEN D'AUTRE DANS LE MOTEUR NE CONNAÎT LE PLANCHER : ni modes.js, ni
 // main.js, ni les paliers de plongée, qui se filtrent tous à partir d'ici.
-export const ZOOM_PALIER_MIN = 3
+//
+// ══════════ LE PLANCHER EST PASSÉ DE z3 À z4 — Tâche R27 ═══════════════════
+//
+// > **Adrien, 2026-08-31 :** *« Il faudrait passer en mode orbite pour tout ce
+// > qui est supérieur à Z4. »*
+//
+// ⚠️ **SA CONVENTION EST INVERSE DE L'INTUITION, ET ELLE EST ÉTABLIE** : il
+// écrit « au-dessus de Z10 » pour la vue la plus ÉLOIGNÉE. « Supérieur à Z4 »
+// désigne donc **tout ce qui est PLUS LARGE que z4**, et `supérieur à` est
+// strict : **z4 reste un bloc de surface, z3 n'en est plus un.** Le plancher
+// vaut donc 4.
+//
+// ⛔ **UN PLANCHER DE ZOOM N'EST PAS UN SEUIL D'ALTITUDE, ET CE DÉPÔT A PAYÉ
+// NEUF FOIS CETTE CONFUSION.** Cette constante est un INDICE DE ZOOM SLIPPY.
+// L'altitude où la porte orbitale s'ouvre n'est écrite nulle part : elle est
+// DÉDUITE, à chaque image, de la géométrie du bloc le plus large qui reste
+// (`getCoarsenTarget` rend `null`, puis `_franchirSiBesoin` appelle
+// `enterOrbit`). Relevée au navigateur après le changement, elle est publiée
+// dans `rapport-R27.md` — mesurée, pas posée. ⚠️ Et elle n'a rien à voir avec
+// `DIVE_TIERS[z4].altM = 8 000 000 m`, qui est le seuil de PLONGÉE (orbite →
+// surface), pris dans l'autre sens et par une autre loi.
+//
+// ⚠️ **z3 NE DISPARAÎT PAS DU DÉPÔT, IL DISPARAÎT DE L'ESCALIER.** `pasEscalier`
+// remonte au plancher un lien de partage ou un gabarit qui porte encore z3, et
+// `paliersRetenus` retire sa marche de `DIVE_TIERS` : le palier de clic le plus
+// large devient z4. C'est le même mécanisme qui avait retiré z1 et z2.
+export const ZOOM_PALIER_MIN = 4
 
 // Le plafond, lui, n'a pas bougé : c'est le zoom fin choisi par l'utilisateur,
 // jamais moins de 12 (en dessous, « fin » ne veut plus rien dire).
