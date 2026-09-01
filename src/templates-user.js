@@ -106,7 +106,7 @@ export const TEMPLATE_KEYS = [
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv', 'bgStops', 'bgPoints', 'bgAuto',
   // camera lens / depth-of-field (NOT position/location) — shadowMode lives in
   // the light group above; listed once there, not duplicated here
-  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale',
+  'fov', 'autoFocus', 'focusDistance', 'focusRatio', 'bokehEnabled', 'bokehScale',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthGlassRefract', 'plinthBump',
