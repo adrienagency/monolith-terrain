@@ -238,3 +238,156 @@ test('③ quater loin des butées, `cranZoom` compte le déplacement — elles s
   assert.ok(controls.getDistance() > d0, 'la caméra doit reculer')
   assert.ok(Math.abs(m.zoomNiveau() - b0 - Math.log(controls.getDistance() / d0)) < 1e-9)
 })
+
+// ══════════ ④ LE BALAYAGE NE MANGE PLUS LES NIVEAUX — Tâche R29 ═════════════
+//
+// ⛔ **CE QUE LE BANC A ATTRAPÉ, ET QUE LA GARDE M4 DE `zoom-continu.test.js`
+// NE POUVAIT PAS VOIR.** Cette garde-là vérifie « le budget n'est pas PERDU »
+// avec `PAS_NIVEAU × 1,2` au compteur — c'est-à-dire UN niveau, le seul cas où
+// `_levelZoom = reste` tient la promesse. Au navigateur
+// (`scripts/sonde-sortie-r29.mjs`, `.banc/R29/avant-bouton-*.json`, bouton « − »
+// à un clic par image) le balayage de retour au nadir de D16 ter s'arme sur la
+// mort du crop et dure **130 images (2,2 s)** : le compteur y monte à **9,01**,
+// soit **treize niveaux**, `reste` vaut alors 0,0 et douze niveaux partaient à
+// la poubelle. La caméra restait à `d = 149,9 / plafond 150`, l'altitude figée à
+// **133 876 m** et `z` bloqué à **10**.
+
+test('④ treize niveaux encaissés pendant le balayage se dépensent TOUS, un par un', async () => {
+  const { m, etat } = await machine()
+  m._fonduPose = { t: 0.3, e: 0.3, angleTotalDeg: 46.5, cible: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 1, z: 0 } }
+  // ⚠️ **13,5 ET PAS 13** : à 13 pile, `13 × ln2 − 12 × ln2` retombe un ulp SOUS
+  // `ln2` et la troncature rend 0 — le treizième niveau se perdrait dans le
+  // `double`, pas dans le code. Le banc, lui, a relevé 9,01 (treize niveaux
+  // pleins et des poussières), ce que ce demi-niveau reproduit honnêtement.
+  m._levelZoom = PAS_NIVEAU * 13.5
+  const budget = m._levelZoom
+  m._franchirSiBesoin()
+  assert.equal(etat.charges.length, 0, 'un niveau a été franchi PENDANT le balayage')
+  assert.equal(m._levelZoom, budget, 'le budget a été entamé pendant le balayage')
+  // le balayage finit : les niveaux partent UN PAR UN, et rien n'est jeté
+  m._fonduPose = null
+  for (let i = 1; i <= 13; i++) {
+    m.busy = false
+    m._franchirSiBesoin()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(etat.charges.length, i, `au tour ${i}, ${etat.charges.length} niveau(x) franchi(s)`)
+    assert.ok(Math.abs(m._levelZoom - (budget - i * PAS_NIVEAU)) < 1e-9,
+      `au tour ${i} le compteur vaut ${m._levelZoom} au lieu de ${budget - i * PAS_NIVEAU}`)
+  }
+  // et il ne reste rien à franchir
+  m.busy = false
+  m._franchirSiBesoin()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.charges.length, 13, 'un quatorzième niveau est parti')
+})
+
+test('④ bis à UN niveau dû, le compteur rend EXACTEMENT `reste` — identité au bit', async () => {
+  // ⚠️ **LE TÉMOIN DE NON-RÉGRESSION.** Le correctif ne doit rien changer au
+  // cas nominal : `reste = budget − 1 × pas`, et c'est ce que retranche la
+  // nouvelle ligne. On l'exige à l'égalité stricte, pas sous un seuil.
+  const { m, etat } = await machine()
+  m._levelZoom = PAS_NIVEAU * 1.2
+  const attendu = m._levelZoom - PAS_NIVEAU
+  m._franchirSiBesoin()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.charges.length, 1, 'le niveau nominal ne se franchit plus')
+  assert.equal(m._levelZoom, attendu, `compteur ${m._levelZoom} au lieu de ${attendu}`)
+})
+
+test('④ ter vers l’INTÉRIEUR aussi, un niveau par appel et le reste reste', async () => {
+  const { m, etat } = await machine()
+  m._levelZoom = -PAS_NIVEAU * 3
+  const budget = m._levelZoom
+  m._franchirSiBesoin()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.charges.length, 1, 'aucun affinage')
+  assert.ok(Math.abs(m._levelZoom - (budget + PAS_NIVEAU)) < 1e-9,
+    `compteur ${m._levelZoom} au lieu de ${budget + PAS_NIVEAU}`)
+})
+
+// ══════════ ⑤ LE CRAN SURVIT AU CHARGEMENT — Tâche R29 ══════════════════════
+//
+// ⛔ **LE FAIT ① DU BRIEF R29 : « huit crans n'ont avancé que d'UN niveau ».**
+// `cranZoom` sortait sur `busy`, alors que le glissé inertiel en est
+// explicitement exempté sous le drapeau (`update()`). Un `_rescale` dure des
+// centaines de millisecondes : sept clics sur huit disparaissaient.
+
+test('⑤ pendant un chargement, huit clics comptent HUIT crans au lieu d’un', async () => {
+  const { m, camera, controls } = await machine()
+  poser(camera, controls, 40)
+  const d0 = controls.getDistance()
+  m.busy = true
+  const b0 = m.zoomNiveau()
+  for (let i = 0; i < 8; i++) m.cranZoom(-1)
+  const attendu = 8 * Math.log(Math.SQRT2)
+  assert.ok(Math.abs(m.zoomNiveau() - b0 - attendu) < 1e-9,
+    `budget ${m.zoomNiveau() - b0} au lieu de ${attendu} — des clics ont été jetés`)
+  // ⚠️ **ET LA CAMÉRA N'A PAS BOUGÉ** : pendant le rechargement elle appartient
+  // à `_rescale`, qui pose la cible d'arrivée et convertit les unités.
+  assert.equal(controls.getDistance(), d0, 'le cran a écrit la caméra pendant le chargement')
+})
+
+test('⑤ bis pendant un chargement, l’asymétrie du zoom fin tient toujours', async () => {
+  const { m, camera, controls } = await machine({ refine: false })
+  poser(camera, controls, 40)
+  m.busy = true
+  const b0 = m.zoomNiveau()
+  m.cranZoom(1)
+  assert.equal(m.zoomNiveau(), b0, `budget parti à ${m.zoomNiveau()} alors qu’il n’y a rien à affiner`)
+})
+
+test('⑤ ter en orbite, un chargement laisse le cran tranquille — pas de compteur', async () => {
+  const { m } = await machine()
+  m.mode = 'orbital'
+  m.busy = true
+  const alt0 = m.orbAltTarget
+  const b0 = m.zoomNiveau()
+  m.cranZoom(-1)
+  assert.equal(m.orbAltTarget, alt0, 'l’altitude orbitale a bougé pendant un chargement')
+  assert.equal(m.zoomNiveau(), b0, 'le compteur de surface a couru en orbite')
+})
+
+// ══════════ ⑥ LE COMPTEUR SE VIDE SANS NOUVEAU GESTE — Tâche R29 ════════════
+//
+// ⛔ **RIEN N'APPELAIT `_franchirSiBesoin` UNE FOIS LE GESTE FINI.** Il ne
+// vivait que dans `_applyZoom` (tant que `_zoomVel` court) et dans `cranZoom`
+// (donc au clic suivant). Un budget encaissé pendant un balayage ou un
+// chargement attendait le geste SUIVANT : caméra au plafond, altitude figée.
+
+test('⑥ une image ordinaire suffit à franchir ce que le geste a laissé', async () => {
+  const { m, camera, controls, etat } = await machine()
+  poser(camera, controls, 40)
+  m._zoomVel = 0 // le geste est fini : `_applyZoom` ne tourne plus
+  m._levelZoom = PAS_NIVEAU * 1.5
+  m.update(1 / 60)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.charges.length, 1, 'aucun niveau franchi alors que le compteur en devait un')
+})
+
+test('⑥ bis et une image ordinaire au repos ne franchit RIEN', async () => {
+  const { m, camera, controls, etat } = await machine()
+  poser(camera, controls, 40)
+  m._zoomVel = 0
+  m._levelZoom = PAS_NIVEAU * 0.5
+  for (let i = 0; i < 30; i++) m.update(1 / 60)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(etat.charges.length, 0, 'un niveau est parti sans que le compteur soit plein')
+})
+
+test('⑥ ter l’appel par image est BIEN dans la branche de surface d’`update`', async () => {
+  // ⚠️ **UNE GARDE DE SOURCE, ET ELLE EST BORNÉE AU CORPS.** `_franchirSiBesoin`
+  // apparaît trois fois dans `modes.js` (`cranZoom`, `_applyZoom`, `update`) :
+  // une recherche sur tout le fichier resterait verte si la troisième
+  // disparaissait. On la borne donc au bloc du balayage de pose, qui est son
+  // voisin immédiat et sa raison d'être — il pose `_fonduPose = null` à l'image
+  // où il finit, donc le niveau part dès CETTE image.
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/modes.js', import.meta.url), 'utf8')
+  const i = src.indexOf('if (pas.fini) this._fonduPose = null')
+  assert.ok(i > 0, 'le bloc du balayage de pose a disparu de `update`')
+  const apres = src.slice(i, i + 1800)
+  assert.ok(/this\._franchirSiBesoin\(\)/.test(apres),
+    '`update` ne vide plus le compteur par image — un budget encaissé pendant un balayage attendrait le geste suivant')
+  assert.ok(apres.indexOf('this._franchirSiBesoin()') < apres.indexOf('surfaceCamAltMeters'),
+    'l’appel par image a quitté la branche de surface')
+})

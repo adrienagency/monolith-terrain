@@ -512,25 +512,42 @@ export class Modes {
     // Le compteur de budget, lui, TRAVERSE : le niveau se franchit à l'image
     // suivant la fin du balayage, sans rien perdre.
     if (!this._continu() || this.busy || this.travel || this._diveTween || this._fonduPose) return
-    const { niveaux, reste } = franchissement(this._levelZoom, BUDGET_NIVEAU)
+    const { niveaux } = franchissement(this._levelZoom, BUDGET_NIVEAU)
     if (niveaux === 0) return
+    // ⛔ **UN NIVEAU PAR APPEL, ET LE RESTE RESTE — Tâche R29.** Les cinq lignes
+    // ci-dessus promettent « le niveau se franchit à l'image suivant la fin du
+    // balayage, SANS RIEN PERDRE » ; `= reste` ne tenait pas cette promesse.
+    // Mesuré au navigateur sur le bouton « − » (`.banc/R29/avant-bouton-*.json`,
+    // un clic par image) : le balayage de retour au nadir de D16 ter s'arme sur
+    // la mort du crop et dure **130 images (2,2 s)** ; pendant ce temps le
+    // compteur encaisse l'intention de chaque clic et monte à **9,01**, soit
+    // **treize niveaux**. `reste` valait alors 0,0 : le premier franchissement
+    // d'après le balayage en dépensait UN et **jetait les douze autres**. La
+    // caméra restait collée à `d = 149,9 / plafond 150`, l'altitude figée à
+    // 133 876 m, `z` bloqué à 10 — c'est le relevé du brief R29, mot pour mot.
+    //
+    // ⚠️ **ET C'EST IDENTIQUE AU BIT QUAND UN SEUL NIVEAU EST DÛ** : `reste`
+    // vaut alors `budget − 1 × pas`, exactement ce que la ligne retranche. La
+    // différence ne vit QUE dans le cas à plusieurs niveaux, c'est-à-dire le
+    // défaut. `update()` rappelle `_franchirSiBesoin` à chaque image, donc le
+    // niveau suivant part dès que le rechargement rend la main.
     if (niveaux > 0) {
       // ⚠️ **ON NE DÉPENSE LE BUDGET QUE SI LE NIVEAU EXISTE.** Au zoom fin il
       // n'y a plus rien à affiner : laisser le compteur courir est CORRECT — il
       // faudra le remonter d'autant pour élargir, et l'aller-retour reste
       // symétrique. Le retrancher rendrait le retour asymétrique.
       if (!this.hooks.getRefineTarget()) return
-      this._levelZoom = reste
+      this._levelZoom += BUDGET_NIVEAU
       this._refine()
       return
     }
     if (this.hooks.getCoarsenTarget()) {
-      this._levelZoom = reste
+      this._levelZoom -= BUDGET_NIVEAU
       this._coarsen()
       return
     }
     // plus de niveau plus large : la porte orbitale, et elle est SANS RIDEAU
-    this._levelZoom = reste
+    this._levelZoom -= BUDGET_NIVEAU
     this.enterOrbit()
   }
 
@@ -541,8 +558,32 @@ export class Modes {
   // c'est la MÊME loi en orbite et en surface, ce qui est la moitié de « une
   // seule caméra, de l'orbite au sol ».
   cranZoom(dir) {
-    if (this.busy || this.travel || this._diveTween) return
+    if (this.travel || this._diveTween) return
     const f = facteurCran(dir)
+    // ══════ LE CRAN SURVIT AU CHARGEMENT, COMME LE GLISSÉ — Tâche R29 ══════
+    //
+    // ⛔ **`busy` JETAIT LE CLIC, ET C'EST LE FAIT ① DU BRIEF R29.** Le glissé
+    // inertiel a été explicitement exempté de `busy` sous le drapeau
+    // (`update()` : « le glissé survit au chargement — et c'est la troisième
+    // moitié du cran ») ; le BOUTON « − » ne l'était pas. Mesuré : huit
+    // `cranZoom(-1)` d'affilée n'avancent que d'UN niveau, **sept clics sur
+    // huit disparaissent** — un `_rescale` dure des centaines de millisecondes
+    // et `busy` y est levé tout du long.
+    //
+    // ⚠️ **ON ENCAISSE L'INTENTION, ON N'ÉCRIT PAS LA CAMÉRA.** Pendant le
+    // rechargement la caméra appartient à `_rescale` (il pose la cible
+    // d'arrivée et convertit les unités) : lui disputer `camera.position`
+    // image par image est exactement ce que la garde de `_franchirSiBesoin`
+    // interdit. Le compteur, lui, TRAVERSE — c'est déjà sa règle.
+    if (this.busy) {
+      if (this.mode !== 'surface' || !this._continu()) return
+      const intention = Math.log(f) // < 0 en zoom avant, comme `_levelZoom`
+      // même asymétrie que `_applyZoom` et que la suite de cette fonction :
+      // vers l'extérieur un niveau existe toujours ; vers l'intérieur, au zoom
+      // fin, il n'y a plus rien à affiner et le compteur ne doit pas courir.
+      if (intention > 0 || !!this.hooks.getRefineTarget?.()) this._levelZoom += intention
+      return
+    }
     if (this.mode === 'orbital') {
       if (dir > 0) this._diveArmed = true // inward intent arms the dive, like the wheel
       this.orbAltTarget = THREE.MathUtils.clamp(
@@ -1769,6 +1810,24 @@ export class Modes {
         this._avancerFonduPose(pas.e)
         if (pas.fini) this._fonduPose = null
       }
+      // ══════ LE COMPTEUR SE VIDE TOUT SEUL — Tâche R29 ═════════════════════
+      //
+      // ⛔ **RIEN N'APPELAIT `_franchirSiBesoin` QUAND LE GESTE ÉTAIT FINI.**
+      // Il n'était appelé que par `_applyZoom` (donc tant que `_zoomVel` vit)
+      // et par `cranZoom` (donc au clic suivant). Un budget encaissé pendant un
+      // balayage ou un chargement restait donc au compteur jusqu'au geste
+      // SUIVANT : la caméra collée au plafond, l'altitude figée, et
+      // l'utilisateur qui ne comprend pas pourquoi le bouton ne fait rien.
+      // Mesuré : `_levelZoom` à **9,01** (treize niveaux dus) sans que rien ne
+      // se franchisse tant qu'aucun clic ne revenait.
+      //
+      // ⚠️ **ICI, ET APRÈS LE BLOC DU BALAYAGE** : le balayage vient de poser
+      // `_fonduPose = null` à l'image où il finit, donc le niveau part dès
+      // CETTE image — la même doctrine que l'armement de la bascule dix lignes
+      // plus haut. La fonction est gardée et sort en une division quand le
+      // compteur ne vaut pas un niveau plein : c'est le cas de toute image
+      // ordinaire.
+      this._franchirSiBesoin()
       this.altM = this.hooks.surfaceCamAltMeters()
     }
 
