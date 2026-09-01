@@ -220,3 +220,25 @@ de la dorsale), et le relief de Madagascar est hypsométrique, pas nu.
 niveau de tuile non encore raffiné à cette altitude, pas D15 qui aurait lâché.
 Dès qu'on dézoome, le relief et la bathymétrie arrivent. **Mesurer avant de
 crier au retour du défaut filmé.**
+
+### ✅ ⑤ Le ciel par défaut se voit — vérifié à l'écran après fusion
+
+La Réunion, réglages par défaut, profil vierge : **un nuage franc au-dessus de la
+mer**, là où l'écran était vide avant l'arbitrage. Le grain, l'écume et la
+bathymétrie de bord se lisent aussi.
+
+⚠️ **Piège d'environnement rencontré en le vérifiant, à ne pas prendre pour une
+régression** : le premier chargement est resté **~40 s** sur *« generating
+terrain… »* avec `globe._crop = false` et une pluie de 404 et de
+`ERR_CONNECTION_TIMED_OUT` en console. Vérifié à la source **avant de conclure** :
+
+| hôte | état |
+|---|---|
+| `tiles.mapterhorn.com` | **200** sur z0/z2/z5/z12 · **404** sur deux tuiles d'océan (couverture creuse, comportement normal) |
+| `s3.amazonaws.com/elevation-tiles-prod` | **200** partout, 115 Ko — le repli fait son travail |
+| `nominatim.openstreetmap.org` | 302, sain |
+| **`overpass-api.de`** | ⛔ **délai dépassé à 12 s** — c'est la source des sommets, donc de R24 |
+
+➡️ **Le réseau était dégradé, pas le code** : la page a fini par se charger seule.
+⚠️ Mais quatre agents plus moi tapions les mêmes fournisseurs en parallèle —
+**une mesure de chargement prise pendant une campagne parallèle ne vaut rien.**
