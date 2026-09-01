@@ -75,7 +75,7 @@ async function chargerPuppeteer() {
 function poserInstrument(LARG, HAUT) {
   const e = window.__exp
   if (!e) return 'pas de __exp'
-  if (window.__r21) return 'déjà posé'
+  if (window.__r21 && window.__r21.capturer) return 'déjà posé'
   const R = e.renderer
   const gl = R.getContext()
   const CV = R.domElement
@@ -222,6 +222,11 @@ function poserCibles() {
     }
     walk(p)
   }
+  // ⚠️ **TOLÉRANT À L'ORDRE, ET C'EST UN VRAI DÉFAUT QUI L'A EXIGÉ** : au
+  // deuxième tour, `poserCibles` a tourné avant que `poserInstrument` ait posé
+  // `window.__r21`, et la sonde est morte sur un `TypeError` — au milieu d'une
+  // campagne de vingt-quatre relevés.
+  window.__r21 = window.__r21 || {}
   window.__r21.cibles = cibles
   return cibles.map((c, i) => ({ i, panneau: c.panneau, section: c.section, nom: c.nom, type: c.type, cache: c.cache?.() ?? false, plage: c.plage || null }))
 }
@@ -404,8 +409,10 @@ try {
   const PG = Math.max(rapport.plancher.grad, 0.05)
 
   const REPETE = Number(opt('--repete', '1'))
+  const SEULEMENT = (opt('--seulement', '') || '').split(',').filter((x) => x !== '').map(Number)
+  const CHOISIS = SEULEMENT.length ? SCENARIOS.filter((s) => SEULEMENT.includes(s.n)) : SCENARIOS
   const LISTE = []
-  for (let r = 0; r < REPETE; r++) for (const sc of SCENARIOS) LISTE.push({ ...sc, tour: r + 1 })
+  for (let r = 0; r < REPETE; r++) for (const sc of CHOISIS) LISTE.push({ ...sc, tour: r + 1 })
   for (const sc of LISTE) {
     // une page NEUVE par scénario : la précondition d'un scénario ne doit pas
     // fuir dans le suivant (le défaut que R18 a payé sur 65 lignes)

@@ -131,12 +131,14 @@ export function lightSection(ctx) {
     // posé une note ; le brief R21 tranche : *« un réglage mort visible est pire
     // qu'un réglage absent — c'est ce qui a produit cet inventaire »*.
     //
-    // ⚡ **TROIS CONSTATS INDÉPENDANTS, TOUS RELEVÉS DANS L'APPLICATION VIVANTE**
-    // (le détail et le palier machine sont au §2 de `monde/lumiere-sphere.js`) :
-    // `globe.js` ne contient **aucune** occurrence de `shadowmap` ;
-    // `terrain.mesh.visible` vaut **false** sous le drapeau ; et la scène du bloc
-    // compte **42 objets visibles, 1 receveur (`ShadowMaterial`), 0 maillage
-    // casteur**. Mesuré de 0 à 20, mouvement coupé : **0,000** et **0,000** —
+    // ⚡ **QUATRE CONSTATS INDÉPENDANTS, TOUS RELEVÉS DANS L'APPLICATION
+    // VIVANTE** (le détail et le palier machine sont au §2 de
+    // `monde/lumiere-sphere.js`) : `globe.js` ne contient **aucune** occurrence
+    // de `shadowmap` ; `terrain.mesh.visible` vaut **false** sous le drapeau ;
+    // la scène du bloc compte **42 objets visibles, 1 receveur
+    // (`ShadowMaterial`), 0 maillage casteur** ; et surtout **cette scène n'est
+    // plus rendue du tout** (`passeSurface.enabled = false`).
+    // Mesuré de 0 à 20, mouvement coupé : **0,000** et **0,000** —
     // et le palier machine était à **0 « PLEINE QUALITÉ », ombres « dynamic »,
     // carte 1 024²**, donc le zéro n'est pas celui d'un mode dégradé.
     //

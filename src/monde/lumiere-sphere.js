@@ -50,7 +50,7 @@
 // de scène : il n'y a donc aucun rapport d'échelle à appliquer, et un portage
 // « converti » aurait été faux dans les deux sens.
 //
-// ⛔ **ET IL N'Y A RIEN À CONVERTIR PARCE QU'IL N'Y A RIEN À OMBRER.** Trois
+// ⛔ **ET IL N'Y A RIEN À CONVERTIR PARCE QU'IL N'Y A RIEN À OMBRER.** Quatre
 // constats indépendants, tous relevés dans l'application vivante :
 //   ① `globe.js` ne contient pas une seule occurrence de `shadowmap` /
 //      `shadowMap` : le matériau de tuile est un `ShaderMaterial` nu, il ne peut
@@ -61,7 +61,12 @@
 //      historique n'est plus dessiné ;
 //   ③ dans la scène du bloc, **42 objets visibles, 1 receveur, 1 casteur** — le
 //      casteur est la `DirectionalLight` elle-même, le receveur est un
-//      `ShadowMaterial` (le plan d'ombre portée). **Zéro maillage casteur.**
+//      `ShadowMaterial` (le plan d'ombre portée). **Zéro maillage casteur** ;
+//   ④ ⚡ **et la plus forte des quatre : LA SCÈNE DU BLOC N'EST PLUS RENDUE DU
+//      TOUT.** `main.js` pose `passeSurface.enabled = false` dès que
+//      `fusionDesPasses` (`frontiereActive && terreUniqueBranchee`), et
+//      `postprocessing` saute une passe désactivée. La carte d'ombre du soleil
+//      n'a donc plus ni receveur ni passe de rendu où se montrer.
 //
 // ➡️ Le curseur est donc **caché en mode sphère** (`ui/light-panel.js`), et
 // c'est tout ce qu'il y a à faire : il pilote toujours le bloc plat quand le

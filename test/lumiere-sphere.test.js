@@ -584,4 +584,9 @@ test('⑥e ⛔ LE 68 N’A AUCUN RECEVEUR, ET C’EST ARITHMÉTIQUE', () => {
   // `shadow.radius` est un rayon de flou en TEXELS de la carte d'ombre, pas une
   // longueur de scène. Il n'y avait aucun rapport d'échelle à appliquer.
   assert.match(MAIN_NU, /renderer\.shadowMap\.type = THREE\.VSMShadowMap/)
+  // ⚡ **ET LA RAISON LA PLUS FORTE DES QUATRE : LA SCÈNE DU BLOC N'EST PLUS
+  // RENDUE DU TOUT.** `postprocessing` saute une passe désactivée : la carte
+  // d'ombre du soleil n'a ni receveur ni passe où se montrer.
+  assert.match(MAIN_NU, /const fusionDesPasses = frontiereActive && terreUniqueBranchee/)
+  assert.match(MAIN_NU, /if \(fusionDesPasses\) \{[\s\S]{0,400}?passeSurface\.enabled = false/)
 })
