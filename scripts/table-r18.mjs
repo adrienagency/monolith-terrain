@@ -29,8 +29,25 @@ const FP = lire(dernier('.banc/R18/fige-pre', 'sonde-'))
 const U = lire(dernier('.banc/R18/uniformes', 'uniformes-'))
 const CARTE = lire('.banc/R18/carte-options.json')
 
+// ⚠️ **TROIS OPTIONS RE-MESURÉES APRÈS UNE FAUTE D'INSTRUMENT**, et leur
+// verdict s'inverse. La sonde n'émettait que `input` ; « Échelle fine »,
+// « Détail fin » et « Échelle du détail » ne COMMITENT qu'au relâchement
+// (`change`) — leur panneau y accroche `regenerateTerrain`. Une sonde qui ne
+// lâche jamais le curseur mesure un curseur qu'on traîne : elle les déclarait
+// morts. Les relevés d'origine sont écrasés ici, pas effacés :
+// `.banc/R18/change2` et `.banc/R18/change3` portent les nouveaux.
+const CORRIGES = ['change2', 'change3']
 const parI = (r) => Object.fromEntries(r.lignes.map((l) => [l.i, l]))
 const fd = parI(FD), fp = parI(FP)
+for (const d of CORRIGES) {
+  const rep = path.join('.banc/R18', d)
+  if (!fs.existsSync(rep)) continue
+  for (const l of lire(dernier(rep, 'sonde-')).lignes) {
+    if (l.err || l.moy == null) continue
+    fd[l.i] = l
+    fp[l.i] = l
+  }
+}
 const u = Object.fromEntries(U.lignes.map((l) => [l.i, l]))
 const BRUIT_UNIFORME = new Set(['uFxTime', 'uTime', 'uMppFacteur'])
 const uni = (i) => (u[i]?.globe || []).filter((k) => !BRUIT_UNIFORME.has(k))

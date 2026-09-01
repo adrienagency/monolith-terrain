@@ -1,60 +1,78 @@
 # INVENTAIRE STUDIO 2 — LES 127 OPTIONS, ET CE QU'ELLES FONT SOUS LA SPHÈRE
 
-> **Tâche R18, étape 1. ⛔ AUCUNE LIGNE DE `src/` N'A ÉTÉ TOUCHÉE POUR L'ÉCRIRE.**
+> **Tâche R18, étape 1. ⛔ CE TABLEAU DÉCRIT L'ÉTAT *AVANT* TOUTE CORRECTION.**
 > Livrés : `scripts/sonde-studio-r18.mjs` (l'écran), `scripts/sonde-uniformes-r18.mjs`
-> (la traversée), `scripts/cibles-studio-r18.mjs` (le catalogue partagé),
-> `scripts/table-r18.mjs` (la jointure), `scripts/diag-r18-*.mjs` (les diagnostics).
-> Traces : `.banc/R18/`.
+> (la traversée), `scripts/cibles-studio-r18.mjs` (le catalogue partagé par les
+> deux), `scripts/captures-r18.mjs` (les images), `scripts/table-r18.mjs` (la
+> jointure), `scripts/diag-r18-*.mjs` (les diagnostics). Traces : `.banc/R18/`.
 > Matériel : ANGLE (NVIDIA RTX 3080, D3D11), Chrome sans tête 1280 × 800, port 5561.
 > URL : `http://localhost:5561/` — **aucun paramètre**, le mode sphère est le défaut.
-> État mesuré : `mode = surface`, `altM = 18 201`, `baseYCrop = −0,1200`, heure 15,1.
+> État mesuré : `mode = surface`, `altM = 18 201`, `baseYCrop = −0,1200`, heure 15,1,
+> La Réunion, z12.
 
-## ⚡ CE QUE J'AI CRU MESURER, ET CE QUI M'A DÉTROMPÉ
+## ⚡ DEUX FAUTES D'INSTRUMENT, ET LES DEUX CHANGEAIENT LE VERDICT
 
-⛔ **MA PREMIÈRE PASSE DÉCLARAIT 66 OPTIONS MORTES. IL Y EN A 50, ET LA
-DIFFÉRENCE EST UNE FAUTE D'INSTRUMENT, PAS DE CODE.** Elle condensait l'image en
-64 × 40 — une moyenne de boîte de 20 × 20 pixels. **« Hauteur des vagues » de 0 à
-2 rendait 1,45 fois le plancher de bruit** ; deux captures prises côte à côte
-(`.banc/R18/mer-seaWaveH-bas.png` / `-haut.png`) montrent des crêtes sur toute la
-nappe. Une moyenne de boîte **annule un motif fin** : les crêtes claires et les
-creux sombres tombent dans la même case.
+⛔ **MA PREMIÈRE PASSE DÉCLARAIT 66 OPTIONS MORTES. IL Y EN A 47.** Les
+dix-neuf de différence ne sont pas des corrections de code : ce sont deux
+défauts de mesure, trouvés parce qu'une capture contredisait un chiffre.
 
-⚡ **DEUX CORRECTIONS, ET LES DEUX COMPTENT :**
+### ① Une moyenne de boîte ANNULE un motif fin
 
-1. **La grille passe à 256 × 160, et une seconde grandeur arrive** — le
-   **gradient** local (|dx| + |dy| sur la luminance), qui mesure la quantité de
-   DÉTAIL et non la couleur moyenne. Le calcul reste dans la page : à cette
-   finesse, faire traverser 122 880 nombres par relevé coûtait plus cher que le
-   rendu.
-2. **Le mouvement ambiant est coupé** (`params.animations = false`). La scène
-   devient reproductible **au bit près** : le plancher de bruit tombe de
-   **0,3693 à 0,0000 sur six relevés consécutifs**. Sans ça, la mer qui bouge
-   EST le bruit, et elle noie tout ce qui est plus discret qu'elle.
+La sonde condensait l'image en 64 × 40 — des cases de 20 × 20 pixels.
+**« Hauteur des vagues » de 0 à 2 rendait 1,45 fois le plancher de bruit**, ce
+qui se lit « ne fait rien ». Deux captures prises côte à côte
+(`.banc/R18/mer-seaWaveH-bas.png` / `-haut.png`) montrent des crêtes sur toute
+la nappe : les crêtes claires et les creux sombres tombaient dans la même case
+et **se compensaient**.
 
-⛔ **CONSÉQUENCE À NE PAS OUBLIER : LES OPTIONS DE MOUVEMENT NE SE JUGENT PAS
-SUR UNE IMAGE FIXE.** Vitesse de dérive, mouvements de caméra, interrupteur
-Animations rendent zéro **par construction** sous ce protocole. Elles sont
-marquées *(mouvement)* et jugées à la traversée, jamais à l'écran.
+⚡ **Deux corrections :** la grille passe à **256 × 160**, et une seconde
+grandeur arrive — le **gradient** local (|dx| + |dy| sur la luminance), qui
+mesure la quantité de DÉTAIL et non la couleur moyenne. Le calcul reste dans la
+page : à cette finesse, faire traverser 122 880 nombres par relevé coûtait plus
+cher que le rendu.
 
-## LE PROTOCOLE, EN QUATRE LIGNES
+### ② Un curseur qu'on ne lâche jamais ne commite rien
 
-- Les contrôles sont pilotés **par leur vrai nœud du DOM** — `input.value` puis un
-  vrai événement `input`, `button.click()` pour les interrupteurs, vignettes et
-  chips. **Aucune recopie du corps de `set:`** : c'est le chemin de l'utilisateur.
-- Trois états par option : **minimum, maximum, retour à l'origine**. Le retour est
-  MESURÉ ; s'il ne revient pas, **la page est rechargée avant l'option suivante**
-  (22 rechargements sur la passe de référence).
-  ⚠️ C'est cette garde qui manquait au premier tour : une rangée de chips sans
-  chip allumée « revenait » sur la première — la scène est restée de nuit et
-  **65 lignes ont été mesurées dans le noir**.
+La sonde n'émettait que `input`. **« Échelle fine », « Détail fin » et
+« Échelle du détail » ne commitent qu'au RELÂCHEMENT** (`change`) — c'est là que
+leur panneau accroche `regenerateTerrain`. Les trois étaient déclarés morts ;
+re-mesurés avec l'événement, ils rendent **0,188 · 0,191 · 0,184**, c'est-à-dire
+qu'ils marchent. `.banc/R18/change2`, `.banc/R18/change3`.
+
+### ③ Et une garde de protocole, qui a failli coûter 65 lignes
+
+Une première passe « remettait à l'origine » une rangée de chips **où aucune
+chip n'était allumée au départ** : elle cliquait la première par défaut, et la
+scène est restée sur une autre heure. **Les 65 lignes suivantes ont été mesurées
+de nuit**, où plus rien ne se voit — elles rendaient toutes « ne fait rien ».
+La sonde MESURE désormais le retour à l'origine et **recharge la page** quand il
+n'a pas eu lieu (22 rechargements sur la passe de référence).
+
+## LE PROTOCOLE
+
+- Les contrôles sont pilotés **par leur vrai nœud du DOM** — `input.value` puis
+  de vrais événements `input` ET `change`, `button.click()` pour les
+  interrupteurs, les vignettes et les chips. **Aucune recopie du corps de
+  `set:`** : c'est le chemin de l'utilisateur, ou rien.
+- **Le mouvement ambiant est coupé** pendant la mesure (`params.animations`).
+  La scène devient reproductible **au bit près** : le plancher de bruit tombe de
+  **0,3693 à 0,0000 sur six relevés consécutifs**. Sans ça, la mer qui bouge EST
+  le bruit, et elle noie tout ce qui est plus discret qu'elle.
+  ⛔ **Corollaire à ne pas oublier : les options de MOUVEMENT ne se jugent pas
+  sur une image fixe.** Vitesse de dérive, direction du vent, mouvements de
+  caméra rendent zéro **par construction** sous ce protocole. Elles sont
+  marquées *(mouvement)* et jugées à la traversée.
 - **Deux passes** : à l'état de départ, et **préconditions allumées** (photo
   aérienne, mer animée, bokeh, SSAO, SSS, socle…). Une tirette rangée derrière
   `visibleWhen` mesurée parent éteint rend toujours « ne fait rien » — c'est un
-  artefact, pas un verdict. *Exemple : « Intensité du flou » = 0,000 parent
+  artefact, pas un verdict. *Étalon : « Intensité du flou » = 0,000 parent
   éteint, **9,815** parent allumé.*
 - **Une troisième sonde lit les uniformes** de `globe.uniforms` avant/après.
-  C'est elle qui sépare **« la valeur n'a pas traversé »** de **« elle a traversé
-  et ne se voit pas »** — deux pannes qui appellent des réparations opposées.
+  C'est elle qui sépare **« la valeur n'a pas traversé »** de **« elle a
+  traversé et ne se voit pas »** — deux pannes qui appellent des réparations
+  opposées. Les deux sondes partagent **le même catalogue de cibles**
+  (`scripts/cibles-studio-r18.mjs`) : sans ça, `[12]` ne désignerait pas la même
+  option des deux côtés.
 
 ## LES SEUILS, ET LEUR ÉTALON
 
@@ -68,8 +86,10 @@ marquées *(mouvement)* et jugées à la traversée, jamais à l'écran.
 | ✅ **marche** | `moy ≥ 0,06` **ou** `grad ≥ 0,12` |
 
 ⚡ **L'ÉTALON EST UNE CAPTURE, PAS UN CHOIX** : « Hauteur des vagues » vaut
-**0,131** et se voit nettement sur deux captures côte à côte ; « Opacité des
-courbes » vaut **0,014** et ne se voit pas. Le seuil est entre les deux.
+**0,140** et se voit nettement sur deux captures côte à côte ; « Opacité des
+courbes » vaut **0,014** et ne se voit pas (capture
+`.banc/R18/captures/17-Carte-Opacité_des_courbes-max.png` : aucune courbe
+lisible sur les terres). Le seuil est entre les deux.
 
 ## LE COMPTE
 
@@ -78,20 +98,116 @@ courbes » vaut **0,014** et ne se voit pas. Le seuil est entre les deux.
 | Caméra | 3 | 0 | 3 | 6 |
 | Couches | 0 | 1 | 3 | 4 |
 | Carte | 4 | 4 | 5 | 13 |
-| Terrain | 27 | 0 | 7 | 34 |
+| Terrain | 30 | 0 | 4 | 34 |
 | Fonds | 3 | 0 | 0 | 3 |
 | Éléments | 18 | 1 | 22 | 41 |
 | Effets | 10 | 1 | 2 | 13 |
 | Parcours | 1 | 1 | 5 | 7 |
 | Mes créations | 0 | 0 | 1 | 1 |
 | Paramètres | 3 | 0 | 2 | 5 |
-| **total** | **69** | **8** | **50** | **127** |
+| **total** | **72** | **8** | **47** | **127** |
 
 ⚠️ **« Caméra », « Couches », « Parcours » et « Mes créations » ne sont pas des
 panneaux du Studio** — ils sont recensés parce que la sonde balaie tout le DOM,
-et parce que leurs pannes sont les mêmes. Les six panneaux demandés (Carte,
-Terrain, Fonds, Éléments, Effets, Paramètres/Avancé) font **109 options :
-65 ✅, 6 ⚠️, 38 ⛔**.
+et parce que leurs pannes sont les mêmes. **Les six panneaux demandés (Carte,
+Terrain, Fonds, Éléments, Effets, Paramètres/Avancé) font 109 options :
+68 ✅, 6 ⚠️, 35 ⛔.**
+
+⚠️ **ET DEUX MESURES SONT NON CONCLUANTES, PAS NÉGATIVES.** Les sept options du
+panneau « Parcours » sont mesurées **sans aucun tracé GPX chargé** : elles n'ont
+rien à peindre, et leur 0,000 ne dit rien de leur branchement. Idem pour les
+trois curseurs du panneau « Couches » dont la couche est éteinte par défaut
+(Lumières nocturnes, canopée). Ils sont comptés ⛔ parce que la règle est
+mécanique ; **ils ne sont pas la cible de cette tâche.**
+
+---
+
+# ÉTAPE 2 — LE CLASSEMENT
+
+## (a) Ce qui se rebranche en déplaçant une écriture — **2 options**
+
+| # | option | ce qu'il faut déplacer |
+|---|---|---|
+| **21** | **Sommets** | ✅ **FAIT.** Les marqueurs sont du DOM projeté : il leur fallait la caméra du globe (`camGlobe`) et l'adaptateur bloc ↔ globe **qui existe déjà** (`monde/sol-globe.js`, celui des rivières et des toponymes), plus un prédicat qui ne soit pas `socleAffiche()`. |
+| **50** | **Couleur de la tranche** | La couleur des parois du crop est lue sur `plinth.wallMat.color` (habillage `paroiCouleur`), et `plinth.setColors` **ignore `params.plinthColor` dès qu'un préréglage PBR est posé** — ce qui est le cas au démarrage. Le curseur écrit donc dans une variable que personne ne relit. C'est un arbitrage de PRIORITÉ (le choix explicite doit-il battre le préréglage ?), pas un branchement. |
+
+⚡ **LE PAQUET (a) EST PETIT, ET C'EST UNE BONNE NOUVELLE.** La raison est que
+`monde/branchement-crop.js` porte déjà un pont large — `CHAMPS_HABILLAGE`
+transporte **une cinquantaine de champs** du socle vers le crop, par image et
+sur changement. Tout ce qui passe par `terrain.mapUniforms` et existe dans le
+nuanceur du globe est **déjà branché** : les dix curseurs d'Atlas, la teinte
+hypsométrique, le contraste et le pivot d'altitude, les huit réglages d'effet de
+surface, la photo aérienne et son fondu, l'éclairage entier. **Ce n'est pas
+« beaucoup à rebrancher » : c'est un pont posé, et une poignée d'oubliés.**
+
+## (b) Ce qui demande une vraie transcription de loi — **25 options**
+
+| bloc | # | pourquoi c'est une transcription |
+|---|---|---|
+| **Nuages + Vent** | 74-88 (**15**) | ⛔ **Le groupe `clouds2` est DANS la scène du bloc plat et `visible = false`** — relevé : `Scene/clouds2`, 1 enfant, invisible. Le globe a bien une couche de nuages (`cloud-shell`, visible), mais c'est **un objet sans rapport** : une coquille sphérique portant une texture équirectangulaire procédurale de couverture satellite. Elle n'a ni couverture, ni bourgeonnement, ni altitude, ni dérive au sens des quinze réglages. Les brancher, c'est **porter le volume de nuages sur la sphère**, pas déplacer une écriture. |
+| **Appoint + ombres** | 68-73 (**6**) | La lampe d'appoint et la douceur des ombres agissent sur des `THREE.Light` de la scène du BLOC. Le crop, lui, n'est pas éclairé par des lampes : `monde/eclairage-crop.js` reçoit des **irradiances** (`soleilIrr`, `hemiHaut`, `cielIrr`, `solIrr`) et calcule sa couleur. Ajouter une seconde source demande d'étendre cette loi et ses uniformes. **La douceur des ombres n'a rien à étendre du tout : le crop ne reçoit aucune ombre portée.** |
+| **Points cotés** | 22 (**1**) | Groupe de GÉOMÉTRIE plate dans la scène du bloc. Même cas que le cartouche : il lui faut l'adoption de `monde/cartouche-globe.js` — la similitude, la conversion de base, et le repère local pour qu'il se couche sur la tangente et non sur `+Y`. |
+| **Intervalle des courbes** | 16 (**1**) | Le globe a `uContourInterval`, mais **en MÈTRES**, et `poserHabillage` le cale déjà tout seul sur l'amplitude du crop (`intervalleCourbes`). Le curseur, lui, est en **unités de bloc**. C'est exactement la classe de défaut n° 1 du chantier (SEPT conversions ratées) : `intervalM = valeur × extentMeters / (56 × exagération)`. ⚠️ **Et ça ne se verrait pas** : voir (d). |
+| **SSS** | 111-112 (**2**) | Le nuanceur du crop n'a pas de diffusion sous-surfacique. (Le crop est un TERRAIN, pas un objet translucide — voir aussi (c).) |
+
+## (c) Ce qui n'a **aucun sens** sur la sphère — **6 options**
+
+⚡ **C'est le paquet le plus utile à dire franchement, et il est plus petit que
+je ne le croyais.**
+
+| # | option | pourquoi |
+|---|---|---|
+| **19, 20** | **Taille / Opacité de la grille** | La grille du bloc plat est un quadrillage **en unités de bloc**, dessiné dans le plan. Sur une découpe de sphère, la grille cartographique **existe déjà et n'est pas celle-là** : c'est le graticule de latitude/longitude (`uGraticuleOpacity`, tous les 10°). Deux curseurs qui prétendraient piloter « la grille » en piloteraient deux objets différents selon le mode. |
+| **30** | **Ombrage des pentes** | Déjà **masqué par l'interface** en colorisation Atlas (`visibleWhen(slopeRow, () => !isNatural())`), et Atlas est le mode de démarrage. Le module `naturel-crop.js` dit pourquoi : le peigné sculpte les versants bien mieux que ce brunissage à plat, et les deux ensemble empâtent la carte. **Rien à faire : il est déjà éteint là où il n'a pas de sens.** |
+| **123, 124** | **Ombres / Résolution des ombres** | Elles règlent la carte d'ombre projetée du bloc plat. **Le crop ne reçoit aucune ombre portée** — son ombrage vient des irradiances, pas d'une `shadowMap`. Ces deux réglages appartiennent au moteur du bloc plat, qui n'est plus rendu. |
+| **26** | **Ombrage auto** | ⚠️ **Ce n'est pas une panne, c'est un no-op légitime** : l'interrupteur *rend la main* au calcul automatique. Il est déjà ALLUMÉ au démarrage et aucun curseur n'a été figé, donc l'éteindre puis le rallumer ne change rien — par construction. |
+
+## (d) Ce qui traverse et ne se voit pas — **2 options ⛔, et 6 ⚠️ de la même famille**
+
+⚡ **Les trente-cinq ⛔ des six panneaux se rangent en 2 + 25 + 6 + 2.** Les deux
+derniers sont ici : **« Reflet du soleil »** (93) et **« Speed » des effets de
+surface** (46, une vitesse — invisible sur une image figée par construction).
+
+
+⚠️ **LES COURBES DE NIVEAU DU CROP SONT QUASI INVISIBLES SUR LES TERRES.**
+« Opacité des courbes » **traverse** (`uContourOpacity` change sur le globe) et
+« Épaisseur des courbes » aussi (`uContourWeight`), mais de 0 à 1 l'écran bouge
+de **0,014** — sous le seuil. La capture le montre : à opacité maximale, on
+distingue quelques courbes **dans la mer** (bathymétrie) et **aucune sur la
+terre**.
+
+➡️ **C'est un seul défaut derrière trois curseurs (16, 17, 18).** Régler
+l'intervalle avant d'avoir rendu les courbes visibles reviendrait à empiler un
+réglage sur une panne. **Le travail utile est de trouver pourquoi elles
+s'effacent** — le nuanceur porte un `minFade` fondé sur les texels par pixel
+d'écran (`clamp(1,6 − texel × 0,55)`), et c'est le premier suspect.
+
+⚠️ **Autres « traverse mais invisible », mesurés** : « Reflet du soleil »
+(`uMerSoleilFx` passe bien de 0,72 à 0 puis à 2 sur le matériau `crop-mer`, et
+l'écran bouge de 0,0001 : la géométrie soleil/vue de ce cadrage ne produit pas
+de glint), « Villes & lieux » (0,008 — les toponymes SONT relogés, ils sont
+juste minuscules à cette échelle), « Rivières & eau » (0,046).
+
+## CE QUE J'AI VÉRIFIÉ ET QUI CONTREDIT LE BRIEF
+
+⚡ **« la mer et la matière écrivent dans `realWater` et `terrain`, donc dans le
+vide » — CE N'EST PLUS VRAI POUR LA MER.** Sur les **douze** options de la
+section Mer, **dix marchent, une à moitié, une écrit dans le vide** : mer animée
+**1,685**, couleur de l'eau **0,694**, givre de tranche **0,548**, tranche de
+verre **0,431**, chips d'état de mer **0,334**, vitesse **0,329** *(mouvement)*,
+clapot **0,243**, hauteur des vagues **0,140**, réfraction **0,081**,
+transparence du fond **6,032**, fond marin **2,485**. Seul « Reflet du soleil »
+rend **0,0001** — et il TRAVERSE (voir (d)).
+Les tâches P4 à R2 ont posé le pont : `globe.majReglagesMer({...realWater.reglagesMer})`
+est appelé **à chaque image**, et il LIT les uniformes du socle. Écrire dans
+`realWater` n'est plus écrire dans le vide.
+
+⚡ **Et la MATIÈRE du relief se voit, elle aussi** — **3,561** mesuré sur le
+picker de dix-sept vignettes. Le crop n'a pas de matériau PBR, mais
+`terrain.material.color` traverse par `albedoBase` : la **couleur** d'une
+matière arrive, sa **texture** non. C'est un ⚠️ déguisé en ✅, et il faut le
+dire : changer « Verre » pour « Marbre » repeint le crop sans lui donner du
+marbre.
 
 ---
 
@@ -163,7 +279,7 @@ Terrain, Fonds, Éléments, Effets, Paramètres/Avancé) font **109 options :
 | # | à l’écran | écrit | lu par | sphère | moy | grad | uniformes du globe |
 |---|---|---|---|---|---|---|---|
 | 23 | chips (×1 Réel/×2 Carte/×4 Relief/×8 Drame) | params.demExaggeration (chips ×1..×8) → regenerateTerrain + saveZoomExag | globe.majExageration / lireExageration(params) — exagération partagée | ✅ | 0.226 | 0.237 | — |
-| 24 | Échelle fine | params.demExaggeration (fin) → idem, commit au relâchement | idem | ⛔ | 0.000 | 0.000 | — |
+| 24 | Échelle fine | params.demExaggeration (fin) → idem, commit au relâchement | idem | ✅ | 0.188 | 0.320 | — |
 
 **Ombrage**
 
@@ -219,8 +335,8 @@ Terrain, Fonds, Éléments, Effets, Paramètres/Avancé) font **109 options :
 |---|---|---|---|---|---|---|---|
 | 53 | segments | params.resolution/detail/detailScale (preset) → regenerateTerrain | le MNT du bloc — le crop en dépend par `dem` | ✅ | 0.271 | 0.436 | — |
 | 54 | Détail (zoom) | params.demZoom → onZoomPicked → chargement MNT | tout le crop | ✅ | 59.588 | 5.620 | `uContourInterval` `uContourOpacity` `uOceanDepth` `uLandMax` `uReliefBas` `uPlancherRampeM` `uMerRampeOn` `uMerFondBudgetM` `uOceanShallow` `uOceanMid` `uOceanDeep` `uResRefM` `uCropOn` `uEstompage` `uHabOn` `uCoastMaskOn` `uMargeCoteM` `uSolOpacite` `uContourWeight` `uAerialCoastFade` `uFondOn` `uFondMetres` `uAnalysisOn` `uTexShade` `uWetK` `uExpoK` `uHemi` `uTreeLine` `uHeightContrast` `uHeightPivot` `uHazeAmt` `uHazeColor` `uEclairageOn` `uSoleilDir` `uSoleilIrr` `uHemiHaut` `uCielIrr` `uSolIrr` `uParoiCielIrr` `uParoiSolIrr` `uAlbedoBase` `uAlbedoTeinte` `uSurfaceFx` `uFxBlend` `uFxOpacite` `uFxColA` `uFxColB` `uFxP1` `uFxP2` `uFxP3` `uParoiCouleur` |
-| 55 | Détail fin | params.detail → regenerateTerrain (relâchement) | maillage du bloc plat ; le crop a son propre maillage | ⛔ | 0.000 | 0.000 | — |
-| 56 | Échelle du détail | params.detailScale → idem | idem | ⛔ | 0.000 | 0.000 | — |
+| 55 | Détail fin | params.detail → regenerateTerrain (relâchement) | maillage du bloc plat ; le crop a son propre maillage | ✅ | 0.191 | 0.333 | — |
+| 56 | Échelle du détail | params.detailScale → idem | idem | ✅ | 0.184 | 0.318 | — |
 
 ## Panneau « Fonds »
 

@@ -26,6 +26,8 @@ const has = (n) => args.includes(n)
 const PORT = Number(opt('--port', '5561'))
 const SORTIE = opt('--sortie', path.join(RACINE, '.banc/R18'))
 const FILTRE = opt('--filtre', '')
+// une liste d'index, quand on ne veut re-mesurer QUE quelques options
+const CIBLES = (opt('--cibles', '') || '').split(',').filter((x) => x !== '').map(Number)
 const IMAGES = Number(opt('--images', '6')) // images moyennées par relevé
 const REPOS_MS = Number(opt('--repos', '700')) // attente après une écriture
 const CAPTURES = has('--captures')
@@ -467,7 +469,7 @@ try {
   const LENTS = /photo aérienne|opacité de la photo|fondu à la côte|détail|échelle du détail|segments|socle|isoler|mer animée|rivières|villes|sommets|picker|maillage|ombres|continu|tranche/i
   const attente = (c) => (LENTS.test(c.nom + ' ' + c.section) ? Math.max(REPOS_MS, 2800) : REPOS_MS)
 
-  const cible = controles.filter((c) => !FILTRE || (c.panneau + '|' + c.section + '|' + c.nom).toLowerCase().includes(FILTRE.toLowerCase()))
+  const cible = controles.filter((c) => (CIBLES.length ? CIBLES.includes(c.i) : (!FILTRE || (c.panneau + '|' + c.section + '|' + c.nom).toLowerCase().includes(FILTRE.toLowerCase()))))
   const bouge = (idx, ph) => page.evaluate((i, p) => {
     try { return { pose: String(window.__r18.cibles[i].apply(p)) } } catch (er) { return { err: String(er.message).slice(0, 120) } }
   }, idx, ph)
