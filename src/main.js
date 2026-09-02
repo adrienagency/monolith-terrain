@@ -42,7 +42,7 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -52,7 +52,7 @@ import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
 import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
-import { focusRayHit } from './autofocus.js'
+import { focusRayHit, focusRayHitGlobe } from './autofocus.js'
 import { doitRafraichirCartouche } from './ground-info.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
@@ -387,9 +387,17 @@ const params = {
 
   // camera & depth of field
   fov: 30,
-  autoFocus: true, // pointer→terrain autofocus (replaces the old cone autofocus)
-  focusDistance: 13.2698,
-  focusRange: 45, // wide in-focus band by default — most of the relief stays sharp
+  // ══════ LA PROFONDEUR DE CHAMP — règle D20 (Tâche R34) ═══════════════════
+  // ⚠️ `focusDistance` est en MÈTRES RÉELS (caméra → point de focus), plus en
+  // unités de bloc : la conversion vers l'espace de la caméra qui lit la
+  // profondeur vit dans `poserMiseAuPoint`, et nulle part ailleurs.
+  // `focusRatio` = k : la plage de netteté vaut k × focusDistance, ce qui rend
+  // le flou APPARENT identique à tout zoom — 5 km comme 5 000 km (D20, rép. 3).
+  // (`focusRange`, en unités de bloc, n'existe plus : un gabarit qui le porte
+  // encore est ignoré sur ce point et garde le k par défaut.)
+  autoFocus: true, // mise au point sous le pointeur, à TOUS les zooms (D20, rép. 1 et 2)
+  focusDistance: 5000,
+  focusRatio: 0.3,
   // Depth of field is OFF by default and gated by an explicit flag, mirroring
   // fogEnabled. bokehScale alone can't serve as the gate: it doubles as the
   // strength slider, so "off" would mean losing the user's chosen strength.
@@ -2610,7 +2618,7 @@ function ensureDof() {
     height: 720,
   })
   // drive the circle-of-confusion in world units so focus params are intuitive
-  poserMiseAuPoint() // ⚠️ la conversion `1/k` vit là-bas, et nulle part ailleurs
+  poserMiseAuPoint() // ⚠️ la chaîne d'unités vit là-bas, et nulle part ailleurs
   dofPass = new EffectPass(camEffets, dof)
   // BEFORE the final colour/tonemap pass — DoF belongs in linear HDR
   composer.addPass(dofPass, composer.passes.length - 1)
@@ -2743,10 +2751,17 @@ setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
 const mouse = new THREE.Vector2(0, 0)
 const focusRay = new THREE.Raycaster() // reused for pointer autofocus
 const _pickNdc = new THREE.Vector2() // scratch NDC for modes' pointUnder hook
+// ⚡ **LE POINTEUR EST-IL SUR LA TOILE ?** — règle D20, réponse 2 : la mise au
+// point suit le pointeur TANT QU'IL VISE LE RENDU ; sur un panneau, hors de la
+// fenêtre ou onglet quitté, elle glisse vers le centre de l'écran (voir le
+// tick, `viseeFocus`). Posé ici parce que c'est le seul écouteur qui voit la
+// souris partout, panneaux compris.
+let pointeurSurToile = false
 window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
   const ny = -((e.clientY / window.innerHeight) * 2 - 1)
   mouse.set(nx, ny)
+  pointeurSurToile = viseLeCanevas3D(e.target, renderer.domElement)
   // ⚠️ GARDE STRUCTURELLE (task 13, RÉGRESSION CORRIGÉE) — voir viseLeCanevas3D
   // dans gpx.js pour le pourquoi complet. Cet écouteur est posé sur `window`
   // (pas sur le canevas 3D) parce qu'il doit connaître la souris même hors du
@@ -2770,6 +2785,11 @@ window.addEventListener('pointermove', (e) => {
     renderer.domElement.style.cursor = ''
   }
 })
+
+// le pointeur qui QUITTE la fenêtre (`relatedTarget` nul) ou l'onglet : la
+// mise au point se replie au centre — en glissant, pas d'un coup
+window.addEventListener('pointerout', (e) => { if (!e.relatedTarget) pointeurSurToile = false })
+window.addEventListener('blur', () => { pointeurSurToile = false })
 
 // click-to-dive: a plain click on the map (NOT an orbit drag) plunges one level
 // onto the point under the cursor — march the height field for the hit, convert
@@ -5263,39 +5283,140 @@ function camNuagesBloc() {
   return _camNuages.set(p[0], p[1], p[2])
 }
 
-// ══════ LA LONGUEUR QUI TRAVERSE — TÂCHE D16-a, LA CLASSE `1/k` ════════════
+// ══════ LA CHAÎNE D'UNITÉS DE LA MISE AU POINT — Tâche R34, règle D20 ═══════
 //
-// ⛔ **UNE LONGUEUR MESURÉE DANS L'ESPACE DU BLOC ET CONSOMMÉE PAR LA CAMÉRA QUI
-// REND EST FAUSSE D'UN FACTEUR `1/k`** — et `1/k` va de ≈ 4,5 à z3 à ≈ 3 700 à
-// z16. C'est la classe de défaut la plus fréquente de ce chantier.
+// ⛔ **TROIS ESPACES, ET LE FLOU N'EN LIT QU'UN.** Le bloc (`TERRAIN_SIZE = 56`
+// unités pour `largeurBlocM()` mètres), le globe (`R_GLOBE = 100` unités pour
+// 6 371 km, soit `ORBITAL_M_PER_UNIT = 63 710 m` l'unité), et la caméra des
+// effets, `cameraDeRendu()` — `camGlobe` sous la fusion des passes, c'est-à-dire
+// TOUJOURS l'espace globe, en orbite comme en surface, puisque la similitude
+// `poseFond` y transporte la caméra du bloc avec `k = largeurBlocM / 56 / 63 710`
+// (0,003 83 à z13, 0,007 67 au lieu de démarrage — le `1/k = 130,4` de D16-a).
 //
-// ⚡ **ET LA FUSION DES PASSES VIENT DE LA RENDRE VISIBLE AU LIEU DE MUETTE.**
-// Tant que la profondeur était effacée, la mise au point du flou pouvait valoir
-// n'importe quoi : **0 pixel sur 1 024 000 changeaient** (`.banc/D16/flou-avant.json`).
-// Maintenant que la profondeur est vraie, une mise au point exprimée en unités
-// de bloc et lue en unités de globe met le point à `1/k` fois trop loin.
+// ⚠️ **`DepthOfFieldEffect` (postprocessing 6.36) COMPARE DES LONGUEURS DE MONDE,
+// pas une profondeur normalisée** : `circle-of-confusion.frag` reconstruit
+// `length(viewPosition)` depuis le tampon de profondeur et rend
+// `smoothstep(0, focusRange, |distance − focusDistance|)`. Le brief supposait un
+// `[0, 1]` entre `near` et `far` — vrai des versions < 6.30, plus maintenant ;
+// la sonde l'a vérifié (`profondeurMire / d = 1,000` à 5 km comme à 2 000 km).
 //
-// ⚠️ **CE FACTEUR NE DISPARAÎTRA QU'AVEC LA SIMILITUDE ELLE-MÊME (D16-b).** Il
-// n'est pas supposé : c'est **le `k` que `poseFond` vient de rendre**, mémorisé
-// à l'image où elle l'a calculé. Hors frontière de rendu il vaut 1 et toutes les
-// lignes ci-dessous redeviennent celles du dépôt, au bit près.
+// LA CHAÎNE, chaque facteur chiffré :
+//   point de focus (mètres réels, `params.focusDistance`)
+//     ÷ `metresParUniteEffets()` — 63 710 m/unité (camGlobe, ou l'orbite) ;
+//                                   `largeurBlocM() / 56` hors fusion en surface
+//                                   (27 354 / 56 = 488 m/unité à z12 ;
+//                                    13 677 / 56 = 244 m/unité à z13)
+//     = `cocMaterial.focusDistance`, en unités de la caméra qui lit la profondeur
+//   plage de netteté = `params.focusRatio` (k, sans unité) × cette distance
+//     = `cocMaterial.focusRange` — donc `k × distance` en mètres aussi, et le
+//       cercle de confusion à ±20 % de la distance vaut smoothstep(0,2 / k) quel
+//       que soit le zoom : c'est ce qui rend le flou apparent constant (D20, 3).
+//
+// ⛔ **ET LES PLANS `near`/`far` NE SUIVENT PAS TOUT SEULS.** `copyCameraSettings`
+// (postprocessing) copie `camera.near` et `camera.far` PAR VALEUR, une seule
+// fois, à la construction ; seules les matrices passent par référence. Or
+// `camGlobe.near` vaut 0,025 à 5 km et 0,5 dès 130 km (`planProche`). Mesuré
+// (`traces-R34/flou-avant.json`) : le bokeh allumé à 5 km linéarisait encore la
+// profondeur avec `near = 0,0246` à 130 km — une mire posée EXACTEMENT à la
+// distance de mise au point y sortait à CoC = 1,00 (32 px de flou) alors que sa
+// profondeur relue valait 1,000 × f. C'est cela qui « semblait mal fonctionner » :
+// la distance écrite était juste (écrit/réel = 0,999 sur 20 images), c'est la
+// LECTURE de la profondeur qui était dans l'espace d'une autre altitude. On
+// resynchronise donc les plans à chaque écriture — deux comparaisons, pas plus.
+//
+// `_kFond` : le k de la similitude, mémorisé par `majCameraFond` (sondes).
 let _kFond = 1
-// ⚠️ **MÊME `try` QUE `cameraDeRendu`, ET POUR LA MÊME RAISON** : `setDofEnabled`
-// est appelée une fois AVANT la déclaration de `frontiereActive`. Lire une
-// `const` avant son initialisation lève une `ReferenceError` ; on rend alors 1,
-// c'est-à-dire le comportement du dépôt, et la première image recale.
-function facteurFond() {
+function metresParUniteEffets() {
+  // ⚠️ même `try` que `cameraDeRendu` : `setDofEnabled` est appelée une fois
+  // AVANT la déclaration de `modes` (bokeh éteint par défaut, donc sans effet)
   try {
-    return fusionDesPasses && modes?.mode === 'surface' && _kFond > 0 ? _kFond : 1
-  } catch { return 1 }
+    if (cameraDeRendu() === camGlobe || modes?.mode === 'orbital') return ORBITAL_M_PER_UNIT
+    const l = largeurBlocM()
+    return l > 0 ? l / TERRAIN_SIZE : 1
+  } catch { return ORBITAL_M_PER_UNIT }
 }
-// La mise au point, convertie à UN SEUL endroit. Sept sites l'écrivaient ; ils
-// passent tous par ici, sans quoi le prochain qui s'ajoute oublierait le facteur.
-function poserMiseAuPoint(distanceBloc = params.focusDistance, porteeBloc = params.focusRange) {
+// une longueur du BLOC (unités) → mètres réels : 56 unités = `largeurBlocM()`
+function blocVersMetres(d) {
+  const l = largeurBlocM()
+  return l > 0 ? (d * l) / TERRAIN_SIZE : d
+}
+// La mise au point, convertie à UN SEUL endroit. Tous les sites passent par ici,
+// sans quoi le prochain qui s'ajoute oublierait la conversion.
+function poserMiseAuPoint(distanceM = params.focusDistance, ratio = params.focusRatio) {
   if (!dof) return
-  const f = facteurFond()
-  if (distanceBloc != null) dof.cocMaterial.worldFocusDistance = distanceBloc * f
-  if (porteeBloc != null) dof.cocMaterial.worldFocusRange = porteeBloc * f
+  const cam = cameraDeRendu()
+  const coc = dof.cocMaterial
+  if (coc.uniforms.cameraNear.value !== cam.near || coc.uniforms.cameraFar.value !== cam.far) coc.copyCameraSettings(cam)
+  if (distanceM != null) coc.focusDistance = distanceM / metresParUniteEffets()
+  if (ratio != null) coc.focusRange = Math.max(0.01, ratio) * coc.focusDistance
+}
+
+// ══════ LA MISE AU POINT SOUS LE POINTEUR, À TOUS LES ZOOMS — D20 ═══════════
+//
+// ⚡ **LE FLOU EST L'EXCEPTION À « LES EFFETS SEULEMENT EN CROP »** (Adrien,
+// réponse 1) : la mise au point suit donc le pointeur en orbite, en surface et
+// au crop — le tick ne teste plus le mode. Le rayon caméra → pointeur est lancé
+// **contre la Terre affichée** : sous la fusion c'est le globe — sphère
+// `R_GLOBE` + relief dessiné (`globe.hauteurDessinee`, en mètres, ×
+// `uUnitesParMetre`, exagération comprise) — et non le bloc plat : à z4 le
+// bloc mesure 7 000 km et la flèche de la sphère à son bord vaut ~960 km. Hors
+// fusion en surface, le bloc plat est ce qui est dessiné, et la marche du dépôt
+// (`terrain.sample`) reste la bonne.
+//
+// ⚡ **LE REPLI AU CENTRE GLISSE** (réponse 2) : quand le pointeur quitte la
+// toile ou passe sur un panneau, la VISÉE (en NDC) glisse vers le centre de
+// l'écran avec une constante de temps de 250 ms, puis la distance suit avec la
+// sienne (125 ms, `dt × 8`). Un saut de mise au point se voit comme une
+// pulsation du flou ; un glissement ne se voit pas. Le temps mesuré est dans
+// `rapport-R34.md` (`repli`).
+const CENTRE_ECRAN = new THREE.Vector2(0, 0)
+const viseeFocus = new THREE.Vector2(0, 0) // la visée qui GLISSE, en NDC
+const TAU_VISEE_FOCUS = 0.25 // s — 63 % du chemin en 250 ms, 95 % en 750 ms
+const _pFocus = new THREE.Vector3()
+function unitesParMetreGlobe() {
+  // la valeur que le NUANCEUR utilise (exagération comprise) ; avant que le globe
+  // n'existe, la sphère nue — il n'y a alors rien de dessiné à viser
+  return globe?.uniforms?.uUnitesParMetre?.value ?? R_GLOBE / EARTH_RADIUS_M
+}
+// le rayon DESSINÉ dans la direction de `p` : la sphère + la hauteur que le GPU
+// dessine. `candidats` : la liste des tuiles à hauteurs, bâtie UNE fois par
+// marche — sans elle `hauteurDessinee` la refait à chaque appel (filtre + tri
+// de 100 à 200 tuiles), et c'est là que passaient 0,2 ms par image, mesuré.
+let _candidatsFocus = null
+function rayonAffiche(p) {
+  const { lat, lon } = sphereToLatLon(_pFocus.set(p.x, p.y, p.z))
+  const h = globe?.hauteurDessinee?.(lat, lon, _candidatsFocus)
+  return R_GLOBE + (h ?? 0) * unitesParMetreGlobe()
+}
+// distance caméra → Terre affichée sous une visée NDC, en MÈTRES RÉELS ; null = ciel
+//
+// ⚠️ **MÉMOÏSÉE SUR LA POSE** : la marche coûte 0,10 à 0,17 ms (21 à 29 lectures
+// du relief, mesuré) ; tant que ni la visée ni la caméra n'ont bougé, le résultat
+// de l'image précédente est le même — et une carte posée, pointeur immobile,
+// c'est l'état le plus fréquent. Une tuile qui arrive entre-temps change la
+// hauteur dessinée sans bouger la caméra : l'écart se résorbe au premier geste.
+const _memoVisee = { x: NaN, y: NaN, cam: null, m: new Float64Array(16), d: null }
+function distanceSousLaVisee(ndc) {
+  const cam = cameraDeRendu()
+  if (cam === camGlobe || modes.mode === 'orbital') {
+    const el = cam.matrixWorld.elements
+    let meme = _memoVisee.cam === cam && _memoVisee.x === ndc.x && _memoVisee.y === ndc.y
+    for (let i = 0; meme && i < 16; i++) if (_memoVisee.m[i] !== el[i]) meme = false
+    if (meme) return _memoVisee.d
+    focusRay.setFromCamera(ndc, cam)
+    _candidatsFocus = globe?.tuilesAvecHauteurs?.() ?? null
+    const d = focusRayHitGlobe(focusRay.ray.origin, focusRay.ray.direction, rayonAffiche, {
+      rayon: R_GLOBE,
+      coque: 9000 * unitesParMetreGlobe() * 1.5 + 0.02, // l'Everest exagéré, et de la marge
+    })
+    _candidatsFocus = null
+    _memoVisee.cam = cam; _memoVisee.x = ndc.x; _memoVisee.y = ndc.y; _memoVisee.m.set(el)
+    _memoVisee.d = d == null ? null : d * ORBITAL_M_PER_UNIT
+    return _memoVisee.d
+  }
+  focusRay.setFromCamera(ndc, camera)
+  const d = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
+  return d == null ? null : blocVersMetres(d)
 }
 
 // ══════════ LE SEUIL DU SOCLE — Tâche 3 du plan, BRANCHÉE ══════════════════
@@ -7454,7 +7575,7 @@ function applyUserTemplate(tmpl) {
   // camera lens / depth-of-field / shadow look
   if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
   if (params.bokehScale != null) { if (dof) dof.bokehScale = params.bokehScale; setDofEnabled(params.bokehEnabled && params.bokehScale > 0) }
-  if (params.focusRange != null && dof) poserMiseAuPoint(null, params.focusRange)
+  if (params.focusRatio != null && dof) poserMiseAuPoint(null, params.focusRatio)
   if (params.shadowMode) applyShadowMode()
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
@@ -7852,10 +7973,10 @@ function shuffleLook() {
   if (params.bokehEnabled) {
     params.autoFocus = true
     params.bokehScale = +rnd(5, 18).toFixed(1)
-    params.focusRange = Math.round(rnd(14, 34))
+    params.focusRatio = +rnd(0.12, 0.45).toFixed(2) // k : la plage vaut k × la distance de focus (D20)
   }
   setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
-  if (dof) { dof.bokehScale = params.bokehScale; poserMiseAuPoint(null, params.focusRange) }
+  if (dof) { dof.bokehScale = params.bokehScale; poserMiseAuPoint(null, params.focusRatio) }
 
   // 6) FOND + SOCLE par théorie des couleurs (Adrien) : un schéma élégant
   //    (complémentaire / split / analogue / triadique / mono), contraste bas ou
@@ -10523,9 +10644,11 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
   // curseur, et sur cet écran le curseur est sur le rail.
   if (pointNet) {
     params.autoFocus = false
-    params.focusDistance = camera.position.distanceTo(
+    // ⚠️ `pointNet` est un point du BLOC : sa distance est en unités de bloc, et
+    // `params.focusDistance` se donne en MÈTRES (règle D20) — d'où `blocVersMetres`.
+    params.focusDistance = blocVersMetres(camera.position.distanceTo(
       new THREE.Vector3(pointNet.x, pointNet.y, pointNet.z)
-    )
+    ))
     if (dof) poserMiseAuPoint(params.focusDistance, null)
   }
   return { restaurer }
@@ -12906,6 +13029,14 @@ history.reset()
 
 // console access for debugging/scripting
 window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, cadreLeDamier, quitteCadrageDamier, modeBoutonCamera, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
+  // ⚠️ **LA BIBLIOTHÈQUE ELLE-MÊME, pour les sondes (R34).** Une sonde qui doit
+  // injecter une mire dans la scène ou relire le tampon de profondeur a besoin
+  // des MÊMES classes que le rendu — une seconde copie de three importée par la
+  // page ne partagerait ni ses caches ni ses `instanceof`.
+  THREE,
+  // LA MISE AU POINT — Tâche R34 : ce que la sonde relit pour prouver la chaîne
+  // d'unités (mètres → unités de la caméra des effets) et la Terre affichée.
+  distanceSousLaVisee, metresParUniteEffets, get pointeurSurToile() { return pointeurSurToile }, get viseeFocus() { return viseeFocus },
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -13679,27 +13810,25 @@ function tick() {
   // terrain scan progress (uScanT 0→1, auto-idle)
   scan?.update()
 
-  // pointer autofocus: focus where the ray from the camera through the cursor
-  // meets the terrain; on a miss (sky / off-map) hold the last valid focus
-  if (params.autoFocus && modes.mode === 'surface') {
-    // lecture GPX : le bokeh se focalise EN PERMANENCE sur la tête de course
-    const headW = gpxLayer.isPlaying?.() ? gpxLayer.headWorld : null
+  // la mise au point sous le pointeur — à TOUS les zooms (D20), voir
+  // `distanceSousLaVisee` ; `null` (ciel, hors carte) : on vise le centre
+  if (params.autoFocus) {
+    const headW = modes.mode === 'surface' && gpxLayer.isPlaying?.() ? gpxLayer.headWorld : null
+    let cibleM = null
     if (headW) {
-      const d = camera.position.distanceTo(headW)
-      params.focusDistance += (d - params.focusDistance) * Math.min(1, dt * 8)
+      // lecture GPX : le bokeh se focalise EN PERMANENCE sur la tête de course
+      cibleM = blocVersMetres(camera.position.distanceTo(headW))
     } else {
-      focusRay.setFromCamera(mouse, camera)
-      const hit = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, {
-        halfExtent: TERRAIN_SIZE / 2,
-      })
-      if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
+      viseeFocus.lerp(pointeurSurToile ? mouse : CENTRE_ECRAN, 1 - Math.exp(-dt / TAU_VISEE_FOCUS))
+      cibleM = distanceSousLaVisee(viseeFocus)
+      if (cibleM == null && pointeurSurToile) cibleM = distanceSousLaVisee(CENTRE_ECRAN)
     }
+    if (cibleM != null) params.focusDistance += (cibleM - params.focusDistance) * Math.min(1, dt * 8)
   }
-  // `dof` is null until bokeh is first switched on (lazy build — see
-  // ensureDof). params.focusDistance keeps tracking either way, and
-  // ensureDof() seeds the material from it, so nothing is lost while it
-  // does not exist.
-  if (dof) poserMiseAuPoint(params.focusDistance, null)
+  // `dof` est nul tant que le bokeh n'a pas été allumé (construction paresseuse,
+  // voir ensureDof) ; `params.focusDistance` suit quand même, et ensureDof()
+  // ensemence le matériau avec — rien n'est perdu tant qu'il n'existe pas.
+  if (dof) poserMiseAuPoint(params.focusDistance, params.focusRatio)
 
   // `half` = le demi-BLOC (l'échelle du bateau), `bord` = où l'eau s'arrête :
   // le bloc, ou l'emprise 3×3 entière en mode continu. Les confondre aurait

@@ -432,3 +432,67 @@ n° 1 d'un rapport précédent, mot pour mot.
   qui saute onze fois.
 - ⚠️ **Sept des 72 options ✅ de l'inventaire ont leurs deux grandeurs sous le
   bruit du banc** (98, 36, 91, 120, 11, 56, 24). À remesurer avant de s'y fier.
+
+---
+
+# ÉTAT AU 2026-09-01, 20 h — sept agents en vol
+
+**`regroupement` : 4 667 tests · 0 échec · audit 241 = 241.** Règles nouvelles :
+**D19** (contrôles Google Earth : glisser = la Terre tourne autour de son centre ;
+molette = vers le point au centre de l'écran) et **D20** (profondeur de champ :
+même flou apparent à tout zoom, mise au point sous le pointeur avec repli au
+centre, **active partout** — l'exception à « les effets seulement en crop »).
+
+| tâche | sujet | arbre | branche |
+|---|---|---|---|
+| **R32** | le pivot = centre de la Terre jusqu'au crop — **confusion d'espace** : quatre passes ont mesuré l'axe du BLOC (le point de surface, `(0,y,0)` en unités de bloc) en l'appelant l'axe de la Terre | `wt-orb3` | `orbite-jusquau-crop` |
+| ~~R33~~ | **FUSIONNÉ** (tests rouges seuls) — pivot à **6 263–6 297 km** du centre pour tout glissé vertical ; glissé H = lacet (0,0000° contre 47,97° en orbite) ; 9 rouges sur 10 dans `test/attaque-r33-ROUGE.mjs` | `wt-att2` | `attaque-pivot-globe` |
+| **PF1** | le profil : qui consomme, trois postes de vue × trois machines émulées, sonde commune `scripts/profil-pf1.mjs` | `wt-pp1` | `perf-profil` |
+| **PF2** | priorité des tuiles : visible d'abord, centre d'abord, à la Cesium (SSE, file de priorité, annulation) | `wt-pp2` | `perf-priorite` |
+| **PF3** | mer et effets seulement en crop — **sauf `dofPass`, active partout (D20)** | `wt-pp3` | `perf-crop-seul` |
+| **PF4** | les bugs qui coûtent : `GL_INVALID_OPERATION`, rotation propre vs rendu à la demande, palier 0×0, clic qui saute, voile | `wt-pp4` | `perf-bugs` |
+| ~~R34~~ | **FUSIONNÉ** — flou en px identique à 130 km / 2 000 km / 15 000 km (29/12/1/12/30) ; la cause était `near`/`far` copiés une fois par valeur, pas le 130,4 ; 4 675 · 0 | `wt-dof` | `flou-zoom` |
+
+⚠️ **Nommage** : la campagne performance s'appelle **PF1→PF4** — les `brief-P2.md`
+/ `rapport-P2.md`… sont une campagne **antérieure**, ne pas confondre.
+
+**Ordre de fusion prévu** : R33 (tests rouges, `src/` vide) → R32 → PF4 (format
+de profondeur) → PF3 (passes) → R34 (paramètres du flou, dépend de PF3 laissant
+`dofPass` active) → PF2 (`globe.js` cache) → PF1 (sondes seules).
+Le script `fusion-test.py` pour `package.json` à chaque fois, puis `audit:tests`.
+
+---
+
+# ⛔ SUSPENSION DU 2026-09-02, 22 h 58 — limite de session atteinte, cinq agents tués
+
+Les cinq agents en vol sont morts sur `HTTP 429 — session limit, reset 00:50
+Europe/Berlin`. **Rien n'est perdu : chaque arbre garde son travail.** État relevé
+à 22 h 58 :
+
+| tâche | arbre | commits au-dessus de `regroupement` | fichiers modifiés non commités | rapport |
+|---|---|---|---|---|
+| **R32** pivot centre de la Terre | `wt-orb3` | 0 | **7** | `rapport-R32.md` (partiel) |
+| **PF1** profil | `wt-pp1` | 1 | 0 | `rapport-PF1.md` (à vérifier : complet ?) |
+| **PF2** priorité tuiles | `wt-pp2` | 1 | 3 | — |
+| **PF3** mer/effets crop seul | `wt-pp3` | 2 | 0 | — |
+| **PF4** bugs | `wt-pp4` | 0 | 5 | — |
+
+**Consigne d'Adrien : relancer tout à 00 h 59.** Procédure, par arbre :
+1. `git status` + `git log regroupement..HEAD` + lire le rapport partiel s'il existe ;
+2. **tenter d'abord `SendMessage` sur l'agent d'origine** (son contexte survit à
+   la coupure) avec : « tu as été tué par la limite de session ; ton arbre
+   contient X commits et Y fichiers modifiés ; reprends depuis là, ne refais pas
+   ce qui est commité » ;
+3. si l'agent ne répond plus : **re-dispatcher un agent neuf** avec le même
+   brief, plus le paragraphe « lis d'abord `git status`, `git diff`, et le
+   rapport partiel — c'est l'état d'un prédécesseur, continue-le » ;
+4. R32 reçoit en plus la direction du soir : **deux pivots pour deux gestes** —
+   rotation rigide caméra + cible autour du centre de la Terre pour le glissé
+   (le motif de `pivoterAutourDuBloc`, axe changé hors crop), inclinaison
+   inchangée autour de la cible de surface ; l'objection « le bloc ne suivrait
+   pas » est **fausse** (`passeSurface.enabled = false`, rien à faire suivre).
+5. Tout brief de mesure porte la consigne : **ne jamais rendre la main « en
+   attendant » un banc** — attendre dans la même exécution.
+
+Base au moment de la suspension : **4 675 tests · 0 échec · audit 241 = 241**
+(R33 et R34 fusionnés). Ordre de fusion prévu inchangé : R32 → PF4 → PF3 → PF2 → PF1.

@@ -24,18 +24,24 @@ export function buildCameraPanel(ctx) {
   })
 
   const sCam = panel.addSection(section('Objectif & mise au point', { open: false }))
-  // Focus distance/range are cut: main.js lerps focusDistance toward the pointer
-  // every frame while autoFocus is on (the default), so the sliders snapped back
-  // in ~125ms and were never actually usable. The params + worldFocusDistance/
-  // worldFocusRange writes stay live internally (main.js) — only the dead UI goes.
+  // Le curseur de DISTANCE de mise au point est coupé : main.js glisse
+  // focusDistance vers le pointeur à chaque image tant que l'autofocus est actif
+  // (le défaut), le curseur revenait en ~125 ms et n'a jamais été utilisable.
   const bokehSlider = slider({ label: 'Intensité du flou', min: 0, max: 32, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; const d = ctx.getDof(); if (d) d.bokehScale = v; ctx.setDofEnabled(params.bokehEnabled && v > 0) } })
+  // ⚡ LA PLAGE DE NETTETÉ EST UN RAPPORT, PAS UNE LONGUEUR — règle D20 (R34) :
+  // k × la distance caméra → point de focus. Le tick de main.js relit
+  // `params.focusRatio` à chaque image (`poserMiseAuPoint`), il n'y a donc rien
+  // d'autre à écrire ici, et le même k rend le même flou à 5 km et à 5 000 km.
+  const plageSlider = slider({ label: 'Plage de netteté (× distance)', min: 0.05, max: 1.5, step: 0.01, get: () => params.focusRatio, set: (v) => { params.focusRatio = v } })
   sCam.body.append(
     slider({ label: 'Champ de vision (fov)', min: 20, max: 60, step: 1, get: () => params.fov, set: (v) => { params.fov = v; ctx.camera.fov = v; ctx.camera.updateProjectionMatrix() } }),
     toggle({ label: 'Mise au point auto (pointeur)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),
     toggle({ label: 'Flou de profondeur (bokeh)', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.setDofEnabled(v && params.bokehScale > 0); const d = ctx.getDof(); if (d) d.bokehScale = params.bokehScale; refreshAll() } }),
-    bokehSlider
+    bokehSlider,
+    plageSlider
   )
   visibleWhen(bokehSlider, () => params.bokehEnabled)
+  visibleWhen(plageSlider, () => params.bokehEnabled)
 
   // looping cinematic camera moves — orbit / fly-over / crane, etc.
   const sAuto = panel.addSection(section('Automatisations'))
