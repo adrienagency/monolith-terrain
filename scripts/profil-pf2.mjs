@@ -259,6 +259,10 @@ function INSTRUMENTER() {
   const updOrig = g.update.bind(g)
   g.update = function (camera, dt) {
     msTraverse = 0
+    // les builds se paient ENTRE deux images (dans les promesses) : on relève
+    // ce qui s'est accumulé depuis l'image d'avant, puis on remet à zéro
+    const msBuildDepuis = msBuildImage
+    const nBuildDepuis = nBuildImage
     msBuildImage = 0
     nBuildImage = 0
     camDir = camera.position.clone().normalize()
@@ -296,7 +300,7 @@ function INSTRUMENTER() {
       visibles: { n: nVis, dMoy: nVis ? Math.round(dSomme / nVis * 100) / 100 : null, dMax: Math.round(dMax * 100) / 100, horsEcran: nVisHorsEcran },
       frame: g.frame, t: Math.round(performance.now()), phase: P.phase,
       msTraverse: Math.round(msTraverse * 1000) / 1000, msUpdate: Math.round(msUpdate * 1000) / 1000,
-      msBuild: Math.round(msBuildImage * 100) / 100, nBuild: nBuildImage, volsHorsChamp,
+      msBuild: Math.round(msBuildDepuis * 100) / 100, nBuild: nBuildDepuis, volsHorsChamp,
       drawn: g._drawn, visites: g._visites, cache: g.tiles.size, file: g.queue.length, vol: g.inFlight,
       credit: g._credit, refus: g._refus, refusFile: g._refusFile, purgees: g._purgees,
       busy: !!e.modes?.busy, travel: !!e.modes?.travel, az: e.controls?.getAzimuthalAngle ? Math.round(e.controls.getAzimuthalAngle() * 1000) / 1000 : null,
@@ -439,7 +443,7 @@ async function lancer() {
 
   const journal = { etiquette: ETIQ, scenario: SCENARIO, port: PORT, dist: DIST, cpu: CPU, departM: DEPART_M, crans: CRANS, periodeMs: PERIODE, viewport: [LARGEUR, HAUTEUR], date: new Date().toISOString() }
   const erreurs = []
-  page.on('console', (m) => { if (m.type() === 'error') erreurs.push(m.text().slice(0, 160)) })
+  page.on('console', (m) => { if (m.type() === 'error' || (m.type() === 'warning' && /décodeur|decodeur|Worker/i.test(m.text()))) erreurs.push(m.text().slice(0, 160)) })
   page.on('pageerror', (e) => erreurs.push('pageerror: ' + String(e.message).slice(0, 160)))
 
   const t0 = Date.now()

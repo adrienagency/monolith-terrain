@@ -72,8 +72,8 @@ async function relacher(n = Infinity) {
   await souffler()
 }
 
-const { Globe, _resetTileMemo, MAX_Z } = await import('../src/globe.js')
-const { latLonToSphere, latLonToTile, R_GLOBE, ORBITAL_M_PER_UNIT } = await import('../src/geo.js')
+const { Globe, _resetTileMemo, MAX_Z, boiteTuile } = await import('../src/globe.js')
+const { latLonToSphere, latLonToTile, tileToLatLon, R_GLOBE, ORBITAL_M_PER_UNIT, EARTH_RADIUS_M } = await import('../src/geo.js')
 const { _resetDemSource, DEM_SOURCES } = await import('../src/dem-source.js')
 
 const ROOT_Z = 2
@@ -133,6 +133,22 @@ async function converger(g, cam, max = 40) {
 const LAT = 45
 const LON = 6.25
 
+// descend image par image, réseau libre, jusqu'à une image qui laisse au
+// moins `min` entrées en file une fois les six créneaux partis — c'est là
+// qu'un ordre se lit. ⚠️ Depuis la boîte orientée (⑤), la première frontière
+// (les z3 de 45°) ne remplit plus la file à 1 500 km : le champ n'en voit
+// que deux ou trois.
+async function jusquaFile(g, cam, min = 8) {
+  for (let i = 0; i < 40; i++) {
+    tenir = true
+    g.update(cam, 0.016)
+    if (g.queue.length >= min) return i
+    await relacher()
+    await calme(g)
+  }
+  throw new Error(`aucune image ne laisse ${min} entrées en file`)
+}
+
 // ───────────────────────────────────────── ③ la clé : le centre de l'écran
 test('③ `_priorite` : la tuile SOUS le centre de l écran passe avant celle du bord, à niveau égal', async () => {
   const g = neuf()
@@ -164,6 +180,9 @@ test('② pendant `_traverse`, AUCUNE requête ne part ; en fin d image, les six
   const g = neuf()
   const cam = camera(LAT, LON, 1500000)
   await calme(g) // les seize racines
+  await jusquaFile(g, cam) // une image dont la file déborde des six créneaux
+  await relacher()
+  await calme(g)
   tenir = true
   let enParcours = false
   let partiesEnParcours = 0
@@ -188,10 +207,15 @@ test('② pendant `_traverse`, AUCUNE requête ne part ; en fin d image, les six
   const pMin = Math.min(...enVol.map((t) => g._priorite(t)))
   const pMaxFile = Math.max(...g.queue.map((e) => e.priority))
   assert.ok(pMin >= pMaxFile, `une tuile en attente (${pMaxFile.toFixed(2)}) vaut mieux qu une tuile partie (${pMin.toFixed(2)})`)
-  // et la tuile sous le centre de l'écran est partie dans la première salve
-  const { x, y } = latLonToTile(LAT, LON, 3)
-  const nadir = `3/${Math.floor(x)}/${Math.floor(y)}`
-  assert.ok(salve.some((u) => zxyDe(u)?.key === nadir), `la tuile z3 sous le centre (${nadir}) n est pas dans la première salve : ${salve.map((u) => zxyDe(u)?.key).join(' ')}`)
+  // et la tuile sous le centre de l'écran est partie dans la première salve,
+  // à chaque niveau que la salve demande (sauf si elle est déjà prête)
+  for (const z of new Set(salve.map((u) => zxyDe(u).z))) {
+    const { x, y } = latLonToTile(LAT, LON, z)
+    const nadir = `${z}/${Math.floor(x)}/${Math.floor(y)}`
+    const t = g.tiles.get(nadir)
+    if (t && t.state === 'ready') continue
+    assert.ok(salve.some((u) => zxyDe(u)?.key === nadir), `la tuile z${z} sous le centre (${nadir}) n est pas dans la première salve : ${salve.map((u) => zxyDe(u)?.key).join(' ')}`)
+  }
   await relacher()
   await calme(g)
   g.dispose()
@@ -241,11 +265,10 @@ test('④ la caméra bouge : la file est RECLASSÉE, et la prochaine requête es
   const g = neuf()
   const camA = camera(LAT, LON, 1500000)
   await calme(g) // les racines
-  tenir = true
-  g.update(camA, 0.016) // la première frontière : les z3, six en vol, le reste en file
+  await jusquaFile(g, camA, 4) // six en vol, au moins quatre en file
   assert.ok(g.queue.length >= 2, `le banc n a pas de file à reclasser sous A (file ${g.queue.length})`)
   // un pas de côté qui garde la MÊME frontière de quadtree, mais déplace le centre
-  const camB = camera(LAT, LON + 6, 1500000)
+  const camB = camera(LAT, LON + 0.6, 1500000)
   g.update(camB, 0.016)
   const enVolAvant = parties.length
   assert.ok(g.queue.length >= 2 && retenues.length > 0, `le banc n a pas de file à reclasser (file ${g.queue.length}, en vol ${retenues.length})`)
@@ -288,4 +311,115 @@ test('les priorités FIXES (racines 1e9, socle, réessai 0) ne sont pas reclass�
   await relacher()
   await calme(g)
   g.dispose()
+})
+
+// ───────────────────────────────────────── ⑤ la boîte orientée
+test('⑤ la boîte orientée CONTIENT la nappe déplacée (relief exagéré et jupe), du z2 au z12, jusqu au 80e parallèle', () => {
+  const JUPE_MAX = 0.9 // le plafond de `skirtDrop` (globe.js)
+  const marge = 9000 * (R_GLOBE / EARTH_RADIUS_M) * 18 // ALT_MAX_M × exagération orbitale
+  const p = new THREE.Vector3()
+  let points = 0
+  for (const lat of [45, 0, 80, -60]) {
+    for (let z = 2; z <= 12; z += 2) {
+      const { x, y } = latLonToTile(lat, 6.25, z)
+      const tx = Math.floor(x), ty = Math.floor(y)
+      const nw = tileToLatLon(tx, ty, z)
+      const se = tileToLatLon(tx + 1, ty + 1, z)
+      const center = latLonToSphere((nw.lat + se.lat) / 2, (nw.lon + se.lon) / 2)
+      const corner = latLonToSphere(nw.lat, nw.lon)
+      const rayon = Math.max(center.distanceTo(corner), center.distanceTo(latLonToSphere(se.lat, se.lon)))
+      const theta = 2 * Math.asin(Math.min(rayon / (2 * R_GLOBE), 1))
+      const b = boiteTuile(nw, se, center)
+      const mXY = Math.max(marge, JUPE_MAX) * Math.sin(theta)
+      const N = 8
+      for (let i = 0; i <= N; i++) {
+        for (let j = 0; j <= N; j++) {
+          const la = nw.lat + ((se.lat - nw.lat) * i) / N
+          const lo = nw.lon + ((se.lon - nw.lon) * j) / N
+          for (const h of [marge, 0, -JUPE_MAX]) {
+            latLonToSphere(la, lo, R_GLOBE + h, p).sub(center)
+            const pe = p.dot(b.e), pn = p.dot(b.n), pu = p.dot(b.u)
+            const dedans = pe >= b.eMin - mXY - 1e-9 && pe <= b.eMax + mXY + 1e-9 &&
+              pn >= b.nMin - mXY - 1e-9 && pn <= b.nMax + mXY + 1e-9 &&
+              pu >= b.uMin - JUPE_MAX - 1e-9 && pu <= b.uMax + marge + 1e-9
+            assert.ok(dedans, `z${z} lat ${lat} : le point (${la.toFixed(2)}, ${lo.toFixed(2)}) déplacé de ${h.toFixed(2)} sort de la boîte (e ${pe.toFixed(3)} ∈ [${b.eMin.toFixed(3)}, ${b.eMax.toFixed(3)}] ± ${mXY.toFixed(3)} · n ${pn.toFixed(3)} ∈ [${b.nMin.toFixed(3)}, ${b.nMax.toFixed(3)}] · u ${pu.toFixed(3)} ∈ [${(b.uMin - JUPE_MAX).toFixed(3)}, ${(b.uMax + marge).toFixed(3)}])`)
+            points++
+          }
+        }
+      }
+    }
+  }
+  assert.ok(points > 4000, `le banc n a vérifié que ${points} points`)
+})
+
+test('⑤ bis la boîte ne fait qu ÉCARTER ce que la sphère laisse passer — et elle en écarte', async () => {
+  const g = neuf()
+  const cam = camera(LAT, LON, 300000) // bas et de biais : là où la sphère ment le plus
+  cam.lookAt(latLonToSphere(LAT + 2.5, LON, R_GLOBE)) // vue de trois quarts
+  cam.updateMatrixWorld(true)
+  const camDir = cam.position.clone().normalize()
+  await calme(g)
+  await converger(g, cam)
+  let sphere = 0, boite = 0, incoherentes = 0
+  for (const t of g.tiles.values()) {
+    if (t.z <= ROOT_Z || g._horsHorizon(t, camDir)) continue
+    const s = g._frustum.intersectsSphere(g._sphereDe(t))
+    const b = s && g._troncBoite(t)
+    if (s) sphere++
+    if (b) boite++
+    if (b && !s) incoherentes++
+  }
+  assert.equal(incoherentes, 0, 'la boîte accepte une tuile que la sphère refuse : elle n est pas contenue dans la sphère')
+  assert.ok(boite < sphere, `la boîte n écarte rien de plus que la sphère (${boite} / ${sphere}) : elle ne sert à rien`)
+  g.dispose()
+})
+
+// ───────────────────────────────────────── ⑥ le cache souple
+test('⑥ le cache SOUPLE : après un balayage, les tuiles hors champ ne gardent pas leur place au-delà de la réserve — sans trou à l écran', async () => {
+  const g = neuf()
+  await calme(g)
+  const { CACHE_SOUPLE, CACHE_SOUPLE_HYSTERESE } = { CACHE_SOUPLE: 600, CACHE_SOUPLE_HYSTERESE: 100 } // les valeurs de globe.js, redites pour que le test rougisse si elles bougent
+  const creees = new Set() // toutes les clés jamais créées : ce que le cache DUR aurait gardé
+  // un balayage : quarante positions à 120 km, 1° de longitude entre deux
+  for (let k = 0; k < 40; k++) {
+    const cam = camera(LAT, LON + k, 120000)
+    await converger(g, cam)
+    for (const key of g.tiles.keys()) creees.add(key)
+  }
+  const cam = camera(LAT, LON + 40, 120000)
+  await converger(g, cam)
+  for (const key of g.tiles.keys()) creees.add(key)
+  const camDir = cam.position.clone().normalize()
+  assert.ok(creees.size > g._porteuses + CACHE_SOUPLE + CACHE_SOUPLE_HYSTERESE, `le banc n a créé que ${creees.size} tuiles (porteuses ${g._porteuses}) : le cache souple n est pas exercé`)
+  assert.ok(creees.size <= g.cacheMax, `le banc dépasse le plafond dur (${creees.size} > ${g.cacheMax}) : il ne distingue plus le souple du dur`)
+  assert.ok(g.tiles.size < creees.size - 100, `${creees.size} tuiles créées, ${g.tiles.size} gardées : rien n a été rendu`)
+  assert.ok(g.tiles.size <= g._porteuses + CACHE_SOUPLE + CACHE_SOUPLE_HYSTERESE, `cache à ${g.tiles.size} pour ${g._porteuses} porteuses : la taille n a pas été rendue`)
+  // et pas un trou : sous chaque parent raffiné, tout enfant VISIBLE est prêt
+  let trous = 0
+  for (const t of g.tiles.values()) {
+    if (!t.refined) continue
+    for (const k of g._children(t)) if (!(k.state === 'ready' && k.mesh) && g._dansLeChamp(k, camDir)) trous++
+  }
+  assert.equal(trous, 0, `${trous} enfant(s) visible(s) non prêt(s) sous un parent raffiné après la taille`)
+  g.dispose()
+})
+
+// ───────────────────────────────────────── ⑦ le décodeur hors fil : une seule formule
+test('⑦ `hauteursTerrarium` est la formule de `fetchTile` — aller-retour exact avec `encodeTerrarium`, écriture en place', async () => {
+  const { hauteursTerrarium } = await import('../src/monde/decodeur-terrarium.js')
+  const px = 16
+  const rgba = new Uint8ClampedArray(px * px * 4)
+  const attendu = new Float32Array(px * px)
+  for (let i = 0; i < px * px; i++) {
+    const m = -430 + i * 37.25 // de la mer Morte aux sommets, par pas de quart de mètre
+    const [r, g, b] = encodeTerrarium(m)
+    rgba[i * 4] = r; rgba[i * 4 + 1] = g; rgba[i * 4 + 2] = b; rgba[i * 4 + 3] = 255
+    attendu[i] = r * 256 + g + b / 256 - 32768
+  }
+  const h = hauteursTerrarium(rgba, px)
+  assert.equal(h.length, px * px)
+  for (let i = 0; i < h.length; i++) assert.equal(h[i], attendu[i], `pixel ${i}`)
+  for (let i = 0; i < h.length; i++) assert.ok(Math.abs(h[i] - (-430 + i * 37.25)) <= 1 / 256, `pixel ${i} : ${h[i]} pour ${-430 + i * 37.25}`)
+  const out = new Float32Array(px * px)
+  assert.equal(hauteursTerrarium(rgba, px, out), out, 'le tampon fourni doit être rendu, pas un neuf')
 })
