@@ -460,3 +460,39 @@ centre, **active partout** — l'exception à « les effets seulement en crop »
 de profondeur) → PF3 (passes) → R34 (paramètres du flou, dépend de PF3 laissant
 `dofPass` active) → PF2 (`globe.js` cache) → PF1 (sondes seules).
 Le script `fusion-test.py` pour `package.json` à chaque fois, puis `audit:tests`.
+
+---
+
+# ⛔ SUSPENSION DU 2026-09-02, 22 h 58 — limite de session atteinte, cinq agents tués
+
+Les cinq agents en vol sont morts sur `HTTP 429 — session limit, reset 00:50
+Europe/Berlin`. **Rien n'est perdu : chaque arbre garde son travail.** État relevé
+à 22 h 58 :
+
+| tâche | arbre | commits au-dessus de `regroupement` | fichiers modifiés non commités | rapport |
+|---|---|---|---|---|
+| **R32** pivot centre de la Terre | `wt-orb3` | 0 | **7** | `rapport-R32.md` (partiel) |
+| **PF1** profil | `wt-pp1` | 1 | 0 | `rapport-PF1.md` (à vérifier : complet ?) |
+| **PF2** priorité tuiles | `wt-pp2` | 1 | 3 | — |
+| **PF3** mer/effets crop seul | `wt-pp3` | 2 | 0 | — |
+| **PF4** bugs | `wt-pp4` | 0 | 5 | — |
+
+**Consigne d'Adrien : relancer tout à 00 h 59.** Procédure, par arbre :
+1. `git status` + `git log regroupement..HEAD` + lire le rapport partiel s'il existe ;
+2. **tenter d'abord `SendMessage` sur l'agent d'origine** (son contexte survit à
+   la coupure) avec : « tu as été tué par la limite de session ; ton arbre
+   contient X commits et Y fichiers modifiés ; reprends depuis là, ne refais pas
+   ce qui est commité » ;
+3. si l'agent ne répond plus : **re-dispatcher un agent neuf** avec le même
+   brief, plus le paragraphe « lis d'abord `git status`, `git diff`, et le
+   rapport partiel — c'est l'état d'un prédécesseur, continue-le » ;
+4. R32 reçoit en plus la direction du soir : **deux pivots pour deux gestes** —
+   rotation rigide caméra + cible autour du centre de la Terre pour le glissé
+   (le motif de `pivoterAutourDuBloc`, axe changé hors crop), inclinaison
+   inchangée autour de la cible de surface ; l'objection « le bloc ne suivrait
+   pas » est **fausse** (`passeSurface.enabled = false`, rien à faire suivre).
+5. Tout brief de mesure porte la consigne : **ne jamais rendre la main « en
+   attendant » un banc** — attendre dans la même exécution.
+
+Base au moment de la suspension : **4 675 tests · 0 échec · audit 241 = 241**
+(R33 et R34 fusionnés). Ordre de fusion prévu inchangé : R32 → PF4 → PF3 → PF2 → PF1.
