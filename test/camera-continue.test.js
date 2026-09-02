@@ -584,25 +584,48 @@ test('la fusion des passes suit `terre=unique`, JAMAIS la seule frontière', () 
   assert.match(SRC_MAIN, /composer\.setMainCamera\(camGlobe\)/)
 })
 
-test('la mise au point passe par UN SEUL site — la conversion `1/k` ne peut pas être oubliée', () => {
+test('la mise au point passe par UN SEUL site — la chaîne d\'unités ne peut pas être oubliée (R34)', () => {
   // ⛔ **UNE LONGUEUR DE BLOC LUE PAR UNE CAMÉRA DE GLOBE EST FAUSSE D'UN FACTEUR
-  // `1/k`**, et `1/k` vaut **130,4** au lieu de démarrage (mesuré :
-  // `k = 0,007 667`, `.banc/D16/flou-apres2.json`) — exactement le facteur que la
-  // tâche du flou avait relevé sur l'autofocus. Sept sites écrivaient la mise au
-  // point ; ils passent tous par `poserMiseAuPoint`.
-  const ecrituresDirectes = [...SRC_MAIN.matchAll(/worldFocus(?:Distance|Range)\s*=/g)]
+  // `1/k`**, et `1/k` vaut **130,4** au lieu de démarrage. Depuis R34 (règle D20)
+  // la mise au point se donne en MÈTRES et se convertit dans `poserMiseAuPoint`
+  // par `metresParUniteEffets()` — 63 710 m l'unité de globe, `largeurBlocM / 56`
+  // hors fusion. Il ne doit exister que ces DEUX écritures du matériau.
+  const ecrituresDirectes = [...SRC_MAIN.matchAll(/(?:coc|cocMaterial)\.(?:world)?focus(?:Distance|Range)\s*=/g)]
   assert.equal(ecrituresDirectes.length, 2,
     `il ne doit rester QUE les deux écritures de poserMiseAuPoint, trouvé ${ecrituresDirectes.length}`)
-  const corps = corpsDe(SRC_MAIN, 'function poserMiseAuPoint(distanceBloc = params.focusDistance, porteeBloc = params.focusRange) {')
-  assert.match(corps, /const f = facteurFond\(\)/)
-  assert.match(corps, /worldFocusDistance = distanceBloc \* f/)
-  // ⚠️ **LA PORTÉE AUSSI EST UNE LONGUEUR**, et l'oublier suffit à tout annuler :
-  // épinglée à 23 unités de bloc, elle vaut 1 465 km en unités de globe — vingt
-  // fois la profondeur de la scène. Mesuré : le balayage ne rendait plus que
-  // **2 000 pixels** au lieu de 151 243.
-  assert.match(corps, /worldFocusRange = porteeBloc \* f/)
-  // et le facteur ne s'applique QUE là où la similitude existe
-  const cf = corpsDe(SRC_MAIN, 'function facteurFond() {')
-  assert.match(cf, /fusionDesPasses && modes\?\.mode === 'surface'/)
-  assert.match(cf, /catch \{ return 1 \}/, 'le repli hors drapeau doit rendre 1, pas planter')
+  const corps = corpsDe(SRC_MAIN, 'function poserMiseAuPoint(distanceM = params.focusDistance, ratio = params.focusRatio) {')
+  assert.match(corps, /coc\.focusDistance = distanceM \/ metresParUniteEffets\(\)/)
+  // ⚡ **LA PLAGE EST UN RAPPORT** : k × la distance, et c'est ce qui rend le flou
+  // apparent identique à tout zoom (D20, réponse 3)
+  assert.match(corps, /coc\.focusRange = Math\.max\(0\.01, ratio\) \* coc\.focusDistance/)
+  // ⛔ **ET LES PLANS near/far SE RESYNCHRONISENT** : `copyCameraSettings` les
+  // copie par valeur une seule fois ; mesuré à 130 km, une mire AU focus sortait à
+  // CoC = 1,00 parce que le matériau linéarisait encore avec le near de 5 km.
+  assert.match(corps, /coc\.copyCameraSettings\(cam\)/)
+  const mpu = corpsDe(SRC_MAIN, 'function metresParUniteEffets() {')
+  assert.match(mpu, /cameraDeRendu\(\) === camGlobe \|\| modes\?\.mode === 'orbital'\) return ORBITAL_M_PER_UNIT/)
+  assert.match(mpu, /l \/ TERRAIN_SIZE/)
+  assert.match(mpu, /catch \{ return ORBITAL_M_PER_UNIT \}/, 'le repli avant les déclarations doit rendre l\'unité de globe, pas planter')
+  // plus aucune portée en unités de bloc ne survit
+  assert.ok(!/focusRange\s*:/.test(SRC_MAIN), 'params.focusRange (unités de bloc) ne doit plus exister')
+})
+
+test('la mise au point suit le pointeur à TOUS les zooms, contre la Terre affichée, avec repli au centre (D20)', () => {
+  const tick = corpsDe(SRC_MAIN, 'function tick() {', '')
+  // ① plus de garde de mode devant l'autofocus
+  assert.ok(!/params\.autoFocus && modes\.mode === 'surface'/.test(tick), "l'autofocus ne doit plus être borné au mode surface")
+  assert.match(tick, /if \(params\.autoFocus\) \{/)
+  // ② la visée glisse vers le centre quand le pointeur n'est pas sur la toile
+  assert.match(tick, /viseeFocus\.lerp\(pointeurSurToile \? mouse : CENTRE_ECRAN, 1 - Math\.exp\(-dt \/ TAU_VISEE_FOCUS\)\)/)
+  assert.match(SRC_MAIN, /pointeurSurToile = viseLeCanevas3D\(e\.target, renderer\.domElement\)/)
+  assert.match(SRC_MAIN, /window\.addEventListener\('pointerout', \(e\) => \{ if \(!e\.relatedTarget\) pointeurSurToile = false \}\)/)
+  // ③ sous la fusion, le rayon est lancé contre le GLOBE + relief dessiné, pas le bloc plat
+  const dsv = corpsDe(SRC_MAIN, 'function distanceSousLaVisee(ndc) {')
+  assert.match(dsv, /focusRayHitGlobe\(focusRay\.ray\.origin, focusRay\.ray\.direction, rayonAffiche/)
+  assert.match(dsv, /d \* ORBITAL_M_PER_UNIT/)
+  const ra = corpsDe(SRC_MAIN, 'function rayonAffiche(p) {')
+  assert.match(ra, /globe\?\.hauteurDessinee\?\.\(lat, lon, _candidatsFocus\)/)
+  // et la liste des tuiles est bâtie UNE fois par marche, pas à chaque lecture
+  assert.match(dsv, /_candidatsFocus = globe\?\.tuilesAvecHauteurs\?\.\(\) \?\? null/)
+  assert.match(ra, /R_GLOBE \+ \(h \?\? 0\) \* unitesParMetreGlobe\(\)/)
 })
