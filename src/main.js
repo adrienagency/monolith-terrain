@@ -305,6 +305,8 @@ import { sonderMachine } from './palier-machine.js'
 import { sansLectureDeProfondeur, copieStableDistincte } from './profondeur-compositeur.js'
 import { dessinerCetteImage } from './cadence-repos.js'
 import { creerAccalmie } from './accalmie-gouverneur.js'
+import { creerMemoEmpreinte, empiler } from './memo-empreinte.js'
+import { amontDemande } from './monde/materiau-tuile.js'
 import { lanceCuissonVolume } from './cloud-volume.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
@@ -4787,6 +4789,11 @@ const _upY = new THREE.Vector3(0, 1, 0)
 //     réversible sans brancher de second chemin.**
 const frontiereActive = frontiereRenduActive()
 const sceneGlobe = frontiereActive ? new THREE.Scene() : null
+// PF4 — la scène du globe ne bouge jamais : figée, elle cesse de forcer la
+// recomposition de toutes les tuiles à chaque image (three propage `force`
+// depuis tout ancêtre qui se recompose). Voir globe.js, « LES TUILES SONT
+// STATIQUES ». Échappatoire : `?matrices=amont`.
+if (sceneGlobe && !amontDemande('matrices')) { sceneGlobe.updateMatrix(); sceneGlobe.matrixAutoUpdate = false }
 const camGlobe = frontiereActive ? new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.01, 1400) : null
 if (frontiereActive) {
   sceneGlobe.add(globe.group)
@@ -6597,7 +6604,7 @@ function contexteCrop() {
 // seconde**, et il ne tourne qu'une fois par entrée en surface.
 const veilleCrop = creerVeilleCrop({
   globe: () => globe,
-  contexte: contexteCrop,
+  contexte: contexteCropMemo, // PF4 : mémo par empreinte, voir contexteCropMemo
   estompage: veilleEstompage,
   // ⚠️ **LE REPOS ENTRE PAR LA MÊME PORTE QUE L'ESTOMPAGE — Tâche N.** Il
   // commande deux choses qui doivent être vraies ensemble : l'estompage plein
@@ -6680,6 +6687,104 @@ const veilleCrop = creerVeilleCrop({
     demanderEmprise(flux, { emprise: { ouest: o, sud: s, est: e, nord: n }, zoom: params.demZoom, aussi: empriseZoomMer() })
   },
 })
+
+// ══════ LE CONTEXTE DU CROP N'EST PLUS REBÂTI À CHAQUE IMAGE — PF4 ═════════
+//
+// PF1 : `contexteCrop` = 14 % des échantillons V8 au crop, appelé par image
+// par `veilleCrop.maj` (branchement-crop.js), qui compare ensuite ce qu'il
+// reçoit à ce qu'il a posé — et ne fait rien tant que rien n'a changé. Ici on
+// relit les MÊMES sources dans un tableau plat (src/memo-empreinte.js) et on
+// ne reconstruit que si une valeur a bougé. `contexteCrop` reste le
+// constructeur (les tests lisent son texte) ; la chaîne reçoit `contexteCropMemo`.
+//
+// ⚠️ **CHAQUE UNIFORME DU SOCLE QUE LE CONSTRUCTEUR LIT EST RELU ICI, UN PAR
+// UN** (`terrain.mapUniforms.uX.value` — jamais en bloc, la règle de
+// test/damier-uniformes.test.js) ; `test/memo-empreinte.test.js` vérifie sur
+// le texte qu'aucun uniforme ni paramètre lu par le constructeur ne manque.
+// Échappatoire : `?crop=amont` reconstruit à chaque appel.
+const _empreinteCrop = []
+function empreinteContexteCrop() {
+  const e = _empreinteCrop
+  e.length = 0
+  const a = assietteCrop()
+  e.push(a?.centre.lat, a?.centre.lon, a?.zoom)
+  empiler(e, terrain.mapUniforms.uCoastMaskOn?.value)
+  empiler(e, terrain.mapUniforms.uCoastMask?.value)
+  empiler(e, terrain.mapUniforms.uSolOn?.value)
+  empiler(e, terrain.mapUniforms.uSol?.value)
+  empiler(e, terrain.mapUniforms.uAerialOn?.value)
+  empiler(e, terrain.mapUniforms.uAerial?.value)
+  empiler(e, terrain.mapUniforms.uAnalysisOn?.value)
+  empiler(e, terrain.mapUniforms.uAnalysis?.value)
+  empiler(e, terrain.mapUniforms.uRampTex?.value)
+  empiler(e, terrain.mapUniforms.uSlabHalf?.value)
+  empiler(e, terrain.mapUniforms.uSlabCorner?.value)
+  empiler(e, terrain.mapUniforms.uSlabCornerN?.value)
+  empiler(e, terrain.mapUniforms.uSolLut?.value)
+  empiler(e, terrain.mapUniforms.uSolOpacite?.value)
+  empiler(e, terrain.mapUniforms.uSolOffset?.value)
+  empiler(e, terrain.mapUniforms.uSolScale?.value)
+  empiler(e, terrain.mapUniforms.uSolTexel?.value)
+  empiler(e, terrain.mapUniforms.uAerialOpacity?.value)
+  empiler(e, terrain.mapUniforms.uAerialOffset?.value)
+  empiler(e, terrain.mapUniforms.uAerialScale?.value)
+  empiler(e, terrain.mapUniforms.uAerialCoastFade?.value)
+  empiler(e, terrain.mapUniforms.uContourInterval?.value)
+  empiler(e, terrain.mapUniforms.uContourOpacity?.value)
+  empiler(e, terrain.mapUniforms.uContourWeight?.value)
+  empiler(e, terrain.mapUniforms.uGridStep?.value)
+  empiler(e, terrain.mapUniforms.uGridOpacity?.value)
+  empiler(e, terrain.mapUniforms.uGridColor?.value)
+  empiler(e, terrain.mapUniforms.uTexShade?.value)
+  empiler(e, terrain.mapUniforms.uWetK?.value)
+  empiler(e, terrain.mapUniforms.uExpoK?.value)
+  empiler(e, terrain.mapUniforms.uHemi?.value)
+  empiler(e, terrain.mapUniforms.uTreeLine?.value)
+  empiler(e, terrain.mapUniforms.uHeightContrast?.value)
+  empiler(e, terrain.mapUniforms.uHeightPivot?.value)
+  empiler(e, terrain.mapUniforms.uHazeAmt?.value)
+  empiler(e, terrain.mapUniforms.uHazeAlt?.value)
+  empiler(e, terrain.mapUniforms.uHazeDist?.value)
+  empiler(e, terrain.mapUniforms.uHazeColor?.value)
+  empiler(e, terrain.mapUniforms.uColorMode?.value)
+  empiler(e, terrain.mapUniforms.uSlopeTint?.value)
+  empiler(e, terrain.mapUniforms.uTint?.value)
+  empiler(e, terrain.mapUniforms.uSurfaceFx?.value)
+  empiler(e, terrain.mapUniforms.uFxBlend?.value)
+  empiler(e, terrain.mapUniforms.uFxOpacity?.value)
+  empiler(e, terrain.mapUniforms.uFxScale?.value)
+  empiler(e, terrain.mapUniforms.uFxColA?.value)
+  empiler(e, terrain.mapUniforms.uFxColB?.value)
+  empiler(e, terrain.mapUniforms.uFxColC?.value)
+  empiler(e, terrain.mapUniforms.uFxP1?.value)
+  empiler(e, terrain.mapUniforms.uFxP2?.value)
+  empiler(e, terrain.mapUniforms.uFxP3?.value)
+  empiler(e, terrain.mapUniforms.uFenetre?.value)
+  empiler(e, terrain.mapUniforms.uMatNoiseOn?.value)
+  empiler(e, terrain.mapUniforms.uMatNoiseCut?.value)
+  empiler(e, terrain.mapUniforms.uMatNoiseSoft?.value)
+  empiler(e, terrain.mapUniforms.uMatNoiseScale?.value)
+  empiler(e, terrain.mapUniforms.uMatAboveZero?.value)
+  const fb = terrain.fenetreBornee
+  e.push(dem, dem?.extentMeters, dem?.empriseCote, dem?.maxM, dem?.minM, fb, fb?.maxM, fb?.minM)
+  e.push(params.sunAzimuth, params.sunElevation, params.sunIntensity, params.fillAzimuthOffset, params.fillElevation, params.fillIntensity,
+    params.fov, params.colorMode, params.envMapIntensity, params.plinthColor, params.plinthDepth, params.terrainSurfaceMat, params.terrainMatNoise,
+    params.fx, params.fx?.[params.surfaceFx], params.exagPartage?.valeur, params.demExaggeration)
+  empiler(e, sun.color); e.push(sun.intensity)
+  empiler(e, hemi.color); empiler(e, hemi.groundColor); e.push(hemi.intensity)
+  empiler(e, fillLight.color); e.push(fillLight.intensity)
+  e.push(scene.environment, scene.environmentIntensity, plinth?.depth, plinth?.wallMat?.envMap ?? null, plinth?.wallMat?.envMapIntensity)
+  empiler(e, plinth?.wallMat?.color)
+  const m = terrain.material
+  e.push(terrain.materialMode, m, m?.map, m?.normalMap, m?.map?.repeat?.x, m?.normalScale?.x)
+  empiler(e, m?.color)
+  e.push(altitudeCadrageM(), fluxMerPret(), fluxDuSocle()?.bathy?.prete, camGlobe?.fov ?? camera.fov, renderer.domElement?.clientHeight)
+  return e
+}
+const memoContexteCrop = creerMemoEmpreinte(empreinteContexteCrop, contexteCrop)
+function contexteCropMemo() {
+  return amontDemande('crop') ? contexteCrop() : memoContexteCrop()
+}
 
 modes = new Modes({
   camera,
@@ -13062,7 +13167,7 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // `.refus`, `.bascules` et `.signature` sont **la seule façon de vérifier à
   // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
   // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
-  veilleCrop, terreUniqueBranchee, contexteCrop,
+  veilleCrop, terreUniqueBranchee, contexteCrop, contexteCropMemo,
   // LES REPÈRES ET LES COTES — Tâche R24, exposés pour la MÊME raison que les
   // blocs ci-dessus : `main.js` n'est chargé par aucun test, et le poseur des
   // repères est **le seul moyen de lire la hauteur d'un sommet en mètres** pour

@@ -59,6 +59,9 @@ const CHAUFFE = Number(opt('--chauffe', '40'))
 const MACHINES = opt('--machines', 'mienne,x4,x6r').split(',').filter(Boolean)
 const POSTES = opt('--postes', 'surface,crop,orbite').split(',').filter(Boolean)
 const TAS_S = Number(opt('--tas', '20'))
+// PF4 : un suffixe d'URL (`--url "?tuiles=amont&matrices=amont&crop=amont"`) pour mesurer
+// l'avant/après d'un correctif dans un seul build, mêmes cellules
+const URL_SUFFIXE = opt('--url', '')
 const SWIFT = flag('--swiftshader')
 const CPUPROFILE = flag('--cpuprofile') // échantillonnage V8 (CDP Profiler) par poste : qui fait « reste »
 const LIEU = { lat: -21.115, lon: 55.536 } // La Réunion : mer + relief, le crop z13 de R31
@@ -574,7 +577,7 @@ for (const nomMachine of MACHINES) {
     const litReseau = () => ({ ...reseau })
 
     const t0 = Date.now()
-    await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 180000 })
+    await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
     await page.waitForFunction(() => !!(window.__exp && window.__exp.globe && window.__exp.modes), { timeout: 180000, polling: 100 })
     await page.waitForFunction(() => !!document.getElementById('loading')?.classList.contains('hidden'), { timeout: 180000, polling: 200 }).catch(() => {})
     await page.evaluate(() => document.querySelector('.ce-hubclose')?.click())

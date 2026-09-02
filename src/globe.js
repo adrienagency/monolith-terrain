@@ -15,6 +15,7 @@ import * as THREE from 'three'
 import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere } from './geo.js'
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
+import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
 import { overzoomTile } from './bathy.js'
 
 // LE BLEU DE NUIT DE LA PLANETE — Tache R7, tour de correction. La face nuit ne
@@ -3456,6 +3457,25 @@ export class Globe {
   constructor(params = {}) {
     this.group = new THREE.Group()
     this.group.name = 'globe'
+    // ══════ PF4 — LES TUILES SONT STATIQUES, ET LE GROUPE AUSSI ══════════════
+    //
+    // PF1 : `updateMatrixWorld` recomposait la matrice de 346 à 982 maillages
+    // IMMOBILES à chaque image (5–9 % des échantillons V8). `matrixAutoUpdate =
+    // false` sur une tuile ne suffit PAS : three propage `force = true` dès
+    // qu'un ANCÊTRE se recompose (`updateMatrix` pose `matrixWorldNeedsUpdate`),
+    // et le groupe comme la scène le faisaient chaque image. Mesuré (PF4,
+    // orbite 2 000 km, CPU ×4) : tuiles seules → −0,3 ms ; tuiles + groupe +
+    // scène figés → −1,3 ms (8,6 → 7,2 ms de `composer.render`). Le groupe ne
+    // bouge jamais (aucune écriture de sa position dans ce fichier) ; les
+    // nuages, qui orbitent, portent leur propre `matrixAutoUpdate` et se
+    // recomposent seuls. Toute écriture de `mesh.position` d'une tuile, de la
+    // mer ou des parois est suivie d'un `updateMatrix()` explicite.
+    // Échappatoire : `?matrices=amont`.
+    this._matricesAuto = amontDemande('matrices')
+    if (!this._matricesAuto) { this.group.updateMatrix(); this.group.matrixAutoUpdate = false }
+    // ══════ PF4 — UN MATÉRIAU POUR TOUTES LES TUILES ═════════════════════════
+    // Voir monde/materiau-tuile.js. Échappatoire : `?tuiles=amont`.
+    this._tuilesAmont = amontDemande('tuiles')
     this.radius = R_GLOBE
     // L'EXAGÉRATION VERTICALE — Tâche E, « UNE SEULE TERRE ».
     //
@@ -4054,7 +4074,15 @@ export class Globe {
     // peuvent venir de deux sources de tailles différentes (voir `planTuile`).
     // Le mettre dans `this.uniforms`, partagé, aurait fait juger la minification
     // de toutes les tuiles sur la taille de la dernière chargée.
-    this._materialFor = (texture, tilePx = 256, uvParMonde = 1) =>
+    // ⚠️ PF4 : UN SEUL matériau pour toutes les tuiles (monde/materiau-tuile.js) ;
+    // ce qui est propre à la tuile est posé par `onBeforeRender`. La signature
+    // de `_materialFor` reste (texture, tilePx, uvParMonde) : les tests
+    // l'empruntent, et `?tuiles=amont` rend l'ancien matériau par tuile. Le
+    // littéral du matériau reste ici, sous `_materialFor`, avec ses uniformes
+    // propres (`uTex`, `uTilePx`, `uUvParMonde`, `uPhoto*`) : c'est le texte
+    // que test/photo-monde.test.js ⑦ relit.
+    this._materialFor = (texture, tilePx = 256, uvParMonde = 1) => this._fabriqueMateriau.pour(texture, tilePx, uvParMonde)
+    const materiauTuile = (texture, tilePx, uvParMonde) =>
       new THREE.ShaderMaterial({
         vertexShader: VERT,
         fragmentShader: FRAG,
@@ -4099,6 +4127,8 @@ export class Globe {
         // faut pour que le liseré du bord se fonde sur ce qui est derrière.
         depthWrite: true,
       })
+
+    this._fabriqueMateriau = creerFabriqueMateriau({ creer: materiauTuile, amont: this._tuilesAmont })
 
     this._buildPoleCaps()
     this._buildAtmosphere()
@@ -6034,6 +6064,7 @@ export class Globe {
     )
     M.setPosition(cal.origine[0], cal.origine[1], cal.origine[2])
     M.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    if (!this._matricesAuto) { mesh.updateMatrix(); mesh.matrixAutoUpdate = false } // PF4 : la mer est posée une fois
     this.group.add(mesh)
     this._mer = mesh
     this._merEtat = {
@@ -6346,7 +6377,7 @@ export class Globe {
       if (t.state !== 'ready' || !t.heights || !t.mesh) continue
       this.group.remove(t.mesh)
       t.mesh.geometry.dispose()
-      t.mesh.material.dispose()
+      libererMateriauTuile(this, t.mesh) // PF4 : jamais le matériau partagé
       t.mesh = null
       this._buildMesh(t)
       n++
@@ -6836,6 +6867,7 @@ export class Globe {
     )
     M.setPosition(solide.origine.x, solide.origine.y, solide.origine.z)
     M.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    if (!this._matricesAuto) { mesh.updateMatrix(); mesh.matrixAutoUpdate = false } // PF4 : les parois sont posées une fois
     this.group.add(mesh)
     // ⚠️ **L'ÉTAT RETENU EST APPLIQUÉ AU MESH NEUF — Tâche R22, option 48.**
     // Sans cette ligne, un socle éteint reviendrait au premier déplacement,
@@ -7963,7 +7995,12 @@ export class Globe {
     // de surface, et un décalage d'entier 32 bits y serait encore juste — mais
     // il déborderait à 31, sans un mot. La puissance flottante n'a pas de bord.
     const mesh = new THREE.Mesh(geo, this._materialFor(t.texture, t.size, 2 ** -t.z))
+    // PF4 : ce qui est propre à la tuile vit sur le maillage, posé avant SON dessin
+    // (monde/materiau-tuile.js) — sans effet quand chaque tuile a son matériau
+    this._fabriqueMateriau?.equiper(mesh, t.texture, t.size, 2 ** -t.z)
     mesh.position.copy(origine) // la position mondiale vit ICI, plus dans les sommets
+    // PF4 : une tuile ne bouge jamais — sa matrice est composée ICI, une fois
+    if (!this._matricesAuto) { mesh.updateMatrix(); mesh.matrixAutoUpdate = false }
     mesh.visible = false
     mesh.name = t.key
     t.mesh = mesh
@@ -8326,20 +8363,8 @@ export class Globe {
   _habillerPhoto(t) {
     const pm = this.photoMonde
     if (!pm || !pm.actif) return
-    const u = t.mesh.material.uniforms
-    if (!u.uPhotoOn) return // matériau emprunté par un test : rien à habiller
-    const r = pm.pourTuile(t, this.frame)
-    if (!r) {
-      // ⚠️ ON REND AUSSI LE SAMPLER, pas seulement le drapeau : une texture
-      // évincée à laquelle un matériau tiendrait encore serait téléversée à la
-      // première image où la tuile redeviendrait visible.
-      u.uPhotoOn.value = 0
-      u.uPhoto.value = null
-      return
-    }
-    u.uPhoto.value = r.tex
-    u.uPhotoUv.value.set(r.ox, r.oy, r.sx, r.sy)
-    u.uPhotoOn.value = 1
+    // PF4 : matériau partagé → la photo vit sur le maillage (monde/materiau-tuile.js)
+    habillerPhotoTuile(t.mesh, pm.pourTuile(t, this.frame))
   }
 
   /**
@@ -8497,7 +8522,7 @@ export class Globe {
       if (t.mesh) {
         this.group.remove(t.mesh)
         t.mesh.geometry.dispose()
-        t.mesh.material.dispose()
+        libererMateriauTuile(this, t.mesh) // PF4 : jamais le matériau partagé
       }
       t.texture?.dispose()
       this.tiles.delete(t.key)
@@ -8556,7 +8581,7 @@ export class Globe {
       if (t.mesh) {
         this.group.remove(t.mesh)
         t.mesh.geometry.dispose()
-        t.mesh.material.dispose()
+        libererMateriauTuile(this, t.mesh) // PF4 : jamais le matériau partagé
         t.mesh = null
       }
       t.texture?.dispose()
@@ -8642,7 +8667,7 @@ export class Globe {
     for (const t of this.tiles.values()) {
       if (t.mesh) {
         t.mesh.geometry.dispose()
-        t.mesh.material.dispose()
+        libererMateriauTuile(this, t.mesh) // PF4 : jamais le matériau partagé
       }
       t.texture?.dispose()
     }
