@@ -460,3 +460,79 @@ centre, **active partout** — l'exception à « les effets seulement en crop »
 de profondeur) → PF3 (passes) → R34 (paramètres du flou, dépend de PF3 laissant
 `dofPass` active) → PF2 (`globe.js` cache) → PF1 (sondes seules).
 Le script `fusion-test.py` pour `package.json` à chaque fois, puis `audit:tests`.
+
+---
+
+# ⛔ SUSPENSION DU 2026-09-02, 22 h 58 — limite de session atteinte, cinq agents tués
+
+Les cinq agents en vol sont morts sur `HTTP 429 — session limit, reset 00:50
+Europe/Berlin`. **Rien n'est perdu : chaque arbre garde son travail.** État relevé
+à 22 h 58 :
+
+| tâche | arbre | commits au-dessus de `regroupement` | fichiers modifiés non commités | rapport |
+|---|---|---|---|---|
+| **R32** pivot centre de la Terre | `wt-orb3` | 0 | **7** | `rapport-R32.md` (partiel) |
+| **PF1** profil | `wt-pp1` | 1 | 0 | `rapport-PF1.md` (à vérifier : complet ?) |
+| **PF2** priorité tuiles | `wt-pp2` | 1 | 3 | — |
+| **PF3** mer/effets crop seul | `wt-pp3` | 2 | 0 | — |
+| **PF4** bugs | `wt-pp4` | 0 | 5 | — |
+
+**Consigne d'Adrien : relancer tout à 00 h 59.** Procédure, par arbre :
+1. `git status` + `git log regroupement..HEAD` + lire le rapport partiel s'il existe ;
+2. **tenter d'abord `SendMessage` sur l'agent d'origine** (son contexte survit à
+   la coupure) avec : « tu as été tué par la limite de session ; ton arbre
+   contient X commits et Y fichiers modifiés ; reprends depuis là, ne refais pas
+   ce qui est commité » ;
+3. si l'agent ne répond plus : **re-dispatcher un agent neuf** avec le même
+   brief, plus le paragraphe « lis d'abord `git status`, `git diff`, et le
+   rapport partiel — c'est l'état d'un prédécesseur, continue-le » ;
+4. R32 reçoit en plus la direction du soir : **deux pivots pour deux gestes** —
+   rotation rigide caméra + cible autour du centre de la Terre pour le glissé
+   (le motif de `pivoterAutourDuBloc`, axe changé hors crop), inclinaison
+   inchangée autour de la cible de surface ; l'objection « le bloc ne suivrait
+   pas » est **fausse** (`passeSurface.enabled = false`, rien à faire suivre).
+5. Tout brief de mesure porte la consigne : **ne jamais rendre la main « en
+   attendant » un banc** — attendre dans la même exécution.
+
+Base au moment de la suspension : **4 675 tests · 0 échec · audit 241 = 241**
+(R33 et R34 fusionnés). Ordre de fusion prévu inchangé : R32 → PF4 → PF3 → PF2 → PF1.
+
+---
+
+# LE PROFIL PF1 — 2026-09-03, 01 h — fusionné (sondes seules, `src/` intact)
+
+**L'image est bornée par le CPU principal, pas par le GPU.** Carte réelle :
+GPU 0,2–2,7 ms partout ; tick CPU **10–36 ms** sur CPU ×4/×6. GPU logiciel
+(portable sans carte) : **337–490 ms/image**, 85–89 % dans le nuanceur des
+tuiles, 11–15 % dans l'EffectPass.
+
+| poste (CPU ×4/×6) | part de l'image | qui |
+|---|---|---|
+| `renderBufferDirect` — **un matériau par tuile, 128 uniformes, 330–637 matériaux** | **23–41 %** | PF4 |
+| `updateMatrixWorld` de 346–982 maillages **immobiles** + `projectObject` | **17–21 %** | PF4 |
+| `contexteCrop()` **reconstruit à chaque image** (au crop) | **14 % des échantillons V8** | PF4 |
+| chargement : maillage + décodage **sur le fil principal** (orbite) | 10 % | PF2 |
+| `_traverse` | 5–7 % | PF2 |
+| GPU | 1–6 % | — |
+| tout le reste (modes, nuages, eau, sommets…) | < 4 % cumulés | — |
+
+⚡ **Le coût du « rien » : 100 % du tick.** Trois images figées consécutives
+sont **identiques au bit** et rendues quand même, **13–24 ms de CPU chacune**.
+Ce qui l'interdit : **la rotation propre** (+14,7 ms p50 en orbite ×4 ; 20–41
+requêtes / 60 images sans geste ; cache poussé à **~1 700 tuiles, ~1,3 Go**) et
+**le grain**, qui change chaque pixel. → rendu à la demande = PF4 ; grain éteint
+hors crop = PF3.
+
+**Réseau** : **70–84 % des requêtes d'un geste arrivent APRÈS le geste** — la
+file n'est purgée que sous contre-pression, jamais déclenchée. `queue.sort`
+**dans le `while` de `_pump`** : 0,5–1,2 ms/image, 8 ms en pointe. → PF2.
+
+**Réfuté par PF1** : « le crop tourne 36 tuiles » est un nombre de *draws*, le
+cache en garde **406–442 pour 24 draws** ; le tas est plat ; **zéro**
+recompilation de nuanceur en usage ; la SSE vraie ne gagne **0 ms** ici (levier
+de justesse, et charge *plus* sur Retina). ⚠️ 17–33 Chrome d'autres agents
+tournaient pendant la mesure : les valeurs absolues ×4/×6 bougent jusqu'à ×1,8,
+**la répartition est stable** — c'est elle qui compte.
+
+Sonde commune : `node scripts/profil-pf1.mjs --port <port>` (`--machines`,
+`--postes`, `--cpuprofile`, `--swiftshader`), traces sous `traces-PF1/`.
