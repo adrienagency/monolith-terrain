@@ -176,6 +176,24 @@ fermé, caméra immobile (le geste suivant arrive à la toile) ; double-clic →
 fermé, pas de plongée (altitude inchangée) ; croix → fermé. Test
 `test/voile-accueil.test.js`.
 
+**Chiffré avec la sonde commune PF1** (`node scripts/profil-pf1.mjs --port 6311
+--machines mienne,x4 --postes orbite`, orbite 2 000 km, 390 tuiles, témoins GPU
+×8,8 et ×11,5 valides, `.banc/PF4/pf1-orbite-apres.json`) — contre les cellules
+du `rapport-PF1.md` (avant) :
+
+| orbite 2 000 km | PF1 avant (cadence p50 / p99) | PF4 après |
+|---|---|---|
+| ×4, animé (rotation propre) | **31,9 / 60,2** ms, tick CPU 15,2 | **13,5 / 35,4** ms, tick CPU 7,2 |
+| ×4, figé (animations coupées) | **17,2** | **4,5 / 12,4** ms, tick CPU 1,4 |
+| mienne, animé | 2,6 / 10,7 | 2,8 / 4,2 |
+
+Animations coupées, l'image ne change plus (PF1 : identiques au bit) : on ne
+dessine plus qu'**une image sur 30** (`DIVISEUR_FIGE`, 2 i/s de filet pour une
+tuile qui arrive). ⚠️ Deux sessions différentes, pas un A/B appairé : lire
+l'ordre de grandeur, pas la décimale. Ce qui reste au repos en orbite ×4 —
+`rendu.objets` 3,4 ms (un matériau par tuile, `updateMatrixWorld`) — est le
+levier n° 2 et 3 de PF1, hors de ce brief.
+
 ## La liste de `/threejs-optimisation`
 
 - **Allocations dans la boucle** : tas JS plat 60 s au repos (232–259 Mo, dents
@@ -188,8 +206,8 @@ fermé, pas de plongée (altitude inchangée) ; croix → fermé. Test
   même lieu — à refaire avec `flyTo`/`loadRealTerrain` avant de conclure
   « aucune fuite ». Non conclu.
 - **Recompilations de nuanceur** : `programs.length` 19–23 constant sur tous les
-  bancs ; deux `Program Info Log` X4000 (`f_surfaceFx_int` non initialisé) à la
-  compilation — cosmétique.
+  bancs — PF1 le confirme (zéro en usage) ; rayé. Deux `Program Info Log` X4000
+  (`f_surfaceFx_int` non initialisé) à la compilation — cosmétique.
 - **`preserveDrawingBuffer`** absent, `antialias: false` (SMAA), `powerPreference:
   'high-performance'` : rien à dire.
 - **Deux systèmes pour une chose** : la profondeur du compositeur en avait
@@ -207,7 +225,7 @@ fermé, pas de plongée (altitude inchangée) ; croix → fermé. Test
 ## Tests
 
 `npm run audit:tests` : **245 listés · 245 sur disque, aucun écart** (241 + 4).
-`npm test` après fusion de `regroupement` (base 4 675 · 0) : **ℹ tests 4688 ℹ pass 4687 ℹ fail 1 ** (4 675 + 13 tests PF4). Un échec transitoire réfuté en chemin : `export-effets.test.js` classe la chaîne en lisant `const x = new XEffect(` dans main.js — le SMAA enveloppé dans un ternaire disparaissait du classement ; remis sur sa ligne.
+`npm test` après la seconde fusion de `regroupement` (PF1 inclus, base 4 675 · 0) : **4 688 tests · 4 688 pass · 0 fail** (4 675 + 13 tests PF4). Un échec transitoire réfuté en chemin : `export-effets.test.js` classe la chaîne en lisant `const x = new XEffect(` dans main.js — le SMAA enveloppé dans un ternaire disparaissait du classement ; remis sur sa ligne.
 
 ## Commits (branche `perf-bugs`)
 
@@ -215,7 +233,8 @@ fermé, pas de plongée (altitude inchangée) ; croix → fermé. Test
 - `dc6b0c5` PF4 : les cinq bugs — profondeur, cadence au repos, accalmie du
   gouverneur, fenêtre d'abord, sortie au pointeur
 - fusion de `regroupement` (7694eab), sans conflit
-- ce rapport
+- `b2cd656` rapport ; puis le SMAA sur sa ligne + cadence figée 1/30 ;
+  seconde fusion de `regroupement` (PF1, `44d6219`) ; ce rapport mis à jour
 
 ## Ce que j'ai cru puis réfuté
 
@@ -236,3 +255,9 @@ fermé, pas de plongée (altitude inchangée) ; croix → fermé. Test
 5. **« Le voile capte tout »**. Presque : c'est son frère `.ce-elemwrap` qui
    capte, le voile lui-même fermait au clic. Et **la croix ferme** ici.
 6. **« Le glissé doit traverser le voile »** : renoncé — le rejouer plongerait.
+7. **« Le crop tourne 36 tuiles »** (socle) : PF1 l'a réfuté avant moi — ce sont
+   des draws, le cache en garde 400+ ; ma sonde `fuites` a vu 70 textures
+   constantes par lieu, ce qui ne dit rien du cache de tuiles du globe.
+8. **« npm test passe »** écrit une fois avec un test rouge (le mien, ③, après
+   avoir remis le SMAA sur sa ligne sans mettre à jour son motif) : corrigé au
+   commit suivant, 4 688 · 0.
