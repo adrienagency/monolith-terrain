@@ -34,7 +34,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as THREE from 'three'
 import { poseFond } from '../src/monde/frontiere-rendu.js'
-import { EARTH_RADIUS_M, R_GLOBE, ORBITAL_M_PER_UNIT } from '../src/geo.js'
+import { EARTH_RADIUS_M, R_GLOBE, ORBITAL_M_PER_UNIT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from '../src/geo.js'
 import { Y_CIBLE } from '../src/loi-altitude.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
@@ -71,14 +71,22 @@ test('ROUGE ① hors du crop, l’axe de rotation du glissé vertical passe par 
 // Glissé HORIZONTAL de 200 px. En orbite le point sous la caméra change de
 // ~48°. Hors crop : 0,000° — la caméra tourne autour de sa propre verticale.
 // ═══════════════════════════════════════════════════════════════════════════
-test('ROUGE ② hors du crop, un glissé horizontal déplace le point sous la caméra comme en orbite (≥ moitié de l’étalon)', { skip: !M && 'journal .banc/R33 absent' }, () => {
-  const o = orbite(M)
-  const etalon = o?.glisses.H.dSousCamDeg
-  assert.ok(etalon > 10, `étalon orbite : ${etalon}°`)
+// ⚠️ **RÉÉCRIT PAR R32 CONTRE D19.** Ce test comparait à l'orbite d'AVANT D19
+// (`rotateSpeed = 1` : 0,447 °/px quelle que soit l'altitude) et exigeait « au
+// moins la moitié de l'étalon ». D19 remplace la vitesse par une contrainte —
+// le point saisi reste sous le curseur — donc le déplacement du point sous la
+// caméra vaut le SOL que 200 px couvrent à cette altitude : 200 × 2·h·tan(fov/2)
+// / 800, soit 5,4° à 4 000 km de fond, 0,2° à 100 km. Ce qu'on garde : il n'est
+// pas nul (le lacet rendait 0,0000°), et il vaut ce que la géométrie impose.
+test('ROUGE ② hors du crop, un glissé horizontal déplace le point sous la caméra du sol que 200 px couvrent (D19), jamais 0°', { skip: !M && 'journal .banc/R33 absent' }, () => {
   for (const b of surfaces(M)) {
     const h = b.glisses.H
-    assert.ok(h.dSousCamDeg >= etalon / 2,
-      `${b.nom} (altimètre ${km(b.altimetreM)}) : le point sous la caméra bouge de ${h.dSousCamDeg.toFixed(4)}° pour 200 px (orbite : ${etalon.toFixed(2)}°) — c’est un LACET sur place, pas une orbite`)
+    const solPx = (b.altFondM * 2 * Math.tan((33 / 2) * Math.PI / 180)) / 800 // mètres de sol par pixel, au nadir
+    const attenduDeg = (200 * solPx) / EARTH_RADIUS_M * 180 / Math.PI
+    assert.ok(h.dSousCamDeg > 0.05 * attenduDeg,
+      `${b.nom} (altimètre ${km(b.altimetreM)}) : le point sous la caméra bouge de ${h.dSousCamDeg.toFixed(4)}° pour 200 px (attendu ≈ ${attenduDeg.toFixed(3)}°) — c’est un LACET sur place, pas une orbite`)
+    assert.ok(h.dSousCamDeg < 3 * attenduDeg,
+      `${b.nom} : ${h.dSousCamDeg.toFixed(4)}° pour 200 px, plus de trois fois le sol couvert (${attenduDeg.toFixed(3)}°) — le point saisi ne suit plus le curseur`)
   }
 })
 
@@ -142,22 +150,46 @@ function distanceAxeM(a, b) {
   return c.length() * ORBITAL_M_PER_UNIT
 }
 
-test('ROUGE ⑤ mécanisme : la rotation polaire d’OrbitControls, transportée par `poseFond`, tourne autour du centre de la Terre (< 100 km)', () => {
-  // 130 km d'altimètre sur un bloc z8 (emprise ≈ 219 km) : d ≈ 33 unités
-  const extentMeters = 219000, d = 33
-  const a = camGlobeDepuisBloc({ phiDeg: 0, thetaDeg: 0, d, extentMeters })
-  const b = camGlobeDepuisBloc({ phiDeg: 2, thetaDeg: 0, d, extentMeters })
+// ⚠️ **RÉÉCRITS PAR R32 CONTRE LE NOUVEAU MÉCANISME**, comme l'en-tête de ⑤ le
+// demandait. Hors du crop, le glissé n'est plus une rotation d'OrbitControls
+// autour de la cible : c'est une TRANSLATION rigide caméra + cible dans le plan
+// du bloc, transportée par la même similitude, ancrée sur l'aplomb de la cible
+// (`main.js`, « on attrape la Terre »). Le témoin d'avant (la rotation polaire
+// autour de la cible tourne autour de la surface) est gardé dans
+// `test/pivot-globe.test.js` ① ter.
+const EMPRISE_Z9 = { ouest: 54.5, est: 56.5, sud: -22.2, nord: -20.3 }
+function camGlobeParTranslation({ tx, tz, camY, extentMeters }) {
+  const cam = new THREE.PerspectiveCamera(33, 1.6, 0.1, 1000)
+  cam.position.set(tx, camY, tz)
+  cam.up.set(0, 1, 0)
+  cam.lookAt(tx, Y_CIBLE, tz + 1e-6)
+  cam.updateMatrixWorld()
+  const ancre = mondeVersLatLonEmprise(EMPRISE_Z9, tx, tz, TERRAIN_SIZE)
+  const pose = poseFond({ lat: ancre.lat, lon: ancre.lon, origineBloc: [tx, 0, tz], positionBloc: cam.position.toArray(), quaternionBloc: cam.quaternion.toArray(), extentMeters, span: TERRAIN_SIZE })
+  return { p: new THREE.Vector3(...pose.position), q: new THREE.Quaternion(...pose.quaternion) }
+}
+
+test('ROUGE ⑤ mécanisme : la translation rigide caméra + cible du glissé, transportée par `poseFond`, tourne autour du centre de la Terre (< 100 km)', () => {
+  const extentMeters = 219000, camY = 33
+  const a = camGlobeParTranslation({ tx: 0, tz: 0, camY, extentMeters })
+  const A = mondeVersLatLonEmprise(EMPRISE_Z9, 0, 0, TERRAIN_SIZE)
+  const w = latLonVersMondeEmprise(EMPRISE_Z9, A.lat, A.lon + 1, TERRAIN_SIZE)
+  const b = camGlobeParTranslation({ tx: w.x, tz: w.z, camY, extentMeters })
   const dist = distanceAxeM(a, b)
-  assert.ok(dist < 100000,
-    `l’axe de rotation transporté est à ${km(dist)} du centre de la Terre (rayon terrestre : ${km(EARTH_RADIUS_M)}) — la caméra qui rend tourne autour d’un point DE LA SURFACE`)
+  assert.ok(dist < 100000, `l’axe de rotation transporté est à ${km(dist)} du centre de la Terre (rayon terrestre : ${km(EARTH_RADIUS_M)})`)
+  assert.ok(Math.abs(a.p.length() - b.p.length()) * ORBITAL_M_PER_UNIT < 50, 'l’altitude de la caméra qui rend doit rester constante')
 })
 
-test('ROUGE ⑤ bis mécanisme : la rotation d’azimut, transportée par `poseFond`, déplace le point sous la caméra (≥ 5° pour 50° d’azimut)', () => {
-  const extentMeters = 219000, d = 33
-  const a = camGlobeDepuisBloc({ phiDeg: 0, thetaDeg: 0, d, extentMeters })
-  const b = camGlobeDepuisBloc({ phiDeg: 0, thetaDeg: 50, d, extentMeters })
+test('ROUGE ⑤ bis mécanisme : la translation, transportée par `poseFond`, déplace le point sous la caméra d’autant (1° pour 1°)', () => {
+  const extentMeters = 219000, camY = 33
+  const a = camGlobeParTranslation({ tx: 0, tz: 0, camY, extentMeters })
+  const A = mondeVersLatLonEmprise(EMPRISE_Z9, 0, 0, TERRAIN_SIZE)
+  const w = latLonVersMondeEmprise(EMPRISE_Z9, A.lat, A.lon + 1, TERRAIN_SIZE)
+  const b = camGlobeParTranslation({ tx: w.x, tz: w.z, camY, extentMeters })
   const deg = a.p.clone().normalize().angleTo(b.p.clone().normalize()) * 180 / Math.PI
-  assert.ok(deg >= 5, `le point sous la caméra bouge de ${deg.toExponential(2)}° pour 50° d’azimut : un lacet autour de la verticale locale, pas une orbite autour du centre (R_GLOBE = ${R_GLOBE})`)
+  // 1° de longitude à la latitude de La Réunion vaut cos(lat) degrés d'arc
+  const attendu = Math.cos(A.lat * Math.PI / 180)
+  assert.ok(Math.abs(deg - attendu) < 0.02, `le point sous la caméra bouge de ${deg.toFixed(4)}° d’arc pour 1° de longitude demandé (attendu ${attendu.toFixed(4)}°, R_GLOBE = ${R_GLOBE})`)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

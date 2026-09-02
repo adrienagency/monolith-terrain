@@ -132,6 +132,7 @@ import { PhotoMonde, urlPhotoMonde, FONDU_MER_MONDE } from './monde/photo-monde.
 // lecteur : les neuf tuiles z12 du bloc étaient téléchargées deux fois par
 // chargement (2,705 Mo), une fois par chaque chemin, faute d'une mémoire commune.
 import { memoTuiles, tuileMemorisee, viderMemoTuiles } from './monde/memo-tuiles-mnt.js'
+import { hauteursTerrarium } from './monde/decodeur-terrarium.js'
 // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
 //
 // ⚠️ **CE N'EST PAS UNE COPIE DU SOCLE, C'EST LE MÊME TEXTE.** `terrain.js`
@@ -860,6 +861,25 @@ const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen 
 // La marge JUSTE coûte des niveaux ; elle ne se négocie pas contre eux.
 const ALT_MAX_M = 9000 // Everest 8 849 m, arrondi au-dessus
 const JUPE_MAX = 0.9 // le plafond de `skirtDrop`, en unités de scène
+
+// ══════════ LE CACHE SOUPLE — PF2, « ce qui est hors champ ne garde pas sa place » ═══
+//
+// Le plafond DUR (`CACHE_MAX_CONTINU`) ne se déclenche qu'à 1 700 tuiles ; en
+// dessous rien n'est jamais rendu. Mesuré (profil-pf2, scénario cache, build,
+// 15 min d'usage — glissés, zooms aller-retour) : **114 → 233 → 614 tuiles
+// prêtes HORS TRONC à 1, 5 et 15 min**, pour 151 dans le tronc à la fin. Les
+// trois quarts du cache portaient des tuiles qu'aucun écran ne montrait — et
+// chacune tient sa texture (256 Kio) en VRAM ou en RAM.
+//
+// C'est le `tileCacheSize` de Cesium : après chaque image, ce qui n'a pas servi
+// à CETTE image est rendu au-delà d'une réserve, en LRU. La réserve garde le
+// dézoom gratuit (les ancêtres sont porteuses, donc jamais candidates) et les
+// voisines récentes ; l'hystérésis évite de trier le cache à chaque image pour
+// trois tuiles. Réservé au chemin continu : les bancs de l'ancien chemin
+// comptent leurs requêtes à budget constant (`test/globe-eviction.test.js`).
+const CACHE_SOUPLE = 600 // places gardées AU-DELÀ des porteuses de l'image
+const CACHE_SOUPLE_HYSTERESE = 100 // on ne taille qu'au-delà de la réserve + ceci
+
 
 // UNE TUILE QUI NE REVIENDRA JAMAIS OCCUPE UNE PLACE DU BUDGET POUR TOUJOURS.
 // C'est le point fixe du cache par une autre porte : `error` et `loading` ne
@@ -3310,6 +3330,57 @@ function tileBitmap(url, octets = 256 * 256 * 4) {
   })(), octets)
 }
 
+// ═══════════ LE DÉCODEUR HORS DU FIL PRINCIPAL — PF2 ═════════════════════
+//
+// Un seul Worker pour tout le globe (voir `src/monde/decodeur-terrarium.js`,
+// qui porte la mesure : 4 ms la tuile 256², 6,5 ms la 512², sur le fil
+// principal). `null` = pas encore essayé ; `false` = indisponible (pas de
+// Worker, pas d'OffscreenCanvas, ou le Worker a levé) — et `fetchTile`
+// décode alors sur place, comme avant, au bit près.
+let _decodeur = null
+function decodeurTerrarium() {
+  if (_decodeur !== null) return _decodeur
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof ImageBitmap === 'undefined') return (_decodeur = false)
+  try {
+    const worker = new Worker(new URL('./monde/decodeur-terrarium.js', import.meta.url), { type: 'module' })
+    const attentes = new Map()
+    worker.onmessage = (ev) => {
+      const { id, heights, image, erreur } = ev.data
+      const a = attentes.get(id)
+      if (!a) { image?.close?.(); return }
+      attentes.delete(id)
+      if (erreur) a.reject(new Error(erreur))
+      else a.resolve({ heights, image })
+    }
+    worker.onerror = (ev) => {
+      // ⚠️ REPLI DÉFINITIF, ET BRUYANT : un Worker qui lève (module introuvable,
+      // OffscreenCanvas refusé) ne doit ni geler les tuiles ni se retenter à
+      // chaque image. Les attentes en cours retombent sur le décodage local.
+      console.warn('décodeur terrarium : repli sur le fil principal —', ev?.message || ev)
+      for (const a of attentes.values()) a.reject(new Error('décodeur indisponible'))
+      attentes.clear()
+      _decodeur = false
+    }
+    _decodeur = { worker, attentes, id: 0 }
+  } catch {
+    _decodeur = false
+  }
+  return _decodeur
+}
+
+/** `null` si le décodage doit se faire ici ; sinon la promesse du Worker. */
+function decoderHorsFil(img, px, tile) {
+  const d = decodeurTerrarium()
+  if (!d || !(img instanceof ImageBitmap)) return null
+  const id = ++d.id
+  return new Promise((resolve, reject) => {
+    d.attentes.set(id, { resolve, reject })
+    // ⚠️ CLONÉ, PAS TRANSFÉRÉ : `img` vient de `_tileMemo`, que le damier
+    // partage. Transférer le bitmap le détacherait pour tous ses lecteurs.
+    d.worker.postMessage({ id, bitmap: img, px, scale: tile.scale, ox: tile.ox, oy: tile.oy })
+  })
+}
+
 // terrarium PNG/WebP → { texture, heights Float32Array(px*px), size }
 // (pas de `signal` : la promesse est partagée entre tous les demandeurs de la
 // même URL, l'abandon de l'un annulerait la tuile des autres)
@@ -3342,22 +3413,37 @@ async function fetchTile(z, x, y, plan) {
     img = await tileBitmap(source.url(tile.z, tile.x, tile.y), source.tilePx * source.tilePx * 4)
   }
   const px = source.tilePx
-  const c = document.createElement('canvas')
-  c.width = c.height = px
-  const ctx = c.getContext('2d', { willReadFrequently: true })
-  if (tile.scale === 1) ctx.drawImage(img, 0, 0)
-  else {
-    // SURZOOM : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre, exactement
-    // comme le damier (`src/dem.js`). Agrandir un fond lisse n'invente rien.
-    const s = px / tile.scale
-    ctx.drawImage(img, tile.ox * px, tile.oy * px, s, s, 0, 0, px, px)
+  // ══════ HORS DU FIL PRINCIPAL D'ABORD — PF2 ═══════════════════════════════
+  // Le Worker rend les hauteurs ET un ImageBitmap prêt pour la texture ; s'il
+  // manque ou échoue, le chemin d'en dessous décode ici, comme avant.
+  let heights = null
+  let texture = null
+  const horsFil = decoderHorsFil(img, px, tile)
+  if (horsFil) {
+    try {
+      const r = await horsFil
+      heights = r.heights
+      texture = new THREE.Texture(r.image)
+      texture.needsUpdate = true
+    } catch {
+      heights = null
+      texture = null
+    }
   }
-  const rgba = ctx.getImageData(0, 0, px, px).data
-  const heights = new Float32Array(px * px)
-  for (let i = 0; i < heights.length; i++) {
-    heights[i] = rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256 - 32768
+  if (!texture) {
+    const c = document.createElement('canvas')
+    c.width = c.height = px
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (tile.scale === 1) ctx.drawImage(img, 0, 0)
+    else {
+      // SURZOOM : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre, exactement
+      // comme le damier (`src/dem.js`). Agrandir un fond lisse n'invente rien.
+      const s = px / tile.scale
+      ctx.drawImage(img, tile.ox * px, tile.oy * px, s, s, 0, 0, px, px)
+    }
+    heights = hauteursTerrarium(ctx.getImageData(0, 0, px, px).data, px)
+    texture = new THREE.CanvasTexture(c)
   }
-  const texture = new THREE.CanvasTexture(c)
   // ⚠️ LE CANEVAS EST RELÂCHÉ DÈS QUE LE GPU L'A REÇU (plan « globe continu »,
   // Tâche 4 sexies, Étape 1). `CanvasTexture` garde son canevas vivant via
   // `texture.image` pour toute la vie de la texture : 256×256×4 = 256 Kio par
@@ -3385,6 +3471,7 @@ async function fetchTile(z, x, y, plan) {
   // `webglcontextrestored` dans `src/main.js`. **Retirer l'un sans l'autre
   // laisse un globe noir après une réinitialisation de pilote.**
   texture.onUpdate = (tex) => {
+    tex.image?.close?.() // un ImageBitmap (chemin Worker) se ferme explicitement
     tex.image = null // = `tex.source.data = null` : le canevas devient collectable
     tex.onUpdate = null
   }
@@ -3452,6 +3539,40 @@ export function sampleHeights(heights, u, v, size = 256) {
 }
 
 // ---------------------------------------------------------------- globe
+
+/**
+ * Le repère et les extrêmes de la nappe NUE d'une tuile — voir `_ensureTile`.
+ * @returns {{e:THREE.Vector3,n:THREE.Vector3,u:THREE.Vector3,eMin:number,eMax:number,nMin:number,nMax:number,uMin:number,uMax:number}}
+ */
+export function boiteTuile(nw, se, center) {
+  const u = center.clone().normalize()
+  const lo = ((nw.lon + se.lon) / 2) * (Math.PI / 180)
+  const e = new THREE.Vector3(Math.cos(lo), 0, -Math.sin(lo)) // l'est au centre
+  const n = new THREE.Vector3().crossVectors(u, e) // haut × est = nord
+  let eMin = 0, eMax = 0, nMin = 0, nMax = 0, uMin = 0, uMax = 0
+  const p = new THREE.Vector3()
+  const releve = (lat, lon) => {
+    latLonToSphere(lat, lon, R_GLOBE, p).sub(center)
+    const pe = p.dot(e), pn = p.dot(n), pu = p.dot(u)
+    if (pe < eMin) eMin = pe
+    if (pe > eMax) eMax = pe
+    if (pn < nMin) nMin = pn
+    if (pn > nMax) nMax = pn
+    if (pu < uMin) uMin = pu
+    if (pu > uMax) uMax = pu
+  }
+  const N = 4
+  for (let i = 0; i <= N; i++) {
+    const f = i / N
+    const lat = nw.lat + (se.lat - nw.lat) * f
+    const lon = nw.lon + (se.lon - nw.lon) * f
+    releve(nw.lat, lon)
+    releve(se.lat, lon)
+    releve(lat, nw.lon)
+    releve(lat, se.lon)
+  }
+  return { e, n, u, eMin, eMax, nMin, nMax, uMin, uMax }
+}
 
 export class Globe {
   constructor(params = {}) {
@@ -3651,6 +3772,11 @@ export class Globe {
     this._angleHorizon = 0
     this._rayonCentre = 1
     this._demiEpaisseur = 0
+    this._echelleProj = 1 // `projectionMatrix[5]`, posé par `_preparerTriSpatial`
+    this._margeRelief = 0 // le déplacement radial maximal du relief, posé par `_preparerTriSpatial`
+    this._porteuses = 0 // tuiles PORTEUSES de la couverture à la dernière image
+    this._camPos = null // la caméra de la dernière image, lue par `_priorite`
+    this._enParcours = false // la pompe se tait pendant `_traverse` — voir `_pump`
     this._visites = 0 // tuiles PARCOURUES à la dernière image (mesure de l'emprise)
     this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
     this._refusFile = 0 // requêtes REFUSÉES par PLAFOND_FILE à la dernière image
@@ -7500,11 +7626,29 @@ export class Globe {
       center.distanceTo(latLonToSphere(se.lat, nw.lon)),
       center.distanceTo(latLonToSphere(se.lat, se.lon))
     )
+    // ══════ LA BOÎTE ORIENTÉE DE LA TUILE — PF2 ═══════════════════════════
+    //
+    // ⚠️ **LA SPHÈRE D'UN CARREAU PLAT EST GRASSE, ET ÇA SE MESURE À L'ÉCRAN.**
+    // Son rayon est la demi-diagonale — dans TOUTES les directions, donc aussi
+    // vers le ciel, où le carreau n'a rien. Une vue de trois quarts RASE les
+    // tuiles du pourtour par-dessus : leur sphère coupe le tronc, pas leur
+    // surface. Mesuré (profil-pf2, descente, sous 280 km) : **31 des 53 tuiles
+    // dessinées avaient leur centre hors de l'écran** (distance NDC moyenne
+    // 1,6) — parcourues, gardées porteuses, habillées de photo, pour rien.
+    //
+    // C'est le `OrientedBoundingBox` de Cesium (`TileBoundingRegion`) : un
+    // repère (est, nord, haut) au centre de la tuile, et les extrêmes de la
+    // nappe NUE sur ses trois axes, relevés sur 16 points du contour + le
+    // centre (les extrêmes d'une calotte convexe sont sur son bord ; les coins
+    // donnent le creux `uMin`). Le relief et la jupe s'ajoutent À L'USAGE, sur
+    // l'axe haut (`_troncBoite`) : ils dépendent de l'exagération du moment.
+    const boite = boiteTuile(nw, se, center)
     t = {
       key,
       z,
       x,
       y,
+      boite,
       state: 'empty', // empty → loading → ready | error
       mesh: null,
       texture: null,
@@ -7544,7 +7688,11 @@ export class Globe {
     return f !== undefined && this.frame - f < IMAGES_QUARANTAINE
   }
 
-  _request(t, priority) {
+  // ⚠️ `priority` ABSENTE = PRIORITÉ SUIVIE (PF2). Le parcours n'en passe plus :
+  // la file la calcule (`_priorite`) et la RECALCULE à chaque image
+  // (`_reclasserFile`) avec la caméra du moment. Les racines, le flux du socle
+  // et le réessai passent un nombre, qui reste fixe — c'est leur contrat.
+  _request(t, priority = null) {
     if (t.state !== 'empty') return
     if (this._contrePression() && this._enQuarantaine(t.key)) return
     // ⚠️ LE PLAFOND DE FILE SE TESTE **AVANT** LA MARQUE `loading`, ET C'EST TOUT
@@ -7594,8 +7742,53 @@ export class Globe {
     t.plan = plan
     t.state = 'loading'
     t.demandee = this.frame // l'image de DÉPART : c'est elle qui date un blocage
-    this.queue.push({ t, priority })
+    const suivie = priority === null
+    this.queue.push({ t, priority: suivie ? this._priorite(t) : priority, suivie })
     this._pump()
+  }
+
+  // ═══════════ LA PRIORITÉ D'UNE TUILE — PF2, « le centre de l'écran d'abord » ═══
+  //
+  // Adrien : « Ce qui est visible doit toujours être calculé en premier. Ce qui
+  // est au centre de l'écran est la priorité. » La clé est donc la DISTANCE, en
+  // écran, du BORD de la tuile au centre de l'écran : le centre projeté de la
+  // tuile, moins son rayon projeté — une grande tuile qui couvre le centre vaut
+  // zéro, une petite tuile au coin vaut ~1,4. Plus la valeur est haute, plus la
+  // tuile part tôt (la file trie en décroissant) ; le niveau ne départage qu'à
+  // égalité, le plus grossier d'abord (il couvre plus d'écran par requête).
+  //
+  // ⚠️ AVANT, LA PRIORITÉ ÉTAIT `chord / dist` DU PARENT, la même pour ses
+  // quatre enfants, figée à l'enfilement, et la pompe partait EN PLEIN parcours
+  // — les six premières requêtes d'une image étaient celles des premières
+  // racines visitées. Mesuré (sonde profil-pf2, descente 2 274 km → 20 km, dev,
+  // RTX 3080) : sur les 20 premières tuiles arrivées, 0 % dans le tiers central,
+  // distance NDC moyenne 1,415 — le COIN de l'écran. Sur une vue de trois quarts
+  // `chord / dist` favorise le premier plan, en bas de l'image, jamais le centre.
+  //
+  // Hors tri spatial (`continu` faux, les bancs), la clé reste `chord / dist`
+  // de la tuile elle-même : aucune matrice de vue n'existe dans ce régime.
+  _priorite(t) {
+    if (!this.continu) {
+      const p = this._camPos
+      if (!p) return 0
+      return t.chord / Math.max(p.distanceTo(t.center) - t.chord * 0.5, 1)
+    }
+    const m = this._matVue.elements
+    const c = t.center
+    const w = m[3] * c.x + m[7] * c.y + m[11] * c.z + m[15]
+    if (!(w > 0)) return 0 // derrière la caméra : en dernier
+    const x = (m[0] * c.x + m[4] * c.y + m[8] * c.z + m[12]) / w
+    const y = (m[1] * c.x + m[5] * c.y + m[9] * c.z + m[13]) / w
+    const r = (t.rayon * this._echelleProj) / w // rayon projeté, en NDC (axe vertical)
+    const d = Math.max(0, Math.hypot(x, y) - r)
+    return 1000 - 1000 * (Math.min(d, 4) / 4) + (MAX_Z - t.z) * 0.1
+  }
+
+  // Une fois par image, après le parcours : la caméra a bougé, la file suit.
+  // ⚠️ Seules les entrées SUIVIES bougent — les racines (1e9), le socle (1e9 /
+  // 9e8) et le réessai (0) gardent la valeur que leur appelant a posée.
+  _reclasserFile() {
+    for (const e of this.queue) if (e.suivie) e.priority = this._priorite(e.t)
   }
 
   // Lance la sonde de couverture d'une zone, sans attendre et sans la relancer.
@@ -7735,8 +7928,16 @@ export class Globe {
   }
 
   _pump() {
+    // ⚠️ PAS PENDANT LE PARCOURS (PF2). `_request` appelait la pompe à chaque
+    // enfilement, donc les `MAX_CONCURRENT` créneaux d'une image partaient aux
+    // PREMIÈRES tuiles visitées — l'ordre des racines, pas celui de l'écran.
+    // `update()` la rappelle une fois la file complète et reclassée : les six
+    // créneaux vont alors aux six meilleures priorités de l'image. C'est le
+    // `RequestScheduler.update()` de Cesium, appelé en fin d'image.
+    if (this._enParcours) return
+    if (!this.queue.length || this.inFlight >= MAX_CONCURRENT) return
+    this.queue.sort((a, b) => b.priority - a.priority)
     while (this.inFlight < MAX_CONCURRENT && this.queue.length) {
-      this.queue.sort((a, b) => b.priority - a.priority)
       const { t } = this.queue.shift()
       this.inFlight++
       fetchTile(t.z, t.x, t.y, t.plan)
@@ -8076,8 +8277,10 @@ export class Globe {
     this.frame++
     const camPos = camera.position
     const camDir = camPos.clone().normalize()
+    this._camPos = camPos // lu par `_priorite` (régime sans tri spatial)
     this._drawn = 0
     this._visites = 0
+    this._porteuses = 0
     this._refus = 0
     this._refusFile = 0
     this._purgees = 0
@@ -8102,13 +8305,35 @@ export class Globe {
     }
     this._credit = this.cacheMax - this.tiles.size + marge
 
+    this._enParcours = true
     for (const root of this.roots) this._traverse(root, camPos, camDir)
 
     // ⚠️ LA PURGE PASSE AVANT L'ÉVICTION, et l'ordre porte du sens : elle rend
     // des tuiles à `empty`, ce que l'éviction sait reprendre (rang 0), alors
     // qu'une `loading` fantôme lui échappe pendant IMAGES_BLOQUEE images.
     this._purgerFile()
-    if (this.tiles.size > this.cacheMax) this._evict()
+    this._reclasserFile()
+    // le plafond DUR, et — sur le chemin continu — le cache SOUPLE : voir
+    // `CACHE_SOUPLE`. La cible ne descend jamais sous les porteuses de l'image
+    // (elles ne sont candidates qu'au rang 2, de toute façon).
+    // ⚠️ ET JAMAIS AU REPOS DU CROP (`_cropSeul`) : le parcours s'y réduit au
+    // bloc, les porteuses tombent à quelques dizaines, et tailler alors
+    // rendrait au réseau tout ce que le dézoom retrouve gratuitement — c'est le
+    // contrat de la Tâche N, tenu par `test/veille-repos.test.js` ⑦ (112 tuiles
+    // sur 792 rendues, mesuré au premier essai). La taille ne se paie qu'en
+    // mouvement, quand le parcours dit vraiment ce qui est à l'écran.
+    let plafond = this.cacheMax
+    if (this.continu && !this._cropSeul) {
+      const cible = this._porteuses + CACHE_SOUPLE
+      if (this.tiles.size > cible + CACHE_SOUPLE_HYSTERESE) plafond = Math.min(plafond, cible)
+    }
+    if (this.tiles.size > plafond) this._evictJusqua(plafond)
+    // ⚠️ ET LA POMPE PART EN DERNIER (PF2) : après la purge (ce qui n'est plus
+    // demandé ne part pas), après le reclassement (la caméra de CETTE image
+    // décide), après l'éviction (une victime `loading` est déjà sortie de la
+    // file). Voir `_pump`.
+    this._enParcours = false
+    this._pump()
     // ══════ L'IMAGERIE, MÊME ORDRE QUE CI-DESSUS — Tâche R16 ═══════════════
     // Abandon des requêtes fantômes PUIS éviction : l'abandon rend des places
     // que l'éviction sait reprendre, alors qu'une entrée « en vol » lui
@@ -8138,6 +8363,7 @@ export class Globe {
     // le déplacement radial maximal du relief, dans les unités de la scène —
     // même formule que `dispScale` dans `_buildMesh`
     const marge = ALT_MAX_M * (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
+    this._margeRelief = marge // lu par `_troncBoite`
     const D = Math.max(camPos.length(), R * 1.0000001)
     const cos = (R * R) / ((R + marge) * D)
     this._angleHorizon = Math.acos(Math.min(Math.max(cos, -1), 1))
@@ -8159,6 +8385,63 @@ export class Globe {
     }
     this._matVue.copy(camera.matrixWorld).invert().premultiply(camera.projectionMatrix)
     this._frustum.setFromProjectionMatrix(this._matVue)
+    // le facteur d'échelle vertical de la projection (1 / tan(fov/2)) : c'est
+    // lui qui convertit un rayon de scène en rayon d'écran dans `_priorite`
+    this._echelleProj = camera.projectionMatrix.elements[5]
+  }
+
+  // ═══════════ LA TUILE EST-ELLE DANS LE CHAMP ? — PF2 ══════════════════════
+  //
+  // Les deux tris de `_traverse` (horizon géométrique, puis tronc de vue) —
+  // ou, hors tri spatial, la calotte constante d'avant — en UNE question, posée
+  // au même code par la tuile parcourue ET par les enfants qu'on s'apprête à
+  // demander. Les racines sont toujours dans le champ : elles portent la
+  // couverture de toute la planète.
+  _dansLeChamp(t, camDir) {
+    if (t.z <= ROOT_Z) return true
+    if (this.continu) {
+      if (this._horsHorizon(t, camDir)) return false
+      // la sphère d'abord (deux produits scalaires par plan), la boîte ensuite
+      // — elle ne peut qu'ÉCARTER ce que la sphère a laissé passer
+      if (!this._frustum.intersectsSphere(this._sphereDe(t))) return false
+      return this._troncBoite(t)
+    }
+    // horizon cull: skip tiles fully on the far side of the planet
+    return t.center.dot(camDir) / this.radius >= -0.35
+  }
+
+  // La boîte orientée de la tuile, relief et jupe compris, contre les six
+  // plans du tronc — le test séparateur classique : la boîte est dehors si,
+  // pour un plan, la distance de son centre plus son rayon projeté est
+  // négative. ⚠️ Le relief est radial en CHAQUE sommet, pas selon l'axe haut de
+  // la tuile : sur une grande tuile il déborde aussi en est/nord, d'au plus
+  // `marge × sin(theta)` — c'est le terme `mXY`, et il n'est pas décoratif.
+  _troncBoite(t) {
+    const b = t.boite
+    if (!b) return true
+    const marge = this._margeRelief
+    const mXY = Math.max(marge, JUPE_MAX) * Math.sin(t.theta)
+    const uHi = b.uMax + marge
+    const uLo = b.uMin - JUPE_MAX
+    const he = (b.eMax - b.eMin) / 2 + mXY
+    const hn = (b.nMax - b.nMin) / 2 + mXY
+    const hu = (uHi - uLo) / 2
+    const ce = (b.eMax + b.eMin) / 2
+    const cn = (b.nMax + b.nMin) / 2
+    const cu = (uHi + uLo) / 2
+    const e = b.e, n = b.n, u = b.u, c = t.center
+    const cx = c.x + e.x * ce + n.x * cn + u.x * cu
+    const cy = c.y + e.y * ce + n.y * cn + u.y * cu
+    const cz = c.z + e.z * ce + n.z * cn + u.z * cu
+    const plans = this._frustum.planes
+    for (let i = 0; i < 6; i++) {
+      const pl = plans[i]
+      const nx = pl.normal.x, ny = pl.normal.y, nz = pl.normal.z
+      const d = nx * cx + ny * cy + nz * cz + pl.constant
+      const r = he * Math.abs(nx * e.x + ny * e.y + nz * e.z) + hn * Math.abs(nx * n.x + ny * n.y + nz * n.z) + hu * Math.abs(nx * u.x + ny * u.y + nz * u.z)
+      if (d + r < 0) return false
+    }
+    return true
   }
 
   // La tuile est-elle ENTIÈREMENT derrière l'horizon ? ⚠️ `t.theta` — son
@@ -8199,24 +8482,16 @@ export class Globe {
     // faveur : elles portent la couverture de toute la planète, ce sont elles
     // qui dessinent tant que leurs enfants ne sont pas au complet. Les écarter
     // du parcours ouvrirait un trou à chaque bord d'écran.
-    if (t.z > ROOT_Z) {
-      // `t.center` est SUR la sphère de rayon `this.radius` (voir `_ensureTile`),
-      // donc ce quotient est exactement le cosinus cherché — sans allocation.
-      const dot = t.center.dot(camDir) / this.radius
-      if (this.continu) {
-        // horizon géométrique + marge de corde de la tuile
-        if (this._horsHorizon(t, camDir)) return
-        // ⚠️ ET C'EST CETTE LIGNE QUI FAIT LE TRAVAIL. Sans elle, réduire la
-        // calotte ne fait que déplacer le point fixe du budget : le zoom reste
-        // le même, quelle que soit l'altitude.
-        if (!this._frustum.intersectsSphere(this._sphereDe(t))) return
-      } else if (dot < -0.35) {
-        // horizon cull: skip tiles fully on the far side of the planet
-        return
-      }
-    }
+    //
+    // Horizon géométrique + marge de corde, puis tronc de vue. ⚠️ ET C'EST LE
+    // TRONC QUI FAIT LE TRAVAIL. Sans lui, réduire la calotte ne fait que
+    // déplacer le point fixe du budget : le zoom reste le même, quelle que soit
+    // l'altitude. La question est posée par `_dansLeChamp`, la MÊME que celle
+    // posée aux enfants avant de les demander (PF2) : deux écritures divergent.
+    if (!this._dansLeChamp(t, camDir)) return
 
     t.lastUsed = this.frame
+    this._porteuses++
     // PORTEUSE de la couverture courante. `lastUsed` ne suffit pas à distinguer
     // les deux populations que ce parcours touche : les tuiles qu'il TRAVERSE
     // (celle-ci — dessinée, ou ancêtre raffiné dont les enfants dessinent) et
@@ -8301,11 +8576,39 @@ export class Globe {
 
     if (wantSplit) {
       const kids = this._children(t)
+      // ══════ UN ENFANT HORS CHAMP N'EST NI DEMANDÉ, NI ATTENDU — PF2 ═════
+      //
+      // ⚠️ **LE PARENT PASSE LE TRONC PAR SA SPHÈRE, ET CETTE SPHÈRE EST GRASSE.**
+      // La sphère d'un carreau plat est 1,41 fois plus haute que le carreau
+      // n'est large (rayon = demi-diagonale, dans TOUTES les directions, donc
+      // aussi vers le ciel). Un tronc qui RASE une tuile par-dessus — la vue de
+      // trois quarts le fait sur tout le pourtour — coupe la sphère du parent
+      // sans toucher celle d'aucun enfant. Le parent « voulait » donc quatre
+      // enfants qu'aucun écran ne montrerait. Mesuré (profil-pf2, glissé gauche
+      // à 1 500 km, caméra du globe IMMOBILE) : **164 demandes, 99,4 % hors du
+      // tronc, 94 requêtes, 7,1 Mio** pour un geste qui n'a pas déplacé la
+      // planète d'un pixel ; sur une descente, 20 % des demandes.
+      //
+      // Chaque enfant est donc jugé par SA sphère avant d'être demandé. Et la
+      // règle sans-trou ne compte plus que les enfants DANS LE CHAMP : c'est le
+      // `TileSelectionResult.CULLED` de Cesium — un enfant écarté vaut « prêt »
+      // pour le raffinement, puisqu'aucun pixel ne dépend de lui. Quand la
+      // caméra tourne et le fait entrer dans le champ, il est `empty`, la
+      // règle retombe sur le parent, qui est en cache (porteuse : il est
+      // reparcouru à chaque image), et l'enfant part sur le réseau. C'est
+      // exactement ce que la Tâche N fait déjà avec les enfants hors crop.
+      //
+      // ⚠️ `lastUsed` n'est posé QUE sur les enfants du champ : un enfant hors
+      // champ resté en file est purgé à l'image suivante (`_purgerFile`), et
+      // un `empty` hors champ est évinçable au rang 0 — il ne coûte rien.
+      let pretes = true
       for (const k of kids) {
+        if (!this._dansLeChamp(k, camDir)) continue
         k.lastUsed = this.frame // protect loading/fresh children from LRU
-        if (k.state === 'empty') this._request(k, ratio)
+        if (k.state === 'empty') this._request(k)
+        if (k.state !== 'ready' || !k.mesh) pretes = false
       }
-      // hole-free rule: descend only when all four children can draw —
+      // hole-free rule: descend only when all children IN THE FIELD can draw —
       // any error keeps the parent covering the whole quad
       //
       // ⚠️ **AU REPOS, `kids` NE CONTIENT QUE LES ENFANTS DU CROP — Tâche N**,
@@ -8329,7 +8632,7 @@ export class Globe {
       // ce chantier. Ce qui garde réellement l'absence de trou est l'assertion
       // d'ensemble de `test/veille-repos.test.js` ⑦ : le crop doit être dessiné
       // par EXACTEMENT les mêmes tuiles avec et sans le drapeau.
-      if (kids.every((k) => k.state === 'ready' && k.mesh)) {
+      if (pretes) {
         t.refined = true
         for (const k of kids) this._traverse(k, camPos, camDir)
         return

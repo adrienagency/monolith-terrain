@@ -472,6 +472,9 @@ async function scenarioPixel(p) {
   for (const poste of POSTES) {
     await poserPoste(p, poste)
     const r = await p.evaluer(`(() => { const e = window.__exp; e.params.animations = false; e.aq.setTier(0, true)
+      // ⚠️ l'heure est FIXÉE : le soleil du monde suit l'horloge réelle, deux sessions à
+      // quelques minutes d'écart n'ont pas le même ombrage (mesuré : 99,7 % des pixels)
+      if (e.applyTimeOfDay) e.applyTimeOfDay(12)
       const gl = e.renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
       if (e.majCameraFond) e.majCameraFond()
       e.composer.render(0); e.composer.render(0)

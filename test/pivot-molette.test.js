@@ -77,20 +77,23 @@ test('① bis tout geste que le voile CAPTE a une sortie', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ② LE PIVOT TIENT L'AXE SOUS LA MOLETTE
+// ② LA MOLETTE NE TRANSLATE PAS LA CIBLE HORS DU CROP
 //
-// > **Adrien :** *« le point d'orbite doit toujours viser le centre de la Terre.
-// > Il change uniquement quand on passe en mode bloc croppé. »*
+// ⚠️ **CE QUE CE PARAGRAPHE DISAIT, ET DANS QUEL ESPACE — R32.** Il s'appelait
+// « le pivot tient l'AXE DE LA TERRE sous la molette » et mesurait
+// `hypot(target.x, target.z)` : c'est l'axe du BLOC, c'est-à-dire l'aplomb du
+// point sous la caméra — pas le centre de la Terre, qui est à `(0, −R_bloc, 0)`
+// dans cet espace. Ce que le test garde vraiment, et qui reste juste : hors du
+// crop, un cran de molette ne TRANSLATE pas la cible latéralement (le zoom est
+// radial, D19 : « je scrolle vers le point visé au centre de l'écran »). Depuis
+// R32 la cible peut être hors de l'axe du bloc hors du crop (la saisie de la
+// Terre la déplace, et `_cibleVisee` vise le lieu demandé) : le test mesure
+// donc que la molette ne la DÉPLACE pas, pas qu'elle est « sur l'axe ».
 //
-// ⛔ R27 §② publie « hors du crop, l'écart à l'axe vaut EXACTEMENT 0 » — mesuré
-// avec `cranZoom`, qui repose la caméra le long de `cible → caméra` et **ne
-// touche jamais la cible**. La molette passe par `_applyZoom`, qui met caméra ET
-// CIBLE à l'échelle autour du curseur. R27 a prouvé sa règle sur le seul chemin
-// où elle était déjà vraie.
-//
-// MESURÉ au geste réel (`.banc/R30/molette.json`, curseur à (950, 230)) :
-// **2 279 images sur 2 369 hors du crop — 96,2 % — ont la cible hors de l'axe**,
-// jusqu'à **13,2695 u**, et `target.y` s'écarte de `Y_CIBLE` jusqu'à 1,1728 u.
+// MESURÉ au geste réel avant R29 bis (`.banc/R30/molette.json`) : 2 279 images
+// sur 2 369 avec une cible translatée par le zoom vers le curseur, jusqu'à
+// 13,2695 u. R29 bis l'a fermé hors du crop ; R32 étend la règle 2 de D19 au
+// crop (pivot au centre de l'écran, plus au curseur).
 // ═══════════════════════════════════════════════════════════════════════════
 
 function domDePacotille() {
@@ -143,14 +146,15 @@ async function machine({ horsDuCrop = true } = {}) {
   return { m, camera, controls, THREE }
 }
 
-test('② hors du crop, un cran de molette laisse la cible SUR l’axe de la Terre', async () => {
+test('② hors du crop, un cran de molette ne TRANSLATE pas la cible — le zoom est radial (D19, règle 2 au nadir)', async () => {
   const { m, controls, THREE } = await machine()
-  // un utilisateur ne vise JAMAIS le centre exact
+  // un pivot qui traîne d'un ancien cran ne doit pas compter hors du crop
   m._zoomPivot = new THREE.Vector3(8, Y_CIBLE, -6)
   m._zoomVel = -1 // un cran vers l'extérieur
+  const avant = { x: controls.target.x, z: controls.target.z }
   m._applyZoom(1 / 60)
-  const ecart = Math.hypot(controls.target.x, controls.target.z)
-  assert.ok(ecart < 1e-9, `la cible est à ${ecart.toFixed(6)} u de l’axe après UNE image de molette`)
+  const ecart = Math.hypot(controls.target.x - avant.x, controls.target.z - avant.z)
+  assert.ok(ecart < 1e-9, `la cible a été translatée de ${ecart.toFixed(6)} u (espace bloc) par UNE image de molette`)
 })
 
 test('② bis …et `target.y` ne quitte pas `Y_CIBLE`', async () => {
@@ -161,18 +165,24 @@ test('② bis …et `target.y` ne quitte pas `Y_CIBLE`', async () => {
   assert.ok(Math.abs(controls.target.y - Y_CIBLE) < 1e-9, `target.y = ${controls.target.y} au lieu de ${Y_CIBLE}`)
 })
 
-test('② ter SUR LE CROP, le zoom vers le curseur est INTACT — c’est l’exception d’Adrien', async () => {
-  // ⚠️ **LE TÉMOIN QUI INTERDIT DE « CORRIGER » PARTOUT.** La règle exclut
-  // explicitement le mode croppé : *« Il change uniquement quand on passe en
-  // mode bloc croppé. »* C'est aussi le régime où le zoom vers le curseur SERT —
-  // viser une vallée sur un bloc de 27 km. Un correctif qui l'éteindrait là
-  // aussi rendrait ce test vert par accident, et il ne le sera pas.
+test('② ter SUR LE CROP, le zoom vise le point AU CENTRE DE L’ÉCRAN — D19, règle 2, et plus le curseur', async () => {
+  // ⚠️ **D19 REMPLACE L'ARBITRAGE DE R29 bis** (« le zoom vers le curseur est
+  // intact sur le crop ») : *« quand je scrolle pour zoomer ou dézoomer, je
+  // scrolle vers le point visé au centre de l'écran »*. Sur le crop la vue est
+  // inclinée : le point du cadre n'est pas la cible dès que le relief passe
+  // entre les deux, et c'est lui qui gagne — le pivot reste donc actif sur le
+  // crop, mais il est lu au CENTRE, où que soit la souris (test ④ de
+  // pivot-terre.test.js pour la lecture ; ici, l'effet).
   const { m, controls, THREE } = await machine({ horsDuCrop: false })
-  m._zoomPivot = new THREE.Vector3(8, Y_CIBLE, -6)
+  m._zoomPivot = new THREE.Vector3(8, Y_CIBLE, -6) // le point du cadre, posé par _zoomGesture
   m._zoomVel = -1
   m._applyZoom(1 / 60)
   const ecart = Math.hypot(controls.target.x, controls.target.z)
-  assert.ok(ecart > 1e-6, 'le zoom vers le curseur a été éteint SUR LE CROP aussi')
+  assert.ok(ecart > 1e-6, 'le zoom vers le point du cadre a été éteint SUR LE CROP aussi')
+  // et le point du cadre est lu au centre de l'écran, pas sous le curseur
+  const src = lire('src/modes.js')
+  assert.match(src, /this\._zoomNdc\.set\(0, 0\)/, '_zoomGesture ne prend plus son pivot au centre de l’écran')
+  assert.doesNotMatch(src, /_zoomNdc\.set\(\(e\.clientX/, 'le pivot de zoom est revenu sous le curseur')
 })
 
 test('② quater le prédicat est le HOOK, et son absence garde le pivot', async () => {
