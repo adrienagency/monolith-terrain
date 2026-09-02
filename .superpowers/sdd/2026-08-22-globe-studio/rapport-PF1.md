@@ -43,9 +43,9 @@ passage `profil-2026-09-01-19-53-34.json`).
 
 | poste | mienne (×1) | x4 (×4) | x6r (×6 + pixelRatio 2) | GPU logiciel (SwiftShader) |
 |---|---|---|---|---|
-| **orbite 2 000 km** | 2,6 / 10,7 (p1 : 1,8 / 6,0) | **31,9 / 60,2** (p1 : 16,0 / 34,7) | 22,0 / 48,7 (p1 : **49,1 / 76,9**) | — (voir § 0, relance) |
-| **surface 130 km** | 2,7 / 9,9 (p1 : 2,3 / 11,0) | **21,7 / 35,5** (p1 : 12,3 / 14,8) | **32,6 / 51,9** (p1 : 33,1 / 52,3) | cadence 3,6 / 10,2 mais **GPU 290 / 321** |
-| **crop 5 km** | 4,9 / 9,9 (p1 : 3,6 / 7,1) | 12,8 / 16,5 (p1 : 14,1 / **31,6**) | **48,5 / 248,7** (p1 : 25,1 / 36,2) | — |
+| **orbite 2 000 km** | 2,6 / 10,7 (p1 : 1,8 / 6,0) | **31,9 / 60,2** (p1 : 16,0 / 34,7) | 22,0 / 48,7 (p1 : **49,1 / 76,9**) | non mesuré (témoin ×1,99 invalide, session coupée) |
+| **surface 130 km** | 2,7 / 9,9 (p1 : 2,3 / 11,0) | **21,7 / 35,5** (p1 : 12,3 / 14,8) | **32,6 / 51,9** (p1 : 33,1 / 52,3) | cadence rAF 4,8 mais **GPU 337 / 346** (p1 : 290 / 321) |
+| **crop 5 km** | 4,9 / 9,9 (p1 : 3,6 / 7,1) | 12,8 / 16,5 (p1 : 14,1 / **31,6**) | **48,5 / 248,7** (p1 : 25,1 / 36,2) | cadence rAF 3,2 mais **GPU 435 / 490** |
 
 `p1` = premier passage (même banc, moins d'enveloppes). Tick CPU p50 des cellules
 lentes : x4 15,2 / 10,1 / 15,2 ms ; x6r 24,2 / 35,6 / 15,0 ms (surface / crop /
@@ -55,8 +55,12 @@ orbite). **GPU p50 sur la RTX 3080 : 0,21 à 2,71 ms dans toutes les cellules.**
 principal, pas par le GPU**, à tous les postes — le GPU tient dans 1 à 6 % de
 l'image. La machine « portable Retina lent » (×6 + densité 2) est à **30–50 ms
 par image (20–30 i/s)** au repos ; Google Earth y tient 60. Sur GPU logiciel,
-c'est l'inverse : 290 ms de fragments par image (**3,4 i/s**), dont **85 % dans
-`PasseFond`** (le nuanceur des tuiles) et 15 % dans la passe d'effets.
+c'est l'inverse : 315–440 ms de fragments par image (**2,3–3,2 i/s**) — la boucle
+rAF y tourne à 3–5 ms parce que SwiftShader ne bloque pas le CPU, l'image affichée
+est celle du GPU —, dont **85–89 % dans `PasseFond`** (le nuanceur des tuiles :
+276 ms surface, 409 ms crop) et 11–15 % dans la passe d'effets (44–51 ms). Le
+crop coûte **+48 % de fragments** que la surface pour 24 draws au lieu de 90 :
+c'est le nuanceur du bloc (mer, habillage, jupes), pas le nombre d'objets.
 
 Décomposition par cellule (moyennes, ms, part de la cadence moyenne) :
 
@@ -86,7 +90,7 @@ BrightnessContrast+Noise+Vignette]`). Ni N8AO ni DOF n'étaient dans la chaîne
 |---|---|---|---|
 | mienne surface / crop / orbite | 0,45 / 0,59 / 0,45 | 0,19 / 0,61 / 0,09 | 103 / 24 / 64 appels · 117 k / 138 k / 122 k tri |
 | x6r surface / crop / orbite | 0,96 / 2,75 / 1,17 | 2,22 / 1,39 / 1,55 | 93 / 24 / 66 appels |
-| SwiftShader surface | **291,1** | **53,2** | 90 appels · 117 k tri |
+| SwiftShader surface / crop | **275,7 / 409,5** | **44,1 / 50,7** | 90 / 24 appels · 117 k / 138 k tri |
 
 ⚠️ **Le témoin de validité** (×4 rendus dans une requête ⇒ ×N de temps) rend
 ×1,6 à ×4,1 **sur la machine non ralentie** — la minuterie mesure bien des
@@ -184,7 +188,7 @@ sens qu'avec ces deux-là gelés au repos ; Google Earth n'a ni l'un ni l'autre.
 | **Décodage hors du fil principal** (Worker + `createImageBitmap`) | `createImageBitmap` (hors fil, fait) puis **`getImageData` + `_buildMesh` sur le fil principal** | hors-tick 10 % en orbite | **3,1 ms/image ×4, jusqu'à 4,8 ms ×6** pendant un mouvement ; p99 6,5 ms. Un Worker rend ces images à leur cadence de repos |
 | **Compression de textures GPU** (KTX2/BC, Cesium ; GE : formats natifs) | `CanvasTexture` RGBA8 256², sans mipmap (terrarium : la mip corromprait les hauteurs) | mémoire GPU, pas temps | les hauteurs ne se compressent pas en lossy ; un canal **R16/float** (÷2) ou une texture de hauteurs partagée + bande passante réduite ; **0 ms sur le tick**, 160–640 textures → −50 % de VRAM |
 | `preserveDrawingBuffer` off · `powerPreference: 'high-performance'` | déjà : non posé (défaut false) · déjà posé (`main.js:1168`) | — | 0 |
-| **Fusion des passes** | faite pour `terre unique` (`fusionDesPasses` : `PasseFond` + une `EffectPass` de sept effets ; `passeSurface` désactivée, plus de `ClearPass`) | GPU | GPU RTX ≤ 2,7 ms : rien à prendre ; **sur GPU logiciel l'EffectPass vaut 53 ms (15 %) et `PasseFond` 291 ms (85 %)** : c'est le nuanceur de tuile, pas la chaîne, qui coûte sur un GPU faible |
+| **Fusion des passes** | faite pour `terre unique` (`fusionDesPasses` : `PasseFond` + une `EffectPass` de sept effets ; `passeSurface` désactivée, plus de `ClearPass`) | GPU | GPU RTX ≤ 2,7 ms : rien à prendre ; **sur GPU logiciel l'EffectPass vaut 44–51 ms (11–15 %) et `PasseFond` 276–409 ms (85–89 %)** : c'est le nuanceur de tuile (et celui du crop), pas la chaîne, qui coûte sur un GPU faible |
 
 **Le comparatif en une ligne** : Google Earth sur portable à GPU intégré tient
 60 i/s parce qu'il **ne rend rien au repos**, dessine ses tuiles avec **un**
@@ -273,7 +277,7 @@ dans `node_modules` puis dans `C:/Dev/wt-*/node_modules`.
   deux sens.
 - **Que le GPU compterait sur machine lente.** Sur la RTX, ≤ 2,7 ms dans neuf
   cellules ; c'est le CPU principal qui borne. Il faut un GPU logiciel pour
-  inverser (290 ms). Un GPU intégré réel est entre les deux ; **c'est là, et
+  inverser (315–440 ms). Un GPU intégré réel est entre les deux ; **c'est là, et
   seulement là, que les coupes de fragments de PF3 rapportent**.
 - **Que « le crop tourne 36 tuiles » (socle).** Le crop **dessine 24 objets** et
   **garde 406–442 tuiles en cache** ; le chiffre du socle est un nombre de draws
