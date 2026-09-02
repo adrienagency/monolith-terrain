@@ -2658,7 +2658,9 @@ const vignette = new VignetteEffect({ darkness: params.vignette, offset: VIGNETT
 // ⚠️ PF4 — SMAA en détection COULEUR ne lit jamais la profondeur, mais la
 // bibliothèque la RÉCLAME (attribut DEPTH) : sans cette ligne le compositeur
 // monte une texture 32F, une cible stable et un blit par image pour rien.
-const smaa = profondeurAmont ? new SMAAEffect() : sansLectureDeProfondeur(new SMAAEffect(), EffectAttribute.DEPTH)
+const smaa = new SMAAEffect()
+// (sur sa propre ligne : test/export-effets.test.js lit `const x = new XEffect(` pour classer la chaîne)
+if (!profondeurAmont) sansLectureDeProfondeur(smaa, EffectAttribute.DEPTH)
 
 // ═══════════ NEUTRALISER POUR PAVER, RÉAPPLIQUER POUR LIVRER ═══════════════
 //
