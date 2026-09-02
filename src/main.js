@@ -16,6 +16,7 @@ import {
   ToneMappingMode,
   Effect,
   BlendFunction,
+  EffectAttribute,
 } from 'postprocessing'
 import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
@@ -301,6 +302,9 @@ import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
 import { applyRenderSize, screenPixelRatio } from './viewport.js'
 import { sonderMachine } from './palier-machine.js'
+import { sansLectureDeProfondeur, copieStableDistincte } from './profondeur-compositeur.js'
+import { dessinerCetteImage } from './cadence-repos.js'
+import { creerAccalmie } from './accalmie-gouverneur.js'
 import { lanceCuissonVolume } from './cloud-volume.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
@@ -2343,6 +2347,19 @@ controls.addEventListener('end', () => {
   lastUserInput = performance.now()
 })
 window.addEventListener('wheel', () => (lastUserInput = performance.now()), { passive: true })
+// PF4 — le survol compte comme un geste pour la CADENCE de dessin (pas pour la
+// rotation propre, qui garde sa règle) : un curseur qui passe sur la planète
+// doit voir ses toponymes réagir à pleine cadence.
+let dernierPointeur = 0
+window.addEventListener('pointermove', () => (dernierPointeur = performance.now()), { passive: true })
+let compteurCadence = 0
+// `?cadence=pleine` : l'échappatoire qui dessine chaque image comme avant — c'est
+// par elle que la sonde PF4 mesure l'avant/après dans un seul build.
+const cadencePleine = new URLSearchParams(location.search).get('cadence') === 'pleine'
+// PF4 — le guichet du gouverneur se ferme dix secondes après chaque arrivée de
+// relief : la rafale d'arrivée n'est pas une mesure de machine. Voir
+// src/accalmie-gouverneur.js.
+const accalmie = creerAccalmie()
 
 let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
@@ -2389,7 +2406,15 @@ const evenSize = () => {
   return [w & ~1, h & ~1]
 }
 
-const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
+// ⚠️ PF4 — la copie « stable » de profondeur doit être une image GL distincte,
+// sinon `blitFramebuffer` copie l'image sur elle-même : `GL_INVALID_OPERATION`
+// à chaque image composée. Voir src/profondeur-compositeur.js.
+// `?profondeur=amont` : l'échappatoire qui rend le compositeur de la bibliothèque
+// tel quel — c'est par elle que la sonde PF4 mesure l'avant/après dans un seul build.
+const profondeurAmont = new URLSearchParams(location.search).get('profondeur') === 'amont'
+const composer = profondeurAmont
+  ? new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
+  : copieStableDistincte(new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType }))
 // ⚠️ LA RÉFÉRENCE EST GARDÉE — Tâche 1b bis (« la frontière de rendu »). La
 // passe était anonyme ; la frontière a besoin de lui couper son effacement et
 // son fond quand le globe passe DEVANT elle dans la chaîne. Sans drapeau, elle
@@ -2630,7 +2655,12 @@ grain.blendMode.opacity.value = params.grain
 // Un 0,28 recopié là-bas ne resterait juste que jusqu'au jour où celui-ci bouge.
 const VIGNETTE_OFFSET = 0.28
 const vignette = new VignetteEffect({ darkness: params.vignette, offset: VIGNETTE_OFFSET })
+// ⚠️ PF4 — SMAA en détection COULEUR ne lit jamais la profondeur, mais la
+// bibliothèque la RÉCLAME (attribut DEPTH) : sans cette ligne le compositeur
+// monte une texture 32F, une cible stable et un blit par image pour rien.
 const smaa = new SMAAEffect()
+// (sur sa propre ligne : test/export-effets.test.js lit `const x = new XEffect(` pour classer la chaîne)
+if (!profondeurAmont) sansLectureDeProfondeur(smaa, EffectAttribute.DEPTH)
 
 // ═══════════ NEUTRALISER POUR PAVER, RÉAPPLIQUER POUR LIVRER ═══════════════
 //
@@ -4181,6 +4211,7 @@ async function loadRealTerrain(opts = {}) {
     indicateurRetard.maj({ enRetard: true, texte: 'relief de détail indisponible — vérifiez la connexion' })
   } finally {
     demBusy = false
+    accalmie.marquer() // PF4 : la rafale d'arrivée (dalles, tuiles, nuanceurs) n'est pas une mesure de machine
   }
 }
 
@@ -6903,6 +6934,7 @@ modes = new Modes({
         throw err
       } finally {
         demBusy = false
+        accalmie.marquer() // PF4 : même règle pour l'arrivée d'une plongée
       }
     },
     // pull back far enough to frame the whole slab (and the ground info added
@@ -12908,7 +12940,7 @@ aq = createAdaptiveQuality({
   // Ça ne re-casse PAS l'iMac 2015 : une machine vraiment à 3 fps l'est ENCORE
   // une fois le relief chargé — elle atteint le palier plancher à 14,3 s au lieu
   // de 9,0 s, toujours sous les 15 s qu'exige test/perf-gouverneur.test.js.
-  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording && !demBusy,
+  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording && !demBusy && accalmie.calme(),
   // LE GOUVERNEUR NE PART PLUS DU MAXIMUM. Il part de ce que la sonde a estimé
   // avant le premier rendu, et ne fait plus qu'AFFINER : il descend si la
   // machine souffre quand même, il regagne au plus un cran si elle tient.
@@ -13875,6 +13907,26 @@ function tick() {
   // ⚠️ La qualité adaptative attend aussi : sans dessin, la cadence mesurée est
   // fantaisiste et ferait grimper le palier de qualité sur des images vides.
   if (!programmesPrets) return
+  // ══════ LA CADENCE AU REPOS — PF4 ═══════════════════════════════════════
+  //
+  // En orbite, quand la seule chose qui bouge est la rotation propre (aucun
+  // geste depuis 3 s, ni vol, ni plongée, ni enregistrement), on dessine une
+  // image sur deux. TOUTE la logique de l'image a déjà tourné au-dessus —
+  // streaming du globe, caméra, nuages — seul le DESSIN est sauté, et le
+  // premier geste rend la pleine cadence à l'image même. Voir
+  // src/cadence-repos.js pour la règle et la mesure.
+  compteurCadence++
+  if (!dessinerCetteImage({
+    mode: modes.mode,
+    occupe: !!modes.busy,
+    vol: !!(modes.travel || tween.active),
+    tenu: controlsHeld,
+    msDepuisGeste: performance.now() - Math.max(lastUserInput, dernierPointeur),
+    enregistrement: !!recorder?.recording,
+    animations: animsOn,
+    compteur: compteurCadence,
+    diviseur: cadencePleine ? 1 : undefined,
+  })) return
   aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
   majCarteOmbre() // la carte d'ombre n'est redessinée que si elle changerait
   // dtAmb, PAS dt : c'est CE delta que le composer transmet à ses passes, et
@@ -13903,7 +13955,7 @@ function tick() {
 // vraiment. Compiler contre le canevas a la place produisait NEUF programmes
 // inutilises (les cles de programme de three portent l espace colorimetrique
 // de sortie). Avec la cible : trois. Meme fluidite, cinq fois moins de gachis.
-warmupPrograms({ renderer, scene, camera, target: composer.inputBuffer }).then(() => { programmesPrets = true })
+warmupPrograms({ renderer, scene, camera, target: composer.inputBuffer }).then(() => { programmesPrets = true; accalmie.marquer() })
 tick()
 
 // ---- mode EMBED (shibumap.com/templates) ------------------------------------

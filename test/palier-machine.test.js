@@ -531,6 +531,18 @@ test('lireSignaux : un `screen` à 0 retombe sur la fenêtre, pas sur « écran 
   assert.deepEqual(lireSignaux({ nav: {}, win: {} }).ecran, [0, 0])
 })
 
+test('lireSignaux : la FENÊTRE prime sur l’écran — c’est elle qu’on dessine (PF4)', () => {
+  // Mesuré : panneau de session, `screen` 1920×1080 pour une fenêtre de 563×419 ;
+  // Chrome sans tête, `screen` 800×600 pour une fenêtre de 1280×800. Le budget
+  // de pixels agit sur la surface dessinée, donc c'est elle qu'il faut lire.
+  const s = lireSignaux({ nav: {}, win: { screen: { width: 1920, height: 1080 }, innerWidth: 563, innerHeight: 419, devicePixelRatio: 1 } })
+  assert.deepEqual(s.ecran, [563, 419])
+  const t = lireSignaux({ nav: {}, win: { screen: { width: 800, height: 600 }, innerWidth: 1280, innerHeight: 800 } })
+  assert.deepEqual(t.ecran, [1280, 800])
+  // fenêtre à 0 (pas encore mise en page) : l'écran reste le repli
+  assert.deepEqual(lireSignaux({ nav: {}, win: { screen: { width: 2560, height: 1440 }, innerWidth: 0, innerHeight: 0 } }).ecran, [2560, 1440])
+})
+
 test('lireSignaux préfère le nom DÉMASQUÉ de la carte quand l’extension existe', () => {
   const gl = {
     RENDERER: 7937,

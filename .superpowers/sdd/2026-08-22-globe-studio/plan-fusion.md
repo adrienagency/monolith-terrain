@@ -496,3 +496,43 @@ Europe/Berlin`. **Rien n'est perdu : chaque arbre garde son travail.** État rel
 
 Base au moment de la suspension : **4 675 tests · 0 échec · audit 241 = 241**
 (R33 et R34 fusionnés). Ordre de fusion prévu inchangé : R32 → PF4 → PF3 → PF2 → PF1.
+
+---
+
+# LE PROFIL PF1 — 2026-09-03, 01 h — fusionné (sondes seules, `src/` intact)
+
+**L'image est bornée par le CPU principal, pas par le GPU.** Carte réelle :
+GPU 0,2–2,7 ms partout ; tick CPU **10–36 ms** sur CPU ×4/×6. GPU logiciel
+(portable sans carte) : **337–490 ms/image**, 85–89 % dans le nuanceur des
+tuiles, 11–15 % dans l'EffectPass.
+
+| poste (CPU ×4/×6) | part de l'image | qui |
+|---|---|---|
+| `renderBufferDirect` — **un matériau par tuile, 128 uniformes, 330–637 matériaux** | **23–41 %** | PF4 |
+| `updateMatrixWorld` de 346–982 maillages **immobiles** + `projectObject` | **17–21 %** | PF4 |
+| `contexteCrop()` **reconstruit à chaque image** (au crop) | **14 % des échantillons V8** | PF4 |
+| chargement : maillage + décodage **sur le fil principal** (orbite) | 10 % | PF2 |
+| `_traverse` | 5–7 % | PF2 |
+| GPU | 1–6 % | — |
+| tout le reste (modes, nuages, eau, sommets…) | < 4 % cumulés | — |
+
+⚡ **Le coût du « rien » : 100 % du tick.** Trois images figées consécutives
+sont **identiques au bit** et rendues quand même, **13–24 ms de CPU chacune**.
+Ce qui l'interdit : **la rotation propre** (+14,7 ms p50 en orbite ×4 ; 20–41
+requêtes / 60 images sans geste ; cache poussé à **~1 700 tuiles, ~1,3 Go**) et
+**le grain**, qui change chaque pixel. → rendu à la demande = PF4 ; grain éteint
+hors crop = PF3.
+
+**Réseau** : **70–84 % des requêtes d'un geste arrivent APRÈS le geste** — la
+file n'est purgée que sous contre-pression, jamais déclenchée. `queue.sort`
+**dans le `while` de `_pump`** : 0,5–1,2 ms/image, 8 ms en pointe. → PF2.
+
+**Réfuté par PF1** : « le crop tourne 36 tuiles » est un nombre de *draws*, le
+cache en garde **406–442 pour 24 draws** ; le tas est plat ; **zéro**
+recompilation de nuanceur en usage ; la SSE vraie ne gagne **0 ms** ici (levier
+de justesse, et charge *plus* sur Retina). ⚠️ 17–33 Chrome d'autres agents
+tournaient pendant la mesure : les valeurs absolues ×4/×6 bougent jusqu'à ×1,8,
+**la répartition est stable** — c'est elle qui compte.
+
+Sonde commune : `node scripts/profil-pf1.mjs --port <port>` (`--machines`,
+`--postes`, `--cpuprofile`, `--swiftshader`), traces sous `traces-PF1/`.

@@ -513,17 +513,19 @@ export function lireSignaux({ gl = null, nav = null, win = null } = {}) {
     coeurs: Number(n.hardwareConcurrency) || 0,
     memoire: Number(n.deviceMemory) || 0,
     densite: Number(w.devicePixelRatio) || 1,
-    // `screen` d'abord, la FENÊTRE en filet de sécurité, et c'est un vrai cas :
-    // dans un panneau de prévisualisation embarqué, `screen.width` vaut 0
-    // (vérifié le 28/07/2026). Un écran à 0 remet la charge à « légère », donc
-    // le palier le plus généreux — et le budget de pixels, qui se calcule sur
-    // cette même surface, ne mordrait plus. Autrement dit : la machine qu'on
+    // LA FENÊTRE D'ABORD, L'ÉCRAN EN REPLI — PF4. La surface qu'on va DESSINER
+    // est la fenêtre (c'est elle qu'applyRenderSize mesure et que le budget de
+    // pixels peut réduire), pas le moniteur. Mesuré : dans le panneau navigateur
+    // de session, `screen` rend 1920×1080 pendant que la fenêtre fait 563×419 ;
+    // en Chrome sans tête, `screen` rend un fantôme de 800×600 pour une fenêtre
+    // de 1280×800 — dans les deux cas le palier se décidait sur une surface qui
+    // n'existe pas. Le repli sur `screen` reste : un panneau pas encore mis en
+    // page rend une fenêtre à 0 (vérifié le 28/07/2026), et un écran à 0 remet
+    // la charge à « légère », le palier le plus généreux — la machine qu'on
     // veut protéger repasserait en pleine qualité par un chemin silencieux.
-    // Même patron que frameSize dans viewport.js : la vraie source, puis le
-    // repli, jamais le contraire.
     ecran: [
-      Number(ecran?.width) || Number(w.innerWidth) || 0,
-      Number(ecran?.height) || Number(w.innerHeight) || 0,
+      Number(w.innerWidth) || Number(ecran?.width) || 0,
+      Number(w.innerHeight) || Number(ecran?.height) || 0,
     ],
     pointeurGrossier: !!lire(() => w.matchMedia?.('(pointer: coarse)').matches, false),
     reseau: n.connection || null,
