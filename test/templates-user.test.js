@@ -73,7 +73,7 @@ test('every visible parameter travels with the look', () => {
     'camMove', 'camSpeed', 'surveyLines',
     'globeExaggeration', 'globeContourInterval', 'globeContourOpacity', 'globeGraticule',
     'gpxFollow', 'gpxFollowSpeed',
-    'bokehEnabled', 'bokehScale', 'focusDistance', 'focusRange', 'fov',
+    'bokehEnabled', 'bokehScale', 'focusDistance', 'focusRatio', 'fov',
   ]
   for (const k of attendues) assert.ok(TEMPLATE_KEYS.includes(k), `${k} manque à TEMPLATE_KEYS`)
 })

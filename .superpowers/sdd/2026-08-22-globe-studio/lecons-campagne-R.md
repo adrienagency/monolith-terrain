@@ -154,3 +154,22 @@ faux, écrit dans un rapport, se recopie ensuite dans tous les briefs sans que
 personne ne le remesure — parce qu'il a l'air d'être une leçon durement acquise.
 Celui-ci a survécu à **quatre tâches**. **Un piège d'instrument qui n'a jamais
 été reproduit par un second banc est une hypothèse, pas une leçon.**
+
+---
+
+# ⚠️ UN AGENT QUI « ATTEND » UN BANC EN ARRIÈRE-PLAN A RENDU LA MAIN — POUR TOUJOURS
+
+**Trois agents de la même vague (PF1, R32, PF2) se sont arrêtés avec le même
+message** : *« le passage tourne encore, j'attends sa notification avant de
+remplir le rapport »*. Aucune notification n'arrive jamais à un sous-agent : il
+n'a pas de boucle d'attente, et rendre la main **termine** son exécution.
+Chacun a coûté un aller-retour de relance.
+
+➡️ **À écrire dans TOUT brief qui fait mesurer** : *« Ne rends jamais la main
+"en attendant" un banc, un build ou un processus. Lance-le en avant-plan, ou
+attends-le dans la même exécution (boucle sur le journal ou le PID). Ne rends
+la main qu'avec le rapport écrit. »*
+
+Et la raison qu'ils donnaient était bonne — *« je ne touche pas à `src/` pendant
+la mesure, Vite recharge la page à chaque édition »* — ce qui rend l'attente
+**dans la même exécution** d'autant plus nécessaire.
