@@ -144,7 +144,7 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 // par image relevées dans l'application vivante — voir le §3 du module.
 import { creerVeilleRepos } from './monde/veille-repos.js'
 import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
-import { decalageRecentrage } from './monde/pivot-terre.js'
+import { deplacementDeSaisie, elanDeSaisie, pointSousLePixel, latLonDe, vecteurDe, enroulerLon, LAT_MAX_DEG } from './monde/saisie-terre.js'
 import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
@@ -2317,7 +2317,12 @@ let followZoomVel = 0 // élan de zoom molette en suivi (log-échelle / s)
 // vrai tant que la poursuite hélicoptère commande la tête de course : sert
 // uniquement à savoir QUAND rendre la main (voir GpxLayer.releaseHead)
 let teteCommandee = false
-controls.addEventListener('start', () => {
+// ⚠️ **DEUX ENTRÉES, UN SEUL CORPS — R32.** La saisie de la Terre (plus bas,
+// « on attrape la Terre ») prend le bouton gauche à la place d'OrbitControls
+// hors du crop et en orbite ; elle doit produire EXACTEMENT les mêmes effets de
+// bord qu'un `start` d'OrbitControls, sinon un vol, un plan ou le suivi
+// continueraient sous la main. Une seule fonction, deux appelants.
+function surPriseDeCamera() {
   tween.active = false
   tour.active = false
   // task 30: grabbing the camera cancels the drone follow — EXCEPT mid GPX
@@ -2341,11 +2346,13 @@ controls.addEventListener('start', () => {
   controlsHeld = true
   if (drone.active && params.gpxFollow) followManual = true
   lastUserInput = performance.now()
-})
-controls.addEventListener('end', () => {
+}
+function surRelacheDeCamera() {
   controlsHeld = false
   lastUserInput = performance.now()
-})
+}
+controls.addEventListener('start', surPriseDeCamera)
+controls.addEventListener('end', surRelacheDeCamera)
 window.addEventListener('wheel', () => (lastUserInput = performance.now()), { passive: true })
 // PF4 — le survol compte comme un geste pour la CADENCE de dessin (pas pour la
 // rotation propre, qui garde sa règle) : un curseur qui passe sur la planète
@@ -4999,6 +5006,20 @@ function latLonDuBloc(x = 0, z = 0) {
 function latLonOrigineBloc() {
   return latLonDuBloc(0, 0)
 }
+// LA RÉCIPROQUE de `latLonDuBloc` : la position, dans la géométrie du bloc, d'un
+// lat/lon — le même chemin dans l'autre sens (fenêtre bornée d'abord, MNT
+// sinon, décalage de fenêtre continue retranché). ⚠️ Mercator est linéaire
+// hors de l'emprise aussi : la saisie de la Terre (R32) s'en sert pour
+// translater caméra et cible au-delà du bloc, et c'est exact.
+function mondeDuLatLon(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  const f = terrain.fenetreBornee
+  if (f?.emprise) return latLonVersMondeEmprise(f.emprise, lat, lon, TERRAIN_SIZE)
+  if (!dem) return null
+  const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
+  const w = latLonToWorld(dem, lat, lon)
+  return { x: w.x - (fen?.x ?? 0), z: w.z - (fen?.z ?? 0) }
+}
 
 // La caméra de fond, remise à jour AVANT chaque dessin. Deux régimes, décrits
 // en tête du bloc ci-dessus.
@@ -7043,6 +7064,13 @@ modes = new Modes({
       const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
+    // LE LIEU SOUS LA VISÉE ET LE NIVEAU COURANT — pour `recentrerBloc` (R32) :
+    // le bloc se recharge au MÊME niveau, centré sur ce que la caméra vise.
+    lieuVise() {
+      if (params.source !== 'real' || (!dem && !terrain.fenetreBornee)) return null
+      return viseeAuSol()
+    },
+    zoomCourant: () => (params.source === 'real' ? params.demZoom : null),
     getCoarsenTarget() {
       // on s'élargit jusqu'au bloc régional z6 ; au-delà c'est la porte orbitale
       // qui s'ouvre — les deux paliers plus larges n'existent plus (Adrien,
@@ -13346,8 +13374,10 @@ function updateCameraMotion(dt) {
     // rotation du glissé, et le delta ne se lit qu'en encadrant l'appel.
     const _azAvantUpdate = controls.getAzimuthalAngle()
     controls.update() // orbital-mode camera is driven by the mode machine
+    // ⚠️ Hors du crop, `enableRotate` est faux (la saisie de la Terre a le
+    // bouton, R32) : il n'y a pas de delta d'azimut, et la correction de R13 ne
+    // fait rien. Sur le crop, elle fait tout ce qu'elle faisait.
     pivoterAutourDuBloc(_azAvantUpdate)
-    recentrerSurLaTerre()
   }
   // ⚠️ **HORS DES BRANCHES, ET C'EST UNE MESURE QUI L'A DÉPLACÉ ICI.** Posé dans
   // la seule branche `surface`, le redressement sautait les images où une AUTRE
@@ -13432,82 +13462,281 @@ function pivoterAutourDuBloc(azAvant) {
   camera.lookAt(controls.target)
 }
 
-// ══════════ LE PIVOT RESTE LE CENTRE DE LA TERRE JUSQU'AU CROP — R27 ═══════
+// ══════════ ON ATTRAPE LA TERRE — règle D19, Tâche R32 ═══════════════════
 //
-// > **Adrien :** *« Il doit toujours viser le centre de la Terre. Il change
-// > uniquement quand on passe en mode bloc croppé. Si on dézoome depuis le mode
-// > croppé, la caméra revient automatiquement avec une orbite autour du centre
-// > de la Terre. »*
+// > **Adrien, 2026-09-01 :** *« quand je déplace et fais tourner la Terre au
+// > clic, la Terre se déplace autour de son centre »* — *« je veux que les
+// > contrôles soient exactement les mêmes que pour Google Earth »*.
 //
-// ⛔ **R13 bis A CONCLU « RIEN À FAIRE », ET LA MESURE LE DÉMENT.** Sa preuve ne
-// portait que sur l'AZIMUT, où le `y` du pivot ne compte pas ; elle laissait
-// ouvert le terme qui manque vraiment — **`controls.target` n'est pas sur
-// l'axe**. Relevé DANS la boucle (`scripts/sonde-pivot-r27.mjs`) : jusqu'à
-// **12,898 unités** d'écart pendant la descente, et le centre du bloc à
-// **188,7 px** du centre de l'écran à la naissance du crop.
+// ⛔ **LE DÉFAUT, MESURÉ EN ESPACE GLOBE** (`scripts/sonde-pivot-r32.mjs`,
+// `.banc/R32/avant.json` : gestes à la souris, relevé au rendu sur `camGlobe`).
+// Hors du crop, un glissé HORIZONTAL de 200 px déplaçait le point sous la
+// caméra de **0,000°** — l'image tournait sur elle-même, un lacet autour de la
+// verticale locale ; un glissé VERTICAL couchait la vue à **67,9°** et mettait
+// le centre de la Terre à **3 319 px** du centre d'un écran de 800 — à
+// 2 382 km comme à 129 km, avant tout crop. En orbite, même geste : 0 px, 0°,
+// et le point sous la caméra tourne de 79°. Quatre passes avaient mesuré
+// `hypot(target.x, target.z)` — l'axe du BLOC — et déclaré le pivot réglé ;
+// l'attaquant R33 a mesuré l'axe instantané de rotation de `camGlobe` pendant
+// le glissé vertical : **6 297 km du centre de la Terre — la surface**.
+// `OrbitControls` tourne autour de `controls.target`, un point de la surface :
+// son azimut y est un lacet, son polaire une inclinaison.
 //
-// ➡️ **LE PAS EST RIGIDE ET BORNÉ EN ANGLE VU** — la loi, ses deux nombres et
-// leur mesure vivent dans `monde/pivot-terre.js`. Caméra ET cible reçoivent le
-// MÊME décalage : la distance caméra → cible est invariante **par
-// construction** — `(P + δ) − (T + δ) = P − T` —, donc `veille-repos`
-// (`SEUIL_BOUGE_LOG = 1e-4`) ne voit rigoureusement rien et D16 ter n'est pas
-// dépensé. C'est la garantie de la rotation rigide de R13, prise par l'autre
-// bout.
+// ⚡ **LE GESTE EST UNE CONTRAINTE, PAS UNE VITESSE.** Le point de la sphère
+// saisi au clic reste sous le pointeur (`monde/saisie-terre.js`) ; la caméra,
+// au nadir et nord en haut, se DÉPLACE au-dessus de la surface à altitude
+// constante — c'est exactement une rotation autour du centre de la Terre, et
+// D16 ter tient par construction : la vue ne s'incline jamais avant le bloc.
+// En orbite, la même loi remplace `rotateSpeed = 1` : à 60 000 km elle en est
+// indiscernable (0,44 °/px pour 0,447), à 8 000 km elle est 8,4 fois plus
+// lente — et c'est là que le point saisi cessait de suivre.
 //
-// ⚠️ **LE PRÉDICAT EST `hooks.horsDuCrop`, ET IL EST ÉNONCÉ UNE SEULE FOIS** —
-// là où le hook est écrit, à côté de `surLeBloc`. Il vaut `terre unique
-// branchée ET crop non posé` : `veilleCrop.pose` est le point unique
-// d'alimentation (`branchement-crop.js`), et `veilleSocle` n'est jamais mise à
-// jour sous le mode sphère — elle resterait fausse pour toujours.
+// ══════ POURQUOI UNE TRANSLATION EN ESPACE BLOC, ET PAS UNE CIBLE AU CENTRE
+//        DE LA TERRE (l'architecture A du brief) ═════════════════════════════
 //
-// ⚠️ **ET RIEN NE BOUGE HORS DU RÉGIME DU CROP.** Sans `terre unique` il n'y a
-// pas de crop du tout : le recentrage forcerait alors la cible sur l'axe dans le
-// mode plat hérité, où la visée d'un point EST le produit. `?terre=deux` reste
-// donc le dépôt d'avant, au bit près — c'est le second terme du hook.
+// La similitude de `majCameraFond` est ancrée sur l'APLOMB DE LA CIBLE
+// (`latLonDuBloc(target.x, target.z)`) : déplacer rigidement caméra et cible
+// dans le plan du bloc, c'est déplacer le point sous la caméra sur la sphère à
+// altitude `camY × emprise / span` constante — une orbite, vue par la caméra qui
+// rend. Rien d'autre ne bouge : ni la distance caméra→cible (`veille-repos` ne
+// voit rien, par construction), ni `camY` (l'altimètre, le seuil du crop, les
+// paliers), ni le zoom radial de `_applyZoom`. Une cible à `(0, −R_bloc, 0)`
+// aurait fait zoomer `_applyZoom` sur `R + h` au lieu de `h` (à 130 km sur
+// un bloc z9, `R_bloc = 1 630 u` pour `h = 33 u` : un cran de 3 % = 190 km
+// sous le sol), déplacé `veille-repos` de `ln(1663/33) = 3,9` d'un coup, et
+// exigé que le bloc suive la caméra À CHAQUE IMAGE.
 //
-// ⚠️ **ET IL COURT PENDANT LE BALAYAGE DE POSE, CONTRAIREMENT À LA CORRECTION
-// DE PIVOT — MESURÉ.** Le balayage de retour au nadir est armé exactement sur le
-// front descendant du crop : sans ce terme, le recentrage restait **bloqué
-// 138 images** (relevé au navigateur, premier jet de R27) et n'aboutissait que
-// par accident, au cran suivant. Le retour d'Adrien commençait donc deux
-// secondes trop tard.
+// ⚠️ **LE BLOC SUIT QUAND MÊME, PAR LE CHEMIN QUI EXISTE** : à chaque
+// franchissement `_rescale` recharge le bloc centré sur le lieu visé et
+// `_cibleVisee` y vise le MÊME lieu (R32, `modes.js`) ; et si la cible
+// s'éloigne de plus de `SEUIL_RECENTRAGE_U` de l'axe du bloc, au repos de la
+// saisie, `modes.recentrerBloc()` recharge au même niveau — sans annonce, et
+// sans que la caméra bouge d'un mètre (`_suivreEmprise`).
 //
-// ⛔ **CE N'EST PAS UNE BAGARRE, ET C'EST CE QUI LE REND SÛR.** On ne réécrit
-// pas la caméra que le balayage vient de poser : on **translate le balayage
-// lui-même**, sa cible comprise. `poseFonduArrivee` rend
-// `cible.xz + direction_h × r` à `camY` constant ; translater `cible` en x/z
-// translate sa sortie du même vecteur, sans toucher ni `camY`, ni `direction`,
-// ni l'avancement. **L'inclinaison balayée est donc identique au bit**, et
-// D16 ter ne voit rien — c'est vérifié sur la remontée complète, pas supposé.
-// Le tween de plongée et les chargements, eux, restent exclus : ils
-// INTERPOLENT deux poses absolues, qu'une translation ferait dériver.
-function recentrerSurLaTerre() {
-  if (!modes || modes.mode !== 'surface') return
-  // ⛔ Mêmes gardes que la correction de pivot, MOINS le balayage de pose —
-  // voir juste au-dessus.
-  if (modes.busy || modes.travel || modes._diveTween) return
-  // ⚠️ **LE MÊME PRÉDICAT QUE `_cibleVisee`, ET LA MÊME DÉFINITION** : sur le
-  // crop, le pivot appartient au bloc — c'est l'exception qu'Adrien nomme. Deux
-  // écritures de la même question finiraient par diverger d'une version ; le
-  // hook est le seul énoncé.
-  if (!modes.hooks?.horsDuCrop?.()) return
-  const dec = decalageRecentrage({
-    cibleX: controls.target.x,
-    cibleZ: controls.target.z,
-    distance: controls.getDistance(),
-  })
-  if (dec.x === 0 && dec.z === 0) return
-  controls.target.x += dec.x
-  controls.target.z += dec.z
-  camera.position.x += dec.x
-  camera.position.z += dec.z
-  // ⚠️ **ET LA CIBLE DU BALAYAGE AVEC**, sinon `_avancerFonduPose` reposerait la
-  // caméra sur l'ancienne à l'image même : le décalage cesserait d'être rigide,
-  // la distance changerait, et `veille-repos` verrait passer exactement ce que
-  // tout ce module est fait pour lui cacher.
-  const balayage = modes._fonduPose
-  if (balayage?.cible) { balayage.cible.x += dec.x; balayage.cible.z += dec.z }
-  camera.lookAt(controls.target)
+// ⚠️ **HORS DU CROP SEULEMENT.** Sur le crop, le pivot est l'axe du bloc (R13,
+// l'exception d'Adrien) et OrbitControls garde le bouton (`enableRotate`). En
+// orbite, la saisie remplace la rotation d'OrbitControls — même loi, même
+// contrainte, du haut de l'orbite jusqu'à la naissance du crop.
+//
+// ⚠️ **LA POSE RÉELLE EST LUE SUR `camGlobe`**, posée par `majCameraFond` à
+// l'image précédente : c'est la caméra qui a DESSINÉ ce que l'utilisateur voit
+// sous son pointeur. Le modèle (`poseNadir`) ne sert qu'aux itérations dans
+// l'image ; l'image suivante relit la réalité. L'écart est mesuré en pixels
+// dans `rapport-R32.md`, aux trois altitudes et en orbite.
+//
+// ⚠️ **GOOGLE EARTH, DÉCRIT AVANT D'ÊTRE CODÉ (D19 ③)** : glissé gauche =
+// la surface saisie suit le pointeur, nord en haut, altitude constante, élan au
+// relâché ; molette = zoom vers le point au centre de la vue (Google Earth Pro)
+// — `_zoomGesture` ; molette enfoncée ou Ctrl+glissé = incliner/tourner
+// autour du point visé ; double-clic = s'approcher du point. Seuls les deux
+// premiers sont dans cette tâche ; l'inclinaison manuelle hors du crop est
+// interdite par D16 ter, et le reste garde le comportement d'avant.
+
+const SEUIL_RECENTRAGE_U = 20
+const saisieTerre = {
+  active: false, // le bouton est tenu, en régime de saisie
+  pointerId: null,
+  saisi: null, // G : le point de la sphère saisi au clic, {lat, lon}
+  pointeur: null, // [px, py] dans le canevas
+  elan: { dLat: 0, dLon: 0 }, // degrés par seconde, après le relâché
+  derniers: [], // [{t, dLat, dLon}] : les derniers pas, pour la vitesse au relâché
+  images: 0, // images où un pas a été appliqué (sonde)
+  recentrages: 0, // recentrages du bloc demandés (sonde)
+  cibleRecentree: null, // la cible (x, z) au dernier recentrage demandé — pour ne pas le redemander en boucle
+  residuDeg: 0, // le résidu de la dernière itération (sonde)
+}
+window.__exp.saisieTerre = saisieTerre
+
+// La caméra qui REND, en espace globe : `camGlobe` sous la frontière de rendu ;
+// en orbite, la caméra principale (les deux espaces y coïncident). Sans
+// frontière en surface, il n'y a pas de caméra globe : pas de saisie, le régime
+// hérité (`?frontiere=0`) garde OrbitControls.
+function cameraGlobe() {
+  if (!modes) return null
+  if (frontiereActive && camGlobe) return camGlobe
+  return modes.mode === 'orbital' ? camera : null
+}
+// LE RÉGIME : là où la règle d'Adrien s'applique — l'orbite, et la surface hors
+// du crop. Une question de géométrie, pas de moment (`busy` est dans
+// `saisiePossible`) : c'est lui qui rend ou prend le bouton à OrbitControls.
+function regimeSaisie() {
+  if (!modes || !cameraGlobe()) return false
+  if (modes.mode === 'orbital') return true
+  return modes.mode === 'surface' && !!modes.hooks?.horsDuCrop?.()
+}
+window.__exp.regimeSaisie = regimeSaisie
+function saisiePossible() {
+  return regimeSaisie() && !modes.busy && !modes.travel && !modes._diveTween && !modes._fonduPose && !(tween && tween.active)
+}
+const _poseReelle = { position: [0, 0, 0], droite: [1, 0, 0], haut: [0, 1, 0], avant: [0, 0, -1] }
+const _vSaisie = new THREE.Vector3()
+function lirePoseReelle() {
+  const cg = cameraGlobe()
+  if (!cg) return null
+  const q = cg.quaternion
+  _poseReelle.position = [cg.position.x, cg.position.y, cg.position.z]
+  _vSaisie.set(1, 0, 0).applyQuaternion(q); _poseReelle.droite = [_vSaisie.x, _vSaisie.y, _vSaisie.z]
+  _vSaisie.set(0, 1, 0).applyQuaternion(q); _poseReelle.haut = [_vSaisie.x, _vSaisie.y, _vSaisie.z]
+  _vSaisie.set(0, 0, -1).applyQuaternion(q); _poseReelle.avant = [_vSaisie.x, _vSaisie.y, _vSaisie.z]
+  return _poseReelle
+}
+function projectionSaisie(px, py) {
+  const r = renderer.domElement.getBoundingClientRect()
+  return { fovDeg: camera.fov, aspect: camera.aspect, largeurPx: r.width, hauteurPx: r.height, px: px - r.left, py: py - r.top }
+}
+// Le point de la sphère sous un pointeur — au limbe si le pointeur est dans le
+// ciel (Google Earth saisit aussi la planète depuis l'espace).
+function pointSaisi(clientX, clientY) {
+  const pose = lirePoseReelle()
+  if (!pose) return null
+  const p = pointSousLePixel({ pose, ...projectionSaisie(clientX, clientY) })
+  return p ? latLonDe(p.point) : null
+}
+function relacherSaisie(avecElan) {
+  if (!saisieTerre.active) return
+  saisieTerre.active = false
+  saisieTerre.pointerId = null
+  saisieTerre.saisi = null
+  saisieTerre.pointeur = null
+  // la vitesse au relâché : les pas des ~120 dernières millisecondes
+  const D = saisieTerre.derniers
+  saisieTerre.derniers = []
+  if (avecElan && D.length >= 2) {
+    const fin = D[D.length - 1].t
+    const fenetre = D.filter((d) => fin - d.t <= 120)
+    const duree = (fin - fenetre[0].t) / 1000
+    // ⚠️ un pointeur immobile avant le relâché ne lance rien : pas de pas
+    // récent, pas d'élan — c'est le geste de Google Earth, qui ne « jette »
+    // que ce qui bougeait
+    if (fenetre.length >= 2 && duree > 0 && performance.now() - fin < 100) {
+      saisieTerre.elan = {
+        dLat: fenetre.slice(1).reduce((a, d) => a + d.dLat, 0) / duree,
+        dLon: fenetre.slice(1).reduce((a, d) => a + d.dLon, 0) / duree,
+      }
+    }
+  }
+  surRelacheDeCamera()
+}
+function annulerSaisie() { relacherSaisie(false) }
+function surPointerDownSaisie(ev) {
+  if (!regimeSaisie()) return
+  if (ev.pointerType === 'mouse' && ev.button !== 0) return
+  if (ev.ctrlKey || ev.metaKey || ev.shiftKey) return // Maj/Ctrl + gauche : le déplacement d'OrbitControls
+  if (saisieTerre.active) { annulerSaisie(); return } // un second doigt : le pincement prend
+  const g = pointSaisi(ev.clientX, ev.clientY)
+  if (!g) return
+  saisieTerre.active = true
+  saisieTerre.pointerId = ev.pointerId
+  saisieTerre.saisi = g
+  saisieTerre.pointeur = [ev.clientX, ev.clientY]
+  saisieTerre.elan = { dLat: 0, dLon: 0 }
+  saisieTerre.derniers = []
+  try { renderer.domElement.setPointerCapture(ev.pointerId) } catch {}
+  surPriseDeCamera()
+}
+function surPointerMoveSaisie(ev) {
+  if (!saisieTerre.active || ev.pointerId !== saisieTerre.pointerId) return
+  saisieTerre.pointeur = [ev.clientX, ev.clientY]
+  lastUserInput = performance.now()
+}
+function surPointerUpSaisie(ev) {
+  if (!saisieTerre.active || ev.pointerId !== saisieTerre.pointerId) return
+  relacherSaisie(true)
+}
+renderer.domElement.addEventListener('pointerdown', surPointerDownSaisie)
+renderer.domElement.addEventListener('pointermove', surPointerMoveSaisie)
+renderer.domElement.addEventListener('pointerup', surPointerUpSaisie)
+renderer.domElement.addEventListener('pointercancel', annulerSaisie)
+// ⚠️ **UN CRAN DE MOLETTE ÉTEINT L'ÉLAN — MESURÉ.** Le banc de l'attaquant R33
+// (`Mc-in`, 20 images après le relâché) lisait le point du centre de l'écran
+// dérivant de 4 · 6,9 · 8,9 px sur trois crans : ce n'était pas le zoom, c'était
+// l'élan du glissé précédent (τ = 0,35 s, encore à 39 % après 20 images) qui
+// continuait sous la molette. Un geste nouveau reprend la main : D19 dit « je
+// scrolle vers le point visé au centre », et le centre ne doit pas glisser.
+renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0 }, { passive: true })
+
+// Déplacer le point SOUS LA CAMÉRA de (dLat, dLon), à altitude constante.
+function deplacerSousLaCamera(S, pas) {
+  const borne = (lat) => Math.max(-LAT_MAX_DEG, Math.min(LAT_MAX_DEG, lat))
+  if (modes.mode === 'orbital') {
+    const v = vecteurDe(borne(S.lat + pas.dLat), enroulerLon(S.lon + pas.dLon))
+    if (!v) return false
+    const r = camera.position.length()
+    camera.position.set(v[0] * r, v[1] * r, v[2] * r)
+    camera.up.set(0, 1, 0)
+    camera.lookAt(0, 0, 0)
+    return true
+  }
+  // surface, hors du crop : translation RIGIDE caméra + cible dans le plan du
+  // bloc — la similitude est ancrée sur l'aplomb de la cible, donc c'est le
+  // point sous la caméra qui se déplace sur la sphère, à altitude constante
+  const A = latLonDuBloc(controls.target.x, controls.target.z)
+  if (!A) return false
+  const w0 = mondeDuLatLon(A.lat, A.lon)
+  const w1 = mondeDuLatLon(borne(A.lat + pas.dLat), enroulerLon(A.lon + pas.dLon))
+  if (!w0 || !w1) return false
+  const dx = w1.x - w0.x, dz = w1.z - w0.z
+  if (!Number.isFinite(dx) || !Number.isFinite(dz)) return false
+  controls.target.x += dx
+  controls.target.z += dz
+  camera.position.x += dx
+  camera.position.z += dz
+  return true
+}
+// Le bloc suit la caméra : au repos de la saisie, si la cible a quitté le
+// voisinage de l'axe du bloc, on recharge au même niveau, centré sur elle.
+// ⚠️ **UNE DEMANDE PAR POSITION DE CIBLE, PAS UNE PAR IMAGE — MESURÉ.** Quand le
+// rechargement ne peut PAS ramener la cible (près du pôle, `viseeArrivee` la
+// borne à 26 u), la redemander à chaque image rechargeait le bloc à chaque
+// image : `busy` alterné, 3 images par seconde (`.banc/R32/apres.json`,
+// première passe). On ne redemande que si la cible a bougé depuis.
+function recentrerSiBesoin() {
+  if (modes.mode !== 'surface' || saisieTerre.active || modes.busy) return
+  const tx = controls.target.x, tz = controls.target.z
+  if (Math.hypot(tx - PIVOT_BLOC_X, tz - PIVOT_BLOC_Z) <= SEUIL_RECENTRAGE_U) return
+  const d = saisieTerre.cibleRecentree
+  if (d && Math.hypot(tx - d.x, tz - d.z) < 1e-6) return
+  saisieTerre.cibleRecentree = { x: tx, z: tz }
+  saisieTerre.recentrages++
+  modes.recentrerBloc()
+}
+function appliquerSaisieTerre(dt) {
+  const regime = regimeSaisie()
+  // ⚡ C'EST ICI que le bouton change de main : OrbitControls ne tourne plus
+  // rien hors du crop ni en orbite. Sur le crop, il retrouve tout.
+  controls.enableRotate = !regime
+  if (!regime) {
+    if (saisieTerre.active) annulerSaisie()
+    saisieTerre.elan.dLat = 0
+    saisieTerre.elan.dLon = 0
+    return
+  }
+  // OrbitControls garde un reste de rotation AMORTIE (`dampingFactor`) d'un
+  // glissé fait sur le crop : il ne doit pas continuer hors du crop.
+  if (controls._sphericalDelta) controls._sphericalDelta.set(0, 0, 0)
+  if (!saisiePossible()) return
+  const pose = lirePoseReelle()
+  if (!pose) return
+  const S = latLonDe(pose.position)
+  if (!S) return
+  const hauteur = Math.hypot(pose.position[0], pose.position[1], pose.position[2]) - R_GLOBE
+  let pas = null
+  if (saisieTerre.active && saisieTerre.pointeur) {
+    const d = deplacementDeSaisie({
+      saisi: saisieTerre.saisi, sousCamera: S, hauteur, poseReelle: pose,
+      ...projectionSaisie(saisieTerre.pointeur[0], saisieTerre.pointeur[1]),
+    })
+    saisieTerre.residuDeg = d.residuDeg
+    pas = d
+    saisieTerre.derniers.push({ t: performance.now(), dLat: d.dLat, dLon: d.dLon })
+    if (saisieTerre.derniers.length > 12) saisieTerre.derniers.shift()
+  } else if (saisieTerre.elan.dLat !== 0 || saisieTerre.elan.dLon !== 0) {
+    const e = elanDeSaisie({ vitesse: saisieTerre.elan, dt })
+    saisieTerre.elan = e.vitesse
+    pas = e.pas
+  }
+  if (!pas || (pas.dLat === 0 && pas.dLon === 0)) { recentrerSiBesoin(); return }
+  if (deplacerSousLaCamera(S, pas)) saisieTerre.images++
 }
 
 let rafId = 0
@@ -13562,6 +13791,13 @@ function tick() {
   tAmb += dtAmb
 
   syncCourseBarMode()
+  // ⚠️ **AVANT `updateCameraMotion`, ET C'EST L'ORDRE QUI COMPTE — R32.** La
+  // saisie de la Terre translate caméra et cible (surface) ou repose la caméra
+  // sur la sphère (orbite) ; `controls.update()` relit ensuite cette pose et
+  // `modes.update()` zoome depuis elle. Placée après, elle serait relue une
+  // image plus tard par `majCameraFond` — et `redresserSurLeSol` (R29 bis) a
+  // déjà payé ce genre d'ordre.
+  appliquerSaisieTerre(dt)
   updateCameraMotion(dt)
   // La fenêtre continue, juste après la caméra : le geste se projette sur les
   // axes de la caméra, donc il lui faut la caméra de CETTE image.
