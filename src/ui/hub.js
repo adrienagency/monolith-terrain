@@ -11,6 +11,7 @@
 import { el } from './kit.js'
 import { setUiAdvanced } from './bars.js'
 import { creerSas } from './hub-sas.js'
+import { sortieAuPointeur, INTERACTIFS } from './hub-sortie.js'
 import { TITRE_ACCUEIL } from './accueil.js'
 
 // contextes où l'accueil ne doit JAMAIS apparaître : interface masquée,
@@ -233,6 +234,22 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   // consommé par l'ouverture, exactement comme le clic.
   window.addEventListener('wheel', () => {
     if (isOpen() || sas.enAttente()) escape()
+  }, { capture: true, passive: true })
+  // ══════ LE POINTEUR EST UNE SORTIE AUSSI — PF4 ══════════════════════════
+  //
+  // ⛔ **« UN CLIC N'IMPORTE OÙ SUR LE VOILE » N'ÉTAIT VRAI QU'AU CENTRE EXACT.**
+  // Mesuré (`scripts/profil-pf4.mjs --scenario voile`, 1280×800) : à (200, 400)
+  // le geste tombe sur `DIV.ce-elemwrap` — le wrap de la barre, frère du voile,
+  // qui s'étale en grand au centre sous `body.ce-hub`. Un glissé de 160 px :
+  // voile toujours ouvert, caméra immobile ; un double-clic : rien. Même
+  // portée que la molette (fenêtre, capture), même garde ; on écarte ce qui se
+  // clique (portes, croix, champ), dont l'écouteur décide déjà.
+  //
+  // ⚠️ Le geste n'est PAS rejoué sur la toile : un `pointerdown` rejoué armerait
+  // le clic-plongée de main.js, et fermer l'accueil plongerait sur le point
+  // cliqué. Le geste SUIVANT arrive à la toile — le voile est déjà parti.
+  window.addEventListener('pointerdown', (e) => {
+    if (sortieAuPointeur({ ouvert: isOpen(), enAttente: sas.enAttente(), interactif: !!e.target?.closest?.(INTERACTIFS), bouton: e.button })) escape()
   }, { capture: true, passive: true })
   // ⚠️ `stopPropagation` : la croix est DANS le voile, qui ferme déjà au clic.
   // Sans ça, un clic sur la croix déclenchait `escape()` deux fois — `hide()`
