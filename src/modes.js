@@ -11,7 +11,7 @@
 import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 import { PinchTracker } from './gestes.js'
-import { pasEscalier, paliersRetenus, palierDeClic } from './escalier-zoom.js'
+import { pasEscalier, paliersRetenus, palierDeClic, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // LA LOI D'ALTITUDE vit dans un module PUR (voir son en-tête, et la Tâche 1 du
 // plan « globe continu »). Rien ne change ici : ces quatre fonctions sont
@@ -479,6 +479,12 @@ export class Modes {
       altM,
       empriseAuZoom,
       span,
+      // ⚠️ **LE PLANCHER EST z4, ICI AUSSI — R32.** `niveauDArrivee` porte un
+      // `zoomMin = 3` par défaut, et l'attaquant R33 l'a attrapé : la molette
+      // depuis l'orbite plongeait sur un bloc **z3 à 11 900 km** malgré
+      // `ZOOM_PALIER_MIN = 4` (R27 : « il faudrait passer en mode orbite pour
+      // tout ce qui est supérieur à Z4 »). Le plancher est unique, et c'est lui.
+      zoomMin: ZOOM_PALIER_MIN,
       zoomMax: this.hooks.getFineZoom(),
       pente: _ARRIVAL_DIR.y,
       yCible: Y_CIBLE,
@@ -692,9 +698,21 @@ export class Modes {
         -ZOOM_VEL_MAX,
         ZOOM_VEL_MAX
       )
-      this._zoomNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
+      // ══════ LA MOLETTE ZOOME VERS LE POINT AU CENTRE DE L'ÉCRAN — D19 ═══
+      //
+      // > **Adrien, 2026-09-01 :** *« quand je scrolle pour zoomer ou dézoomer,
+      // > je scrolle vers le point visé au centre de l'écran »*.
+      //
+      // ⛔ Le pivot était le point sous le CURSEUR (`e.clientX/Y`). D19 le
+      // remplace par le point du cadre : la surface au milieu de l'écran, quelle
+      // que soit la position de la souris — Google Earth Pro fait de même.
+      // Quand la vue passe par le centre de la Terre (nadir, hors du crop),
+      // c'est le zoom radial de R29 bis ; quand elle est inclinée (sur le crop),
+      // c'est le point du cadre qui gagne, et il diffère de la cible dès que le
+      // relief passe entre les deux. `_applyZoom` garde le prédicat hors crop.
+      this._zoomNdc.set(0, 0)
       const p = this.hooks.pointUnder?.(this._zoomNdc.x, this._zoomNdc.y)
-      if (p) this._zoomPivot = p // fixed pivot for the whole coast (zoom toward cursor)
+      if (p) this._zoomPivot = p // fixed pivot for the whole coast (zoom toward the frame's centre)
       return
     }
     e.preventDefault()
@@ -1010,36 +1028,66 @@ export class Modes {
   //
   // Sans le hook (banc de test, source procédurale) on retombe exactement sur
   // l'ancienne pose : le centre du socle.
-  // ══════ ET HORS DU CROP, ON VISE LA VERTICALE DU CENTRE DE LA TERRE — R27 ══
+  // ══════ ET HORS DU CROP AUSSI, ON VISE LE LIEU DEMANDÉ — Tâche R32 ═════════
   //
-  // > **Adrien :** *« Il doit toujours viser le centre de la Terre. Il change
-  // > uniquement quand on passe en mode bloc croppé. »*
+  // ⛔ **R27 VISAIT L'AXE DU BLOC HORS DU CROP, ET LA CAMÉRA SAUTAIT À CHAQUE
+  // FRANCHISSEMENT — MESURÉ EN ESPACE GLOBE** (`scripts/sonde-pivot-r32.mjs`,
+  // `.banc/R32/avant.json`, descente à la molette, point sous la caméra relevé
+  // sur `camGlobe` image par image) : au sortir de chaque `_rescale`, le point
+  // sous la caméra saute de **466 km (z4) · 197 km (z5) · 90 à 129 km (z6) ·
+  // 48 à 68 km (z7) · 24 km (z8) · 12 km (z9) · 8,6 km (z10)** en UNE image —
+  // et de **550 km à la traversée orbite → surface**. C'est le calage du bloc
+  // sur la grille de tuiles : `(0, ·, 0)` est le centre du bloc CALÉ, jamais le
+  // lieu demandé (jusqu'à un sixième de côté, `escalier-zoom.js`). R27 le
+  // faisait pour que le crop naisse centré ; il n'a mesuré que le centre du
+  // bloc à l'écran (0 px après la re-pose) et l'altitude — pas le sol.
   //
-  // ⚠️ **C'EST ICI QUE LA DESCENTE SE JOUE, PAS DANS LA BOUCLE D'IMAGE.**
-  // `_arrivalPose` et `_rescale` reposent la cible à CHAQUE cran ; sans cette
-  // ligne, le recentrage de `main.js` la ramènerait bien sur l'axe, mais en
-  // GLISSANT pendant ~2 s après chaque cran — un tassement visible à chaque
-  // niveau franchi. Ici, la descente arrive sur l'axe du premier coup, et le
-  // recentrage par image ne sert plus qu'à ce pour quoi il est fait : le RETOUR
-  // depuis le crop.
+  // ➡️ **LA CAMÉRA VISE LE LIEU DEMANDÉ DES DEUX CÔTÉS DU CROP.** `viseeDuLieu`
+  // rend la position du lieu dans le NOUVEAU bloc ; `_suivreEmprise` repose la
+  // caméra relativement à elle ; le point sous la caméra ne bouge donc pas d'un
+  // mètre au franchissement — D16 (« pas de saut de position »), mesuré après
+  // correctif dans `rapport-R32.md`. La cible n'est alors plus « sur l'axe »
+  // du bloc hors du crop, et **ça n'a plus d'importance** : hors du crop le
+  // bloc est invisible, et le glissé n'est plus une rotation autour de la
+  // cible mais une saisie de la Terre (`main.js`, « on attrape la Terre »).
   //
-  // ⚠️ **LE `y` NE CHANGE PAS, ET C'EST MESURÉ** — voir `monde/pivot-terre.js` :
-  // tout point de la droite `x = z = 0` vise le centre de la Terre, et forcer
-  // `y = 0` déplacerait `camera.position.y`, donc `altitudeCadrageM()`, donc le
-  // seuil de naissance du crop contre lequel ce correctif est jugé.
+  // ⚠️ **CE QUE ÇA COÛTE, DIT** : sur le crop, le bloc n'est centré sur la
+  // visée qu'au calage près (≤ 9,33 u). La bascule de trois quarts (D16 ter)
+  // et le pivot du crop (R13, l'axe du bloc) s'en accommodent par construction
+  // — R13 l'a mesuré avec une cible à 21,3 u de l'axe.
   //
-  // ⚠️ **LE PRÉDICAT EST `horsDuCrop`, PAS `!surLeBloc()`.** Sans `terre
-  // unique` il n'y a pas de crop : `surLeBloc()` rendrait faux pour toujours et
-  // le mode plat hérité perdrait sa visée. Le hook porte les DEUX termes.
+  // ⚠️ **LE `y` NE CHANGE PAS** : forcer `y = 0` déplacerait `camera.position.y`,
+  // donc `altitudeCadrageM()`, donc le seuil de naissance du crop.
   //
   // ⚠️ **SANS LE HOOK, RIEN NE CHANGE** — banc de test, source procédurale,
-  // régime hérité `?terre=deux` : on retombe sur la pose d'avant, au bit près.
+  // régime hérité `?terre=deux` : la pose d'avant, au bit près.
   _cibleVisee(lieu) {
-    if (this.hooks.horsDuCrop?.()) {
-      return new THREE.Vector3(0, Y_CIBLE, 0)
-    }
     const p = lieu && this.hooks.viseeDuLieu ? this.hooks.viseeDuLieu(lieu.lat, lieu.lon) : null
     return new THREE.Vector3(p?.x ?? 0, Y_CIBLE, p?.z ?? 0)
+  }
+
+  // ══════ LE BLOC SUIT LA CAMÉRA — Tâche R32 ════════════════════════════════
+  //
+  // Hors du crop, la saisie de la Terre translate caméra ET cible dans l'espace
+  // du bloc (voir `main.js`). La cible peut donc s'éloigner de l'axe du bloc de
+  // plus que ce que `viseeArrivee` tolère (`TERRAIN_SIZE/2 − 2 = 26 u`) : le
+  // prochain franchissement la BORNERAIT, et ce serait un saut. On recharge
+  // donc le bloc au même niveau, centré sur le lieu visé, dès que la cible passe
+  // `SEUIL_RECENTRAGE_U` — c'est un `_rescale` ordinaire, SANS annonce, dont
+  // `_suivreEmprise` garantit que la caméra ne bouge pas d'un mètre (même
+  // emprise, même lieu). Mesuré dans `rapport-R32.md`.
+  //
+  // ⚠️ **PAS PENDANT UN GESTE** : l'appelant ne le demande qu'au repos de la
+  // saisie ; pendant `busy`, `_zoomGesture` jette les crans, et un rechargement
+  // sous la main serait exactement le cran que D16 supprime.
+  async recentrerBloc() {
+    if (this.mode !== 'surface' || this.busy || this.travel || this._diveTween || this._fonduPose) return false
+    if (!this._continu()) return false
+    const lieu = this.hooks.lieuVise?.()
+    const zoom = this.hooks.zoomCourant?.()
+    if (!lieu || !Number.isFinite(lieu.lat) || !Number.isFinite(lieu.lon) || !(zoom > 0)) return false
+    await this._rescale({ lat: lieu.lat, lon: lieu.lon, zoom }, 'RECENTRING', { silencieux: true })
+    return true
   }
 
   // `lieu` : le lat/lon VOULU. Absent, on prend celui sous la caméra — c'est le
@@ -1332,7 +1380,7 @@ export class Modes {
   //
   // ⚠️ ET IL N'Y A PLUS DE FONDU AU BLANC. Le rideau n'était pas l'ornement du
   // saut, il était là parce que le saut était invisible autrement.
-  async _rescale(next, verb) {
+  async _rescale(next, verb, { silencieux = false } = {}) {
     const continu = this._continu()
     this.busy = true
     // ⛔ **`_resetZoom()` TUAIT L'ÉLAN À CHAQUE CRAN, ET C'EST LA MOITIÉ DE LA
@@ -1344,11 +1392,13 @@ export class Modes {
     const prevDir = this.camera.position.clone().sub(this.controls.target)
     const camYAvant = this.camera.position.y
     const echelleAvant = this.hooks.echelleVerticaleBloc?.() ?? null
-    this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
+    // ⚠️ `silencieux` : le recentrage du bloc (R32) n'est pas un événement pour
+    // l'utilisateur — rien ne change à l'écran, rien à annoncer.
+    if (!silencieux) this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
       await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
     } catch {
-      this.announce(`${verb} FAILED — HOLDING SCALE`)
+      if (!silencieux) this.announce(`${verb} FAILED — HOLDING SCALE`)
       this.busy = false
       return
     }

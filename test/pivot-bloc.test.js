@@ -234,48 +234,46 @@ test('⚡ le centre du bloc ne dérive plus : 68,324 px → 0 px, sur la pose me
   assert.ok(Math.hypot(ancienne.x - 17.4659, ancienne.z + 9.7525) > 1, 'la cible d’avant devait bouger')
 })
 
-// ══════════ ⑥ LA RÈGLE D'ADRIEN, ET POURQUOI ELLE N'A PAS D'EXCEPTION ══════
+// ══════════ ⑥ LA RÈGLE D'ADRIEN, ET OÙ VIT SON EXCEPTION — réécrit par R32 ══
 //
-// > **Adrien, après avoir vu les mesures :** *« On utilise le centre de la Terre
-// > comme point de rotation, excepté en mode crop. »*
+// > **Adrien :** *« On utilise le centre de la Terre comme point de rotation,
+// > excepté en mode crop. »*
 //
-// ⚡ **LES DEUX PIVOTS N'EN FONT QU'UN, ET C'EST DE LA GÉOMÉTRIE, PAS UN
-// HASARD.** La correction ne porte que sur l'AZIMUT — une rotation autour d'un
-// axe VERTICAL — et `decalagePivot` n'a pas de paramètre `y` : le centre de la
-// Terre, qui est sur la verticale du centre du bloc, et l'axe du bloc lui-même
-// sont **le même axe de rotation**. C'est déjà ce qui rendait « centre au sol »
-// et « centre du volume » indiscernables plus haut.
+// ⛔ **CE PARAGRAPHE DISAIT « LES DEUX PIVOTS N'EN FONT QU'UN », ET C'ÉTAIT LA
+// CONFUSION D'ESPACE QUE QUATRE PASSES ONT PAYÉE.** Une rotation autour de la
+// verticale locale passe bien par le centre de la Terre — mais elle ne fait
+// pas TOURNER AUTOUR de lui : c'est un lacet sur place. Mesuré en espace globe
+// (`.banc/R32/avant.json`, R33) : hors du crop, 200 px de glissé horizontal
+// déplaçaient le point sous la caméra de **0,000°** (l'orbite : 79°), et le
+// glissé vertical, pris autour de la cible, couchait la vue à 67,9° avec le
+// centre de la Terre à 3 319 px du cadre. `decalagePivot` est aveugle au `y`
+// **parce que** c'est une rotation d'axe vertical — c'est exactement ce qui en
+// fait le pivot du CROP (R13) et PAS une orbite.
 //
-// ➡️ **Il n'y a donc RIEN à excepter : le même code sert les deux régimes.**
-// Vérifié à l'écran, dérive du sujet pour 100 px de souris
-// (`.banc/R13/descente-avant.json` contre `descente-apres.json`) :
-//
-//   | régime                      | crop | avant     | après     |
-//   |-----------------------------|------|-----------|-----------|
-//   | orbite 60 000 km            | non  | 1,38e-5 px| 1,37e-5 px|
-//   | descente SANS crop, 49 km   | non  | 183,574 px| 21,285 px |
-//   | sur le bloc, crop posé      | OUI  | 64,054 px |  9,796 px |
-//
-// ⛔ **CE TEST EXISTE POUR EMPÊCHER QU'ON AJOUTE L'EXCEPTION.** Lire la phrase
-// d'Adrien sans les mesures conduit tout droit à mettre une garde
-// `veilleCrop.pose` dans `pivoterAutourDuBloc` — et à **rendre à la descente ses
-// 183 px de dérive**, c'est-à-dire à casser exactement la moitié qu'il demande.
+// ➡️ **L'exception d'Adrien existe donc, et elle ne vit pas dans
+// `pivoterAutourDuBloc`** : hors du crop et en orbite, OrbitControls n'a plus
+// le bouton (`controls.enableRotate = !regimeSaisie()`, `main.js`), le glissé
+// est une saisie de la Terre, et il n'y a AUCUN delta d'azimut à corriger.
+// Sur le crop, OrbitControls retrouve le bouton et la correction de R13 fait
+// tout ce qu'elle faisait. Une garde de crop DANS la correction resterait
+// inutile — et c'est toujours ce que ce test garde, avec la vraie raison.
 
-test('⛔ le pivot n’est PAS conditionné au crop — pas de garde `veilleCrop` dans la correction', () => {
+test('⛔ le pivot de R13 n’est pas conditionné au crop DANS la correction : l’exception vit à la source, sur le bouton', () => {
   const i = MAIN.indexOf('function pivoterAutourDuBloc')
   assert.ok(i > 0)
   const corps = MAIN.slice(i, i + 1800)
-  assert.doesNotMatch(
-    corps,
-    /veilleCrop|cropPose|surLeBloc|arriveeSurLeBloc|veilleSocle/,
-    'une garde de crop est réapparue : la descente hors crop reperdrait 183,574 px de dérive'
-  )
+  assert.doesNotMatch(corps, /veilleCrop|cropPose|surLeBloc|arriveeSurLeBloc|veilleSocle/, 'une garde de crop est apparue dans la correction')
+  // l'exception : hors du crop et en orbite, OrbitControls ne tourne plus rien
+  assert.match(MAIN, /controls\.enableRotate = !regime\b/, 'le bouton n’est pas retiré à OrbitControls hors du crop')
 })
 
-test('le décalage ne lit jamais le `y` du pivot — c’est ce qui identifie les deux règles', () => {
-  // Si `decalagePivot` prenait un `y`, « centre de la Terre » et « axe du bloc »
-  // deviendraient deux gestes différents et l'exception d'Adrien devrait exister.
+test('`decalagePivot` est aveugle au `y` du pivot : une rotation d’axe VERTICAL, le pivot du crop — pas une orbite', () => {
   const a = decalagePivot({ cibleX: 12, cibleZ: -7, angle: 0.4 })
   const b = decalagePivot({ cibleX: 12, cibleZ: -7, angle: 0.4, pivotY: -6371000 })
-  assert.deepEqual(a, b, 'un pivot enfoncé au centre de la Terre doit rendre le MÊME décalage')
+  assert.deepEqual(a, b, 'enfoncer le pivot au centre de la Terre ne change rien : c’est un lacet autour de la verticale, pas une orbite')
+  // et c'est précisément pour ça qu'il ne doit courir que sur le crop : hors du
+  // crop, tourner autour de la verticale locale n'est PAS tourner autour de la
+  // Terre — le point sous la caméra ne bouge pas (0,000° mesuré)
+  const c = decalagePivot({ cibleX: 0, cibleZ: 0, angle: 0.4 })
+  assert.deepEqual(c, { x: 0, y: 0, z: 0 }, 'cible sur l’axe : la rotation tourne sur place, le sol ne défile pas')
 })
