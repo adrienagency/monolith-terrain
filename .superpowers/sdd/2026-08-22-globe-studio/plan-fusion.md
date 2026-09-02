@@ -536,3 +536,47 @@ tournaient pendant la mesure : les valeurs absolues ×4/×6 bougent jusqu'à ×1
 
 Sonde commune : `node scripts/profil-pf1.mjs --port <port>` (`--machines`,
 `--postes`, `--cpuprofile`, `--swiftshader`), traces sous `traces-PF1/`.
+
+---
+
+# 2026-09-03, ~03 h — R32, PF4, PF2 fusionnés · 4 717 tests · 0 échec · audit 248 = 248
+
+**✅ R32 — le pivot est le centre de la Terre jusqu'au crop, pour de bon.**
+Recette de l'attaquant R33 : **10/10**. Avant → après (1 977 / 130 / 50 km) :
+centre de la Terre à l'écran **1 200–3 300 px → 0 px** ; sol parcouru par 200 px
+de glissé 0,000° → **5,44° / 0,354° / 0,136°** ; angle rasant 50–68° → **0°** ;
+`|Δ ln d|` **0,0** ; point saisi ↔ curseur **200 px → 0–0,2 px** (D19) ; point du
+centre sous la molette ≤ 1,4 px. Mécanisme : **translation rigide** caméra +
+cible dans le plan du bloc — la similitude étant ancrée sur l'aplomb de la
+cible, c'est pour la caméra qui rend une rotation autour du centre de la Terre à
+altitude constante (vérifié : axe < 100 km du centre, altitude à 50 m). Écrire
+`controls.target` au centre aurait donné `R_bloc = 1 630 u` pour `h = 33 u` : un
+cran de 3 % = 190 km sous le sol. `pivot-terre.js` **supprimé**, `saisie-terre.js`
+et `pivot-globe.js` créés, quatre tests qui gravaient la confusion réécrits.
+Bonus : le point sous la caméra sautait de **466 km à z4 … 550 km à la traversée**
+à chaque franchissement de niveau → 0.
+Réserves : bloc centré au calage près sur le crop (≤ 9,33 u) ; retour au nadir
+inachevé sur le chemin « vue couchée puis molette » (84,9°, préexistant).
+
+**✅ PF4 — les bugs.** `GL_INVALID_OPERATION` : pas un format 24/32F — *« read and
+write depth attachments cannot be the same image »* (clone partagé par three
+r172) et **SMAA déclarait DEPTH sans la lire** → `profondeur-compositeur.js`,
+0/616. « ESSENTIAL MODE » au chargement : le **gouverneur** mesurait la rafale
+d'arrivée → `accalmie-gouverneur.js`, palier 0 tenu 100 s à ×4. Rotation propre
+(choix v29) gardée, **cadence de repos** (`cadence-repos.js`) : orbite ×4
+**31,9 → 13,5 ms** animé, **17,2 → 4,5 ms** figé. Voile : c'était `.ce-elemwrap`,
+glissé/double-clic ferment. Clic qui saute : tracé (butée 150 u abroge la
+continuité, puis 70 % en une image), non corrigé.
+**En cours (PF4 bis)** : matériau partagé des tuiles (23–41 %),
+`matrixAutoUpdate=false` (17–21 %), `contexteCrop()` mémoïsé (14 %).
+
+**✅ PF2 — priorité des tuiles.** 20 premières tuiles dans le tronc 80–100 % →
+**100 %** ; tuile sous le centre au **rang 0–3** par niveau (avant : rang 84–118
+à z10, jamais à z11–12) ; rotation : demandes hors tronc **100 % → 0 %** ;
+descente **21,7 → 16,3 Mio (−25 %)** ; cache hors tronc à 1/5/15 min
+**114/233/614 → 11/72/346** ; `_traverse` ×4 p99 5,5 → 3,6 ms ; décodage
+terrarium en **Worker**. Sept correctifs, sept tests rouges. Réfuté : SSE =
+vitesse (non), le tiers central comme dénominateur (trop étroit pour des z6), le
+« glissé de planète » existait (non — R32 l'a créé depuis).
+
+**En vol** : PF3 (mer et effets au crop seul, `dofPass` active partout), PF4 bis.
