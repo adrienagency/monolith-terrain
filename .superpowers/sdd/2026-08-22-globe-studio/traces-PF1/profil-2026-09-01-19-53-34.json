@@ -1,0 +1,9298 @@
+{
+ "quand": "2026-09-01T19:53:34.484Z",
+ "port": 6210,
+ "images": 60,
+ "chauffe": 40,
+ "lieu": {
+  "lat": -21.115,
+  "lon": 55.536
+ },
+ "machines": {
+  "mienne": {
+   "cpu": 1,
+   "dsf": 1,
+   "angle": "d3d11",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "palierAvant": {
+    "palier": 0,
+    "nom": "PLEINE QUALITÉ",
+    "densite": 1,
+    "ecran": [
+     800,
+     600
+    ],
+    "carte": "fort",
+    "tier": 0,
+    "pixelRatio": 1
+   },
+   "tierAvant": 0,
+   "etalon": {
+    "avant": 103.10000000009313,
+    "apres": 98.79999999981374,
+    "facteur": 0.958292919492963
+   },
+   "demarrage": {
+    "ms": 13452,
+    "reseau": {
+     "requetes": 408,
+     "octets": 59252300
+    }
+   },
+   "tas": [
+    {
+     "t": 0,
+     "tas": 384397597,
+     "textures": 307,
+     "geometries": 273,
+     "tuiles": 642
+    },
+    {
+     "t": 1003,
+     "tas": 372245457,
+     "textures": 319,
+     "geometries": 285,
+     "tuiles": 658
+    },
+    {
+     "t": 2003,
+     "tas": 381097757,
+     "textures": 323,
+     "geometries": 289,
+     "tuiles": 662
+    },
+    {
+     "t": 3004,
+     "tas": 319866386,
+     "textures": 328,
+     "geometries": 294,
+     "tuiles": 678
+    },
+    {
+     "t": 4018,
+     "tas": 333801144,
+     "textures": 340,
+     "geometries": 306,
+     "tuiles": 694
+    },
+    {
+     "t": 5019,
+     "tas": 335520648,
+     "textures": 344,
+     "geometries": 310,
+     "tuiles": 698
+    },
+    {
+     "t": 6020,
+     "tas": 345108726,
+     "textures": 346,
+     "geometries": 312,
+     "tuiles": 710
+    },
+    {
+     "t": 7021,
+     "tas": 331430736,
+     "textures": 358,
+     "geometries": 324,
+     "tuiles": 714
+    },
+    {
+     "t": 8027,
+     "tas": 337046776,
+     "textures": 362,
+     "geometries": 328,
+     "tuiles": 722
+    },
+    {
+     "t": 9033,
+     "tas": 351184772,
+     "textures": 365,
+     "geometries": 331,
+     "tuiles": 742
+    },
+    {
+     "t": 10037,
+     "tas": 360479036,
+     "textures": 380,
+     "geometries": 346,
+     "tuiles": 746
+    },
+    {
+     "t": 11038,
+     "tas": 342629352,
+     "textures": 381,
+     "geometries": 347,
+     "tuiles": 754
+    },
+    {
+     "t": 12046,
+     "tas": 352854424,
+     "textures": 391,
+     "geometries": 357,
+     "tuiles": 766
+    },
+    {
+     "t": 13052,
+     "tas": 355253520,
+     "textures": 397,
+     "geometries": 363,
+     "tuiles": 766
+    },
+    {
+     "t": 14053,
+     "tas": 367451624,
+     "textures": 402,
+     "geometries": 368,
+     "tuiles": 786
+    },
+    {
+     "t": 15061,
+     "tas": 375237980,
+     "textures": 413,
+     "geometries": 379,
+     "tuiles": 798
+    },
+    {
+     "t": 16061,
+     "tas": 375863112,
+     "textures": 417,
+     "geometries": 383,
+     "tuiles": 802
+    },
+    {
+     "t": 17079,
+     "tas": 374431240,
+     "textures": 420,
+     "geometries": 386,
+     "tuiles": 810
+    },
+    {
+     "t": 18083,
+     "tas": 380642224,
+     "textures": 431,
+     "geometries": 397,
+     "tuiles": 822
+    },
+    {
+     "t": 19084,
+     "tas": 386556904,
+     "textures": 435,
+     "geometries": 401,
+     "tuiles": 826
+    }
+   ]
+  },
+  "x4": {
+   "cpu": 4,
+   "dsf": 1,
+   "angle": "d3d11",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "palierAvant": {
+    "palier": 0,
+    "nom": "PLEINE QUALITÉ",
+    "densite": 1,
+    "ecran": [
+     800,
+     600
+    ],
+    "carte": "fort",
+    "tier": 0,
+    "pixelRatio": 1
+   },
+   "tierAvant": 0,
+   "etalon": {
+    "avant": 90.6999999997206,
+    "apres": 396.5,
+    "facteur": 4.3715545755371705
+   },
+   "demarrage": {
+    "ms": 11221,
+    "reseau": {
+     "requetes": 416,
+     "octets": 50263129
+    }
+   },
+   "tas": [
+    {
+     "t": 0,
+     "tas": 511171254,
+     "textures": 350,
+     "geometries": 315,
+     "tuiles": 694
+    },
+    {
+     "t": 1016,
+     "tas": 480076162,
+     "textures": 351,
+     "geometries": 316,
+     "tuiles": 702
+    },
+    {
+     "t": 2048,
+     "tas": 493681002,
+     "textures": 356,
+     "geometries": 321,
+     "tuiles": 714
+    },
+    {
+     "t": 3062,
+     "tas": 504733638,
+     "textures": 367,
+     "geometries": 332,
+     "tuiles": 714
+    },
+    {
+     "t": 4086,
+     "tas": 519660570,
+     "textures": 370,
+     "geometries": 335,
+     "tuiles": 730
+    },
+    {
+     "t": 5089,
+     "tas": 493681610,
+     "textures": 383,
+     "geometries": 348,
+     "tuiles": 742
+    },
+    {
+     "t": 6097,
+     "tas": 333027342,
+     "textures": 388,
+     "geometries": 353,
+     "tuiles": 750
+    },
+    {
+     "t": 7098,
+     "tas": 342302826,
+     "textures": 390,
+     "geometries": 355,
+     "tuiles": 754
+    },
+    {
+     "t": 8115,
+     "tas": 357563678,
+     "textures": 401,
+     "geometries": 366,
+     "tuiles": 766
+    },
+    {
+     "t": 9142,
+     "tas": 368420667,
+     "textures": 407,
+     "geometries": 372,
+     "tuiles": 778
+    },
+    {
+     "t": 10162,
+     "tas": 343269950,
+     "textures": 410,
+     "geometries": 375,
+     "tuiles": 798
+    },
+    {
+     "t": 11164,
+     "tas": 362316066,
+     "textures": 423,
+     "geometries": 388,
+     "tuiles": 802
+    },
+    {
+     "t": 12165,
+     "tas": 372480846,
+     "textures": 426,
+     "geometries": 391,
+     "tuiles": 806
+    },
+    {
+     "t": 13196,
+     "tas": 386738190,
+     "textures": 429,
+     "geometries": 394,
+     "tuiles": 822
+    },
+    {
+     "t": 14212,
+     "tas": 351738886,
+     "textures": 442,
+     "geometries": 407,
+     "tuiles": 822
+    },
+    {
+     "t": 15231,
+     "tas": 364074772,
+     "textures": 445,
+     "geometries": 410,
+     "tuiles": 838
+    },
+    {
+     "t": 16263,
+     "tas": 333943730,
+     "textures": 456,
+     "geometries": 421,
+     "tuiles": 850
+    },
+    {
+     "t": 17282,
+     "tas": 345861942,
+     "textures": 462,
+     "geometries": 427,
+     "tuiles": 854
+    },
+    {
+     "t": 18297,
+     "tas": 355268126,
+     "textures": 464,
+     "geometries": 429,
+     "tuiles": 858
+    },
+    {
+     "t": 19314,
+     "tas": 374130562,
+     "textures": 476,
+     "geometries": 441,
+     "tuiles": 874
+    }
+   ]
+  },
+  "x6r": {
+   "cpu": 6,
+   "dsf": 2,
+   "angle": "d3d11",
+   "materiel": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+   "palierAvant": {
+    "palier": 0,
+    "nom": "PLEINE QUALITÉ",
+    "densite": 2,
+    "ecran": [
+     800,
+     600
+    ],
+    "carte": "fort",
+    "tier": 0,
+    "pixelRatio": 2
+   },
+   "tierAvant": 0,
+   "etalon": {
+    "avant": 109.70000000018626,
+    "apres": 728.6999999997206,
+    "facteur": 6.64266180490869
+   },
+   "demarrage": {
+    "ms": 12173,
+    "reseau": {
+     "requetes": 395,
+     "octets": 46761465
+    }
+   },
+   "tas": [
+    {
+     "t": 0,
+     "tas": 395056268,
+     "textures": 406,
+     "geometries": 369,
+     "tuiles": 798
+    },
+    {
+     "t": 1050,
+     "tas": 395520728,
+     "textures": 413,
+     "geometries": 376,
+     "tuiles": 802
+    },
+    {
+     "t": 2188,
+     "tas": 396464842,
+     "textures": 414,
+     "geometries": 377,
+     "tuiles": 810
+    },
+    {
+     "t": 3226,
+     "tas": 334878856,
+     "textures": 421,
+     "geometries": 384,
+     "tuiles": 822
+    },
+    {
+     "t": 4280,
+     "tas": 342449624,
+     "textures": 430,
+     "geometries": 393,
+     "tuiles": 826
+    },
+    {
+     "t": 5326,
+     "tas": 354724188,
+     "textures": 435,
+     "geometries": 398,
+     "tuiles": 838
+    },
+    {
+     "t": 6385,
+     "tas": 368518240,
+     "textures": 447,
+     "geometries": 410,
+     "tuiles": 850
+    },
+    {
+     "t": 7431,
+     "tas": 375000160,
+     "textures": 450,
+     "geometries": 413,
+     "tuiles": 854
+    },
+    {
+     "t": 8472,
+     "tas": 380877588,
+     "textures": 452,
+     "geometries": 415,
+     "tuiles": 870
+    },
+    {
+     "t": 9516,
+     "tas": 344697588,
+     "textures": 467,
+     "geometries": 430,
+     "tuiles": 874
+    },
+    {
+     "t": 10561,
+     "tas": 355709363,
+     "textures": 471,
+     "geometries": 434,
+     "tuiles": 894
+    },
+    {
+     "t": 11634,
+     "tas": 370544696,
+     "textures": 478,
+     "geometries": 441,
+     "tuiles": 906
+    },
+    {
+     "t": 12680,
+     "tas": 381320976,
+     "textures": 488,
+     "geometries": 451,
+     "tuiles": 910
+    },
+    {
+     "t": 13767,
+     "tas": 385161728,
+     "textures": 488,
+     "geometries": 451,
+     "tuiles": 914
+    },
+    {
+     "t": 14813,
+     "tas": 332496961,
+     "textures": 495,
+     "geometries": 458,
+     "tuiles": 926
+    },
+    {
+     "t": 15879,
+     "tas": 340902168,
+     "textures": 504,
+     "geometries": 467,
+     "tuiles": 926
+    },
+    {
+     "t": 16973,
+     "tas": 346046352,
+     "textures": 506,
+     "geometries": 469,
+     "tuiles": 938
+    },
+    {
+     "t": 18081,
+     "tas": 357001356,
+     "textures": 509,
+     "geometries": 472,
+     "tuiles": 954
+    },
+    {
+     "t": 19155,
+     "tas": 368217144,
+     "textures": 522,
+     "geometries": 485,
+     "tuiles": 958
+    }
+   ]
+  }
+ },
+ "cellules": [
+  {
+   "machine": "mienne",
+   "poste": "surface",
+   "cible": 130000,
+   "etat": {
+    "mode": "surface",
+    "altM": 126749.40362472765,
+    "altCadrageM": 129960.02729349818,
+    "busy": false,
+    "crop": false,
+    "tuiles": 382,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1374,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 24,
+    "geometries": 160,
+    "textures": 157,
+    "tas": 285145417,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 19218,
+    "requetes": 316,
+    "octets": 30138443
+   },
+   "ecartAlt": 0.00030748235770633285,
+   "ok": true,
+   "temoin": {
+    "x1": 0.23142400000000002,
+    "x4": 1.737728,
+    "rapport": 7.508849557522123
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 2.2999999999956344,
+     "p99": 11,
+     "moy": 2.9322033898305087,
+     "min": 1.1999999999970896,
+     "max": 12.39999999999418
+    },
+    "tick": {
+     "p50": 1.3999999999068677,
+     "p99": 9,
+     "moy": 2.024999999961195
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.23552,
+     "p99": 1.805312,
+     "moy": 0.5312112000000001,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.014999999975164732,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.17500000000776103,
+      "p50": 0.19999999972060323,
+      "p99": 0.39999999990686774,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.05500000002793968,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.00499999998913457,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 1.5899999999751648,
+      "p50": 1,
+      "p99": 8.399999999906868,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.024999999961195,
+      "p50": 1.3999999999068677,
+      "p99": 9,
+      "n": 60
+     },
+     "reste": {
+      "moy": 0.14999999998447797,
+      "p50": 0.10000000009313226,
+      "p99": 0.40000000037252903,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.5312112000000001,
+      "p50": 0.23552,
+      "p99": 1.805312,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 90,
+      "max": 90
+     },
+     "triangles": {
+      "p50": 117173,
+      "max": 117173
+     }
+    },
+    "tas": {
+     "debut": 281459689,
+     "fin": 288519769,
+     "min": 281459689,
+     "max": 288519769
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 2.599999999998545,
+     "p99": 9.099999999998545,
+     "moy": 3.2169491525424223,
+     "min": 1.0999999999985448,
+     "max": 10.700000000004366
+    },
+    "tick": {
+     "p50": 1.400000000372529,
+     "p99": 7.699999999720603,
+     "moy": 2.0700000000031045
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.361472,
+     "p99": 2.4862719999999996,
+     "moy": 0.5860997333333333,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.013333333345750967,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.2066666666495924,
+      "p50": 0.20000000018626451,
+      "p99": 0.39999999990686774,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.030000000004656614,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.011666666677532097,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 1.5416666666356227,
+      "p50": 1,
+      "p99": 7,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.09666666667132327,
+      "p50": 0.09999999962747097,
+      "p99": 1.1000000000931323,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.023333333316259086,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.0700000000031045,
+      "p50": 1.400000000372529,
+      "p99": 7.699999999720603,
+      "n": 60
+     },
+     "reste": {
+      "moy": 0.1200000000341485,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.2804586666666667,
+      "p50": 0.057344,
+      "p99": 2.320384,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 0.3056410666666666,
+      "p50": 0.169984,
+      "p99": 0.96768,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 90,
+      "max": 90
+     },
+     "triangles": {
+      "p50": 117173,
+      "max": 117173
+     }
+    },
+    "tas": {
+     "debut": 300819377,
+     "fin": 274709437,
+     "min": 271612489,
+     "max": 304627941
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 2.7999999999956344,
+     "p99": 10.5,
+     "moy": 3.798305084745738,
+     "min": 1.2000000000043656,
+     "max": 10.80000000000291
+    },
+    "tick": {
+     "p50": 1.7999999998137355,
+     "p99": 9.5,
+     "moy": 2.7166666666511445
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.3328,
+     "p99": 1.127424,
+     "moy": 0.4263514666666666,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.013333333322467904,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.1916666666744277,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.058333333348855376,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.011666666654249033,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 2.261666666646488,
+      "p50": 1.2999999998137355,
+      "p99": 8.600000000093132,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.7166666666511445,
+      "p50": 1.7999999998137355,
+      "p99": 9.5,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.13499999999379117,
+      "p50": 0.10000000009313226,
+      "p99": 0.40000000037252903,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.4263514666666666,
+      "p50": 0.3328,
+      "p99": 1.127424,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 90,
+      "max": 90
+     },
+     "triangles": {
+      "p50": 117173,
+      "max": 117173
+     }
+    },
+    "tas": {
+     "debut": 299155061,
+     "fin": 272898677,
+     "min": 271611213,
+     "max": 304667141
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 882205014,
+     "b": 882205014
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 1.7999999999956344,
+     "p99": 3.400000000001455,
+     "moy": 2.0068965517240374,
+     "min": 1.0999999999985448,
+     "max": 3.6999999999970896
+    },
+    "tick": {
+     "p50": 1.1000000000931323,
+     "p99": 2.1000000000931323,
+     "moy": 1.2433333333271246
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.330752,
+     "p99": 1.591296,
+     "moy": 0.49225386666666665,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.15666666662630935,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.03666666668529312,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 0.8599999999627471,
+      "p50": 0.7999999998137355,
+      "p99": 1.6000000000931323,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.05999999999379118,
+      "p50": 0.09999999962747097,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.01666666668218871,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "tick": {
+      "moy": 1.2433333333271246,
+      "p50": 1.1000000000931323,
+      "p99": 2.1000000000931323,
+      "n": 30
+     },
+     "reste": {
+      "moy": 0.0866666667163372,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "0:PasseFond": {
+      "moy": 0.30213119999999993,
+      "p50": 0.162816,
+      "p99": 0.623616,
+      "n": 30
+     },
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.1901226666666667,
+      "p50": 0.05632,
+      "p99": 1.103872,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 90,
+      "max": 90
+     },
+     "triangles": {
+      "p50": 117173,
+      "max": 117173
+     }
+    },
+    "tas": {
+     "debut": 293823761,
+     "fin": 297245441,
+     "min": 293823761,
+     "max": 297245441
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 172776778,
+    "b": 172776778
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 126749.40362472765,
+    "altCadrageM": 129960.02729349818,
+    "busy": false,
+    "crop": false,
+    "tuiles": 382,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1374,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 24,
+    "geometries": 160,
+    "textures": 157,
+    "tas": 313177841,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 3
+   }
+  },
+  {
+   "machine": "mienne",
+   "poste": "crop",
+   "cible": 5000,
+   "etat": {
+    "mode": "surface",
+    "altM": 6548.059847645778,
+    "altCadrageM": 5000.260443541228,
+    "busy": false,
+    "crop": true,
+    "tuiles": 442,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1595,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 28,
+    "geometries": 147,
+    "textures": 173,
+    "tas": 402126357,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 8417,
+    "requetes": 41,
+    "octets": 13316712
+   },
+   "ecartAlt": 0.00005208870824553742,
+   "ok": true,
+   "temoin": {
+    "x1": 0.554496,
+    "x4": 2.077696,
+    "rapport": 3.746999076638966
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 3.599999999998545,
+     "p99": 7.100000000005821,
+     "moy": 3.5745762711864653,
+     "min": 1,
+     "max": 7.30000000000291
+    },
+    "tick": {
+     "p50": 3,
+     "p99": 6,
+     "moy": 2.8466666666402793
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.54784,
+     "p99": 2.086912,
+     "moy": 0.8396458666666663,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.014999999982925753,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.0533333333209157,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.05500000002793968,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.07666666665269682,
+      "p50": 0.09999999962747097,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 2.149999999984478,
+      "p50": 2.2000000001862645,
+      "p99": 5.099999999627471,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.8466666666402793,
+      "p50": 3,
+      "p99": 6,
+      "n": 60
+     },
+     "reste": {
+      "moy": 0.4549999999891346,
+      "p50": 0.39999999990686774,
+      "p99": 1.099999999627471,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.8396458666666663,
+      "p50": 0.54784,
+      "p99": 2.086912,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 395962409,
+     "fin": 401405909,
+     "min": 395962409,
+     "max": 401405909
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 4,
+     "p99": 8.19999999999709,
+     "moy": 3.9542372881356425,
+     "min": 0.9000000000014552,
+     "max": 9.400000000001455
+    },
+    "tick": {
+     "p50": 3.1000000000931323,
+     "p99": 6,
+     "moy": 3.0733333333240203
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.5232640000000001,
+     "p99": 2.793472,
+     "moy": 0.8392362666666664,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.013333333314706881,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.04999999999223898,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.07166666668684532,
+      "p50": 0.09999999962747097,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.08833333329142382,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 2.025000000023283,
+      "p50": 2,
+      "p99": 4.2999999998137355,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.16166666668529311,
+      "p50": 0.10000000009313226,
+      "p99": 1.1999999997206032,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.09999999998447796,
+      "p50": 0,
+      "p99": 0.900000000372529,
+      "n": 60
+     },
+     "tick": {
+      "moy": 3.0733333333240203,
+      "p50": 3.1000000000931323,
+      "p99": 6,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.5216666666790843,
+      "p50": 0.5,
+      "p99": 1,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.2746197333333336,
+      "p50": 0.06656,
+      "p99": 1.855488,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 0.5646165333333333,
+      "p50": 0.454656,
+      "p99": 1.559552,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 395674783,
+     "fin": 401129031,
+     "min": 395674783,
+     "max": 401129031
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 1.7000000000043656,
+     "p99": 4.299999999995634,
+     "moy": 1.8949152542373375,
+     "min": 0.6999999999970896,
+     "max": 6.100000000005821
+    },
+    "tick": {
+     "p50": 0.8999999999068677,
+     "p99": 3.7999999998137355,
+     "moy": 1.2416666666433835
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.52736,
+     "p99": 2.02752,
+     "moy": 0.7013375999999998,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.016666666674427687,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.04166666663562258,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.041666666689949734,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.035000000001552206,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 0.6699999999953434,
+      "p50": 0.39999999990686774,
+      "p99": 3,
+      "n": 60
+     },
+     "tick": {
+      "moy": 1.2416666666433835,
+      "p50": 0.8999999999068677,
+      "p99": 3.7999999998137355,
+      "n": 60
+     },
+     "reste": {
+      "moy": 0.4166666666511446,
+      "p50": 0.39999999990686774,
+      "p99": 0.900000000372529,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.7013375999999998,
+      "p50": 0.52736,
+      "p99": 2.02752,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 402117847,
+     "fin": 406073159,
+     "min": 402117847,
+     "max": 406073159
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 1790972874,
+     "b": 1790972874
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 1.0999999999985448,
+     "p99": 2.2000000000043656,
+     "moy": 1.3068965517241882,
+     "min": 0.7999999999956344,
+     "max": 2.900000000001455
+    },
+    "tick": {
+     "p50": 0.7000000001862645,
+     "p99": 1.7000000001862645,
+     "moy": 0.8700000000341485
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.519168,
+     "p99": 1.562624,
+     "moy": 0.7250165333333334,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.03999999999068678,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.05333333333643774,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0.03666666666977107,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 0.32666666673806805,
+      "p50": 0.2999999998137355,
+      "p99": 0.7000000001862645,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.026666666644935808,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.026666666691501934,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "tick": {
+      "moy": 0.8700000000341485,
+      "p50": 0.7000000001862645,
+      "p99": 1.7000000001862645,
+      "n": 30
+     },
+     "reste": {
+      "moy": 0.32333333330849806,
+      "p50": 0.2999999998137355,
+      "p99": 0.6999999997206032,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.16305493333333335,
+      "p50": 0.06656,
+      "p99": 0.86016,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 0.5619616,
+      "p50": 0.452608,
+      "p99": 1.143808,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 404566003,
+     "fin": 406537691,
+     "min": 404566003,
+     "max": 406537691
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 3231452448,
+    "b": 3231452448
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 6548.059847645778,
+    "altCadrageM": 5000.260443541228,
+    "busy": false,
+    "crop": true,
+    "tuiles": 442,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1595,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 28,
+    "geometries": 147,
+    "textures": 173,
+    "tas": 429142003,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "mienne",
+   "poste": "orbite",
+   "cible": 2000000,
+   "etat": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.83511284084,
+    "busy": false,
+    "crop": false,
+    "tuiles": 638,
+    "enVol": 8,
+    "file": 0,
+    "credit": 1401,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 26,
+    "geometries": 271,
+    "textures": 305,
+    "tas": 359708821,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 10870,
+    "requetes": 191,
+    "octets": 14939490
+   },
+   "ecartAlt": 1.0028929175564205,
+   "ok": false,
+   "temoin": {
+    "x1": 0.21760000000000002,
+    "x4": 3.150848,
+    "rapport": 14.479999999999999
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 1.8000000000029104,
+     "p99": 6,
+     "moy": 2.5627118644067304,
+     "min": 0.9000000000014552,
+     "max": 7.30000000000291
+    },
+    "tick": {
+     "p50": 1.1999999997206032,
+     "p99": 5.2999999998137355,
+     "moy": 2.0083333333255724
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.216064,
+     "p99": 1.22368,
+     "moy": 0.3396266666666666,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.10333333333643774,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.0566666666806365,
+      "p50": 0.09999999962747097,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 1.7799999999891345,
+      "p50": 0.8999999999068677,
+      "p99": 4.7999999998137355,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.0083333333255724,
+      "p50": 1.1999999997206032,
+      "p99": 5.2999999998137355,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.05166666666045785,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.3396266666666666,
+      "p50": 0.216064,
+      "p99": 1.22368,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 64,
+      "max": 65
+     },
+     "triangles": {
+      "p50": 121733,
+      "max": 123077
+     }
+    },
+    "tas": {
+     "debut": 355655257,
+     "fin": 360754893,
+     "min": 355655257,
+     "max": 360754893
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 2.8000000000029104,
+     "p99": 5.69999999999709,
+     "moy": 3.032203389830533,
+     "min": 1.0999999999985448,
+     "max": 6.400000000001455
+    },
+    "tick": {
+     "p50": 1.6000000000931323,
+     "p99": 4.5,
+     "moy": 2.116666666658906
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.22527999999999998,
+     "p99": 1.120256,
+     "moy": 0.40119413333333337,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.011666666677532097,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.13333333327124516,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.06166666666201005,
+      "p50": 0.09999999962747097,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 1.765000000037253,
+      "p50": 1.1000000000931323,
+      "p99": 3.8999999999068677,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.06666666665890565,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.02166666667132328,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "tick": {
+      "moy": 2.116666666658906,
+      "p50": 1.6000000000931323,
+      "p99": 4.5,
+      "n": 60
+     },
+     "reste": {
+      "moy": 0.04000000001396984,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.16827519999999999,
+      "p50": 0.05632,
+      "p99": 0.954368,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 0.23291893333333338,
+      "p50": 0.15872,
+      "p99": 0.75776,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 64,
+      "max": 64
+     },
+     "triangles": {
+      "p50": 121733,
+      "max": 121733
+     }
+    },
+    "tas": {
+     "debut": 371615025,
+     "fin": 376740305,
+     "min": 371615025,
+     "max": 376740305
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {
+     "createImageBitmap": 2
+    }
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 1.5,
+     "p99": 5.80000000000291,
+     "moy": 2.428813559322083,
+     "min": 1,
+     "max": 6
+    },
+    "tick": {
+     "p50": 0.8999999999068677,
+     "p99": 5.100000000093132,
+     "moy": 1.798333333308498
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.22016,
+     "p99": 1.221632,
+     "moy": 0.37259786666666683,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.013333333322467904,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.1033333332821106,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.058333333341094355,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 1.5566666667039195,
+      "p50": 0.7000000001862645,
+      "p99": 4.600000000093132,
+      "n": 60
+     },
+     "tick": {
+      "moy": 1.798333333308498,
+      "p50": 0.8999999999068677,
+      "p99": 5.100000000093132,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.04833333333178113,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.37259786666666683,
+      "p50": 0.22016,
+      "p99": 1.221632,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 65,
+      "max": 65
+     },
+     "triangles": {
+      "p50": 123077,
+      "max": 123077
+     }
+    },
+    "tas": {
+     "debut": 369581849,
+     "fin": 374678617,
+     "min": 369581849,
+     "max": 374678617
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 3417249327,
+     "b": 3417249327
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 1.1999999999970896,
+     "p99": 2,
+     "moy": 1.3137931034482258,
+     "min": 1,
+     "max": 2.1999999999970896
+    },
+    "tick": {
+     "p50": 0.7000000001862645,
+     "p99": 1.2999999998137355,
+     "moy": 0.8299999999348074
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.216064,
+     "p99": 0.96256,
+     "moy": 0.43946453333333335,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "controls.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.09666666658595205,
+      "p50": 0.10000000009313226,
+      "p99": 0.19999999972060323,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.03333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 0.6100000000403573,
+      "p50": 0.599999999627471,
+      "p99": 0.900000000372529,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.03666666665424903,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.006666666641831398,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 30
+     },
+     "tick": {
+      "moy": 0.8299999999348074,
+      "p50": 0.7000000001862645,
+      "p99": 1.2999999998137355,
+      "n": 30
+     },
+     "reste": {
+      "moy": 0.026666666675979892,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.20698346666666673,
+      "p50": 0.055296,
+      "p99": 0.745472,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 0.23248106666666674,
+      "p50": 0.157696,
+      "p99": 0.838656,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 65,
+      "max": 65
+     },
+     "triangles": {
+      "p50": 123077,
+      "max": 123077
+     }
+    },
+    "tas": {
+     "debut": 366867933,
+     "fin": 369397333,
+     "min": 366867933,
+     "max": 369397333
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 727763482,
+    "b": 727763482
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.83511284084,
+    "busy": false,
+    "crop": false,
+    "tuiles": 642,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1397,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 26,
+    "geometries": 273,
+    "textures": 307,
+    "tas": 384225005,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x4",
+   "poste": "surface",
+   "cible": 130000,
+   "etat": {
+    "mode": "surface",
+    "altM": 126749.3352911931,
+    "altCadrageM": 129959.95895996362,
+    "busy": false,
+    "crop": false,
+    "tuiles": 374,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1390,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 23,
+    "geometries": 161,
+    "textures": 159,
+    "tas": 289298959,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 29776,
+    "requetes": 319,
+    "octets": 41338015
+   },
+   "ecartAlt": 0.00030800800027981705,
+   "ok": true,
+   "temoin": {
+    "x1": 0.899072,
+    "x4": 12.096512,
+    "rapport": 13.454441913439636
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 12.299999999995634,
+     "p99": 14.799999999995634,
+     "moy": 12.311864406779685,
+     "min": 0.7999999999956344,
+     "max": 28.900000000001455
+    },
+    "tick": {
+     "p50": 8.299999999813735,
+     "p99": 11.399999999906868,
+     "moy": 8.481666666680637
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.238592,
+     "p99": 4.615168,
+     "moy": 0.40668160000000014,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.041666666682188706,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.09666666664804022,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.014999999998447795,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.8516666666759799,
+      "p50": 0.7999999998137355,
+      "p99": 1.400000000372529,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.1699999999642993,
+      "p50": 0.19999999972060323,
+      "p99": 0.40000000037252903,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.05,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.011666666662010054,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.019999999987582364,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "lieux.refresh": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     },
+     "scan.update": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.026666666683740913,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 6.453333333344199,
+      "p50": 6.2999999998137355,
+      "p99": 8.899999999906868,
+      "n": 60
+     },
+     "tick": {
+      "moy": 8.481666666680637,
+      "p50": 8.299999999813735,
+      "p99": 11.399999999906868,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.6633333333379899,
+      "p50": 0.6000000000931323,
+      "p99": 1.1999999997206032,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.40668160000000014,
+      "p50": 0.238592,
+      "p99": 4.615168,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 296145867,
+     "fin": 303146263,
+     "min": 296145867,
+     "max": 303146263
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 12.599999999998545,
+     "p99": 16.30000000000291,
+     "moy": 12.942372881355908,
+     "min": 9.89999999999418,
+     "max": 18.69999999999709
+    },
+    "tick": {
+     "p50": 8.599999999627471,
+     "p99": 11.899999999906868,
+     "moy": 8.795000000003105
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.25088,
+     "p99": 4.611072,
+     "moy": 0.8962224000000002,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.04833333335506419,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.06666666663562258,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.014999999998447795,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.011666666669771075,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.8900000000139698,
+      "p50": 0.8000000002793968,
+      "p99": 1.3000000002793968,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.14999999997671692,
+      "p50": 0.10000000009313226,
+      "p99": 0.5,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.05166666666045785,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.02333333333954215,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.02166666666356226,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 6.153333333274349,
+      "p50": 6,
+      "p99": 8.299999999813735,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.4199999999642993,
+      "p50": 0.39999999990686774,
+      "p99": 0.6000000000931323,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.1866666666775321,
+      "p50": 0.20000000018626451,
+      "p99": 0.39999999990686774,
+      "n": 60
+     },
+     "tick": {
+      "moy": 8.795000000003105,
+      "p50": 8.599999999627471,
+      "p99": 11.899999999906868,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.7016666667691122,
+      "p50": 0.6999999997206032,
+      "p99": 1.2000000001862645,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.008333333341094354,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 3
+     }
+    },
+    "gpu": {
+     "0:PasseFond": {
+      "moy": 0.24876373333333338,
+      "p50": 0.175104,
+      "p99": 0.198656,
+      "n": 60
+     },
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.6474586666666666,
+      "p50": 0.074752,
+      "p99": 4.114432,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 309177559,
+     "fin": 316181271,
+     "min": 309177559,
+     "max": 316181271
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 11.299999999995634,
+     "p99": 13.099999999998545,
+     "moy": 11.255932203389806,
+     "min": 9,
+     "max": 13.80000000000291
+    },
+    "tick": {
+     "p50": 7.7999999998137355,
+     "p99": 9.100000000093132,
+     "moy": 7.626666666691502
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.3584,
+     "p99": 1.342464,
+     "moy": 0.5645823999999998,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.04500000001086543,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.009999999986030161,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.08833333335351198,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.008333333341094354,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.7916666666821887,
+      "p50": 0.7999999998137355,
+      "p99": 1.2999999998137355,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.16833333333488554,
+      "p50": 0.19999999972060323,
+      "p99": 0.4999999995343387,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.054999999981373546,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.019999999987582364,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.013333333322467904,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     },
+     "scan.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.008333333317811291,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 5.760000000032596,
+      "p50": 5.600000000093132,
+      "p99": 7.199999999720603,
+      "n": 60
+     },
+     "tick": {
+      "moy": 7.626666666691502,
+      "p50": 7.7999999998137355,
+      "p99": 9.100000000093132,
+      "n": 61
+     },
+     "reste": {
+      "moy": 0.6083333333488554,
+      "p50": 0.5,
+      "p99": 1.1000000000931323,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.5645823999999998,
+      "p50": 0.3584,
+      "p99": 1.342464,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 292052764,
+     "fin": 298981573,
+     "min": 292052764,
+     "max": 298981573
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 3583635609,
+     "b": 3583635609
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 11.5,
+     "p99": 19.900000000001455,
+     "moy": 12.306896551724188,
+     "min": 0.9000000000014552,
+     "max": 34.599999999998545
+    },
+    "tick": {
+     "p50": 8.199999999720603,
+     "p99": 12.899999999906868,
+     "moy": 8.473333333355065
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.38707199999999997,
+     "p99": 3.612672,
+     "moy": 1.1515904000000001,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.04000000000620882,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.06000000000931323,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.019999999987582364,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.9,
+      "p50": 0.7999999998137355,
+      "p99": 1.6000000000931323,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.00999999997826914,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.1733333333861083,
+      "p50": 0.19999999972060323,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.03666666665424903,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0.029999999981373548,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.01666666668218871,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 5.896666666616996,
+      "p50": 5.5,
+      "p99": 9.5,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.4300000000279397,
+      "p50": 0.39999999990686774,
+      "p99": 0.8000000002793968,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.10000000001552205,
+      "p50": 0.09999999962747097,
+      "p99": 0.2999999998137355,
+      "n": 30
+     },
+     "tick": {
+      "moy": 8.473333333355065,
+      "p50": 8.199999999720603,
+      "p99": 12.899999999906868,
+      "n": 31
+     },
+     "reste": {
+      "moy": 0.7033333333364378,
+      "p50": 0.6000000000931323,
+      "p99": 1.2000000001862645,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 2
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.7512064000000002,
+      "p50": 0.113664,
+      "p99": 3.315712,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 0.4003840000000001,
+      "p50": 0.273408,
+      "p99": 0.275456,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 312479409,
+     "fin": 315885389,
+     "min": 312479409,
+     "max": 315885389
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 3847497298,
+    "b": 3847497298
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 126749.3352911931,
+    "altCadrageM": 129959.95895996362,
+    "busy": false,
+    "crop": false,
+    "tuiles": 374,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1390,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 23,
+    "geometries": 161,
+    "textures": 159,
+    "tas": 324607673,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x4",
+   "poste": "crop",
+   "cible": 5000,
+   "etat": {
+    "mode": "surface",
+    "altM": 6548.059847640261,
+    "altCadrageM": 5000.260443535711,
+    "busy": false,
+    "crop": true,
+    "tuiles": 434,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1615,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 28,
+    "geometries": 153,
+    "textures": 180,
+    "tas": 395186701,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 27332,
+    "requetes": 45,
+    "octets": 14857102
+   },
+   "ecartAlt": 0.000052088707142138445,
+   "ok": true,
+   "temoin": {
+    "x1": 0.7403519999999999,
+    "x4": 2.946048,
+    "rapport": 3.979253112033195
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 14.10000000000582,
+     "p99": 31.59999999999127,
+     "moy": 15.110169491525424,
+     "min": 1.1000000000058208,
+     "max": 35.09999999999127
+    },
+    "tick": {
+     "p50": 10.899999999906868,
+     "p99": 20.600000000093132,
+     "moy": 11.841666666658906
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.651264,
+     "p99": 1.865728,
+     "moy": 0.8048810666666668,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.0716666666402792,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.10500000002017866,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.016666666666666666,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.018333333327124515,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.40166666664493583,
+      "p50": 0.39999999990686774,
+      "p99": 0.6999999997206032,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.5433333333736906,
+      "p50": 0.5,
+      "p99": 1.5,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.06833333333488553,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.7383333333147069,
+      "p50": 0.6000000000931323,
+      "p99": 1.5,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.011666666669771075,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.024999999992238977,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.05333333334419876,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.016666666674427687,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.01833333335040758,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 5.4349999999705085,
+      "p50": 5.100000000093132,
+      "p99": 8.899999999906868,
+      "n": 60
+     },
+     "tick": {
+      "moy": 11.841666666658906,
+      "p50": 10.899999999906868,
+      "p99": 20.600000000093132,
+      "n": 61
+     },
+     "reste": {
+      "moy": 4.278333333328677,
+      "p50": 3.9000000008381903,
+      "p99": 7.5,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.8048810666666668,
+      "p50": 0.651264,
+      "p99": 1.865728,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 400845029,
+     "fin": 361854025,
+     "min": 361454525,
+     "max": 406809773
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 16.69999999999709,
+     "p99": 35.70000000001164,
+     "moy": 17.840677966101794,
+     "min": 0.8000000000029104,
+     "max": 36.29999999998836
+    },
+    "tick": {
+     "p50": 13.5,
+     "p99": 19.200000000186265,
+     "moy": 13.668333333358168
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.521216,
+     "p99": 2.83136,
+     "moy": 1.0045056,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.07166666668684532,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.02166666667132328,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.09666666667132327,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.02166666667132328,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.016666666666666666,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.45666666664959243,
+      "p50": 0.39999999990686774,
+      "p99": 0.8000000002793968,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.013333333345750967,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.6333333333410943,
+      "p50": 0.6000000000931323,
+      "p99": 1.1000000000931323,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.05500000002793968,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.7016666666449358,
+      "p50": 0.6000000000931323,
+      "p99": 1.6000000000931323,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.03166666665735344,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.034999999993791185,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.030000000004656614,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.023333333331781128,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 5.523333333285215,
+      "p50": 5.399999999906868,
+      "p99": 8.399999999906868,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.8016666666449358,
+      "p50": 0.7000000001862645,
+      "p99": 1.7000000001862645,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.21166666673185924,
+      "p50": 0.20000000018626451,
+      "p99": 0.599999999627471,
+      "n": 60
+     },
+     "tick": {
+      "moy": 13.668333333358168,
+      "p50": 13.5,
+      "p99": 19.200000000186265,
+      "n": 61
+     },
+     "reste": {
+      "moy": 4.873333333355064,
+      "p50": 4.599999999627471,
+      "p99": 9.200000000186265,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 5
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.44069226666666655,
+      "p50": 0.077824,
+      "p99": 1.985536,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 0.5638133333333332,
+      "p50": 0.441344,
+      "p99": 2.407424,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 367313353,
+     "fin": 373577993,
+     "min": 367313353,
+     "max": 373577993
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 11,
+     "p99": 17.69999999999709,
+     "moy": 11.5864406779662,
+     "min": 3.3000000000029104,
+     "max": 33.10000000000582
+    },
+    "tick": {
+     "p50": 8.5,
+     "p99": 14.100000000093132,
+     "moy": 8.906666666711681
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.534528,
+     "p99": 1.622016,
+     "moy": 0.8273237333333332,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.02833333332867672,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.09833333332402011,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.01666666668218871,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.35833333334109435,
+      "p50": 0.39999999990686774,
+      "p99": 0.7000000001862645,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.42666666661389174,
+      "p50": 0.39999999990686774,
+      "p99": 0.8000000002793968,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.046666666648040214,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.21500000002173086,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.018333333327124515,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.014999999990686774,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.014999999998447795,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.02833333333643774,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.025,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.014999999998447795,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 4.38833333333799,
+      "p50": 4.2000000001862645,
+      "p99": 7.100000000093132,
+      "n": 60
+     },
+     "tick": {
+      "moy": 8.906666666711681,
+      "p50": 8.5,
+      "p99": 14.100000000093132,
+      "n": 61
+     },
+     "reste": {
+      "moy": 3.176666666745829,
+      "p50": 3.1000000000931323,
+      "p99": 4.899999999906868,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.8273237333333332,
+      "p50": 0.534528,
+      "p99": 1.622016,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 379257297,
+     "fin": 383473953,
+     "min": 379257297,
+     "max": 383473953
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 2088254415,
+     "b": 2088254415
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 10.900000000008731,
+     "p99": 14.30000000000291,
+     "moy": 11.289655172414093,
+     "min": 9.19999999999709,
+     "max": 15.299999999988358
+    },
+    "tick": {
+     "p50": 8.300000000279397,
+     "p99": 11.099999999627471,
+     "moy": 8.749999999984478
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.518144,
+     "p99": 2.3142400000000003,
+     "moy": 0.9186890666666667,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.05333333330539366,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.10333333335195978,
+      "p50": 0.10000000009313226,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.03333333333333333,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.33333333327124515,
+      "p50": 0.2999999998137355,
+      "p99": 0.6000000000931323,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.39999999998447794,
+      "p50": 0.39999999990686774,
+      "p99": 0.7999999998137355,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.030000000012417635,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0.25666666665735344,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.02000000001862645,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0.02333333333954215,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.033333333348855375,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 3.6099999999782693,
+      "p50": 3.3999999999068677,
+      "p99": 4.899999999906868,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.49666666666356224,
+      "p50": 0.5,
+      "p99": 0.7999999998137355,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.18333333330228924,
+      "p50": 0.20000000018626451,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "tick": {
+      "moy": 8.749999999984478,
+      "p50": 8.300000000279397,
+      "p99": 11.099999999627471,
+      "n": 31
+     },
+     "reste": {
+      "moy": 3.0966666667411724,
+      "p50": 3.099999999627471,
+      "p99": 4.2000000001862645,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 1
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.3525194666666668,
+      "p50": 0.077824,
+      "p99": 1.134592,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 0.5661696,
+      "p50": 0.44032,
+      "p99": 2.236416,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 394776805,
+     "fin": 396878297,
+     "min": 394776805,
+     "max": 396878297
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 1765024489,
+    "b": 1765024489
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 6548.059847640261,
+    "altCadrageM": 5000.260443535711,
+    "busy": false,
+    "crop": true,
+    "tuiles": 434,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1615,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 28,
+    "geometries": 153,
+    "textures": 180,
+    "tas": 405247593,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x4",
+   "poste": "orbite",
+   "cible": 2000000,
+   "etat": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.83511284084,
+    "busy": false,
+    "crop": false,
+    "tuiles": 642,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1406,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 26,
+    "geometries": 279,
+    "textures": 314,
+    "tas": 457059022,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 12176,
+    "requetes": 192,
+    "octets": 15412769
+   },
+   "ecartAlt": 1.0028929175564205,
+   "ok": false,
+   "temoin": {
+    "x1": 1.701888,
+    "x4": 12.235776,
+    "rapport": 7.189530685920577
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 16,
+     "p99": 34.69999999999709,
+     "moy": 18.791525423728764,
+     "min": 1.5,
+     "max": 44
+    },
+    "tick": {
+     "p50": 11.399999999906868,
+     "p99": 19.399999999906868,
+     "moy": 12.126666666683741
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 7.2000000001862645,
+     "moy": 0.8833333333410943,
+     "total": 53.00000000046566
+    },
+    "gpuTotal": {
+     "p50": 0.208896,
+     "p99": 4.154368,
+     "moy": 0.5480565333333334,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.03333333331005027,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.07499999998447796,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.013333333345750967,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 1.0566666666961586,
+      "p50": 1,
+      "p99": 1.5,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.623333333269693,
+      "p50": 0.6000000000931323,
+      "p99": 0.8999999999068677,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.05166666667597989,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.02666666666821887,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.023333333331781128,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 9.456666666649593,
+      "p50": 8.900000000372529,
+      "p99": 14.800000000279397,
+      "n": 60
+     },
+     "tick": {
+      "moy": 12.126666666683741,
+      "p50": 11.399999999906868,
+      "p99": 19.399999999906868,
+      "n": 62
+     },
+     "reste": {
+      "moy": 0.628333333421809,
+      "p50": 0.5,
+      "p99": 3.1000000000931323,
+      "n": 0
+     },
+     "horsTick.tuile.decode": {
+      "moy": 0.0966666666790843,
+      "p50": 0,
+      "p99": 0.8000000002793968,
+      "n": 9
+     },
+     "horsTick.tuile.maillage": {
+      "moy": 0.78666666666201,
+      "p50": 0,
+      "p99": 6.5,
+      "n": 9
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 5
+     },
+     "globe._request": {
+      "moy": 0.0950000000031044,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.5480565333333334,
+      "p50": 0.208896,
+      "p99": 4.154368,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 67,
+      "max": 70
+     },
+     "triangles": {
+      "p50": 133125,
+      "max": 140805
+     }
+    },
+    "tas": {
+     "debut": 467764252,
+     "fin": 480837918,
+     "min": 467764252,
+     "max": 480837918
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {
+     "createImageBitmap": 19
+    },
+    "reseau": {
+     "requetes": 20,
+     "octets": 1513865
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 19.30000000000291,
+     "p99": 42.5,
+     "moy": 20.093220338983052,
+     "min": 0.6999999999970896,
+     "max": 43.5
+    },
+    "tick": {
+     "p50": 11.700000000186265,
+     "p99": 16.600000000093132,
+     "moy": 11.99833333333178
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 12.799999999348074,
+     "moy": 1.5383333333224678,
+     "total": 92.29999999934807
+    },
+    "gpuTotal": {
+     "p50": 0.223232,
+     "p99": 4.516864,
+     "moy": 1.3542645333333332,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.025,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.07666666668374092,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.02166666667132328,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 1.0683333333581686,
+      "p50": 1,
+      "p99": 1.6000000000931323,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.6466666666325182,
+      "p50": 0.6000000000931323,
+      "p99": 1,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.04833333333178113,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.016666666666666666,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.014999999990686774,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.016666666651144624,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 8.41166666666201,
+      "p50": 8.199999999720603,
+      "p99": 10.899999999906868,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.6033333333364378,
+      "p50": 0.6000000000931323,
+      "p99": 1,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.19833333334730316,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 60
+     },
+     "tick": {
+      "moy": 11.99833333333178,
+      "p50": 11.700000000186265,
+      "p99": 16.600000000093132,
+      "n": 62
+     },
+     "reste": {
+      "moy": 0.5866666666697711,
+      "p50": 0.5,
+      "p99": 2.7999999998137355,
+      "n": 0
+     },
+     "horsTick.tuile.decode": {
+      "moy": 0.20166666665269684,
+      "p50": 0,
+      "p99": 1.1999999997206032,
+      "n": 18
+     },
+     "horsTick.tuile.maillage": {
+      "moy": 1.336666666669771,
+      "p50": 0,
+      "p99": 11.599999999627471,
+      "n": 18
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 5
+     },
+     "globe._request": {
+      "moy": 0.2383333333224679,
+      "p50": 0,
+      "p99": 4.7999999998137355,
+      "n": 16
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.9327541333333331,
+      "p50": 0.067584,
+      "p99": 4.297728,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 0.4215103999999999,
+      "p50": 0.1536,
+      "p99": 4.133888,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 63,
+      "max": 71
+     },
+     "triangles": {
+      "p50": 128709,
+      "max": 139461
+     }
+    },
+    "tas": {
+     "debut": 456798718,
+     "fin": 476987658,
+     "min": 456798718,
+     "max": 476987658
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {
+     "createImageBitmap": 32
+    }
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 13.299999999988358,
+     "p99": 15.69999999999709,
+     "moy": 13.452542372881307,
+     "min": 11.80000000000291,
+     "max": 16.5
+    },
+    "tick": {
+     "p50": 9.5,
+     "p99": 11.299999999813735,
+     "moy": 9.591666666643384
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.208896,
+     "p99": 0.210944,
+     "moy": 0.20869119999999994,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.023333333355064195,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.07500000001552204,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.015000000006208818,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.9716666666713233,
+      "p50": 1,
+      "p99": 1.3000000002793968,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.5449999999720603,
+      "p50": 0.5,
+      "p99": 0.8999999999068677,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.05166666666045785,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.013333333322467904,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.018333333334885536,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.009999999986030161,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.013333333337989946,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 7.38666666666201,
+      "p50": 7.300000000279397,
+      "p99": 8.899999999906868,
+      "n": 60
+     },
+     "tick": {
+      "moy": 9.591666666643384,
+      "p50": 9.5,
+      "p99": 11.299999999813735,
+      "n": 62
+     },
+     "reste": {
+      "moy": 0.44333333330384145,
+      "p50": 0.3000000002793968,
+      "p99": 2.8000000002793968,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 0.20869119999999994,
+      "p50": 0.208896,
+      "p99": 0.210944,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 66,
+      "max": 66
+     },
+     "triangles": {
+      "p50": 131781,
+      "max": 131781
+     }
+    },
+    "tas": {
+     "debut": 482882510,
+     "fin": 488123514,
+     "min": 482882510,
+     "max": 488123514
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 3622547890,
+     "b": 3622547890
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 13.30000000000291,
+     "p99": 14.30000000000291,
+     "moy": 13.244827586206595,
+     "min": 11.69999999999709,
+     "max": 15.10000000000582
+    },
+    "tick": {
+     "p50": 9.5,
+     "p99": 10.300000000279397,
+     "moy": 9.433333333379899
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.219136,
+     "p99": 3.760128,
+     "moy": 1.0598741333333335,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "controls.update": {
+      "moy": 0.049999999984477954,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.07000000001862645,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.023333333355064195,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.8966666666325182,
+      "p50": 0.8000000002793968,
+      "p99": 1.2000000001862645,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.5033333333674819,
+      "p50": 0.5,
+      "p99": 0.7000000001862645,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.056666666688397524,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.013333333314706881,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0.026666666675979892,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 6.770000000034148,
+      "p50": 6.699999999720603,
+      "p99": 7.5,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.4700000000341485,
+      "p50": 0.5,
+      "p99": 0.6000000000931323,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.186666666638727,
+      "p50": 0.20000000018626451,
+      "p99": 0.39999999990686774,
+      "n": 30
+     },
+     "tick": {
+      "moy": 9.433333333379899,
+      "p50": 9.5,
+      "p99": 10.300000000279397,
+      "n": 30
+     },
+     "reste": {
+      "moy": 0.30999999997826916,
+      "p50": 0.2999999998137355,
+      "p99": 0.6000000000931323,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0,
+      "n": 2
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.9079125333333333,
+      "p50": 0.067584,
+      "p99": 3.608576,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 0.15196159999999995,
+      "p50": 0.151552,
+      "p99": 0.152576,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 66,
+      "max": 66
+     },
+     "triangles": {
+      "p50": 131781,
+      "max": 131781
+     }
+    },
+    "tas": {
+     "debut": 499971506,
+     "fin": 502550610,
+     "min": 499971506,
+     "max": 502550610
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 3993697948,
+    "b": 3993697948
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.8351128408385,
+    "busy": false,
+    "crop": false,
+    "tuiles": 694,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1406,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 1,
+    "tampon": [
+     1280,
+     720
+    ],
+    "programmes": 26,
+    "geometries": 314,
+    "textures": 349,
+    "tas": 510978338,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x6r",
+   "poste": "surface",
+   "cible": 130000,
+   "etat": {
+    "mode": "surface",
+    "altM": 126749.32664871,
+    "altCadrageM": 129959.95031748053,
+    "busy": false,
+    "crop": false,
+    "tuiles": 374,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1373,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 23,
+    "geometries": 152,
+    "textures": 150,
+    "tas": 326206221,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 49320,
+    "requetes": 318,
+    "octets": 39920998
+   },
+   "ecartAlt": 0.0003080744809190107,
+   "ok": true,
+   "temoin": {
+    "x1": 1.462784,
+    "x4": 48.382976,
+    "rapport": 33.075953797689884
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 33.10000000000582,
+     "p99": 52.30000000000291,
+     "moy": 33.5796610169491,
+     "min": 18.90000000000873,
+     "max": 53
+    },
+    "tick": {
+     "p50": 24.200000000186265,
+     "p99": 31.100000000093132,
+     "moy": 24.71333333334575
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.722752,
+     "p99": 1.8432,
+     "moy": 1.1547616000000003,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.150000000007761,
+      "p50": 0.19999999972060323,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.2200000000341485,
+      "p50": 0.20000000018626451,
+      "p99": 0.39999999990686774,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.03833333334575097,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.04666666667132328,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 2.089999999990687,
+      "p50": 2,
+      "p99": 3,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.47333333334730315,
+      "p50": 0.40000000037252903,
+      "p99": 1,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.09000000002173086,
+      "p50": 0.09999999962747097,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.025000000007761022,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.07499999999223898,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.023333333331781128,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.005000000004656613,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.015000000006208818,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.039999999982925756,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.04333333332712452,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.011666666654249033,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.056666666688397524,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 19.138333333291424,
+      "p50": 19.199999999720603,
+      "p99": 21.299999999813735,
+      "n": 60
+     },
+     "tick": {
+      "moy": 24.71333333334575,
+      "p50": 24.200000000186265,
+      "p99": 31.100000000093132,
+      "n": 63
+     },
+     "reste": {
+      "moy": 2.1166666666356226,
+      "p50": 1.7000000006519258,
+      "p99": 8.100000000558794,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.02166666666356226,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 9
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 1.1547616000000003,
+      "p50": 0.722752,
+      "p99": 1.8432,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 293423410,
+     "fin": 300528742,
+     "min": 293423410,
+     "max": 300528742
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 33,
+     "p99": 52.80000000000291,
+     "moy": 34.103389830508576,
+     "min": 18.09999999999127,
+     "max": 53.5
+    },
+    "tick": {
+     "p50": 24.399999999906868,
+     "p99": 33.5,
+     "moy": 25.216666666674428
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 1.318816,
+     "p99": 10.658816,
+     "moy": 3.0081578666666666,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.13999999999068677,
+      "p50": 0.19999999972060323,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.2199999999953434,
+      "p50": 0.20000000018626451,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.0399999999984478,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.03166666665735344,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 2.2049999999580905,
+      "p50": 2,
+      "p99": 3.5,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.4600000000325963,
+      "p50": 0.40000000037252903,
+      "p99": 0.7999999998137355,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.10833333334885538,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.10833333328676721,
+      "p50": 0.09999999962747097,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.041666666666666664,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.03833333334575097,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.03666666663872699,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 17.870000000018628,
+      "p50": 17.40000000037253,
+      "p99": 23.199999999720603,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.3216666666558012,
+      "p50": 1.2999999998137355,
+      "p99": 1.7999999998137355,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.46000000000931324,
+      "p50": 0.40000000037252903,
+      "p99": 0.8000000002793968,
+      "n": 60
+     },
+     "tick": {
+      "moy": 25.216666666674428,
+      "p50": 24.399999999906868,
+      "p99": 33.5,
+      "n": 63
+     },
+     "reste": {
+      "moy": 2.0550000000900277,
+      "p50": 1.7000000001862645,
+      "p99": 7.700000000651926,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.021666666655801237,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 9
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.926764266666667,
+      "p50": 0.219136,
+      "p99": 8.247296,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 1.0813936,
+      "p50": 0.520192,
+      "p99": 7.943168,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 306619766,
+     "fin": 313672018,
+     "min": 306619766,
+     "max": 313672018
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 32.09999999999127,
+     "p99": 52.79999999998836,
+     "moy": 33.03728813559317,
+     "min": 19.69999999999709,
+     "max": 53.60000000000582
+    },
+    "tick": {
+     "p50": 23.600000000093132,
+     "p99": 30.799999999813735,
+     "moy": 24.33666666665425
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.731136,
+     "p99": 1.964032,
+     "moy": 1.2410186666666665,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.12500000001552206,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.21166666668529313,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.024999999984477956,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.02999999999689559,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 2.2416666666511444,
+      "p50": 2.2000000001862645,
+      "p99": 3.6000000000931323,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.44666666668684535,
+      "p50": 0.39999999990686774,
+      "p99": 0.900000000372529,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.12333333333954215,
+      "p50": 0.19999999972060323,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.011666666662010054,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.0966666666790843,
+      "p50": 0.09999999962747097,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.02166666666356226,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.016666666666666666,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.011666666662010054,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.0399999999984478,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "lieux.refresh": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 9
+     },
+     "scan.update": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.05166666665269683,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.03833333334575097,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 18.750000000031044,
+      "p50": 18.300000000279397,
+      "p99": 23.100000000093132,
+      "n": 60
+     },
+     "tick": {
+      "moy": 24.33666666665425,
+      "p50": 23.600000000093132,
+      "p99": 30.799999999813735,
+      "n": 63
+     },
+     "reste": {
+      "moy": 2.018333333265036,
+      "p50": 1.6999999997206032,
+      "p99": 7.700000000651926,
+      "n": 0
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 1.2410186666666665,
+      "p50": 0.731136,
+      "p99": 1.964032,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 320767782,
+     "fin": 273658186,
+     "min": 270689846,
+     "max": 324671986
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 754327342,
+     "b": 754327342
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 31.59999999999127,
+     "p99": 48.5,
+     "moy": 32.36206896551724,
+     "min": 19.90000000000873,
+     "max": 50.29999999998836
+    },
+    "tick": {
+     "p50": 22.90000000037253,
+     "p99": 29.50000000046566,
+     "moy": 24.003333333398526
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 1.293312,
+     "p99": 8.275967999999999,
+     "moy": 2.8303285333333337,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.16333333340783915,
+      "p50": 0.20000000018626451,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.23000000004346172,
+      "p50": 0.20000000018626451,
+      "p99": 0.40000000037252903,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.02000000001862645,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.030000000012417635,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 2.0799999999813736,
+      "p50": 2.099999999627471,
+      "p99": 2.6999999997206032,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.003333333320915699,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.436666666638727,
+      "p50": 0.39999999990686774,
+      "p99": 0.8000000002793968,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.12333333341715237,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0.026666666675979892,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0.05999999999379118,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0.03333333333333333,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.013333333345750967,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.023333333324020107,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0.053333333367481826,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.043333333311602475,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 16.943333333327125,
+      "p50": 16.600000000093132,
+      "p99": 20.300000000279397,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.2566666667039195,
+      "p50": 1.2000000001862645,
+      "p99": 1.8000000002793968,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.3600000000093132,
+      "p50": 0.3000000002793968,
+      "p99": 0.6000000005587935,
+      "n": 30
+     },
+     "tick": {
+      "moy": 24.003333333398526,
+      "p50": 22.90000000037253,
+      "p99": 29.50000000046566,
+      "n": 32
+     },
+     "reste": {
+      "moy": 2.056666666502133,
+      "p50": 1.699999999254942,
+      "p99": 6.699999999720603,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.013333333314706881,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "0:PasseFond": {
+      "moy": 0.7897087999999999,
+      "p50": 0.507904,
+      "p99": 1.185792,
+      "n": 30
+     },
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 2.0406197333333327,
+      "p50": 0.211968,
+      "p99": 7.774208,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 93,
+      "max": 93
+     },
+     "triangles": {
+      "p50": 117187,
+      "max": 117187
+     }
+    },
+    "tas": {
+     "debut": 309366730,
+     "fin": 312833894,
+     "min": 309366730,
+     "max": 312833894
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 4166356452,
+    "b": 4166356452
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 126749.32664871,
+    "altCadrageM": 129959.95031748053,
+    "busy": false,
+    "crop": false,
+    "tuiles": 374,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1373,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 23,
+    "geometries": 152,
+    "textures": 150,
+    "tas": 343709102,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x6r",
+   "poste": "crop",
+   "cible": 5000,
+   "etat": {
+    "mode": "surface",
+    "altM": 6548.059847639563,
+    "altCadrageM": 5000.260443535012,
+    "busy": false,
+    "crop": true,
+    "tuiles": 434,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1598,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 26,
+    "geometries": 142,
+    "textures": 171,
+    "tas": 438966816,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 26047,
+    "requetes": 45,
+    "octets": 14857094
+   },
+   "ecartAlt": 0.00005208870700244006,
+   "ok": true,
+   "temoin": {
+    "x1": 3.787776,
+    "x4": 14.39232,
+    "rapport": 3.799675587996756
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 25.10000000000582,
+     "p99": 36.19999999999709,
+     "moy": 25.508474576271187,
+     "min": 18.89999999999418,
+     "max": 43.5
+    },
+    "tick": {
+     "p50": 19.199999999720603,
+     "p99": 26.899999999906868,
+     "moy": 19.768333333334887
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 2.328576,
+     "p99": 4.861952,
+     "moy": 2.6495269333333336,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.14499999998758237,
+      "p50": 0.19999999972060323,
+      "p99": 0.39999999990686774,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.008333333341094354,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.20833333334109436,
+      "p50": 0.20000000018626451,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.018333333334885536,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.043333333319363496,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.7066666666651145,
+      "p50": 0.6999999997206032,
+      "p99": 1.3000000002793968,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.8333333333798995,
+      "p50": 0.8000000002793968,
+      "p99": 1.599999999627471,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.11333333333798995,
+      "p50": 0.10000000009313226,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 1.0966666666713232,
+      "p50": 1,
+      "p99": 1.8999999999068677,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.09499999998758236,
+      "p50": 0.09999999962747097,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.008333333341094354,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.008333333333333333,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.061666666669771074,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.04499999999534339,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.02666666666821887,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.039999999982925756,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 9.030000000043461,
+      "p50": 8.700000000186265,
+      "p99": 13,
+      "n": 60
+     },
+     "tick": {
+      "moy": 19.768333333334887,
+      "p50": 19.199999999720603,
+      "p99": 26.899999999906868,
+      "n": 62
+     },
+     "reste": {
+      "moy": 7.248333333269693,
+      "p50": 7,
+      "p99": 10.600000000093132,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 7
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 2.6495269333333336,
+      "p50": 2.328576,
+      "p99": 4.861952,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137965,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 401316584,
+     "fin": 408441516,
+     "min": 401316584,
+     "max": 408441516
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "reseau": {
+     "requetes": 0,
+     "octets": 0
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 29.39999999999418,
+     "p99": 50.59999999999127,
+     "moy": 30.48135593220329,
+     "min": 18.40000000000873,
+     "max": 51.19999999999709
+    },
+    "tick": {
+     "p50": 22.799999999813735,
+     "p99": 29.600000000093132,
+     "moy": 22.52666666668374
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 2.127872,
+     "p99": 5.187584,
+     "moy": 2.4846336,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.1449999999642993,
+      "p50": 0.19999999972060323,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.016666666658905645,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.23833333334575096,
+      "p50": 0.20000000018626451,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.03166666667287548,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.008333333325572312,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.04333333332712452,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.815000000052775,
+      "p50": 0.8000000002793968,
+      "p99": 1.3000000002793968,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0033333333286767203,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.8649999999285986,
+      "p50": 0.7999999998137355,
+      "p99": 1.6000000000931323,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.16000000001707423,
+      "p50": 0.19999999972060323,
+      "p99": 0.39999999990686774,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 1.3566666666728755,
+      "p50": 1.2000000001862645,
+      "p99": 3,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.059999999962747096,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.01833333334264656,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.026666666683740913,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.03666666668529312,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.033333333356616396,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 8.493333333334885,
+      "p50": 8.299999999813735,
+      "p99": 12.200000000186265,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.2799999999736125,
+      "p50": 1.2000000001862645,
+      "p99": 2,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.388333333353512,
+      "p50": 0.39999999990686774,
+      "p99": 0.7000000001862645,
+      "n": 60
+     },
+     "tick": {
+      "moy": 22.52666666668374,
+      "p50": 22.799999999813735,
+      "p99": 29.600000000093132,
+      "n": 63
+     },
+     "reste": {
+      "moy": 8.46666666669771,
+      "p50": 8.299999999813735,
+      "p99": 12.899999999906868,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 8
+     }
+    },
+    "gpu": {
+     "0:PasseFond": {
+      "moy": 1.6182271999999995,
+      "p50": 1.470464,
+      "p99": 2.65216,
+      "n": 60
+     },
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.8664063999999997,
+      "p50": 0.247808,
+      "p99": 3.8144,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137953,
+      "max": 137965
+     }
+    },
+    "tas": {
+     "debut": 352824179,
+     "fin": 360113974,
+     "min": 352824179,
+     "max": 360113974
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 25.39999999999418,
+     "p99": 32.39999999999418,
+     "moy": 25.352542372881405,
+     "min": 19.10000000000582,
+     "max": 32.80000000000291
+    },
+    "tick": {
+     "p50": 19,
+     "p99": 23.800000000279397,
+     "moy": 19.19333333330384
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 3.171328,
+     "p99": 9.43616,
+     "moy": 4.124552533333332,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.1333333333488554,
+      "p50": 0.19999999972060323,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe.animerMer": {
+      "moy": 0.038333333337989946,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.19499999997982134,
+      "p50": 0.19999999972060323,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.015000000006208818,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.05333333331315468,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 0.686666666654249,
+      "p50": 0.6000000000931323,
+      "p99": 1.1999999997206032,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.015000000006208818,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 0.8083333332945283,
+      "p50": 0.7999999998137355,
+      "p99": 1.2000000001862645,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.1283333333907649,
+      "p50": 0.10000000009313226,
+      "p99": 0.39999999990686774,
+      "n": 60
+     },
+     "nuages.update": {
+      "moy": 0.5299999999813736,
+      "p50": 0.5,
+      "p99": 0.8000000002793968,
+      "n": 60
+     },
+     "trafic.update": {
+      "moy": 0.01999999999534339,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickFx": {
+      "moy": 0.014999999998447795,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "gpx.tick": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.07166666666356226,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.004999999996895591,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.011666666669771075,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.035000000001552206,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.04166666665890564,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.02833333332867672,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 8.808333333317812,
+      "p50": 8.600000000093132,
+      "p99": 11.399999999906868,
+      "n": 60
+     },
+     "tick": {
+      "moy": 19.19333333330384,
+      "p50": 19,
+      "p99": 23.800000000279397,
+      "n": 62
+     },
+     "reste": {
+      "moy": 7.51833333336593,
+      "p50": 7.2999999998137355,
+      "p99": 10.200000000186265,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.008333333325572312,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 7
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 4.124552533333332,
+      "p50": 3.171328,
+      "p99": 9.43616,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137929,
+      "max": 137929
+     }
+    },
+    "tas": {
+     "debut": 365591286,
+     "fin": 369996318,
+     "min": 365591286,
+     "max": 369996318
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {},
+    "identiques": {
+     "identiques": true,
+     "a": 598234601,
+     "b": 598234601
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 19.90000000000873,
+     "p99": 35.30000000000291,
+     "moy": 19.32758620689655,
+     "min": 0.6999999999970896,
+     "max": 35.69999999999709
+    },
+    "tick": {
+     "p50": 14.699999999720603,
+     "p99": 17.299999999813735,
+     "moy": 14.819999999987582
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 2.950144,
+     "p99": 9.264128,
+     "moy": 3.493717333333333,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "controls.update": {
+      "moy": 0.07666666664493581,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.animerMer": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.16000000000931322,
+      "p50": 0.19999999972060323,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.019999999972060322,
+      "p50": 0,
+      "p99": 0.09999999962747097,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.026666666675979892,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 0.5066666666883975,
+      "p50": 0.5,
+      "p99": 0.6000000000931323,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.013333333345750967,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 0.6633333332991849,
+      "p50": 0.6000000000931323,
+      "p99": 0.8999999999068677,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.08000000001241764,
+      "p50": 0.09999999962747097,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "nuages.update": {
+      "moy": 0.37666666669150195,
+      "p50": 0.3000000002793968,
+      "p99": 0.6000000000931323,
+      "n": 30
+     },
+     "trafic.update": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "terrain.tickFx": {
+      "moy": 0.023333333355064195,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "terrain.tickLiquidMetal": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "terrain.tickMateriau": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "gpx.tick": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.03999999997516473,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0.026666666675979892,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.05333333333643774,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.02999999999689559,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 5.643333333327124,
+      "p50": 5.399999999906868,
+      "p99": 7.300000000279397,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.8333333333333334,
+      "p50": 0.7999999998137355,
+      "p99": 1.3999999999068677,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.2699999999720603,
+      "p50": 0.20000000018626451,
+      "p99": 0.4999999995343387,
+      "n": 30
+     },
+     "tick": {
+      "moy": 14.819999999987582,
+      "p50": 14.699999999720603,
+      "p99": 17.299999999813735,
+      "n": 31
+     },
+     "reste": {
+      "moy": 5.9066666666728755,
+      "p50": 6.099999999627471,
+      "p99": 6.7999999998137355,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.006666666657353441,
+      "p50": 0,
+      "p99": 0,
+      "n": 3
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 0.5891754666666668,
+      "p50": 0.325632,
+      "p99": 1.169408,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 2.904541866666668,
+      "p50": 1.913856,
+      "p99": 8.112128,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 24,
+      "max": 24
+     },
+     "triangles": {
+      "p50": 137929,
+      "max": 137929
+     }
+    },
+    "tas": {
+     "debut": 363831870,
+     "fin": 365912054,
+     "min": 363831870,
+     "max": 365912054
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 3452507962,
+    "b": 3452507962
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "surface",
+    "altM": 6548.059847639563,
+    "altCadrageM": 5000.260443535012,
+    "busy": false,
+    "crop": true,
+    "tuiles": 434,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1598,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 26,
+    "geometries": 142,
+    "textures": 171,
+    "tas": 396540174,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  },
+  {
+   "machine": "x6r",
+   "poste": "orbite",
+   "cible": 2000000,
+   "etat": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.8351128408385,
+    "busy": false,
+    "crop": false,
+    "tuiles": 714,
+    "enVol": 24,
+    "file": 6,
+    "credit": 1365,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 24,
+    "geometries": 304,
+    "textures": 341,
+    "tas": 356343131,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "chargement": {
+    "ms": 19347,
+    "requetes": 250,
+    "octets": 19200578
+   },
+   "ecartAlt": 1.0028929175564205,
+   "ok": false,
+   "temoin": {
+    "x1": 5.8946559999999995,
+    "x4": 34.481152,
+    "rapport": 5.849561365413012
+   },
+   "temoinValide": true,
+   "anim": {
+    "images": 60,
+    "cadence": {
+     "p50": 49.09999999997672,
+     "p99": 76.89999999999418,
+     "moy": 48.432203389830505,
+     "min": 18.89999999999418,
+     "max": 80.19999999998254
+    },
+    "tick": {
+     "p50": 24.800000000279397,
+     "p99": 47.60000000009313,
+     "moy": 26.753333333344198
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 19.800000000279397,
+     "moy": 5.139999999982925,
+     "total": 308.39999999897555
+    },
+    "gpuTotal": {
+     "p50": 1.32608,
+     "p99": 10.073088,
+     "moy": 2.7417941333333338,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.014999999975164732,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.07500000001552204,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.20666666666511446,
+      "p50": 0.20000000018626451,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.023333333331781128,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.04666666667132328,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 1.988333333345751,
+      "p50": 2,
+      "p99": 3.5,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.013333333330228925,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 1.3166666666744278,
+      "p50": 1.2000000001862645,
+      "p99": 2.3999999999068677,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.14499999999534338,
+      "p50": 0.19999999972060323,
+      "p99": 0.40000000037252903,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.045000000026387474,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.011666666669771075,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.06833333332712452,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.035000000001552206,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 20.61833333338145,
+      "p50": 18.899999999906868,
+      "p99": 40.299999999813735,
+      "n": 60
+     },
+     "tick": {
+      "moy": 26.753333333344198,
+      "p50": 24.800000000279397,
+      "p99": 47.60000000009313,
+      "n": 64
+     },
+     "reste": {
+      "moy": 1.5449999999410162,
+      "p50": 1.1000000005587935,
+      "p99": 7.800000000279397,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 12
+     },
+     "globe._request": {
+      "moy": 0.5716666666713233,
+      "p50": 0,
+      "p99": 7.5,
+      "n": 32
+     },
+     "horsTick.tuile.decode": {
+      "moy": 0.6383333333379899,
+      "p50": 0,
+      "p99": 2.1000000000931323,
+      "n": 32
+     },
+     "horsTick.tuile.maillage": {
+      "moy": 4.501666666644936,
+      "p50": 0,
+      "p99": 18,
+      "n": 32
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 2.7417941333333338,
+      "p50": 1.32608,
+      "p99": 10.073088,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 65,
+      "max": 68
+     },
+     "triangles": {
+      "p50": 130437,
+      "max": 138117
+     }
+    },
+    "tas": {
+     "debut": 371315269,
+     "fin": 350669089,
+     "min": 335964485,
+     "max": 384686333
+    },
+    "longtasks": {
+     "n": 6,
+     "ms": 347
+    },
+    "compteurs": {
+     "createImageBitmap": 38
+    },
+    "reseau": {
+     "requetes": 41,
+     "octets": 2721541
+    },
+    "glConsole": 0
+   },
+   "passes": {
+    "images": 60,
+    "cadence": {
+     "p50": 44.10000000000582,
+     "p99": 86,
+     "moy": 43.996610169491824,
+     "min": 18.5,
+     "max": 127
+    },
+    "tick": {
+     "p50": 21.700000000186265,
+     "p99": 58.700000000186265,
+     "moy": 23.724999999976717
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 18.5,
+     "moy": 3.8066666666961586,
+     "total": 228.4000000017695
+    },
+    "gpuTotal": {
+     "p50": 2.5200639999999996,
+     "p99": 15.952895999999999,
+     "moy": 4.8060224000000025,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.008333333341094354,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.05833333332557231,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.20166666668374092,
+      "p50": 0.20000000018626451,
+      "p99": 0.599999999627471,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.02833333333643774,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.035000000001552206,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 1.8866666665999219,
+      "p50": 1.7999999998137355,
+      "p99": 3.5,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.0066666666651144625,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 1.2550000000589838,
+      "p50": 1.2000000001862645,
+      "p99": 2.599999999627471,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.12333333335506419,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.03333333332557231,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "lieux.refresh": {
+      "moy": 0.0016666666682188709,
+      "p50": 0,
+      "p99": 0,
+      "n": 11
+     },
+     "scan.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.04833333333178113,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 240
+     },
+     "passe.0:PasseFond": {
+      "moy": 15.819999999987582,
+      "p50": 15.300000000279397,
+      "p99": 29.299999999813735,
+      "n": 60
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.7816666666651144,
+      "p50": 1.2000000001862645,
+      "p99": 3,
+      "n": 60
+     },
+     "composer.render": {
+      "moy": 0.4133333333923171,
+      "p50": 0.40000000037252903,
+      "p99": 0.8000000007450581,
+      "n": 60
+     },
+     "tick": {
+      "moy": 23.724999999976717,
+      "p50": 21.700000000186265,
+      "p99": 58.700000000186265,
+      "n": 64
+     },
+     "reste": {
+      "moy": 1.4349999999006589,
+      "p50": 0.8999999999068677,
+      "p99": 8.299999999813735,
+      "n": 0
+     },
+     "horsTick.tuile.decode": {
+      "moy": 0.4683333333271245,
+      "p50": 0,
+      "p99": 2.3999999999068677,
+      "n": 25
+     },
+     "horsTick.tuile.maillage": {
+      "moy": 3.338333333369034,
+      "p50": 0,
+      "p99": 16.100000000093132,
+      "n": 25
+     },
+     "globe._request": {
+      "moy": 0.55,
+      "p50": 0,
+      "p99": 7.399999999906868,
+      "n": 32
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 3.3680704000000006,
+      "p50": 1.235968,
+      "p99": 12.20608,
+      "n": 60
+     },
+     "0:PasseFond": {
+      "moy": 1.4379520000000006,
+      "p50": 1.009664,
+      "p99": 5.533696,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 64,
+      "max": 66
+     },
+     "triangles": {
+      "p50": 121733,
+      "max": 126341
+     }
+    },
+    "tas": {
+     "debut": 370300961,
+     "fin": 347581808,
+     "min": 319530989,
+     "max": 370616553
+    },
+    "longtasks": {
+     "n": 2,
+     "ms": 139
+    },
+    "compteurs": {
+     "createImageBitmap": 40
+    }
+   },
+   "gel": {
+    "images": 60,
+    "cadence": {
+     "p50": 30,
+     "p99": 49.5,
+     "moy": 30.78474576271216,
+     "min": 17.79999999998836,
+     "max": 53.10000000000582
+    },
+    "tick": {
+     "p50": 20.90000000037253,
+     "p99": 27.899999999906868,
+     "moy": 21.465000000021732
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 0.9728,
+     "p99": 13.129728,
+     "moy": 1.905356800000001,
+     "n": 60
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.008333333325572312,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "controls.update": {
+      "moy": 0.05999999997826914,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "modes.update": {
+      "moy": 0.17166666667132327,
+      "p50": 0.19999999972060323,
+      "p99": 0.5,
+      "n": 60
+     },
+     "globe.nuages": {
+      "moy": 0.010000000001552205,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe._majRampeMonde": {
+      "moy": 0.0066666666728754835,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 60
+     },
+     "globe._triSpatial": {
+      "moy": 0.04833333334730317,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "globe._traverse": {
+      "moy": 1.8916666666744277,
+      "p50": 1.7999999998137355,
+      "p99": 3.6000000000931323,
+      "n": 960
+     },
+     "globe._purgerFile": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 60
+     },
+     "globe.update": {
+      "moy": 1.296666666624757,
+      "p50": 1.2999999993480742,
+      "p99": 2.2000000001862645,
+      "n": 60
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.11166666662320494,
+      "p50": 0.10000000009313226,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "sommets.update": {
+      "moy": 0.03166666668839753,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "scan.update": {
+      "moy": 0.016666666674427687,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 60
+     },
+     "bateaux.update": {
+      "moy": 0.0016666666604578495,
+      "p50": 0,
+      "p99": 0,
+      "n": 60
+     },
+     "eau.update": {
+      "moy": 0.055000000004656616,
+      "p50": 0,
+      "p99": 0.3000000002793968,
+      "n": 60
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.011666666669771075,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 60
+     },
+     "ombres.render": {
+      "moy": 0.04833333331625909,
+      "p50": 0,
+      "p99": 0.2999999998137355,
+      "n": 240
+     },
+     "composer.render": {
+      "moy": 16.546666666694605,
+      "p50": 15.900000000372529,
+      "p99": 21.800000000745058,
+      "n": 60
+     },
+     "tick": {
+      "moy": 21.465000000021732,
+      "p50": 20.90000000037253,
+      "p99": 27.899999999906868,
+      "n": 63
+     },
+     "reste": {
+      "moy": 1.1350000000636404,
+      "p50": 0.8999999999068677,
+      "p99": 5.6000000005587935,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 9
+     }
+    },
+    "gpu": {
+     "total": {
+      "moy": 1.905356800000001,
+      "p50": 0.9728,
+      "p99": 13.129728,
+      "n": 60
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 62,
+      "max": 62
+     },
+     "triangles": {
+      "p50": 119045,
+      "max": 119045
+     }
+    },
+    "tas": {
+     "debut": 364254272,
+     "fin": 369759596,
+     "min": 364254272,
+     "max": 369759596
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {
+     "createImageBitmap": 6
+    },
+    "identiques": {
+     "identiques": true,
+     "a": 1912100763,
+     "b": 1912100763
+    }
+   },
+   "gelPasses": {
+    "images": 30,
+    "cadence": {
+     "p50": 29.60000000000582,
+     "p99": 46,
+     "moy": 31.600000000000804,
+     "min": 18.29999999998836,
+     "max": 52.80000000001746
+    },
+    "tick": {
+     "p50": 20.59999999962747,
+     "p99": 27.899999999906868,
+     "moy": 22.04666666664804
+    },
+    "horsTick": {
+     "p50": 0,
+     "p99": 0,
+     "moy": 0,
+     "total": 0
+    },
+    "gpuTotal": {
+     "p50": 2.6859520000000003,
+     "p99": 8.971264,
+     "moy": 3.624311466666668,
+     "n": 30
+    },
+    "disjoint": 0,
+    "cpu": {
+     "globe.animerMer": {
+      "moy": 0.010000000009313226,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "controls.update": {
+      "moy": 0.0566666666418314,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "modes.update": {
+      "moy": 0.16333333337679506,
+      "p50": 0.20000000018626451,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "globe.nuages": {
+      "moy": 0.02333333333954215,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._majRampeMonde": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "globe._triSpatial": {
+      "moy": 0.033333333348855375,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe._traverse": {
+      "moy": 1.9433333333271245,
+      "p50": 1.8000000002793968,
+      "p99": 2.8999999999068677,
+      "n": 480
+     },
+     "globe._purgerFile": {
+      "moy": 0.02000000000310441,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "globe.update": {
+      "moy": 1.5033333332588275,
+      "p50": 1.5,
+      "p99": 2.099999999627471,
+      "n": 30
+     },
+     "etiquettesCourse.update": {
+      "moy": 0.12333333337058623,
+      "p50": 0.19999999972060323,
+      "p99": 0.3000000002793968,
+      "n": 30
+     },
+     "sommets.update": {
+      "moy": 0.029999999981373548,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 30
+     },
+     "scan.update": {
+      "moy": 0.009999999993791182,
+      "p50": 0,
+      "p99": 0.10000000009313226,
+      "n": 30
+     },
+     "bateaux.update": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "eau.update": {
+      "moy": 0.02999999999689559,
+      "p50": 0,
+      "p99": 0.20000000018626451,
+      "n": 30
+     },
+     "globe.majReglagesMer": {
+      "moy": 0.0033333333364377418,
+      "p50": 0,
+      "p99": 0,
+      "n": 30
+     },
+     "ombres.render": {
+      "moy": 0.023333333308498065,
+      "p50": 0,
+      "p99": 0.19999999972060323,
+      "n": 120
+     },
+     "passe.0:PasseFond": {
+      "moy": 15.203333333305393,
+      "p50": 14.299999999813735,
+      "p99": 20.299999999813735,
+      "n": 30
+     },
+     "passe.2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 1.1200000000651926,
+      "p50": 1,
+      "p99": 1.6000000000931323,
+      "n": 30
+     },
+     "composer.render": {
+      "moy": 0.4099999999627471,
+      "p50": 0.39999999990686774,
+      "p99": 0.8000000002793968,
+      "n": 30
+     },
+     "tick": {
+      "moy": 22.04666666664804,
+      "p50": 20.59999999962747,
+      "p99": 27.899999999906868,
+      "n": 32
+     },
+     "reste": {
+      "moy": 1.336666666685293,
+      "p50": 0.8999999999068677,
+      "p99": 7.2999999998137355,
+      "n": 0
+     },
+     "lieux.refresh": {
+      "moy": 0,
+      "p50": 0,
+      "p99": 0,
+      "n": 4
+     }
+    },
+    "gpu": {
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]": {
+      "moy": 2.4730282666666668,
+      "p50": 0.893952,
+      "p99": 8.20224,
+      "n": 30
+     },
+     "0:PasseFond": {
+      "moy": 1.1512832000000002,
+      "p50": 0.770048,
+      "p99": 2.230272,
+      "n": 30
+     }
+    },
+    "dessin": {
+     "appels": {
+      "p50": 62,
+      "max": 62
+     },
+     "triangles": {
+      "p50": 119045,
+      "max": 119045
+     }
+    },
+    "tas": {
+     "debut": 371233188,
+     "fin": 373979068,
+     "min": 371233188,
+     "max": 373979068
+    },
+    "longtasks": {
+     "n": 0,
+     "ms": 0
+    },
+    "compteurs": {}
+   },
+   "animIdentiques": {
+    "identiques": true,
+    "a": 3024097352,
+    "b": 3024097352
+   },
+   "erreursGL": [
+    {
+     "passe": "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]",
+     "codes": [
+      "0x502"
+     ]
+    }
+   ],
+   "etatFin": {
+    "mode": "orbital",
+    "altM": 1999999.9999999998,
+    "altCadrageM": -5785.835112840838,
+    "busy": false,
+    "crop": false,
+    "tuiles": 798,
+    "enVol": 0,
+    "file": 0,
+    "credit": 1373,
+    "refusFile": 0,
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     800,
+     600
+    ],
+    "tier": 0,
+    "pixelRatio": 2,
+    "tampon": [
+     2560,
+     1440
+    ],
+    "programmes": 24,
+    "geometries": 368,
+    "textures": 405,
+    "tas": 394862780,
+    "animations": true,
+    "dof": false,
+    "ssao": false,
+    "ombres": "dynamic",
+    "passes": [
+     "0:PasseFond",
+     "1:RenderPass(off)",
+     "2:EffectPass[SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette]"
+    ]
+   },
+   "console": {
+    "gl": 257,
+    "nuanceur": [],
+    "autres": 5
+   }
+  }
+ ]
+}
