@@ -1086,7 +1086,11 @@ export class Modes {
     const lieu = this.hooks.lieuVise?.()
     const zoom = this.hooks.zoomCourant?.()
     if (!lieu || !Number.isFinite(lieu.lat) || !Number.isFinite(lieu.lon) || !(zoom > 0)) return false
-    await this._rescale({ lat: lieu.lat, lon: lieu.lon, zoom }, 'RECENTRING', { silencieux: true })
+    // ⚠️ la signature de `_rescale` est lue par deux cliquets de source
+    // (`escalier-surface`, `voile-whiteout`) : le silence est un drapeau, pas un
+    // argument
+    this._rechargementSilencieux = true
+    try { await this._rescale({ lat: lieu.lat, lon: lieu.lon, zoom }, 'RECENTRING') } finally { this._rechargementSilencieux = false }
     return true
   }
 
@@ -1380,8 +1384,9 @@ export class Modes {
   //
   // ⚠️ ET IL N'Y A PLUS DE FONDU AU BLANC. Le rideau n'était pas l'ornement du
   // saut, il était là parce que le saut était invisible autrement.
-  async _rescale(next, verb, { silencieux = false } = {}) {
+  async _rescale(next, verb) {
     const continu = this._continu()
+    const silencieux = this._rechargementSilencieux === true
     this.busy = true
     // ⛔ **`_resetZoom()` TUAIT L'ÉLAN À CHAQUE CRAN, ET C'EST LA MOITIÉ DE LA
     // SENSATION D'ACCROCHAGE.** Le glissé repartait de zéro de l'autre côté :

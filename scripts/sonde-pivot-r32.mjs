@@ -291,6 +291,23 @@ async function jalon(nom) {
   jalons.push({ nom, depart, fin })
 }
 
+// ⚠️ **UN GLISSÉ DE 200 px À 60 000 km SORT DU DISQUE (130 px de rayon)** et,
+// même dans le disque, un glissé horizontal à nord constant suit un grand
+// cercle, pas un parallèle : la caméra finit vers −60° de latitude (mesuré :
+// −58,7°). Les jalons de surface se joueraient alors près du pôle, sous la
+// butée de latitude — un cas dégénéré. On ramène donc la caméra au-dessus de
+// La Réunion après chaque jalon d'orbite, à l'altitude où elle est.
+async function ramenerSurLaReunion() {
+  await page.evaluate(() => {
+    const e = window.__exp
+    if (e.modes.mode !== 'orbital') return
+    const la = -21.13 * Math.PI / 180, lo = 55.53 * Math.PI / 180
+    const r = e.camera.position.length()
+    e.camera.position.set(Math.cos(la) * Math.sin(lo) * r, Math.sin(la) * r, Math.cos(la) * Math.cos(lo) * r)
+    e.camera.up.set(0, 1, 0); e.camera.lookAt(0, 0, 0); e.controls.update()
+  })
+  await wait(10)
+}
 // ══════════ ④ LE SCÉNARIO D'ADRIEN ════════════════════════════════════════
 const demarrage = await etat()
 // l'orbite haute : l'ÉTALON du geste (Adrien : « parfait en mode orbital »)
@@ -298,9 +315,11 @@ await page.evaluate(() => window.__exp.modes.enterOrbit(60000000))
 await page.waitForFunction("window.__exp.modes.mode === 'orbital' && !window.__exp.modes.busy", { timeout: 90000 })
 await wait(90)
 await jalon('orbite-60000km')
+await ramenerSurLaReunion()
 // l'orbite basse, juste au-dessus de la porte de plongée
 await descendreA(10000000)
 await jalon('orbite-10000km')
+await ramenerSurLaReunion()
 // la surface, aux trois altitudes du brief
 for (const km of ALTS_KM) {
   await descendreA(km * 1000)
@@ -315,7 +334,7 @@ await wait(120) // le repos du crop et la bascule de trois quarts (D16 ter)
 await jalon('crop-28km')
 // le retour : on dézoome depuis le crop jusqu'à sa mort, SANS autre geste
 await on('retour')
-await remonterA(48000, 400)
+await remonterA(95000, 600)
 await reposer()
 await off()
 

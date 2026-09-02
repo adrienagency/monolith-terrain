@@ -13615,6 +13615,13 @@ renderer.domElement.addEventListener('pointerdown', surPointerDownSaisie)
 renderer.domElement.addEventListener('pointermove', surPointerMoveSaisie)
 renderer.domElement.addEventListener('pointerup', surPointerUpSaisie)
 renderer.domElement.addEventListener('pointercancel', annulerSaisie)
+// ⚠️ **UN CRAN DE MOLETTE ÉTEINT L'ÉLAN — MESURÉ.** Le banc de l'attaquant R33
+// (`Mc-in`, 20 images après le relâché) lisait le point du centre de l'écran
+// dérivant de 4 · 6,9 · 8,9 px sur trois crans : ce n'était pas le zoom, c'était
+// l'élan du glissé précédent (τ = 0,35 s, encore à 39 % après 20 images) qui
+// continuait sous la molette. Un geste nouveau reprend la main : D19 dit « je
+// scrolle vers le point visé au centre », et le centre ne doit pas glisser.
+renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0 }, { passive: true })
 
 // Déplacer le point SOUS LA CAMÉRA de (dLat, dLon), à altitude constante.
 function deplacerSousLaCamera(S, pas) {

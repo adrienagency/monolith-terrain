@@ -830,6 +830,7 @@ const VERBES_INERTES = {
   retarget: 'change la CIBLE d\'un vol déjà en cours (changement d\'étape), sans le recommencer — voir gpxLayer.onTrackTransition',
   followPivot: 'lecture de la pose du rail de suivi',
   syncToCamera: 'recale le rail sur la caméra que l\'utilisateur vient de bouger',
+  recentrerBloc: 'R32 — recharge le bloc au même niveau SOUS la caméra, qui ne bouge pas d\'un mètre (rigide, _suivreEmprise) : rien n\'est confié',
 }
 
 test('toute porte qui confie la camera rend D\'ABORD ce que le cadrage a emprunte', () => {
