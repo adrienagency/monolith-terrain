@@ -89,9 +89,10 @@ test('② sans profondeur réclamée, rien n’est créé — le correctif ne co
 test('③ main.js branche les deux : SMAA sans DEPTH, compositeur à copie distincte', () => {
   const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
   assert.match(main, /copieStableDistincte\(\s*new EffectComposer\(/, 'le compositeur doit être enveloppé à sa création')
-  assert.match(main, /sansLectureDeProfondeur\(\s*new SMAAEffect\(\)\s*,\s*EffectAttribute\.DEPTH\s*\)/, 'le SMAA doit perdre DEPTH à sa création')
+  // `const smaa = new SMAAEffect()` reste sur SA ligne : test/export-effets.test.js
+  // lit `const x = new XEffect(` pour classer la chaîne ; le retrait suit juste après
+  assert.match(main, /const smaa = new SMAAEffect\(\)\n[^\n]*\n\s*if \(!profondeurAmont\) sansLectureDeProfondeur\(smaa, EffectAttribute\.DEPTH\)/, 'le SMAA doit perdre DEPTH juste après sa création')
   // l'échappatoire de mesure existe, et elle coupe LES DEUX correctifs
   assert.match(main, /get\('profondeur'\)\s*===\s*'amont'/)
-  assert.match(main, /profondeurAmont\s*\?\s*new SMAAEffect\(\)/)
   assert.match(main, /profondeurAmont\s*\n?\s*\?\s*new EffectComposer\(/)
 })

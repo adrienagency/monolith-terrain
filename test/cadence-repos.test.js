@@ -11,7 +11,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { dessinerCetteImage, DELAI_REPOS_MS, DIVISEUR } from '../src/cadence-repos.js'
+import { dessinerCetteImage, DELAI_REPOS_MS, DIVISEUR, DIVISEUR_FIGE } from '../src/cadence-repos.js'
 
 const repos = { mode: 'orbital', occupe: false, vol: false, tenu: false, msDepuisGeste: DELAI_REPOS_MS + 1, enregistrement: false, animations: true }
 
@@ -36,9 +36,15 @@ test('② chaque interrupteur rend la pleine cadence — sur l’image impaire, 
   assert.equal(dessinerCetteImage({ ...impaire, msDepuisGeste: DELAI_REPOS_MS }), true, 'à la limite exacte : encore un geste récent')
   assert.equal(dessinerCetteImage({ ...impaire, msDepuisGeste: 0 }), true)
   assert.equal(dessinerCetteImage({ ...impaire, msDepuisGeste: NaN }), true, 'un délai non mesurable ne saute rien')
-  // animations coupées : la planète est figée, on saute quand même une image sur deux, pas plus
-  assert.equal(dessinerCetteImage({ ...impaire, animations: false }), false)
-  assert.equal(dessinerCetteImage({ ...repos, animations: false, compteur: 2 }), true)
+  // animations coupées : la planète est figée — une image sur DIVISEUR_FIGE, pas plus (PF1 : au repos, 100 % du tick est jetable)
+  assert.equal(DIVISEUR_FIGE, 30)
+  let figees = 0
+  for (let i = 0; i < 600; i++) if (dessinerCetteImage({ ...repos, animations: false, compteur: i })) figees++
+  assert.equal(figees, 600 / DIVISEUR_FIGE)
+  assert.equal(dessinerCetteImage({ ...repos, animations: false, compteur: 0 }), true)
+  assert.equal(dessinerCetteImage({ ...repos, animations: false, compteur: 2 }), false)
+  // même figée, l'échappatoire dessine tout
+  assert.equal(dessinerCetteImage({ ...repos, animations: false, compteur: 7, diviseur: 1 }), true)
   // sans argument : pleine cadence (surface par défaut)
   assert.equal(dessinerCetteImage(), true)
   // diviseur 1 (l'échappatoire `?cadence=pleine`) : chaque image, comme avant

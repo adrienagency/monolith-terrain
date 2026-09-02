@@ -24,6 +24,11 @@
 
 export const DELAI_REPOS_MS = 3000 // le même délai que la rotation propre (main.js)
 export const DIVISEUR = 2 // une image dessinée sur deux : 60 → 30 i/s
+export const DIVISEUR_FIGE = 30
+// Animations coupées : la planète est FIGÉE au repos, l'image ne change plus
+// (PF1 : trois images consécutives identiques au bit). On ne dessine plus
+// qu'une image sur 30 (2 i/s à 60 Hz) — un filet pour qu'une tuile qui arrive se
+// voie en moins d'une demi-seconde, pas un rendu.
 
 // Pur, sans état : l'appelant tient le compteur. Rend `true` si CETTE image
 // doit être dessinée.
@@ -42,8 +47,8 @@ export function dessinerCetteImage({
   // pleine cadence, sans discussion
   if (mode !== 'orbital' || occupe || vol || tenu || enregistrement) return true
   if (!(msDepuisGeste > DELAI_REPOS_MS)) return true
-  // animations coupées : la planète est FIGÉE au repos, rien ne change d'une
-  // image à l'autre — on dessine une image sur `diviseur` quand même (une tuile
-  // qui arrive doit se voir vite), jamais moins
-  return !(diviseur > 1) || compteur % diviseur === 0
+  if (!(diviseur > 1)) return true // l'échappatoire `?cadence=pleine`
+  // animations coupées : rien ne bouge, une image sur DIVISEUR_FIGE suffit
+  const d = animations ? diviseur : Math.max(diviseur, DIVISEUR_FIGE)
+  return compteur % d === 0
 }
