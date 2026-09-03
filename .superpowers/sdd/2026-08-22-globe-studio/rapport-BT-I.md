@@ -17,9 +17,19 @@ indépendantes, parce qu'une seule ne distingue pas « la donnée est fausse » 
 Mais l'intégration a surtout servi de révélateur : **quatre défauts silencieux**
 séparaient la donnée de l'écran, dont un — la bande de fondu de 25 m — qui
 **amputait de 55 % la profondeur de toute baie américaine**, et un autre qui
-**écartait cinq zones cuites de l'index sans un mot**. Et **trois seuils du
-barème demandent au fond marin d'avoir un relief que le levé NOAA à 4 m
-n'a pas** : je les réfute avec la mesure de la donnée source, pas avec la mienne.
+**écartait cinq zones cuites de l'index sans un mot**.
+
+**Cinq critères sur huit sont acquis, dont l'éliminatoire.** Des trois qui
+restent, **deux demandent au fond marin un relief que le levé NOAA à 4 m ne
+contient pas** — je les réfute avec la mesure de la **donnée source**, pas avec
+la mienne — et **le troisième est un vrai manque de la chaîne, que je chiffre
+sans l'excuser** : à Virginia Beach le levé porte 2,973 m/km et le globe n'en
+lit que 1,957.
+
+⛔ **Et l'un de ces critères, BT-2, était VERT tant que la carte était FAUSSE.**
+Il est passé au rouge le jour où les quatre niveaux de zoom se sont mis d'accord
+sur la bonne profondeur. C'est le fait le plus dérangeant de ce rapport, il est
+daté, et les deux journaux sont dans `.banc/BT-I/`.
 
 ---
 
