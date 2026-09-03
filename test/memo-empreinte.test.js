@@ -84,7 +84,10 @@ test('③ l’empreinte couvre chaque uniforme du socle et chaque paramètre lus
   // sources (exagPartage.valeur, demExaggeration) sans rappeler la fonction — test/exageration-globe
   // compte les appels de lireExageration dans main.js, et le compte est celui du plan
   assert.match(constructeur, /lireExageration\(params\)/)
-  assert.match(empreinte, /params\.exagPartage\?\.valeur, params\.demExaggeration/)
+  // exagPartage est le SEUL stockage de l'exagération (creerExagerationPartagee) ; test/exageration-globe
+  // interdit l'ancien `params.demExaggeration` à tout lecteur
+  assert.match(empreinte, /params\.exagPartage\?\.valeur/)
+  assert.equal(/demExaggeration/.test(empreinte), false)
   assert.equal(/lireExageration\(/.test(empreinte), false)
   // les autres sources vivantes, nommées une par une
   for (const s of ['assietteCrop()', 'sun.color', 'sun.intensity', 'hemi.color', 'hemi.groundColor', 'hemi.intensity', 'fillLight.color', 'fillLight.intensity',
