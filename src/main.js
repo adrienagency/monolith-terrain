@@ -2904,14 +2904,22 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     seekAndResumeCourse(traceCumKm[traceHoverIdx] / traceTotKm)
     return
   }
-  if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
+  // ⚠️ **`!dem` SEUL JETAIT LE CLIC PENDANT LE VOL DU MNT — R35.** `entrerEnVol`
+  // met `dem` à null à chaque franchissement et le MNT arrive des centaines de
+  // millisecondes plus tard : un clic entre les deux disparaissait en silence
+  // (`.banc/R35/clic-apres-2.json`, clic 8 : aucun glissé armé, `dem` nul, la
+  // fenêtre bornée pourtant posée). Même garde que `getRefineTarget` (R32) : la
+  // fenêtre bornée sait convertir sans `dem`.
+  if (params.source !== 'real' || (!dem && !terrain.fenetreBornee) || params.demZoom >= userFineZoom) return // already at finest detail
   focusRay.setFromCamera(_clickNdc, camera)
   const hitDist = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
   if (hitDist == null) return // clicked the sky or off-map
   const px = focusRay.ray.origin.x + focusRay.ray.direction.x * hitDist
   const py = focusRay.ray.origin.y + focusRay.ray.direction.y * hitDist
   const pz = focusRay.ray.origin.z + focusRay.ray.direction.z * hitDist
-  const { lat, lon } = worldToLatLon(dem, px, pz)
+  const ll = latLonDuBloc(px, pz) // fenêtre bornée d'abord, MNT sinon — le même chemin que `viseeAuSol`
+  if (!ll) return
+  const { lat, lon } = ll
   // ⚠️ LE CLIC-PLONGÉE REND D'ABORD L'EMPRUNT DU CADRAGE. `_loadDive` (modes.js)
   // repose bien `maxDistance` en arrivant, mais PAS `near`/`far` — il ne les a
   // pas touchés. Plonger depuis le cadrage laissait donc un plan de coupe à

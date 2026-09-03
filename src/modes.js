@@ -176,6 +176,15 @@ const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast st
 const ZOOM_VEL_MAX = 1.3 // caps a fast burst
 const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
 const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRESH gesture
+// ══════ LE CLIC EST UN GLISSÉ D'UN NIVEAU — R35 ══════════════════════════
+//
+// Un clic (orbite ou surface) rapproche la caméra d'UN niveau — `exp(−ln 2)`,
+// le même `BUDGET_NIVEAU` que vingt crans de molette — en `DUREE_GLISSE_CLIC_S`
+// secondes, en géométrique : le rapport image à image vaut au pire
+// `2^(pas d'avancement)`, soit ×1,03 à 60 i/s, contre ×4,41 mesuré avant
+// (`rapport-R35.md`). Google Earth fait de même sur un double-clic (D19).
+const FACTEUR_CLIC = Math.exp(-PAS_NIVEAU)
+const DUREE_GLISSE_CLIC_S = 0.9
 
 // ══════════ LA DURÉE DU BALAYAGE DE POSE — Tâche R4 ═════════════════════════
 //
@@ -1482,9 +1491,19 @@ export class Modes {
     tr.t = Math.min(1, tr.t + dt / tr.duration)
     const e = tr.t < 0.5 ? 4 * tr.t ** 3 : 1 - (-2 * tr.t + 2) ** 3 / 2
     const dir = tr.fromDir.clone().lerp(tr.toDir, e).normalize() // fine for < π arcs
-    const up = THREE.MathUtils.smoothstep(tr.t, 0, 0.35)
-    const down = THREE.MathUtils.smoothstep(tr.t, 0.55, 1)
-    const alt = THREE.MathUtils.lerp(THREE.MathUtils.lerp(tr.fromAlt, tr.cruise, up), tr.endAlt, down)
+    // ══════ LE GLISSÉ DU CLIC : PAS DE CROISIÈRE, L'ALTITUDE DESCEND — R35 ══
+    //
+    // Le vol de `flyTo` monte en croisière puis redescend ; le clic, lui, ne
+    // fait que se RAPPROCHER (D16 : « on ne vise pas, on se rapproche »).
+    // L'altitude suit une géométrique en `e` — le rapport image à image est
+    // alors uniforme, et vaut `2^(Δe)` au pire, c'est-à-dire ~×1,02 à 60 i/s.
+    const alt = tr.clic
+      ? tr.fromAlt * (tr.endAlt / tr.fromAlt) ** e
+      : THREE.MathUtils.lerp(
+          THREE.MathUtils.lerp(tr.fromAlt, tr.cruise, THREE.MathUtils.smoothstep(tr.t, 0, 0.35)),
+          tr.endAlt,
+          THREE.MathUtils.smoothstep(tr.t, 0.55, 1)
+        )
     this.orbAlt = this.orbAltTarget = alt
     this.camera.position.copy(dir).multiplyScalar(R_GLOBE + alt)
     this.camera.lookAt(0, 0, 0)
@@ -1492,6 +1511,11 @@ export class Modes {
       this.travel = null
       this.controls.enabled = true
       this.controls.update()
+      // ⚠️ **LE CLIC N'IMPOSE AUCUN NIVEAU : IL ARME LA PORTE GÉOMÉTRIQUE**,
+      // exactement comme un cran de molette vers l'intérieur. La traversée, si
+      // elle a lieu, est celle de `_niveauDArrivee` — elle conserve l'altitude
+      // de fond, donc elle ne se voit pas (rapport-R35.md).
+      if (tr.clic) { this._diveArmed = true; return }
       // a glide lands on its pinned zoom (GPX framing) or the FINE scale,
       // explicitly (dive arming is for manual zooms only)
       this._dive(tr.zoom ? { altM: DIVE_ALT_M, zoom: tr.zoom } : DIVE_TIERS[0], null, { zoomImpose: !!tr.zoom })
@@ -1532,6 +1556,23 @@ export class Modes {
   // Le palier : celui de l'altitude, et le plus large qui reste quand on est
   // au-dessus de tous (voir `palierDeClic`) — c'est-à-dire z6 dès qu'on regarde
   // vraiment la planète, le « Z3 » d'Adrien.
+  //
+  // ══════ SOUS LE DRAPEAU, LE CLIC NE PLONGE PLUS : IL GLISSE — R35 ═════════
+  //
+  // ⛔ **LE CLIC SAUTAIT ×4,41 EN UNE IMAGE** (`.banc/R35/clic-avant.json`,
+  // 60 000 → 13 613 km) : `_dive` avec un niveau IMPOSÉ (z4) posait la caméra
+  // à `surfaceMaxDistance()` = 150 u, et 150 u sur un bloc z4 valent 13 600 km.
+  // La règle R1 (conserver l'altitude) était abrogée par la butée dès que
+  // l'altitude quittée la dépassait. D16 : « on ne vise pas, on se rapproche » ;
+  // D19 : Google Earth zoome vers le point cliqué, progressivement.
+  //
+  // ➡️ Le clic est donc un GLISSÉ : la direction tourne vers le lieu cliqué
+  // (le point vient sous la caméra, la Terre reste plantée — c'est la rotation
+  // autour de son centre) pendant que l'altitude descend d'UN NIVEAU
+  // (`FACTEUR_CLIC` = ½, le `BUDGET_NIVEAU` de la molette). À l'arrivée, la
+  // porte géométrique est ARMÉE, pas forcée : `_niveauDArrivee` traverse quand
+  // un bloc tient l'altitude, en la conservant. Le régime hérité (`?terre=deux`)
+  // garde la plongée à palier, au bit près.
   plongeDepuisGlobe(lat, lon) {
     if (this.busy || this.travel || this.mode !== 'orbital') return false
     // embed « zone de test » : le visiteur ne franchit aucun niveau, ni à la
@@ -1540,6 +1581,15 @@ export class Modes {
     if (this.locked) return false
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false
     this._diveArmed = false // le clic consomme l'intention ; la molette ne doit pas re-plonger derrière
+    if (this._continu()) {
+      const fromDir = this.camera.position.clone().normalize()
+      const toDir = latLonToSphere(lat, lon, 1)
+      const fromAlt = this.orbAlt
+      const endAlt = Math.max(fromAlt * FACTEUR_CLIC, ORB_ALT_MIN)
+      this.travel = { t: 0, duration: DUREE_GLISSE_CLIC_S, fromDir, toDir, fromAlt, cruise: fromAlt, endAlt, zoom: null, clic: true }
+      this.controls.enabled = false
+      return true
+    }
     this._dive(palierDeClic(DIVE_TIERS, this.altM) ?? DIVE_TIERS[0], { lat, lon }, { zoomImpose: true })
     return true
   }
@@ -1547,18 +1597,62 @@ export class Modes {
   // Click-to-dive, two beats (Adrien): first EASE IN toward the clicked point
   // by 30% of the remaining zoom distance (a "lean toward it"), THEN load the
   // finer level centred there. `target.point` is the clicked world position.
+  //
+  // ══════ SOUS LE DRAPEAU : UN SEUL TEMPS, ET LE NIVEAU SUIT — R35 ═════════
+  //
+  // ⛔ **LES 70 % RESTANTS TOMBAIENT EN UNE IMAGE** (×1,43 par clic,
+  // `.banc/R35/clic-avant.json`) : `_loadDive` reposait la caméra à
+  // `distancePresentation` — une distance FIXE sur un bloc deux fois plus
+  // petit. Ici le clic est le geste de la molette, cadré : la cible glisse
+  // RIGIDEMENT vers le point cliqué (caméra + cible, même vecteur, `y`
+  // inchangé — l'orbite de R32, la Terre plantée) pendant que la distance
+  // descend d'un niveau en géométrique ; le compteur de niveau encaisse
+  // l'intention image par image, et `_franchirSiBesoin` recharge le niveau fin
+  // à l'arrivée par `_rescale`, dont `_suivreEmprise` garantit la continuité.
+  // Rien n'est posé : ni distance, ni `_loadDive`.
   diveTo(target) {
     if (this.busy || this.travel || this._diveTween || this.mode !== 'surface' || !target) return
-    this._resetZoom() // cancel any coasting zoom; the dive owns the camera now
     const from = this.camera.position.clone()
     const fromT = this.controls.target.clone()
     const dist = from.distanceTo(fromT)
-    const lean = 0.3 * Math.max(0, dist - this.controls.minDistance)
     const dir = from.clone().sub(fromT).normalize()
+    if (this._continu()) {
+      // l'élan de la molette s'éteint (le glissé tient la caméra) ; le COMPTEUR,
+      // lui, traverse — un reste de molette n'est pas jeté, comme pour `cranZoom`
+      this._zoomVel = 0
+      const toT = target.point ? new THREE.Vector3(target.point.x, fromT.y, target.point.z) : fromT.clone()
+      const d1 = Math.max(this.controls.minDistance, dist * FACTEUR_CLIC)
+      this.controls.enabled = false
+      this._diveTween = { t: 0, dur: DUREE_GLISSE_CLIC_S, fromT, toT, dir, d0: dist, d1, dPrec: dist, compteur0: this._levelZoom, target, glisse: true }
+      return
+    }
+    this._resetZoom() // cancel any coasting zoom; the dive owns the camera now
+    const lean = 0.3 * Math.max(0, dist - this.controls.minDistance)
     const toT = target.point ? target.point.clone() : fromT.clone()
     const toPos = toT.clone().addScaledVector(dir, Math.max(this.controls.minDistance, dist - lean))
     this.controls.enabled = false // the tween owns the camera until it loads
     this._diveTween = { t: 0, dur: 0.42, from, fromT, toPos, toT, target }
+  }
+
+  // Une image du glissé de clic en surface (R35). `e` est l'avancement adouci.
+  _avancerGlisseClic(dv, e) {
+    const c = this.controls
+    c.target.lerpVectors(dv.fromT, dv.toT, e)
+    const d = dv.d0 * (dv.d1 / dv.d0) ** e
+    // le compteur encaisse l'INTENTION (un niveau) tant qu'un niveau existe ;
+    // au zoom fin, le déplacement réel — même asymétrie que `_applyZoom`.
+    // ⚠️ **POSÉ, PAS ACCUMULÉ** : la somme des pas `(eᵢ − eᵢ₋₁)` télescope à 1
+    // à un epsilon près, et `franchissement` TRONQUE `budget / pas` — mesuré au
+    // navigateur : un clic sur deux ratait son niveau (`.banc/R35/clic-apres-1.json`,
+    // clics 5 et 7 sans REFINING). À `e = 1` le compteur vaut exactement
+    // `compteur0 − PAS_NIVEAU`.
+    if (this.hooks.getRefineTarget?.()) this._levelZoom = dv.compteur0 - PAS_NIVEAU * e
+    else this._levelZoom += Math.log(d / dv.dPrec)
+    dv.dPrec = d
+    this.camera.position.copy(c.target).addScaledVector(dv.dir, d)
+    const seuil = this._solSous(c.target) + 3 // même garde de dégagement qu'`_arrivalPose`
+    if (this.camera.position.y < seuil) this.camera.position.y = seuil
+    c.update()
   }
 
   // second beat: load the finer level, centred on the clicked point, landing
@@ -1847,13 +1941,24 @@ export class Modes {
         const dv = this._diveTween
         dv.t = Math.min(1, dv.t + dt / dv.dur)
         const e = dv.t < 0.5 ? 2 * dv.t * dv.t : 1 - ((-2 * dv.t + 2) ** 2) / 2
-        this.camera.position.lerpVectors(dv.from, dv.toPos, e)
-        this.controls.target.lerpVectors(dv.fromT, dv.toT, e)
-        this.controls.update()
-        if (dv.t >= 1) {
-          this._diveTween = null
-          this.controls.enabled = true
-          this._loadDive(dv.target)
+        if (dv.glisse) {
+          // R35 : le glissé de clic — rien n'est posé à l'arrivée, le niveau
+          // se franchit par le compteur, comme pour la molette
+          this._avancerGlisseClic(dv, e)
+          if (dv.t >= 1) {
+            this._diveTween = null
+            this.controls.enabled = true
+            this._franchirSiBesoin()
+          }
+        } else {
+          this.camera.position.lerpVectors(dv.from, dv.toPos, e)
+          this.controls.target.lerpVectors(dv.fromT, dv.toT, e)
+          this.controls.update()
+          if (dv.t >= 1) {
+            this._diveTween = null
+            this.controls.enabled = true
+            this._loadDive(dv.target)
+          }
         }
       }
       // ══════ LE BALAYAGE DE POSE DE LA PLONGÉE — Tâche R4 ══════════════════
