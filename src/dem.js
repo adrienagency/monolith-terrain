@@ -14,7 +14,7 @@
 // rien une fois l'agrandissement corrigé, et coûtait 84 ms par bloc. Il reste
 // exporté et testé pour une future source côtière (voir le corps du fichier).
 import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
-import { normalizeIndex, tileMaxZoom } from './bathy-sources.js'
+import { normalizeIndex, tileMaxZoom, zoneAt } from './bathy-sources.js'
 import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
 import { quantizeElevation, quantizeElevations } from './dem-quant.js'
 import {
@@ -102,6 +102,30 @@ const bathyIndex = () => {
 // l'affichage, pas un repli dégradé, et l'interdire supprimerait la
 // bathymétrie de toutes les vues d'ensemble. Le plancher effectif est donc
 // `min(BATHY_ZMIN, zoom)` : on ne descend jamais SOUS le zoom demandé.
+//
+// 🔴 B3 — LE PLANCHER RESTE 7, ET IL A DÉSORMAIS UNE EXCEPTION NOMMÉE.
+//
+// J'ai d'abord descendu cette constante à 6, et c'était FAUX : cinq tests le
+// disent, dont `dem-load.test.js:251` qui encode exactement l'arbitrage
+// ci-dessus. Le raisonnement « z6 vaut 1 992 m contre 1 852 m d'ETOPO1, donc
+// c'est le même ordre » oublie que le repli s'applique AUSSI là où l'ETOPO1 est
+// bon, et le recensement des 796 coutures parle de ce cas-là.
+//
+// Ce que le plancher protège, c'est **l'ETOPO1 du terrarium**. Or au-delà de
+// z10 il n'y a plus d'ETOPO1 à protéger : le terrarium rend **0,000 m pile** sur
+// tout le champ immergé (B1, mesuré au GPU à z11 et z12, étendue 9×9 = 0,00 m).
+// Là, refuser le repli grossier ne préserve rien — ça interdit la seule donnée
+// disponible. Et ce n'est pas un cas de bord : le tuileur n'écrit QUE la frange
+// côtière (`SHELF = −500`, scripts/build-bathy-tiles.mjs), donc au large la
+// cascade s'arrête souvent bien au-dessus de z7. Mesuré sur disque à
+// 35,5°N / 19°E (Méditerranée, plaine ionienne) : z8 ABSENTE, z7 ABSENTE,
+// **z6 présente, −3 688 m**. Avec le plancher à 7 et rien d'autre, les DEUX
+// chemins rendaient **0 m** — le défaut que B1 laisse ouvert à son §⑨.
+//
+// L'exception est donc conditionnée, pas globale : `plancher: index.zmin` n'est
+// forcé QUE sur une emprise où le terrarium est muet en mer, et seulement après
+// que la descente normale a échoué. Voir `terrariumMuetEnMer` (ici et dans
+// `src/globe.js`).
 const BATHY_ZMIN = 7
 // ⚠️ NOS tuiles bathy font 256 px, quelle que soit la taille des tuiles
 // d'altitude. La sous-fenêtre SOURCE se mesure donc en pixels de tuile bathy,
@@ -213,8 +237,13 @@ function loadBathyTile(url) {
 // fonction synchrone-après-index en une fonction qui `await` toujours.
 //
 // @returns {Promise<number>} le zoom de la tuile réellement peinte, ou -1
-export async function peindreBathyTuile({ zoom, tx, ty, index, dst, dstStride, dx, dy, dw, dh }) {
-  const plancher = Math.min(BATHY_ZMIN, zoom)
+export async function peindreBathyTuile({ zoom, tx, ty, index, dst, dstStride, dx, dy, dw, dh, plancher: forcePlancher }) {
+  // ⚠️ `plancher` FORCÉ : le SEUL appelant qui s'en sert est `fondMarinTuile`
+  // (src/globe.js), et seulement après avoir constaté que le terrarium est MUET
+  // en mer sur cette dalle. `BATHY_ZMIN` protège de l'écrasement de l'ETOPO1 ;
+  // quand il n'y a pas d'ETOPO1 à protéger, il n'interdit plus qu'une chose :
+  // la seule donnée disponible. Voir l'encart de `fondMarinTuile`.
+  const plancher = Math.min(Number.isFinite(forcePlancher) ? forcePlancher : BATHY_ZMIN, zoom)
   // Le plafond se lit AU CENTRE DE CETTE TUILE, pas au centre du bloc : une
   // emprise peut chevaucher la limite d'une source fine, et chaque case doit
   // alors chercher au niveau qui la concerne.
@@ -427,7 +456,9 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // BATHYMÉTRIE : on peint le même damier dans un second canevas, puis on
   // fusionne. Tout échec est silencieux et sans conséquence — la carte reste
   // celle d'avant.
-  const seaData = bathy === false ? null : await loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx: TILE_PX })
+  const seaData = bathy === false
+    ? null
+    : await loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx: TILE_PX, muet: terrariumMuetEnMer(rgba) })
   // ⚠️ FLOAT32, ET PAS INT16 — LA MESURE, POUR QUE PERSONNE NE LA REFASSE.
   //
   // 1536² × 4 octets = 9,44 Mo par bloc. Le passer en Int16 rendrait 4,72 Mo et
@@ -492,7 +523,18 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
 
   // La fusion ne peut que CREUSER la mer : la terre et le trait de côte
   // restent ceux du terrarium (voir src/bathy.js, et la session polders).
-  const fused = seaData ? fuseBathymetry(data, seaData) : data
+  // 🔴 B3 — LA NAPPE DU LAC, SI LA ZONE EN DÉCLARE UNE.
+  // Sans elle, `seaLevel = 0` et un lac d'altitude est de la TERRE : le Léman à
+  // +372 m sort inchangé, la source lacustre n'est même pas lue, et on aurait
+  // déployé des tuiles pour zéro pixel changé, sans une erreur en console (B2).
+  // ⚠️ **UN SEUL `seaLevel` PAR EMPRISE** : si une dalle contient deux lacs de
+  // cotes différentes, un seul niveau s'applique. La sentinelle de
+  // `fuseBathymetry` fait que l'autre lac est simplement ignoré, jamais creusé
+  // — c'est une limite à écrire, pas à découvrir.
+  const nappeZone = seaData ? zoneAt(await bathyIndex(), lat, lon)?.waterLevelM : undefined
+  const fused = seaData
+    ? fuseBathymetry(data, seaData, Number.isFinite(nappeZone) ? { seaLevel: nappeZone + 0.5 } : undefined)
+    : data
   // ⚠️ PLUS DE `smoothSeaFloor` ICI, ET C'EST UN CHOIX MESURÉ, PAS UN OUBLI.
   //
   // Ce flou existait pour cacher les facettes de l'agrandissement BILINÉAIRE
@@ -664,7 +706,7 @@ function slotIsBlank(rgba, sizePx, ox, oy, tilePx) {
 // 3,825 m/cellule dans la baie de Tokyo, soit 0,67° de cassure d'inclinaison à
 // l'exagération 2,8, que `computeVertexNormals` révèle en grille de carrés de
 // 464 m. En Catmull-Rom : 0,006 m/cellule, 615 fois moins (src/bathy.js).
-async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
+async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx, muet = false }) {
   // NaN = case non peinte, que `fuseBathymetry` ignore comme n'importe quelle
   // valeur non finie (c'est ce que faisait l'alpha nul du canevas d'avant)
   const patch = new Float32Array(sizePx * sizePx).fill(NaN)
@@ -689,10 +731,46 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
         peindreBathyTuile({
           zoom, tx, ty, index,
           dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
-        }).then((z) => { if (z >= 0) painted++ })
+        }).then((z) => {
+          if (z >= 0) { painted++; return }
+          // 🔴 B3 — LA SECONDE CHANCE, ET SEULEMENT QUAND ELLE NE COÛTE RIEN.
+          // La case n'a rien trouvé au-dessus du plancher de `BATHY_ZMIN`. Si le
+          // terrarium était bavard ici, on s'arrête : c'est exactement
+          // l'arbitrage des 796 coutures, et l'écraser avec du 8 km dégraderait
+          // la carte. Mais si le terrarium est MUET (à 0,000 m pile sur tout le
+          // champ immergé — c'est le cas au-delà de z10), il n'y a rien à
+          // dégrader et le repli grossier remplit un vide au lieu d'écraser une
+          // mesure. Sans ça, la plaine ionienne reste à 0 m sur les DEUX chemins.
+          if (!muet) return
+          return peindreBathyTuile({
+            zoom, tx, ty, index, plancher: index.zmin,
+            dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
+          }).then((z2) => { if (z2 >= 0) painted++ })
+        })
       )
     }
   }
   await Promise.all(jobs)
   return painted ? patch : null
+}
+
+/**
+ * Le relief de référence n'a-t-il RIEN à dire de la mer sur cette dalle ?
+ *
+ * ⚠️ **ON LIT LES OCTETS, PAS LES MÈTRES** : `data` n'est décodé qu'APRÈS la
+ * bathymétrie, et c'est cette réponse-là qui décide de la descente. Un pixel
+ * porte une vraie profondeur dès que son triplet terrarium décode sous
+ * −0,002 m ; on s'arrête au PREMIER, donc une vraie mer coûte quelques
+ * itérations. Le cas coûteux — la dalle entièrement muette — est celui où l'on
+ * a de toute façon un aller-retour réseau à faire ensuite.
+ * ⚠️ Alpha 0 = case non peinte : une absence, pas une profondeur.
+ */
+function terrariumMuetEnMer(rgba) {
+  if (!rgba) return false
+  for (let i = 0, n = rgba.length; i < n; i += 4) {
+    if (rgba[i + 3] === 0) continue
+    const m = rgba[i] * 256 + rgba[i + 1] + rgba[i + 2] / 256 - 32768
+    if (m < -0.002) return false
+  }
+  return true
 }

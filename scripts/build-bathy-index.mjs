@@ -119,7 +119,17 @@ function main() {
       octets += b
       detail.push(`z${z} ${dedans.length} tuiles ${(b / 1024 / 1024).toFixed(1)} Mo`)
     }
-    if (zmaxReel <= base.zmax) {
+    // 🔴 B3 — UNE ZONE DE LAC NE DÉCLARE PAS UNE RÉSOLUTION, ELLE DÉCLARE UNE
+    // NAPPE. Le test ci-dessous (« aucune tuile plus fine que le socle ⇒
+    // ignorée ») est juste pour une source marine régionale : promettre z10
+    // sans avoir cuit z10 serait mentir au client. Mais un lac dont le fond est
+    // DÉJÀ dans le socle GEBCO — le Baïkal y est, mesuré sur disque : −304 m à
+    // 53,5 / 108,1 — n'a aucune tuile fine à cuire, et sa zone porte pourtant
+    // le seul renseignement qui rende ce fond lisible : `waterLevelM`. Sans
+    // nappe, `seaLevel = 0`, la surface du lac à +456 m est classée TERRE, et le
+    // fond que le socle porte déjà n'est jamais lu.
+    const nappe = Number.isFinite(d.waterLevelM) ? Number(d.waterLevelM) : undefined
+    if (zmaxReel <= base.zmax && nappe === undefined) {
       console.log(`  ✖ ${d.id.padEnd(10)} déclarée à z${d.zmax} mais AUCUNE tuile fine cuite → ignorée`)
       continue
     }
@@ -128,7 +138,10 @@ function main() {
     console.log(
       `  ✓ ${d.id.padEnd(10)} ${d.source.padEnd(11)} z${zmaxReel}${zmaxReel < d.zmax ? ` (déclarée z${d.zmax})` : ''}  ${detail.join(' · ')}`
     )
-    zones.push({ id: d.id, source: d.source, zmax: zmaxReel, bbox: d.bbox })
+    zones.push({
+      id: d.id, source: d.source, zmax: zmaxReel, bbox: d.bbox,
+      ...(nappe === undefined ? {} : { waterLevelM: nappe }),
+    })
   }
 
   const index = { version: 1, base, zmin, zones }

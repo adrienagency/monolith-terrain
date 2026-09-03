@@ -118,7 +118,22 @@ class FakeCtx {
   drawImage(img) {
     this._url = img?.url ?? null
   }
+  // ⚠️ **B3 — LE GLOBE RÉ-ENCODE DÉSORMAIS SA TUILE APRÈS FUSION**
+  // (`fetchTile` → `textureDeHauteurs`, src/globe.js) : il lui faut un
+  // `createImageData` et un `putImageData`. Sans eux le double levait un
+  // TypeError, `fetchTile` rejetait, et AUCUNE tuile n'atteignait `ready` —
+  // d'où quatre tests rouges qui accusaient la file alors que c'était le
+  // canevas bouchon qui manquait. Le double suit le contrat du canevas ; ces
+  // deux méthodes n'assouplissent aucune assertion, elles rendent exécutable un
+  // chemin réel qui ne l'était pas.
+  createImageData(w, h) {
+    return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }
+  }
+  putImageData(im) {
+    this._pose = im
+  }
   getImageData() {
+    if (this._pose) return this._pose
     return { data: this._url ? dallePour(this._url) : dallePour('terrarium/0/0/0.png') }
   }
 }

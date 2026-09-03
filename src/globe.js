@@ -16,7 +16,11 @@ import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
-import { overzoomTile } from './bathy.js'
+import { overzoomTile, fuseBathymetry } from './bathy.js'
+// ⚠️ `dem.js` N'IMPORTE PAS `globe.js` (il s'en garde explicitement, voir
+// l'encart de `memo-tuiles-mnt.js`) : le sens unique est acquis, pas espéré.
+import { peindreBathyTuile, indexBathy } from './dem.js'
+import { zoneAt } from './bathy-sources.js'
 
 // LE BLEU DE NUIT DE LA PLANETE — Tache R7, tour de correction. La face nuit ne
 // fond plus vers le fond du decor NU (creme en theme clair, ce qui EFFACAIT la
@@ -3381,6 +3385,124 @@ function decoderHorsFil(img, px, tile) {
   })
 }
 
+// ═══════ LA CASCADE BATHYMÉTRIQUE SUR LE CHEMIN DU GLOBE — B3 ══════════════
+//
+// 🔴 LE DÉFAUT QUE CE BLOC RÉPARE, MESURÉ PAR B1 : au repos le globe et le
+// damier s'accordent à 8,5 m près, parce que les tuiles AWS portent de
+// l'ETOPO1 jusqu'à z10. **À z11 le terrarium cesse de décrire la mer** — quelle
+// que soit sa source — et le globe n'avait RIEN pour prendre le relais :
+// fosse de la Sonde, z10 → −7 067,6 m, z11 → **0,0 m**. 7 105 m d'écart avec
+// le damier au même point, au même zoom, dans la même session.
+//
+// ⚠️ CE N'ÉTAIT PAS UN DÉFAUT DE CÂBLAGE DE `flux-terrain.js` : ce module
+// importe bien `fuseBathymetry`, mais ses deux appelants sont la fenêtre bornée
+// et le champ de la mer. Les textures que `_buildMesh` déplace et que le
+// nuanceur colore ne passaient jamais par là — 544 tuiles d'altitude contre
+// **0** tuile bathymétrique en 54 s de mode sphère.
+//
+// LA LOI DE SÉLECTION N'EST PAS RECOPIÉE : `peindreBathyTuile` (src/dem.js) est
+// la même descente « fin → plancher » que le damier, avec la même mémoire de
+// tuiles, les mêmes absences mémorisées et le même surzoom Catmull-Rom. C'est
+// le §1 de `/threejs-optimisation` : deux descentes à faire coïncider, ce sont
+// deux descentes qui divergent.
+//
+// ⚠️ CE QU'ON NE PAIE PAS, ET POURQUOI ÇA TIENT :
+//   · une tuile SANS un seul pixel immergé ne coûte rien (test en sortie de
+//     décodage, arrêt au premier pixel ≤ 0) — c'est la majorité des tuiles
+//     continentales ;
+//   · une tuile immergée dont la cascade n'a RIEN (abysse hors socle cuit) ne
+//     coûte qu'une lecture de la mémoire d'absences, jamais un réseau ;
+//   · seule la tuile qui a vraiment trouvé du fond paie le ré-encodage.
+
+/**
+ * Y a-t-il quoi que ce soit à creuser ? (arrêt au premier pixel sous la nappe)
+ *
+ * ⚠️ **LE NIVEAU EST UN PARAMÈTRE, PAS ZÉRO.** Écrit avec `<= 0` en dur, ce
+ * garde-fou rendait `false` sur toute dalle du Baïkal — dont le pixel le plus
+ * bas est à +449 m — et la zone lacustre restait donc lettre morte SUR LE
+ * GLOBE alors qu'elle marchait déjà sur le damier. Mesuré : crop −291 m,
+ * globe +449 m, au même point, dans la même session.
+ */
+function tuilePorteDeLaMer(heights, level) {
+  for (let i = 0; i < heights.length; i++) if (heights[i] <= level) return true
+  return false
+}
+
+// Le terrarium n'a-t-il RIEN à dire de la mer sur cette dalle ? C'est le cas
+// au-delà de z10, où il rend 0,000 m pile sur tout le champ immergé (mesuré :
+// fosse de la Sonde et mer Noire à z11 et z12, étendue 9×9 = 0,00 m).
+function terrariumMuetEnMer(heights) {
+  for (let i = 0; i < heights.length; i++) {
+    const h = heights[i]
+    if (h < -0.002) return false // une vraie profondeur : il parle
+  }
+  return true
+}
+
+// La texture que le GPU tiendra, ré-encodée depuis les hauteurs FUSIONNÉES.
+// ⚠️ LIGNE 0 = NORD, et `CanvasTexture` garde `flipY = true` : c'est
+// exactement l'orientation du chemin de repli de `fetchTile` (et l'inverse du
+// chemin Worker, qui retourne la dalle lui-même et pose `flipY = false`).
+// Se tromper ici couperait le globe en bandes de latitude — défaut R36.
+function textureDeHauteurs(m, px) {
+  const c = document.createElement('canvas')
+  c.width = c.height = px
+  const ctx = c.getContext('2d')
+  const im = ctx.createImageData(px, px)
+  const d = im.data
+  for (let i = 0, j = 0; i < m.length; i++, j += 4) {
+    // `encodeTerrarium` en ligne : l'appel et le tableau rendu coûtaient
+    // 40 % du ré-encodage sur une dalle 512². La formule est la même, au bit.
+    const v = Math.min(32767.99, Math.max(-32768, m[i])) + 32768
+    let R = Math.floor(v / 256)
+    let G = Math.floor(v - R * 256)
+    let B = Math.round((v - R * 256 - G) * 256)
+    if (B === 256) { B = 0; if (G === 255) { G = 0; R += 1 } else G += 1 }
+    d[j] = R; d[j + 1] = G; d[j + 2] = B; d[j + 3] = 255
+  }
+  ctx.putImageData(im, 0, 0)
+  return new THREE.CanvasTexture(c)
+}
+
+/**
+ * Le fond marin de CETTE tuile, ou `null` s'il n'y a rien à en dire.
+ *
+ * ⚠️ **LE PLANCHER DE REPLI EST DOUBLE, ET CE N'EST PAS UN CONFORT.**
+ * `BATHY_ZMIN` vaut 6 parce qu'au-delà on écraserait de l'ETOPO1 avec plus
+ * grossier que lui (recensement du 2026-07-28). Mais quand le terrarium est
+ * MUET — et à z11 il l'est, à 0,000 m pile sur toute la dalle — il n'y a plus
+ * d'ETOPO1 à protéger : le repli grossier n'écrase rien, il remplit un vide.
+ * On redescend alors jusqu'au plancher de l'index (z4). Mesuré : c'est ce qui
+ * rend la plaine ionienne, dont AUCUNE tuile n'existe au-dessus de z6 (le
+ * tuileur n'écrit que la frange côtière, `SHELF = −500`).
+ *
+ * @returns {Promise<Float32Array|null>}
+ */
+async function fondMarinTuile(z, x, y, heights, px) {
+  if (!heights) return null
+  // ⚠️ L'INDEX D'ABORD, ET C'EST L'ORDRE QUI COMPTE : la NAPPE décide de ce
+  // qu'est « immergé » sur cette dalle. Le coût est nul — `indexBathy` rend une
+  // promesse mémorisée pour toute la session, donc une micro-tâche.
+  let index
+  try { index = await indexBathy() } catch { return null }
+  // ⚠️ `tileToLatLon(tx, ty, zoom)` — LA TUILE D'ABORD, LE ZOOM EN DERNIER.
+  // Écrit `(z, x, y)` par analogie avec tout le reste du fichier, l'appel ne
+  // levait rien, ne journalisait rien, et rendait un point à l'autre bout du
+  // monde : la zone lacustre ne matchait jamais et le globe gardait +449 m
+  // pendant que le damier rendait −291 m. `gl.getError()` valait 0.
+  const c = tileToLatLon(x + 0.5, y + 0.5, z)
+  const nappe = zoneAt(index, c.lat, c.lon)?.waterLevelM
+  const opts = Number.isFinite(nappe) ? { seaLevel: nappe + 0.5 } : undefined
+  if (!tuilePorteDeLaMer(heights, opts ? opts.seaLevel : 0)) return null
+  const sea = new Float32Array(px * px).fill(NaN)
+  const arg = { zoom: z, tx: x, ty: y, index, dst: sea, dstStride: px, dx: 0, dy: 0, dw: px, dh: px }
+  let peint = await peindreBathyTuile(arg)
+  if (peint < 0 && terrariumMuetEnMer(heights)) peint = await peindreBathyTuile({ ...arg, plancher: index.zmin })
+  if (peint < 0) return null
+  const fondu = fuseBathymetry(heights, sea, opts)
+  return fondu === heights ? null : fondu
+}
+
 // terrarium PNG/WebP → { texture, heights Float32Array(px*px), size }
 // (pas de `signal` : la promesse est partagée entre tous les demandeurs de la
 // même URL, l'abandon de l'un annulerait la tuile des autres)
@@ -3449,6 +3571,20 @@ async function fetchTile(z, x, y, plan) {
     }
     heights = hauteursTerrarium(ctx.getImageData(0, 0, px, px).data, px)
     texture = new THREE.CanvasTexture(c)
+  }
+  // ══════ LA BATHYMÉTRIE ENTRE ICI, ET PAS AILLEURS — B3 ════════════════════
+  // C'est le seul point du globe où l'on tient À LA FOIS les hauteurs et la
+  // texture avant que l'une ou l'autre ne parte : `_buildMesh` relâche
+  // `t.heights` dès le maillage bâti, et le nuanceur ne lit que la texture.
+  // Fusionner plus tard voudrait dire fusionner deux fois, dans deux unités.
+  const fondu = await fondMarinTuile(z, x, y, heights, px)
+  if (fondu) {
+    heights = fondu
+    // la texture d'origine n'a jamais été téléversée : la libérer ne coûte
+    // qu'un `close()` sur l'ImageBitmap du Worker, qui sinon fuirait.
+    texture.image?.close?.()
+    texture.dispose()
+    texture = textureDeHauteurs(fondu, px)
   }
   // ⚠️ LE CANEVAS EST RELÂCHÉ DÈS QUE LE GPU L'A REÇU (plan « globe continu »,
   // Tâche 4 sexies, Étape 1). `CanvasTexture` garde son canevas vivant via

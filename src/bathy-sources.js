@@ -157,9 +157,18 @@ export function normalizeIndex(raw) {
     if (!Number.isFinite(z?.zmax)) continue
     const [west, south, east, north] = bbox
     if (south > north) continue
+    // 🔴 B3 — `waterLevelM` DOIT SURVIVRE À CETTE LISTE BLANCHE.
+    // C'est le piège silencieux parfait, et B2 l'a vérifié à l'exécution : le
+    // fichier serait juste, le code serait juste, et le nombre n'arriverait
+    // jamais. Une nappe absente ⇒ `seaLevel = 0` ⇒ un lac d'altitude est classé
+    // TERRE et la source lacustre n'est même pas lue.
+    // ⚠️ On ne recopie qu'un nombre FINI, et on OMET le champ sinon : l'absence
+    // rend exactement le comportement marin d'origine, au bit près.
+    const nappe = Number.isFinite(z?.waterLevelM) ? Number(z.waterLevelM) : undefined
     zones.push({
       id: String(z.id ?? z.source ?? 'zone'),
       source: String(z.source ?? 'inconnue'),
+      ...(nappe === undefined ? {} : { waterLevelM: nappe }),
       // ⚠️ un plafond de zone ne peut qu'AJOUTER des niveaux : le relever au
       // socle est ce qui garantit qu'une zone mal cuite ne creuse pas un trou
       // dans une carte qui marchait.

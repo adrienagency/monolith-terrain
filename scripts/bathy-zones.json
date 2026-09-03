@@ -10,6 +10,16 @@
       "zmax": 10,
       "bbox": [-6, 41, 10, 52],
       "_note": "Premier jalon. 546 tuiles z10 estimées, ~4 Mo. EMODnet DTM 2024 à 115 m contre 464 m pour GEBCO : 4× en linéaire. Zone de contrôle : rade de Brest (48.35 / -4.5)."
+    },
+    {
+      "id": "baikal",
+      "source": "gebco",
+      "zmax": 8,
+      "waterLevelM": 455.5,
+      "bbox": [103.5, 51.3, 110.1, 56.0],
+      "_note": "B3 — ZÉRO OCTET DE TUILE AJOUTÉ. Le fond du Baïkal est DÉJÀ dans le socle GEBCO (mesuré sur disque : -304 m à 53.5/108.1, soit 760 m sous la nappe). Ce qui manquait n'était pas la donnée mais la NAPPE : sans elle, seaLevel = 0, la surface du lac à +456 m est classée TERRE et le fond n'est jamais lu. Cette zone ne relève AUCUN plafond de zoom (zmax = socle) : elle ne déclare qu'un niveau d'eau.",
+      "_sentinelle": "Les tuiles GEBCO écrivent 0 pour « pas de la mer ». Sous une nappe à 456 m ce 0 passerait pour un fond, et toute la terre sibérienne sous 456 m se ferait creuser. C'est fuseBathymetry qui l'interdit (test sMuet, gardé par level > 0). Couvert par test.",
+      "_zone_de_controle": "53.5 N / 108.1 E — nappe +456 m, fond GEBCO -304 m"
     }
   ],
   "_reserve": [

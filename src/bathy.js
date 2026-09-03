@@ -191,7 +191,22 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // depuis 4×4 pixels de l'ancêtre — près d'un rivage, presque tous émergés.
     // C'est le fond plat à zéro vu sur Santorin et Toulon, alors que les tuiles
     // portaient bien −2 408 m et −2 432 m.
-    if (s >= level) {
+    //
+    // 🔴 B3 — ET SOUS UNE NAPPE DE LAC, `s >= level` NE SUFFIT PLUS.
+    // Le tuileur écrit `0` pour « ce pixel n'est pas de la mer » (voir
+    // ci-dessus). Tant que `level` vaut 0, ce `0` est attrapé par le test
+    // ci-dessus et tout va bien. Dès qu'une zone déclare une NAPPE de lac
+    // (`waterLevelM`), `level` vaut par exemple 456,5 m : le marqueur de terre
+    // `0` passe alors pour un fond à 456 m sous la surface du lac, et TOUTE la
+    // terre située sous la cote du lac se fait creuser. Mesuré par B2 sur
+    // l'exutoire du Rhône à Genève : **347,67 m de vallée détruits**.
+    //
+    // La SENTINELLE, donc : sous une nappe déclarée, un échantillon nul est une
+    // ABSENCE, pas un fond. ⚠️ Le garde `level > 0` n'est pas décoratif — il
+    // rend le chemin marin identique AU BIT (à `level = 0`, `s >= level`
+    // couvre déjà `s === 0`).
+    const sMuet = level > 0 && s > -NODATA_EPS && s < NODATA_EPS
+    if (s >= level || sMuet) {
       out[i] = l
       continue
     }
@@ -209,8 +224,20 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // ⚠️ Ne PAS prendre le maximum des deux : au large la source fine dit
     // −2 000 m partout, le fondu saturerait à 1 jusque sur le rivage et le
     // trait de côte sauterait. Mesuré : un pixel de bord passait à −400 m.
-    const base = noData ? level : l
-    const t = smooth((level - (noData ? deep : l)) / blend)
+    //
+    // 🔴 B3 — SOUS UNE NAPPE DÉCLARÉE, LA RÉFÉRENCE N'A PAS DE FOND À DÉFENDRE.
+    // B1 l'a mesuré sur cinq lacs, aux deux chemins et à tous les zooms :
+    // le terrarium n'y rend pas un fond, il rend **la surface, étendue 9×9 =
+    // 0,00 m**. Piloter le fondu sur `l` reviendrait donc à le piloter sur la
+    // cote de l'eau : à 1,5 m sous `level`, `t ≈ 0,01` et la source fine sort
+    // **pondérée à 1 %** — le Léman à 371,6 m au lieu de 62 (mesuré par B2).
+    // Quand une nappe est déclarée, la source fine est donc la seule autorité
+    // sous elle, exactement comme sur un pixel muet. ⚠️ Les pixels de TERRE
+    // sous la cote du lac ne passent jamais ici : la sentinelle ci-dessus les a
+    // déjà rendus intacts.
+    const sousNappe = level > 0
+    const base = noData || sousNappe ? level : l
+    const t = smooth((level - (noData || sousNappe ? deep : l)) / blend)
     out[i] = base + (deep - base) * t
   }
   return out
