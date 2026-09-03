@@ -531,10 +531,23 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // cotes différentes, un seul niveau s'applique. La sentinelle de
   // `fuseBathymetry` fait que l'autre lac est simplement ignoré, jamais creusé
   // — c'est une limite à écrire, pas à découvrir.
-  const nappeZone = seaData ? zoneAt(await bathyIndex(), lat, lon)?.waterLevelM : undefined
-  const fused = seaData
-    ? fuseBathymetry(data, seaData, Number.isFinite(nappeZone) ? { seaLevel: nappeZone + 0.5 } : undefined)
-    : data
+  const zoneIci = seaData ? zoneAt(await bathyIndex(), lat, lon) : null
+  const nappeZone = zoneIci?.waterLevelM
+  // 🔵 BT-I — LA BANDE DE FONDU, SI LA ZONE EN DÉCLARE UNE.
+  // `fuseBathymetry` fond la source fine vers le rivage sur 25 m de
+  // PROFONDEUR, en se servant de la profondeur comme substitut de la
+  // DISTANCE À LA CÔTE. Bon pour GEBCO à 464 m ; faux pour BlueTopo à 4 m,
+  // où une baie de 11,6 m à 20 km de toute côte sortait à −5,21 m (45 %).
+  // ⚠️ Champ absent ⇒ rien n'est passé ⇒ BLEND_DEPTH = 25 comme avant, AU BIT.
+  const fonduZone = zoneIci?.blendDepthM
+  const optsFusion =
+    Number.isFinite(nappeZone) || Number.isFinite(fonduZone)
+      ? {
+          ...(Number.isFinite(nappeZone) ? { seaLevel: nappeZone + 0.5 } : {}),
+          ...(Number.isFinite(fonduZone) ? { blendDepth: fonduZone } : {}),
+        }
+      : undefined
+  const fused = seaData ? fuseBathymetry(data, seaData, optsFusion) : data
   // ⚠️ PLUS DE `smoothSeaFloor` ICI, ET C'EST UN CHOIX MESURÉ, PAS UN OUBLI.
   //
   // Ce flou existait pour cacher les facettes de l'agrandissement BILINÉAIRE
