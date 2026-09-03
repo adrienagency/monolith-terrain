@@ -50,7 +50,7 @@ import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorSt
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
-import { peakVantage } from './camera-poses.js'
+import { peakVantage, exigerPose } from './camera-poses.js'
 import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
 import { focusRayHit, focusRayHitGlobe } from './autofocus.js'
 import { doitRafraichirCartouche } from './ground-info.js'
@@ -2200,7 +2200,18 @@ let hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAcc
 hud3.lines.visible = params.surveyLines
 scene.add(hud3.group)
 
+// ⛔ **`flyTo(lat, lon, zoom)` METTAIT LA CAMÉRA À NaN, POUR TOUJOURS — R35.**
+// Deux `flyTo` coexistent : celui-ci prend deux POSES (`Vector3`), celui de
+// `modes.flyTo` prend un lat/lon. Appelé avec des nombres (`__exp.flyTo(-21.1,
+// 55.5, 9)`, l'appel de PF3), `tween.p1.copy(-21.1)` lisait `.x/.y/.z` d'un
+// nombre — `undefined` — et l'image suivante `lerpVectors` posait la caméra à
+// NaN, d'où `modes.altM`, l'altimètre et tout le reste ne revenaient jamais
+// (reproduit : `.banc/R35/flyto-exp-avant.json`, image 2905). Le premier NaN
+// était ICI, pas dans `modes.js`. Une pose se vérifie à l'entrée : un appel
+// faux échoue bruyamment, il ne laisse pas une caméra à NaN.
 function flyTo(pos, target, opts = {}) {
+  exigerPose(pos, 'flyTo(pos)')
+  exigerPose(target, 'flyTo(target)')
   cameraAuto.stop() // any programmatic move cancels a looping automation
   shots.cancel() // …et interrompt le plan en cours (le cran reste sélectionné)
   pilote.cancel() // …et fait atterrir la caméra pilote

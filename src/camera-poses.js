@@ -19,3 +19,19 @@ export function peakVantage(x, h, z, { rise = 5.6, standoff = 3.4 } = {}) {
     target: { x, y: h + 0.3, z },
   }
 }
+
+// ══════ UNE POSE SE VÉRIFIE À L'ENTRÉE — R35 ══════════════════════════════
+//
+// `flyTo(pos, target)` (main.js) prend deux `Vector3` ; son homonyme
+// `modes.flyTo(lat, lon, zoom)` prend des nombres. Appelé avec les seconds,
+// `Vector3.copy(nombre)` rend `NaN` en silence et la caméra ne revient jamais
+// (rapport-R35.md). Une pose est un {x, y, z} FINI, rien d'autre : sinon on
+// échoue ici, bruyamment, en nommant l'appel juste.
+export function estPose(v) {
+  return !!v && typeof v === 'object' && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z)
+}
+export function exigerPose(v, nom = 'pose') {
+  if (estPose(v)) return v
+  const recu = typeof v === 'number' ? `le nombre ${v}` : v == null ? String(v) : typeof v
+  throw new TypeError(`${nom} : une pose {x, y, z} finie est attendue, reçu ${recu} — pour un lat/lon, appeler modes.flyTo(lat, lon, zoom)`)
+}
