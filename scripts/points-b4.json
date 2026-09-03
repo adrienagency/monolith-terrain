@@ -1,0 +1,12 @@
+[
+  { "regime": "fosse", "nom": "Mariannes B4", "lat": 11.373, "lon": 142.591, "ref": -10880, "srcRef": "NOTEUR B4 — hors barème. Nos tuiles : -10 880 m. Reference reelle -10 935 m." },
+  { "regime": "fosse", "nom": "Perou-Chili B4", "lat": -23.0, "lon": -71.4, "ref": -6512, "srcRef": "NOTEUR B4 — hors barème. Nos tuiles : -6 512 m." },
+  { "regime": "abyssale", "nom": "Weddell B4", "lat": -65.0, "lon": -40.0, "ref": -4736, "srcRef": "NOTEUR B4 — hors barème. Nos tuiles : -4 736 m." },
+  { "regime": "abyssale", "nom": "Bengale B4", "lat": 15.0, "lon": 88.0, "ref": -2832, "srcRef": "NOTEUR B4 — hors barème. Nos tuiles : -2 832 m." },
+  { "regime": "mer fermee", "nom": "Rouge B4", "lat": 20.0, "lon": 38.5, "ref": -2088, "srcRef": "NOTEUR B4 — controle impose par le coordinateur." },
+  { "regime": "fosse", "nom": "Kourile B4", "lat": 45.5, "lon": 152.0, "ref": -5136, "srcRef": "NOTEUR B4 — controle impose par le coordinateur." },
+  { "regime": "abyssale", "nom": "CapB4 large", "lat": -35.5, "lon": 18.0, "ref": -2968, "srcRef": "NOTEUR B4 — controle impose par le coordinateur." },
+  { "regime": "lac", "nom": "Superieur B4", "lat": 47.5, "lon": -87.5, "ref": 183, "srcRef": "NOTEUR B4 — controle de NON-REGRESSION. Aucune bathy dans nos tuiles : attendu = la nappe +183 m, INCHANGE." },
+  { "regime": "lac", "nom": "TiticacaB4", "lat": -15.9, "lon": -69.3, "ref": 3808, "srcRef": "NOTEUR B4 — controle de NON-REGRESSION. Attendu = la surface, inchange." },
+  { "regime": "lac", "nom": "Tanganyika B4", "lat": -6.0, "lon": 29.6, "ref": 770, "srcRef": "NOTEUR B4 — controle de NON-REGRESSION." }
+]
