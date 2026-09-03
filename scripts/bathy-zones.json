@@ -1,14 +1,22 @@
 {
   "_pourquoi": "Les zones bathymétriques FINES prévues, du plus fin au plus grossier. Fichier VERSIONNÉ parce que c'est un choix éditorial et budgétaire, pas un produit de cuisson : il dit ce qu'on a décidé de payer en octets. scripts/build-bathy-index.mjs le confronte aux tuiles réellement cuites et n'écrit dans public/data/bathy/index.json que ce qui existe VRAIMENT sur le disque. Une zone déclarée mais non cuite est donc sans effet — voir le dossier docs/superpowers/plans/2026-07-28-bathymetrie-cotiere.md.",
   "_licences": "Chaque source porte une attribution IMPOSÉE mot pour mot, recopiée dans src/bathy-sources.js. Ajouter une zone sans ajouter sa source au catalogue est une faute de licence, pas un oubli de confort.",
-  "base": { "source": "gebco", "zmax": 8 },
+  "base": {
+    "source": "gebco",
+    "zmax": 8
+  },
   "zmin": 4,
   "zones": [
     {
       "id": "fr-metro",
       "source": "emodnet",
       "zmax": 10,
-      "bbox": [-6, 41, 10, 52],
+      "bbox": [
+        -6,
+        41,
+        10,
+        52
+      ],
       "_note": "Premier jalon. 546 tuiles z10 estimées, ~4 Mo. EMODnet DTM 2024 à 115 m contre 464 m pour GEBCO : 4× en linéaire. Zone de contrôle : rade de Brest (48.35 / -4.5)."
     },
     {
@@ -16,7 +24,12 @@
       "source": "swisstopo",
       "zmax": 14,
       "waterLevelM": 372.05,
-      "bbox": [6.1267, 46.2035, 6.9328, 46.522],
+      "bbox": [
+        6.1267,
+        46.2035,
+        6.9328,
+        46.522
+      ],
       "_note": "swissBATHY3D, 2 m natif, CHLV95/LN02. CUIT ET VERIFIE par B3 : 404 tuiles z9..z14, 3,22 Mo, fond lu 62,00 m soit 310,05 m sous la nappe contre 309,70 m de reference CIPEL (+0,35 m). Le pivot retrouve le point le plus bas a 46.44064 N / 6.59996 E, la position documentee, sans qu'on la lui donne.",
       "_licence": "Attribution IMPOSEE mot pour mot : « Federal Office of Topography swisstopo » (entree `swisstopo` de src/bathy-sources.js). Usage commercial et redistribution explicitement autorises.",
       "_sentinelle": "Le tuileur ecrit nappe + 1 m HORS du lac, jamais 0. Mesure par B2 : avec 0, la vallee du Rhone en aval de Geneve se fait creuser de 347,67 m, l'exutoire etant sous la cote du lac.",
@@ -28,10 +41,31 @@
       "source": "gebco",
       "zmax": 8,
       "waterLevelM": 455.5,
-      "bbox": [103.5, 51.3, 110.1, 56.0],
+      "bbox": [
+        103.5,
+        51.3,
+        110.1,
+        56
+      ],
       "_note": "B3 — ZÉRO OCTET DE TUILE AJOUTÉ. Le fond du Baïkal est DÉJÀ dans le socle GEBCO (mesuré sur disque : -304 m à 53.5/108.1, soit 760 m sous la nappe). Ce qui manquait n'était pas la donnée mais la NAPPE : sans elle, seaLevel = 0, la surface du lac à +456 m est classée TERRE et le fond n'est jamais lu. Cette zone ne relève AUCUN plafond de zoom (zmax = socle) : elle ne déclare qu'un niveau d'eau.",
       "_sentinelle": "Les tuiles GEBCO écrivent 0 pour « pas de la mer ». Sous une nappe à 456 m ce 0 passerait pour un fond, et toute la terre sibérienne sous 456 m se ferait creuser. C'est fuseBathymetry qui l'interdit (test sMuet, gardé par level > 0). Couvert par test.",
       "_zone_de_controle": "53.5 N / 108.1 E — nappe +456 m, fond GEBCO -304 m"
+    },
+    {
+      "id": "chesapeake",
+      "source": "bluetopo",
+      "zmax": 12,
+      "bbox": [
+        -76.5,
+        36.9,
+        -75.9,
+        37.6
+      ],
+      "_note": "BT-I — NOAA BlueTopo, 4 m natif (NAD83/UTM 18N + NAVD88), CUIT ET VERIFIE : 127 tuiles z9..z12, 585 Ko, fond le plus bas 44,49 m a 37,24512 N / -76,07313 E (chenal principal de la baie). Le pivot fond 106 GeoTIFF, 265,5 M pixels source, et remplit 78,5 % des cellules — les 21,5 % restants sont les TROUS de BlueTopo, laisses a NaN et non interpoles.",
+      "_licence": "CC0-1.0, domaine public federal americain. Aucune attribution imposee ; l entree `bluetopo` de src/bathy-sources.js cite quand meme NOAA Office of Coast Survey, comme la FAQ le demande poliment.",
+      "_index_vivant": "⛔ NE JAMAIS FIGER DE CHEMIN. L index gpkg de BlueTopo est horodate — ET LE NOM DE SA COUCHE INTERNE AUSSI (mesure : fichier BlueTopo_Tile_Scheme_20260903_145453.gpkg, couche du meme nom). scripts/recon-bluetopo.mjs balaie le prefixe BlueTopo/_ et prend le plus recent, a chaque execution.",
+      "_shelf": "Le filtre SHELF = -500 du tuileur est un NON-EVENEMENT ici, prouve au bit : cuisson a -500 et cuisson a -99999 --all rendent 127 tuiles IDENTIQUES (diff -r vide). La baie plafonne a -44,5 m. ⚠️ MAIS PAS AILLEURS : trois dalles BlueTopo du large (16 m) mesurees a 100 % sous -500 m (min -5134 m au large de la Californie, -4887 m au large de la Caroline, -3466 m dans le golfe). Etendre BlueTopo au large SANS --shelf -99999 jetterait ces 233 dalles en silence — c est exactement la plaine ionienne de B3, avant qu on la paie.",
+      "_zone_de_controle": "37,24512 N / -76,07313 E — fond BlueTopo -44,49 m, la ou GEBCO z8 ne descend pas sous -12 m"
     }
   ],
   "_reserve": [
@@ -39,15 +73,26 @@
       "id": "eu-mers",
       "source": "emodnet",
       "zmax": 10,
-      "bbox": [-36, 25, 43, 85],
+      "bbox": [
+        -36,
+        25,
+        43,
+        85
+      ],
       "_note": "Toutes les mers européennes. 23 814 tuiles z10, 100-200 Mo. À N'OUVRIR QU'APRÈS mesure du poids réel de fr-metro : dist/ fait déjà 968 Mo dont 336 de bathymétrie, et le plan Netlify est à plafond dur."
     },
     {
       "id": "us-est",
       "source": "bluetopo",
       "zmax": 12,
-      "bbox": [-98, 24, -66, 45],
-      "_note": "NOAA BlueTopo, CC0-1.0, 2-16 m natif. Bucket s3://noaa-ocs-nationalbathymetry-pds listable sans compte (vérifié), avec un geopackage d'index des tuiles. Le plus propre juridiquement du dossier, mais aucun visiteur français ne le verra."
+      "bbox": [
+        -98,
+        24,
+        -66,
+        45
+      ],
+      "_note": "NOAA BlueTopo, CC0-1.0, 2-16 m natif. Bucket s3://noaa-ocs-nationalbathymetry-pds listable sans compte (vérifié), avec un geopackage d'index des tuiles. Le plus propre juridiquement du dossier, mais aucun visiteur français ne le verra.",
+      "_cout_mesure": "BT-I — CHIFFRE, plus estime. Bucket entier : 8 203 GeoTIFF, 89,17 Go, mediane 5,7 Mo, plus gros 472 Mo ; grille de 12 684 dalles dont 4 481 SANS GeoTIFF (35,3 % de trous, structurel). Par classe : 2 m 20 dalles/0,13 Go, 4 m 7 431/43,79 Go (41,8 deg2), 8 m 519/9,94 Go (40,2 deg2), 16 m 233/35,31 Go (302,5 deg2 — le large). Le littoral utile (2+4+8 m) = 82,0 deg2 pour 53,9 Go de source. Chesapeake a coute 0,42 deg2 -> 577 Mo de source -> 585 Ko de tuiles z9..z12 : etendre a tout le littoral americain vaut donc ~114 Mo de tuiles pour ~54 Go a telecharger."
     }
   ]
 }
