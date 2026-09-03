@@ -61,8 +61,14 @@
 // ➡️ **ON N'ARBITRE PAS ICI.** D19 est la règle écrite d'Adrien : le prédicat
 // ci-dessous vaut `false` (le pivot est le centre de l'écran, comme la molette),
 // et il est **seul sur sa ligne** pour qu'une bascule tienne en un caractère.
-/** ⛔ ARBITRAGE D'ADRIEN, NON TRANCHÉ PAR L'EXÉCUTANT — `false` = D19 (le centre de l'écran), `true` = Google Earth documenté (le curseur). */
-export const PIVOT_VERS_LE_CURSEUR = false
+//
+// ⚡ **ARBITRÉ LE 2026-09-04 (coordinateur, sur la lettre d'Adrien « exactement
+// comme Google Earth ») : `true`.** D19 parle de la MOLETTE — et Google ne
+// publie aucune cible pour la molette, qui reste donc au centre (D19 §2, tenue
+// à 0,00 px). Le DOUBLE-CLIC, lui, a une cible publiée : le curseur. Les deux
+// règles ne se contredisent plus une fois lues chacune sur son geste.
+/** D19 = la molette (au centre, toujours) ; Google = le double-clic (vers le curseur) ; Adrien peut basculer ICI, en un caractère. */
+export const PIVOT_VERS_LE_CURSEUR = true
 //
 // ══════════ 3. ⚡ L'INCLINAISON : MANUELLE PARTOUT, AUTOMATIQUE AU BLOC ══════
 //
@@ -169,8 +175,25 @@ export function inclinaisonPermise(regime) {
 // you »* — tirer la souris VERS SOI (vers le bas de l'écran, `dy > 0`) —
 // **zoome AVANT**. C'est contre-intuitif, c'est documenté, et c'est ce qu'Adrien
 // a demandé (« tout doit fonctionner pareil »).
-/** Combien de pixels de glissé vertical valent un cran de molette. */
-export const PX_PAR_CRAN_ZOOM = 40
+/**
+ * Combien de pixels de glissé vertical valent un cran de molette.
+ *
+ * ⚠️ **10, PARCE QUE 200 px DOIVENT VALOIR UN NIVEAU (×2), ET C'EST UNE
+ * MESURE QUI A FIXÉ LE NOMBRE.** L'escalier de `modes.js` fait un niveau en
+ * `CRANS_PAR_NIVEAU = 20` crans (voir `CRANS_UN_NIVEAU`). Le barème GE3 (C1)
+ * attend ×1,5 à ×3 pour 200 px : 20 crans = ×2, au milieu de la fenêtre.
+ *
+ * ⛔ **ET LE DOSAGE SE FAIT PAR CRAN, PAS PAR IMAGE — première passe réfutée.**
+ * `_zoomGesture` ajoute UNE impulsion par appel quel que soit `deltaY` ; la
+ * première passe appelait une fois par image avec le cumul, donc le zoom d'un
+ * glissé dépendait du NOMBRE D'IMAGES du geste, pas de ses pixels. Le noteur a
+ * mesuré ×1,894 vers l'avant contre ×2,128 vers l'arrière pour les mêmes 200 px
+ * (13 % d'écart, seuil 5 %). `main.js` appelle désormais la porte une fois par
+ * cran accumulé.
+ */
+export const PX_PAR_CRAN_ZOOM = 10
+/** Le nombre de crans d'UN niveau de l'escalier — `CRANS_PAR_NIVEAU` de `modes.js`, recopié ici pour rester pur ; le test GE2 ⑰ tient les deux d'accord. */
+export const CRANS_UN_NIVEAU = 20
 /** Un cran de molette vaut ~100 en `deltaY` dans les navigateurs de bureau — l'unité que `modes.js` attend (voir `gestes.js`). */
 export const CRAN = 100
 /** Plafond d'UN pas, en crans : une image sautée sous la charge ne doit pas franchir cinq paliers d'un coup (le garde-fou de `gestes.js`). */
@@ -197,8 +220,13 @@ export function zoomDuGlisseDroit(dyPx) {
 // on se rapproche »*. Le double-clic passe donc par la MÊME porte que la
 // molette, l'escalier de paliers de `modes.js`, dont `gestes.js` rappelle
 // qu'elle est la seule.
-/** Combien de crans un double-clic vaut. Deux : la moitié d'un cran de zoom de Google Earth Pro, qui saute d'environ un facteur 2. */
-export const CRANS_DOUBLE_CLIC = 2
+/**
+ * Combien de crans un double-clic vaut : **UN NIVEAU** — ×2 à gauche, ÷2 à
+ * droite, symétriques. Première passe : 2 crans, soit ×1,035 — le noteur l'a
+ * mesuré (×0,983 en altitude) et jugé : « ce n'est pas ÷2, et ce n'est pas
+ * “zoom away” au sens de Google ». Le barème (C4) attend 1,8–2,2 et 0,45–0,56.
+ */
+export const CRANS_DOUBLE_CLIC = CRANS_UN_NIVEAU
 
 /**
  * @param {number} bouton 0 gauche (avant) · 2 droit (arrière)
@@ -245,6 +273,40 @@ export function pasInclinaison({ dxPx = 0, dyPx = 0, inclinaisonDeg = 0, degParP
   // propage en signe négatif là où on n'en veut pas »). Un `dxPx` nul rend
   // `-0 × 0,25 = -0`, qui traverse `Math.sin` et ressort dans une coordonnée.
   return { dInclinaisonDeg: (borne - inclinaisonDeg) || 0, dCapDeg: (-dxPx * degParPixel) || 0 }
+}
+
+// ── l'élan au relâché : PLAFONNÉ par le geste lui-même ──────────────────────
+//
+// ⚠️ **MESURÉ PAR LE NOTEUR (C8), HUIT CHARGEMENTS** : 3 sur 8 rendaient 13,4 /
+// 13,4 / 14,3° de rotation pour un geste de 3,4° — le point saisi était resté
+// sous le curseur (0 px), donc les ~10° sont arrivés APRÈS le relâché : une
+// vitesse armée d'environ 150 °/s sur un pas dégénéré (deux `mousemove` à
+// ~1 ms). Un banc l'a produit ; une souris à 1 000 Hz peut le produire. Et sur
+// les cinq autres, la course valait **20 %** du geste pour un seuil de 15 %.
+//
+// ➡️ La course de l'élan (`v · τ`, l'intégrale exacte de `elanDeSaisie`) est
+// bornée à une FRACTION de l'arc parcouru pendant le geste : on ne peut pas
+// « lancer » la Terre plus loin qu'une fraction de ce qu'on l'a tirée. Un pas
+// de 1 ms ne vaut plus 150 °/s, et un geste de 5° ne coule plus que de 0,6°.
+/** La course de l'élan ne dépasse pas cette fraction de l'arc du geste (le barème dit ≤ 15 % ; 12 % laisse la marge de la mesure). */
+export const FRACTION_ELAN_MAX = 0.12
+
+/**
+ * @param {object} a
+ * @param {{dLat:number,dLon:number}} a.vitesse  degrés par seconde, au relâché
+ * @param {number} a.arcDeg  l'arc parcouru pendant le geste, en degrés
+ * @returns {{vitesse:{dLat:number,dLon:number}, plafonne:boolean, courseDeg:number}}
+ */
+export function plafonnerElan({ vitesse, arcDeg, tau = 0.35, fraction = FRACTION_ELAN_MAX } = {}) {
+  const zero = { vitesse: { dLat: 0, dLon: 0 }, plafonne: false, courseDeg: 0 }
+  if (!vitesse || ![vitesse.dLat, vitesse.dLon, arcDeg, tau, fraction].every((v) => typeof v === 'number' && Number.isFinite(v))) return zero
+  if (!(arcDeg > 0) || !(tau > 0) || !(fraction > 0)) return { ...zero, plafonne: true }
+  const v = Math.hypot(vitesse.dLat, vitesse.dLon)
+  const course = v * tau
+  const max = arcDeg * fraction
+  if (course <= max) return { vitesse: { dLat: vitesse.dLat, dLon: vitesse.dLon }, plafonne: false, courseDeg: course }
+  const k = max / course
+  return { vitesse: { dLat: vitesse.dLat * k || 0, dLon: vitesse.dLon * k || 0 }, plafonne: true, courseDeg: max }
 }
 
 // ── le double-clic, reconnu ─────────────────────────────────────────────────

@@ -459,6 +459,8 @@ async function porterA(altM) {
   return (await lire1()).alt
 }
 
+const DIAG = () => page.evaluate(() => { const e = window.__exp, c = e.controls, k = e.camera; return { phiDeg: c.getPolarAngle() * 180 / Math.PI, azDeg: c.getAzimuthalAngle() * 180 / Math.PI, up: [k.up.x, k.up.y, k.up.z], cible: [c.target.x, c.target.y, c.target.z], pos: [k.position.x, k.position.y, k.position.z], levelZoom: e.modes._levelZoom, zoomVel: e.modes._zoomVel, busy: !!e.modes.busy, damping: c.enableDamping, sph: c._sphericalDelta ? [c._sphericalDelta.theta, c._sphericalDelta.phi] : null } })
+const SERIE = (f) => f.map((x) => [Math.round(x.now), +x.azimut.toFixed(3), +x.tilt.toFixed(3), +x.d.toFixed(4), x.busy ? 1 : 0, x.pointer ? 1 : 0])
 const ALT_M = Number(opt('--alt', '2000000'))
 const R = { pose: null, altViseeM: ALT_M, gestes: {} }
 for (const [nom, faire] of Object.entries(GESTES)) {
@@ -471,6 +473,7 @@ for (const [nom, faire] of Object.entries(GESTES)) {
   }
   if (!pose) throw new Error('trois chargements rates')
   pose.regime = await page.evaluate(() => ({ regimeGeste: window.__exp.regimeGeste?.() ?? null, horsDuCrop: !!window.__exp.modes.hooks?.horsDuCrop?.(), surLeBloc: !!window.__exp.modes.hooks?.surLeBloc?.(), tiltDeg: window.__exp.inclinaisonCouranteDeg?.() ?? null, mouseButtons: { ...window.__exp.controls.mouseButtons }, enableRotate: window.__exp.controls.enableRotate, enablePan: window.__exp.controls.enablePan }))
+  pose.diag = await DIAG()
   etape(`pose ${JSON.stringify(pose)}`)
   if (!R.pose) R.pose = pose
   // ⚠️ Chrome sans tête perd parfois son cadre en plein geste (« detached Frame »,
@@ -503,12 +506,15 @@ for (const [nom, faire] of Object.entries(GESTES)) {
   if (nom.startsWith('menu-contextuel')) s.menu = await page.evaluate(() => ({ evenements: window.__GE.menu, defaultPrevented: window.__GE.defautBulle, captureAvantCanvas: window.__GE.defaut }))
   const N = Number(opt('--repete', '1'))
   if (N > 1) {
+    s.serie = SERIE(f); s.diagAvant = R.pose?.diag ?? null
     R.gestes[nom] = [s]
     for (let k = 1; k < N; k++) {
       for (let essai = 0; essai < 3; essai++) { try { await neuf(); await porterRegime(ALT_M); break } catch (err) { etape(`  chargement rate (${err.message.slice(0, 80)})`); await pageNeuve() } }
+      const diagAvant = await DIAG()
       let f2 = null
       for (let essai = 0; essai < 3 && !f2; essai++) { try { f2 = await faire() } catch (err) { etape(`  geste rate (${err.message.slice(0, 60)})`); f2 = null; await pageNeuve(); try { await neuf(); await porterRegime(ALT_M) } catch {} } }
       const s2 = resume(f2 || [])
+      s2.diagAvant = diagAvant; s2.diagApres = await DIAG(); s2.serie = SERIE(f2 || [])
       R.gestes[nom].push(s2)
       etape(`${nom} #${k + 1} saisi=${s2.saisiVsPointeurPx} px rot=${s2.rotationDeg}deg centre0=${s2.centre0DerivePx} px`)
     }

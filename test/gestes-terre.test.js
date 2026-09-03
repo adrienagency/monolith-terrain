@@ -1,10 +1,11 @@
 import test from 'node:test'
+import fs from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   GESTE, REGIME, PIVOT_VERS_LE_CURSEUR, PX_PAR_CRAN_ZOOM, CRAN, MAX_CRANS_PAR_PAS,
   CRANS_DOUBLE_CLIC, DEG_PAR_PIXEL, INCLINAISON_MAX_DEG, INCLINAISON_MIN_DEG,
   DOUBLE_CLIC_MAX_MS, DOUBLE_CLIC_SLOP_PX,
-  gesteDuBouton, inclinaisonPermise, regimeTerreActif, zoomDuGlisseDroit, zoomDuDoubleClic,
+  gesteDuBouton, inclinaisonPermise, regimeTerreActif, plafonnerElan, FRACTION_ELAN_MAX, CRANS_UN_NIVEAU, zoomDuGlisseDroit, zoomDuDoubleClic,
   pasInclinaison, estDoubleClic,
 } from '../src/monde/gestes-terre.js'
 
@@ -187,7 +188,11 @@ test('GE2 ⑮ — ⛔ LA CONTRADICTION AVEC D19 N’EST PAS TRANCHÉE PAR L’EX
   // ➡️ Le prédicat vaut D19, et il est SEUL sur sa ligne pour qu'Adrien bascule
   // en un caractère. Ce test le fige : si quelqu'un le retourne, il devra
   // toucher ce fichier et lire ce commentaire.
-  assert.equal(PIVOT_VERS_LE_CURSEUR, false, 'D19 tant qu’Adrien n’a pas tranché')
+  // ⚡ ARBITRÉ LE 2026-09-04 (coordinateur, sur la lettre d'Adrien) : D19 = la
+  // MOLETTE, qui reste au centre ; Google = le DOUBLE-CLIC, vers le curseur. Les
+  // deux règles ne se contredisent plus lues chacune sur son geste. Le prédicat
+  // reste seul sur sa ligne : Adrien peut le retourner en un caractère.
+  assert.equal(PIVOT_VERS_LE_CURSEUR, true, 'arbitrage du 2026-09-04 : le double-clic vise le curseur')
 })
 
 test('GE2 ⑯ — ⛔ « !!regime » EST FAUX : le crop n’est pas le régime de la Terre', () => {
@@ -204,4 +209,43 @@ test('GE2 ⑯ — ⛔ « !!regime » EST FAUX : le crop n’est pas le régime d
   assert.equal(regimeTerreActif(undefined), false)
   // et le piège lui-même, nommé : la double négation ne dit PAS la même chose
   assert.notEqual(regimeTerreActif(REGIME.CROP), !!REGIME.CROP, '« !!regime » est le défaut que ce prédicat remplace')
+})
+
+test('GE2 ⑰ — 200 px de clic droit = UN niveau = ×2, et le niveau est celui de modes.js', () => {
+  // Le noteur (C1) attend ×1,5 à ×3 pour 200 px, et une symétrie avant/arrière
+  // à 5 %. Un niveau de l'escalier fait CRANS_PAR_NIVEAU crans ; 200 px doivent
+  // en valoir exactement autant — et `CRANS_UN_NIVEAU`, recopié ici pour rester
+  // pur, doit rester égal à la constante de `modes.js`. Ce test lit le texte.
+  const modes = fs.readFileSync(new URL('../src/modes.js', import.meta.url), 'utf8')
+  const m = modes.match(/export const CRANS_PAR_NIVEAU = (\d+)/)
+  assert.ok(m, 'modes.js exporte CRANS_PAR_NIVEAU')
+  assert.equal(CRANS_UN_NIVEAU, Number(m[1]), 'CRANS_UN_NIVEAU (gestes-terre) = CRANS_PAR_NIVEAU (modes)')
+  assert.equal(200 / PX_PAR_CRAN_ZOOM, CRANS_UN_NIVEAU, '200 px = un niveau')
+  assert.equal(CRANS_DOUBLE_CLIC, CRANS_UN_NIVEAU, 'le double-clic vaut un niveau : ×2 à gauche, ÷2 à droite')
+  assert.equal(zoomDuDoubleClic(0), -zoomDuDoubleClic(2), 'symétrique')
+})
+
+test('GE2 ⑱ — l’élan est plafonné par l’arc du geste, jamais par un réglage de vitesse', () => {
+  // C8, huit chargements du noteur : 3 sur 8 armaient ~150 °/s sur un pas de
+  // 1 ms et la Terre partait de 10° pour un geste de 3,4°. La course v·τ ne
+  // dépasse plus FRACTION_ELAN_MAX de l'arc tiré.
+  const tau = 0.35
+  const fou = plafonnerElan({ vitesse: { dLat: 0, dLon: 150 }, arcDeg: 3.4, tau })
+  assert.equal(fou.plafonne, true)
+  assert.ok(Math.abs(fou.courseDeg - 3.4 * FRACTION_ELAN_MAX) < 1e-12, `course ${fou.courseDeg}° pour 3,4° de geste`)
+  assert.ok(Math.hypot(fou.vitesse.dLat, fou.vitesse.dLon) * tau <= 3.4 * 0.15 + 1e-12, 'sous les 15 % du barème')
+  // un lancer modéré passe intact
+  const doux = plafonnerElan({ vitesse: { dLat: 0.3, dLon: 0.4 }, arcDeg: 10, tau })
+  assert.equal(doux.plafonne, false)
+  assert.deepEqual(doux.vitesse, { dLat: 0.3, dLon: 0.4 })
+  // la direction est conservée quand on plafonne
+  const p = plafonnerElan({ vitesse: { dLat: 30, dLon: 40 }, arcDeg: 1, tau })
+  assert.ok(Math.abs(p.vitesse.dLat / p.vitesse.dLon - 0.75) < 1e-12, 'même direction')
+  // sans arc (un clic sans mouvement), pas d'élan du tout
+  assert.deepEqual(plafonnerElan({ vitesse: { dLat: 5, dLon: 5 }, arcDeg: 0, tau }).vitesse, { dLat: 0, dLon: 0 })
+  // aucune entrée dégénérée ne produit de NaN
+  for (const v of [NaN, Infinity, undefined, null]) {
+    const r = plafonnerElan({ vitesse: { dLat: v, dLon: 1 }, arcDeg: 5, tau })
+    assert.ok(Number.isFinite(r.vitesse.dLat) && Number.isFinite(r.vitesse.dLon), `entrée ${String(v)}`)
+  }
 })

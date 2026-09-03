@@ -298,7 +298,13 @@ export const BUDGET_NIVEAU = PAS_NIVEAU
 // cran aurait divisé la molette par deux au passage, ce que personne n'a
 // demandé ; la dériver du niveau laisse la molette **au bit près** ce qu'elle
 // était.
-const CRANS_PAR_NIVEAU = 20
+export const CRANS_PAR_NIVEAU = 20
+// Le zoom d'orbite est en `exp(deltaY × k)` : `k` est exporté pour que le
+// clic droit glissé et le double-clic (GE2) puissent y doser UN NIVEAU (×2) avec
+// les mêmes crans qu'en surface — sinon 20 crans de 100 y feraient ×9.
+export const ORB_ZOOM_LOG_PAR_DELTA = 0.0011
+/** Le `deltaY` d'orbite qui vaut un cran de surface : 20 crans = ×2 des deux côtés de la traversée. */
+export const ORB_CRAN_DELTA_Y = Math.log(2) / CRANS_PAR_NIVEAU / ORB_ZOOM_LOG_PAR_DELTA
 const ZOOM_IMPULSE = BUDGET_NIVEAU / (CRANS_PAR_NIVEAU * ZOOM_TAU) // ≈ 0,0289 log-dist/s par cran
 
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
@@ -727,7 +733,7 @@ export class Modes {
     e.preventDefault()
     if (this.busy || this.travel) return
     if (e.deltaY < 0) this._diveArmed = true // inward intent arms the dive
-    const f = Math.exp(e.deltaY * 0.0011)
+    const f = Math.exp(e.deltaY * ORB_ZOOM_LOG_PAR_DELTA)
     this.orbAltTarget = THREE.MathUtils.clamp(
       this.orbAltTarget * f,
       ORB_ALT_MIN, // le plancher orbital est parti — voir ORB_ALT_MIN

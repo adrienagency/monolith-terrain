@@ -234,11 +234,24 @@ test('② quinquies surface : à mi-glissé le compteur porte la moitié du nive
 
 // ══════════ ③ LE CLIC N'EST PLUS JETÉ PENDANT LE VOL DU MNT (main.js) ══════
 
-test('③ main.js : le clic-plongée accepte la fenêtre bornée sans `dem`, et convertit par `latLonDuBloc` — la garde de R32, appliquée au clic', () => {
+test('③ main.js : le clic simple ne plonge plus — la plongée est celle du DOUBLE-clic (GE2, tour 2), et la garde de R32 la suit', () => {
+  // Guide Google Earth v4, § « Using a Mouse » : « double-click … to zoom in to
+  // that point. Single-click to stop ». Arbitré le 2026-09-04 : la plongée R35
+  // quitte le clic simple et devient le geste du double-clic (sur le crop ; dans
+  // le régime de la Terre, le double-clic est le zoom épinglé de gestes-terre).
+  // Ce test lit le texte : le gestionnaire doit RECONNAÎTRE le double avant de
+  // plonger, éteindre le mouvement au clic simple, et garder les gardes de R32.
   const src = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
   const debut = src.indexOf("renderer.domElement.addEventListener('pointerup', (e) => {\n  if (!_clickArmed")
   assert.ok(debut > 0, 'le gestionnaire du clic est là')
   const corps = src.slice(debut, src.indexOf('modes.diveTo(', debut))
+  const iDouble = corps.indexOf('reconnaitreDoubleClic(e)')
+  assert.ok(iDouble > 0, 'le gestionnaire reconnaît le double-clic')
+  const iStop = corps.indexOf('eteindreLeMouvement()')
+  assert.ok(iStop > 0 && iStop < iDouble, 'le clic simple éteint le mouvement AVANT de savoir s’il est double — c’est le « stop » documenté')
+  assert.ok(/if \(!double\) return/.test(corps), 'sans double-clic, rien ne plonge')
+  assert.ok(corps.indexOf('if (!double) return') < corps.indexOf('plongeDepuisGlobe'), 'la plongée d’orbite est derrière la porte du double')
+  // les gardes de R32/R35, inchangées
   assert.ok(corps.includes("(!dem && !terrain.fenetreBornee)"), 'la garde tolère `dem` nul si la fenêtre bornée est posée')
   assert.ok(!/\|\| !dem \|\|/.test(corps), 'plus de `!dem` seul : c’est lui qui jetait le clic 8 (`.banc/R35/clic-apres-2.json`)')
   assert.ok(corps.includes('latLonDuBloc(px, pz)') && !corps.includes('worldToLatLon(dem, px, pz)'), 'la conversion passe par le même chemin que `viseeAuSol`')

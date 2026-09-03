@@ -145,7 +145,8 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 import { creerVeilleRepos } from './monde/veille-repos.js'
 import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
 import { deplacementDeSaisie, elanDeSaisie, pointSousLePixel, latLonDe, vecteurDe, enroulerLon, LAT_MAX_DEG } from './monde/saisie-terre.js'
-import { GESTE, REGIME, regimeTerreActif, gesteDuBouton, zoomDuGlisseDroit, zoomDuDoubleClic, pasInclinaison, estDoubleClic, PIVOT_VERS_LE_CURSEUR } from './monde/gestes-terre.js'
+import { GESTE, REGIME, CRAN, regimeTerreActif, gesteDuBouton, zoomDuGlisseDroit, zoomDuDoubleClic, pasInclinaison, estDoubleClic, plafonnerElan, PIVOT_VERS_LE_CURSEUR } from './monde/gestes-terre.js'
+import { ORB_CRAN_DELTA_Y } from './modes.js'
 import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
@@ -2849,6 +2850,26 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   // le seuil de dérive dépend de CE QUI a touché l'écran (voir gestes.js) :
   // 6 px pour une souris, 14 pour un doigt, qui roule en s'écrasant
   if (!isTap({ moved, elapsedMs: performance.now() - _clickDownT, pointerType: e.pointerType, multiTouch: _clickMulti })) return
+  // ══════════ C5 — LE CLIC SIMPLE NE FAIT RIEN, SAUF ARRÊTER — GE2, tour 2 ══
+  //
+  // Guide Google Earth v4, § « Using a Mouse » : *« double-click … to zoom in to
+  // that point. Single-click to stop »* ; Earth Web : le zoom est le DOUBLE-clic.
+  // Arbitré par le coordinateur le 2026-09-04 sur la lettre d'Adrien
+  // (« exactement comme Google Earth ») : **la plongée R35 quitte le clic simple
+  // et devient le geste du double-clic.** Le clic simple, lui, éteint l'élan et
+  // le glissé de zoom qui courent — c'est le « stop » documenté.
+  //
+  // ⚠️ La reconnaissance du double est partagée avec `surClicGeste` (le régime
+  // de la Terre, plus bas) par une marque sur l'événement : les deux
+  // gestionnaires voient le même `pointerup`, et deux compteurs de « clic
+  // précédent » se seraient contredits.
+  eteindreLeMouvement()
+  const double = reconnaitreDoubleClic(e)
+  if (!double) return
+  // Dans le régime de la Terre (orbite, surface hors du crop), le double-clic
+  // est le zoom ÉPINGLÉ de `surClicGeste` (×2 vers le point désigné) ; ici ne
+  // reste que le crop, où la plongée R35 garde son sens (le pivot R13).
+  if (regimeTerreActif(regimeGeste())) return
   if (!modes || modes.busy || modes.travel) return
   _clickNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
   // ══════════ EN ORBITE : LE CLIC DÉSIGNE UN LIEU SUR LA PLANÈTE ════════════
@@ -13673,6 +13694,8 @@ const saisieTerre = {
   saisi: null, // G : le point de la sphère saisi au clic, {lat, lon}
   pointeur: null, // [px, py] dans le canevas
   elan: { dLat: 0, dLon: 0 }, // degrés par seconde, après le relâché
+  arcDeg: 0, // l'arc parcouru pendant le geste (le plafond de l'élan s'y mesure)
+  elanPlafonne: false, // sonde : le dernier relâché a-t-il été plafonné ?
   derniers: [], // [{t, dLat, dLon}] : les derniers pas, pour la vitesse au relâché
   images: 0, // images où un pas a été appliqué (sonde)
   recentrages: 0, // recentrages du bloc demandés (sonde)
@@ -13743,10 +13766,17 @@ function relacherSaisie(avecElan) {
     // récent, pas d'élan — c'est le geste de Google Earth, qui ne « jette »
     // que ce qui bougeait
     if (fenetre.length >= 2 && duree > 0 && performance.now() - fin < 100) {
-      saisieTerre.elan = {
+      // ⚠️ **PLAFONNÉ PAR L'ARC DU GESTE — C8, huit chargements du noteur** : 3
+      // sur 8 armaient ~150 °/s sur un pas de 1 ms (deux `mousemove` collés) et
+      // la Terre partait de 10° au relâché pour un geste de 3,4°. La course
+      // `v · τ` ne dépasse plus `FRACTION_ELAN_MAX` de ce qu'on a tiré.
+      const brut = {
         dLat: fenetre.slice(1).reduce((a, d) => a + d.dLat, 0) / duree,
         dLon: fenetre.slice(1).reduce((a, d) => a + d.dLon, 0) / duree,
       }
+      const p = plafonnerElan({ vitesse: brut, arcDeg: saisieTerre.arcDeg })
+      saisieTerre.elan = p.vitesse
+      saisieTerre.elanPlafonne = p.plafonne
     }
   }
   surRelacheDeCamera()
@@ -13764,7 +13794,9 @@ function surPointerDownSaisie(ev) {
   saisieTerre.saisi = g
   saisieTerre.pointeur = [ev.clientX, ev.clientY]
   saisieTerre.elan = { dLat: 0, dLon: 0 }
+  saisieTerre.arcDeg = 0
   saisieTerre.derniers = []
+  gestesTerre.epingle = null // une main posée reprend le point : l'épingle tombe
   try { renderer.domElement.setPointerCapture(ev.pointerId) } catch {}
   surPriseDeCamera()
 }
@@ -13787,7 +13819,7 @@ renderer.domElement.addEventListener('pointercancel', annulerSaisie)
 // l'élan du glissé précédent (τ = 0,35 s, encore à 39 % après 20 images) qui
 // continuait sous la molette. Un geste nouveau reprend la main : D19 dit « je
 // scrolle vers le point visé au centre », et le centre ne doit pas glisser.
-renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0 }, { passive: true })
+renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0; gestesTerre.epingle = null }, { passive: true })
 
 // ══════════ LE RESTE DU VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ════════════
 //
@@ -13824,11 +13856,14 @@ const gestesTerre = {
   pointerId: null,
   pointeur: null, // [px, py] du dernier `pointermove`
   precedent: null, // le dernier clic, pour reconnaître le double
+  epingle: null, // {saisi, pointeur, jusquA} : le point tenu sous un pixel pendant un zoom au double-clic
   dInclinaisonDeg: 0, // le pas d'inclinaison en attente, appliqué à l'image
   dCapDeg: 0,
   crans: 0, // les `deltaY` de zoom en attente
   images: 0, // sonde : images où un pas a été appliqué
   refus: 0, // sonde : gestes tombés hors du régime permis
+  inclinaisonManuelle: false, // l'utilisateur a incliné lui-même dans ce régime : D16 ter ne redresse pas
+  retoursNadir: 0, // sonde : redressements automatiques armés (D16 ter, hors du crop)
 }
 window.__exp.gestesTerre = gestesTerre
 
@@ -13850,6 +13885,20 @@ window.__exp.regimeGeste = regimeGeste
 function eteindreLeMouvement() {
   saisieTerre.elan.dLat = 0
   saisieTerre.elan.dLon = 0
+  // et le glissé de zoom qui coule encore (`_applyZoom`), et l'épingle d'un
+  // double-clic : « stop motion », c'est tout le mouvement
+  if (modes && typeof modes._zoomVel === 'number') modes._zoomVel = 0
+  gestesTerre.epingle = null
+}
+// Le double-clic, reconnu UNE fois par `pointerup` quel que soit le nombre de
+// gestionnaires qui le demandent (marque sur l'événement).
+function reconnaitreDoubleClic(ev) {
+  if (ev._ge2Double !== undefined) return ev._ge2Double
+  const clic = { t: performance.now(), x: ev.clientX, y: ev.clientY, bouton: ev.button }
+  const double = estDoubleClic({ precedent: gestesTerre.precedent, ...clic })
+  gestesTerre.precedent = double ? null : clic
+  ev._ge2Double = double
+  return double
 }
 
 // L'inclinaison COURANTE, en degrés : l'angle polaire d'OrbitControls. Hors du
@@ -13921,15 +13970,33 @@ function relacherGeste(ev) {
 // fois, et R35 est un acquis verrouillé par des tests.
 // **Le DROIT, lui, ne faisait rien** — c'est la moitié manquante :
 // « Zoom away from cursor location — Double click (right) ».
+// ⚡ **TOUR 2 (2026-09-04) : LE GAUCHE EST RÉÉCRIT, ET LA RAISON D'AVANT ÉTAIT
+// FAUSSE.** « Le clic simple de R35 fait déjà exactement ça » — non : le noteur
+// a mesuré que la plongée R35 recentre le point cliqué (470 px du centre, 236 px
+// du curseur), donc elle ne vise ni le centre ni le curseur, et Google n'a pas
+// de clic simple qui zoome. Arbitrage du coordinateur : **double-clic gauche =
+// ×2 vers le point cliqué** (`PIVOT_VERS_LE_CURSEUR`), **droit = ÷2,
+// symétrique**. Le point désigné est ÉPINGLÉ sous le curseur pendant la course
+// du zoom, par la saisie de R32 elle-même (voir `appliquerSaisieTerre`).
 function surClicGeste(ev) {
   if (ev.pointerType !== 'mouse') return
   const regime = regimeGeste()
   if (!regime || regime === REGIME.CROP) return
-  const clic = { t: performance.now(), x: ev.clientX, y: ev.clientY, bouton: ev.button }
-  const double = estDoubleClic({ precedent: gestesTerre.precedent, ...clic })
-  gestesTerre.precedent = double ? null : clic
-  if (!double || ev.button !== 2) return
+  if (!reconnaitreDoubleClic(ev)) return
+  if (ev.button !== 0 && ev.button !== 2) return
   gestesTerre.crans += zoomDuDoubleClic(ev.button)
+  epingler(ev.clientX, ev.clientY)
+}
+// L'ÉPINGLE : le point de la sphère que le zoom doit garder sous un pixel de
+// l'écran. Avec `PIVOT_VERS_LE_CURSEUR`, c'est le point sous le curseur (Google :
+// « Zoom toward cursor location ») ; sinon le point du centre (D19), que le
+// zoom radial garde déjà — l'épingle y est alors une identité, et le prédicat
+// reste le seul endroit où le choix s'écrit.
+const EPINGLE_MS = 2500 // la course du glissé de zoom (τ = 1,2 s) est spente à ~3 τ
+function epingler(clientX, clientY) {
+  const pointeur = PIVOT_VERS_LE_CURSEUR ? [clientX, clientY] : [innerWidth / 2, innerHeight / 2]
+  const saisi = pointSaisi(pointeur[0], pointeur[1])
+  gestesTerre.epingle = saisi ? { saisi, pointeur, jusquA: performance.now() + EPINGLE_MS } : null
 }
 
 // ⛔ **AUCUN MENU CONTEXTUEL SUR LE GLOBE — et c'est la référence qui le dit**,
@@ -13967,6 +14034,11 @@ renderer.domElement.addEventListener('pointercancel', relacherGeste)
 // réglage à tenir d'accord avec quoi que ce soit.
 function appliquerInclinaison(dInclinaisonDeg, dCapDeg) {
   if (!dInclinaisonDeg && !dCapDeg) return false
+  // ⛔ pas pendant un balayage de pose (le retour au nadir de D16 ter, ou la
+  // pente d'arrivée) : deux écrivains de la caméra sur la même image, c'est la
+  // classe de défaut que R4 a payée
+  if (modes._fonduPose) return false
+  gestesTerre.inclinaisonManuelle = true
   const d = controls.getDistance()
   if (!(d > 0)) return false
   const phi = controls.getPolarAngle() + THREE.MathUtils.degToRad(dInclinaisonDeg)
@@ -13982,11 +14054,45 @@ function appliquerInclinaison(dInclinaisonDeg, dCapDeg) {
   return true
 }
 
+// ══════════ D16 TER, LE TROU QUE LE CAP BIMODAL A RÉVÉLÉ — GE2, tour 2 ═════
+//
+// ⚠️ **MESURÉ, HUIT CHARGEMENTS (`.banc/GE2/c6-avant.json`)** : à 2,4 Mm hors
+// du crop, le cap d'un même glissé de 200 px rendait −50° ou −69° selon le
+// chargement. La différence n'était pas dans le geste : **elle était dans la
+// pose d'AVANT**. Sur les chargements où la pose de démarrage tombe au-dessus
+// de `SEUIL_NAISSANCE_M` (33,05 km contre 32,27 — le piège ② du noteur), le
+// crop ne naît jamais, donc il ne meurt jamais, donc `_armerRetourNadir` —
+// qui n'est armé QUE sur la mort du crop — ne part jamais : **l'inclinaison
+// oblique du vol de présentation (54,3° d'angle polaire) reste posée hors du
+// crop, jusqu'à 2 400 km d'altitude.** Un cap tourné sur un cône de 54° n'est
+// pas un cap tourné au nadir : −69° contre −50°, avec 17° de roulis du sol.
+//
+// ⛔ **C'est une violation de D16 ter** (« la vue de trois quarts arrive au
+// bloc, pas avant »), antérieure à GE2, que le crop de démarrage masquait une
+// fois sur deux. Le redressement AUTOMATIQUE est donc armé ici aussi — par le
+// chemin qui existe, le balayage de `_armerRetourNadir` — quand la vue est
+// hors du crop, inclinée, et que **personne ne l'a inclinée à la main** : c'est
+// exactement la distinction manuelle / automatique de `gestes-terre.js` §3,
+// et `inclinaisonManuelle` en est le témoin.
+const SEUIL_HERITE_DEG = 1
+function redresserSiHerite(regime) {
+  if (regime !== REGIME.SURFACE || gestesTerre.inclinaisonManuelle) return
+  if (!modes || modes.busy || modes.travel || modes._fonduPose || modes._diveTween || (tween && tween.active)) return
+  if (veilleCrop?.pose) return
+  if (THREE.MathUtils.radToDeg(controls.getPolarAngle()) <= SEUIL_HERITE_DEG) return
+  // « toute porte qui confie la caméra rend D'ABORD ce que le cadrage a emprunté »
+  // (test/damier-cadre.test.js) : le balayage est un pilote, il rend avant.
+  quitteCadrageDamier()
+  modes._armerRetourNadir()
+  if (modes._fonduPose) gestesTerre.retoursNadir++
+}
+
 // Le pas de l'image : le zoom en attente part par la porte de la molette,
 // l'inclinaison se pose. Appelé depuis `appliquerSaisieTerre`, donc AVANT
 // `updateCameraMotion` — le même ordre que R32, pour la même raison.
 function appliquerGestesTerre() {
   const regime = regimeGeste()
+  if (regime !== REGIME.SURFACE) gestesTerre.inclinaisonManuelle = false // sur le crop et en orbite, c'est la machine qui pose
   if (!regime || regime === REGIME.CROP) {
     if (gestesTerre.actif !== GESTE.INERTE) relacherGeste(null)
     gestesTerre.crans = 0
@@ -13994,6 +14100,7 @@ function appliquerGestesTerre() {
     gestesTerre.dCapDeg = 0
     return
   }
+  redresserSiHerite(regime)
   if (gestesTerre.crans) {
     const dy = gestesTerre.crans
     gestesTerre.crans = 0
@@ -14006,7 +14113,17 @@ function appliquerGestesTerre() {
     const p = PIVOT_VERS_LE_CURSEUR && gestesTerre.pointeur
       ? { clientX: gestesTerre.pointeur[0], clientY: gestesTerre.pointeur[1] }
       : { clientX: innerWidth / 2, clientY: innerHeight / 2 }
-    modes._zoomGesture({ deltaY: dy, ...p, preventDefault: () => {} })
+    // ⛔ **UN APPEL PAR CRAN, PAS UN PAR IMAGE — C1, mesuré.** En surface,
+    // `_zoomGesture` ajoute UNE impulsion par appel quel que soit `deltaY` : un
+    // appel par image avec le cumul faisait dépendre le zoom du nombre d'images
+    // du geste, et le noteur lisait ×1,894 vers l'avant contre ×2,128 vers
+    // l'arrière pour 200 px (13 %, seuil 5 %). En orbite, c'est la GRANDEUR de
+    // `deltaY` qui compte (`exp(deltaY · k)`) : on y dose le même niveau
+    // (`ORB_CRAN_DELTA_Y`, 20 crans = ×2) pour que le geste vaille pareil des
+    // deux côtés de la traversée.
+    const crans = Math.round(dy / CRAN)
+    if (modes.mode === 'orbital') modes._zoomGesture({ deltaY: crans * ORB_CRAN_DELTA_Y, ...p, preventDefault: () => {} })
+    else for (let k = 0; k < Math.abs(crans); k++) modes._zoomGesture({ deltaY: Math.sign(crans) * CRAN, ...p, preventDefault: () => {} })
     gestesTerre.images++
   }
   if (gestesTerre.dInclinaisonDeg || gestesTerre.dCapDeg) {
@@ -14083,6 +14200,7 @@ function appliquerSaisieTerre(dt) {
   if (!S) return
   const hauteur = Math.hypot(pose.position[0], pose.position[1], pose.position[2]) - R_GLOBE
   let pas = null
+  const inclineeDeg = Math.abs(THREE.MathUtils.radToDeg(controls.getPolarAngle()))
   if (saisieTerre.active && saisieTerre.pointeur) {
     // ⚠️ **UNE SEULE ITÉRATION QUAND LA VUE EST INCLINÉE — GE2, et c'est une
     // mesure.** `deplacementDeSaisie` itère sur `poseNadir`, un modèle de caméra
@@ -14094,7 +14212,6 @@ function appliquerSaisieTerre(dt) {
     // que l'utilisateur regarde — donc elle reste juste sous toute inclinaison ;
     // le résidu se résorbe à l'image suivante, qui relit la réalité. C'est
     // exactement l'argument que `saisie-terre.js` écrit pour le premier ordre.
-    const inclineeDeg = Math.abs(THREE.MathUtils.radToDeg(controls.getPolarAngle()))
     const d = deplacementDeSaisie({
       saisi: saisieTerre.saisi, sousCamera: S, hauteur, poseReelle: pose,
       iterations: inclineeDeg > SEUIL_MODELE_NADIR_DEG ? 1 : undefined,
@@ -14102,12 +14219,30 @@ function appliquerSaisieTerre(dt) {
     })
     saisieTerre.residuDeg = d.residuDeg
     pas = d
+    saisieTerre.arcDeg += Math.hypot(d.dLat, d.dLon * Math.cos(S.lat * Math.PI / 180))
     saisieTerre.derniers.push({ t: performance.now(), dLat: d.dLat, dLon: d.dLon })
     if (saisieTerre.derniers.length > 12) saisieTerre.derniers.shift()
   } else if (saisieTerre.elan.dLat !== 0 || saisieTerre.elan.dLon !== 0) {
     const e = elanDeSaisie({ vitesse: saisieTerre.elan, dt })
     saisieTerre.elan = e.vitesse
     pas = e.pas
+  } else if (gestesTerre.epingle) {
+    // L'ÉPINGLE D'UN DOUBLE-CLIC (GE2, tour 2) : le zoom est radial (hors du
+    // crop, `_applyZoom` vise la cible), donc le point cliqué file vers le bord
+    // à mesure qu'on s'approche ; on le RAMÈNE sous son pixel à chaque image par
+    // la saisie elle-même — la même contrainte, la même translation rigide, donc
+    // le même `|Δ ln d| = 0`. C'est « Zoom toward cursor location », obtenu
+    // sans écrire une seconde loi de zoom.
+    const E = gestesTerre.epingle
+    if (performance.now() > E.jusquA) gestesTerre.epingle = null
+    else {
+      const d = deplacementDeSaisie({
+        saisi: E.saisi, sousCamera: S, hauteur, poseReelle: pose,
+        iterations: inclineeDeg > SEUIL_MODELE_NADIR_DEG ? 1 : undefined,
+        ...projectionSaisie(E.pointeur[0], E.pointeur[1]),
+      })
+      pas = d
+    }
   }
   if (!pas || (pas.dLat === 0 && pas.dLon === 0)) { recentrerSiBesoin(); return }
   if (deplacerSousLaCamera(S, pas)) saisieTerre.images++
