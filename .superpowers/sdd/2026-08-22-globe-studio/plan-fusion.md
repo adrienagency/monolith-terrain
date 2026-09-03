@@ -734,3 +734,4 @@ pas à contourner.
 ⚠️ **Conflit prévu** : B5 et BT-I peuvent toucher `scripts/build-bathy-tiles.mjs`
 et `dem.js`. B5 a ordre de le dire en tête de rapport ; fusion à la main.
 | **R37** | **raffinement partiel** contre le flou de zoom (dessiner les enfants prêts, parent seulement sous les manquants ; prélecture ; pas d'éviction sous un parent dessiné) — `_traverse` ~8746, `veille-repos.test.js` ⑦ à réécrire | `wt-raf` | en vol |
+| ~~GE2~~ | **FUSIONNÉ** — clic droit V = zoom (centre 0 px), clic droit H inerte (doc muette), milieu/Ctrl/Maj = inclinaison +20,31° et cap −50,000° à |Δln d| = 0, Alt = saisie seule 0,06 px, double-clic droit, inertie 4,35 °/s ; D19 glissé 0,00 px, molette 0,00 px, clic 1,0171, D16 ter 0,000° sur 1 194 images ; **arbitrage ouvert `PIVOT_VERS_LE_CURSEUR`** (double-clic : Google = curseur, D19 = centre) ; 4 774 · 0, audit 254 | `wt-ge2` | ✅ |
