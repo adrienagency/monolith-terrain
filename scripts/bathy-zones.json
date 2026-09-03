@@ -61,7 +61,9 @@
         -75.9,
         37.6
       ],
-      "_note": "BT-I — Embouchure et bas de la baie (caps Charles et Henry, Thimble Shoal, Hampton Roads). 106 GeoTIFF, 4 m natif."
+      "_note": "BT-I — Embouchure et bas de la baie (caps Charles et Henry, Thimble Shoal, Hampton Roads). 106 GeoTIFF, 4 m natif.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "chesa-median",
@@ -73,7 +75,9 @@
         -76.1,
         38.4
       ],
-      "_note": "BT-I — Bassin median de la baie. 46 GeoTIFF, 4 m natif."
+      "_note": "BT-I — Bassin median de la baie. 46 GeoTIFF, 4 m natif.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "virginia",
@@ -85,7 +89,9 @@
         -75.1,
         37
       ],
-      "_note": "BT-I — Plateau au large de Virginia Beach. 6 GeoTIFF, 8 m natif."
+      "_note": "BT-I — Plateau au large de Virginia Beach. 6 GeoTIFF, 8 m natif.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "ny-bight",
@@ -97,7 +103,9 @@
         -73.7,
         40.7
       ],
-      "_note": "BT-I — Sortie de l Hudson / New York Bight. 34 GeoTIFF, 4 et 8 m."
+      "_note": "BT-I — Sortie de l Hudson / New York Bight. 34 GeoTIFF, 4 et 8 m.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "georges",
@@ -109,7 +117,9 @@
         -67.3,
         41.5
       ],
-      "_note": "BT-I — Georges Bank. UNE dalle de 16 m couvrant 1,2 deg2 : plafond z10, pas z13 — le natif ne le porterait pas."
+      "_note": "BT-I — Georges Bank. UNE dalle de 16 m couvrant 1,2 deg2 : plafond z10, pas z13 — le natif ne le porterait pas.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "louisiane",
@@ -121,7 +131,9 @@
         -90.3,
         29
       ],
-      "_note": "BT-I — Plateau louisianais, large de Terrebonne. 10 GeoTIFF, 4 et 8 m."
+      "_note": "BT-I — Plateau louisianais, large de Terrebonne. 10 GeoTIFF, 4 et 8 m.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "floride-o",
@@ -133,7 +145,9 @@
         -83,
         27.7
       ],
-      "_note": "BT-I — Plateau ouest-Floride, large de Tampa. 20 GeoTIFF, 4/8/16 m."
+      "_note": "BT-I — Plateau ouest-Floride, large de Tampa. 20 GeoTIFF, 4/8/16 m.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "puget",
@@ -145,7 +159,9 @@
         -122.25,
         47.8
       ],
-      "_note": "BT-I — ⛔ PAS DE BLUETOPO ICI, et c est mesure : 0 dalle publiee sur 278 dans -126..-121 / 45..50, tout le Pacifique Nord-Ouest. Remplacee par le DEM NCEI Puget Sound 1/3 arc-seconde (10,3 m, NAVD88), meme regime juridique. Fond le plus bas du pivot -298,33 m a 47,4546 N / -122,4225 E ; le bassin principal est documente autour de -280 m."
+      "_note": "BT-I — ⛔ PAS DE BLUETOPO ICI, et c est mesure : 0 dalle publiee sur 278 dans -126..-121 / 45..50, tout le Pacifique Nord-Ouest. Remplacee par le DEM NCEI Puget Sound 1/3 arc-seconde (10,3 m, NAVD88), meme regime juridique. Fond le plus bas du pivot -298,33 m a 47,4546 N / -122,4225 E ; le bassin principal est documente autour de -280 m.",
+      "blendDepthM": 2,
+      "_fondu": "BT-I — La bande de fondu de fuseBathymetry vaut 25 m de PROFONDEUR par defaut : elle sert de substitut a la DISTANCE A LA COTE. Substitut correct pour GEBCO (464 m), FAUX pour une source a 4 m. Mesure en executant fuseBathymetry sur nos propres valeurs : un fond de -11,63 m sortait a -5,21 m (45 pour cent), un fond de -19,38 m a -16,88 m ; a partir de -27 m le fondu ne fait DEJA plus rien. On la ramene a 2 m sur les zones fines. ⚠️ Le rivage ne bouge pas : la branche TERRE de fuseBathymetry est EN AMONT du fondu, et deep = min(s, level - SEA_EPS) interdit toujours a la source marine d emerger. On raccourcit la transition SOUS l eau, on ne deplace pas la ligne d eau."
     },
     {
       "id": "erie",

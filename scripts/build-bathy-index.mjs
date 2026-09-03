@@ -153,6 +153,8 @@ function main() {
     // nappe, `seaLevel = 0`, la surface du lac à +456 m est classée TERRE, et le
     // fond que le socle porte déjà n'est jamais lu.
     const nappe = Number.isFinite(d.waterLevelM) ? Number(d.waterLevelM) : undefined
+    // BT-I : la bande de fondu par zone, meme mecanique que la nappe.
+    const fondu = Number.isFinite(d.blendDepthM) && d.blendDepthM > 0 ? Number(d.blendDepthM) : undefined
     if (zmaxReel <= base.zmax && nappe === undefined) {
       console.log(`  ✖ ${d.id.padEnd(10)} déclarée à z${d.zmax} mais AUCUNE tuile fine cuite → ignorée`)
       continue
@@ -165,6 +167,7 @@ function main() {
     zones.push({
       id: d.id, source: d.source, zmax: zmaxReel, bbox: d.bbox,
       ...(nappe === undefined ? {} : { waterLevelM: nappe }),
+      ...(fondu === undefined ? {} : { blendDepthM: fondu }),
     })
   }
 

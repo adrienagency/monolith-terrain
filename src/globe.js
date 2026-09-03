@@ -3491,9 +3491,28 @@ async function fondMarinTuile(z, x, y, heights, px) {
   // monde : la zone lacustre ne matchait jamais et le globe gardait +449 m
   // pendant que le damier rendait −291 m. `gl.getError()` valait 0.
   const c = tileToLatLon(x + 0.5, y + 0.5, z)
-  const nappe = zoneAt(index, c.lat, c.lon)?.waterLevelM
-  const opts = Number.isFinite(nappe) ? { seaLevel: nappe + 0.5 } : undefined
-  if (!tuilePorteDeLaMer(heights, opts ? opts.seaLevel : 0)) return null
+  const zoneIci = zoneAt(index, c.lat, c.lon)
+  const nappe = zoneIci?.waterLevelM
+  // 🔵 BT-I — la bande de fondu par zone, même raison qu'en src/dem.js.
+  // Les DEUX chemins doivent la porter : sans ça le globe et le damier
+  // divergeraient sur la même emprise, et c'est exactement l'écart que B3 a
+  // mis une session à diagnostiquer.
+  const bandeFondu = zoneIci?.blendDepthM
+  const opts =
+    Number.isFinite(nappe) || Number.isFinite(bandeFondu)
+      ? {
+          ...(Number.isFinite(nappe) ? { seaLevel: nappe + 0.5 } : {}),
+          ...(Number.isFinite(bandeFondu) ? { blendDepth: bandeFondu } : {}),
+        }
+      : undefined
+  // ⛔ BT-I — `opts ? opts.seaLevel : 0` ÉTAIT JUSTE TANT QU'`opts` NE POUVAIT
+  // CONTENIR QUE LA NAPPE. Depuis qu'il peut ne porter QUE la bande de fondu,
+  // il rend `undefined` sur une zone marine, `tuilePorteDeLaMer` compare tout
+  // à `undefined`, la tuile est refusée, et le globe rend **0,0 m** pendant
+  // que le damier rend −12 m DANS LA MÊME SESSION. Mesuré : c'est la
+  // régression que j'ai introduite en câblant `blendDepthM`, et aucune erreur
+  // n'est apparue nulle part. Le `?? 0` rétablit le niveau marin par défaut.
+  if (!tuilePorteDeLaMer(heights, opts?.seaLevel ?? 0)) return null
   const sea = new Float32Array(px * px).fill(NaN)
   const arg = { zoom: z, tx: x, ty: y, index, dst: sea, dstStride: px, dx: 0, dy: 0, dw: px, dh: px }
   let peint = await peindreBathyTuile(arg)

@@ -207,10 +207,38 @@ export function normalizeIndex(raw) {
     // ⚠️ On ne recopie qu'un nombre FINI, et on OMET le champ sinon : l'absence
     // rend exactement le comportement marin d'origine, au bit près.
     const nappe = Number.isFinite(z?.waterLevelM) ? Number(z.waterLevelM) : undefined
+    // 🔵 BT-I — `blendDepthM` DOIT SURVIVRE À CETTE LISTE BLANCHE, POUR LA MÊME
+    // RAISON QUE `waterLevelM` UN CRAN PLUS HAUT. C'est le troisième champ à
+    // franchir cette barrière et le piège n'a pas changé d'un iota : le fichier
+    // serait juste, le code serait juste, et le nombre n'arriverait jamais.
+    //
+    // CE QU'IL RÈGLE. `fuseBathymetry` fond la source fine vers le rivage sur
+    // une bande de 25 m de PROFONDEUR (`BLEND_DEPTH`), en se servant de la
+    // profondeur comme d'un substitut de la DISTANCE À LA CÔTE. Le substitut
+    // est bon pour GEBCO — à 464 m de résolution, un fond de 25 m tient dans un
+    // pixel de rivage. Il est FAUX pour une source à 4 m : l'embouchure de la
+    // Chesapeake fait 11,6 m de fond à 20 km de toute côte, et elle sortait à
+    // **−5,21 m**, soit 45 % de sa profondeur. Mesuré, puis vérifié en
+    // exécutant `fuseBathymetry` sur nos propres valeurs :
+    //     source −11,63 m → fondu 25 m : −5,21 m · fondu 2 m : −11,63 m
+    //     source −27,25 m → fondu 25 m : −27,25 m (le fondu n'y fait DÉJÀ rien)
+    // La bande n'agit donc que sur le régime que BlueTopo est justement là pour
+    // décrire, et elle est sans effet partout ailleurs.
+    //
+    // ⚠️ ET LE RIVAGE NE BOUGE PAS D'UN PIXEL, structurellement : la branche
+    // TERRE (`l >= level && !noData`) est en amont du fondu et n'est pas
+    // touchée, et `deep = min(s, level − SEA_EPS)` interdit toujours à la source
+    // marine d'émerger. On raccourcit la transition sous l'eau, on ne déplace
+    // pas la ligne d'eau. C'est la leçon des polders, et elle tient.
+    //
+    // ⚠️ Champ ABSENT ⇒ rien n'est passé ⇒ `BLEND_DEPTH` = 25 s'applique, comme
+    // avant, AU BIT. Aucune zone existante ne le porte.
+    const fondu = Number.isFinite(z?.blendDepthM) && z.blendDepthM > 0 ? Number(z.blendDepthM) : undefined
     zones.push({
       id: String(z.id ?? z.source ?? 'zone'),
       source: String(z.source ?? 'inconnue'),
       ...(nappe === undefined ? {} : { waterLevelM: nappe }),
+      ...(fondu === undefined ? {} : { blendDepthM: fondu }),
       // ⚠️ un plafond de zone ne peut qu'AJOUTER des niveaux : le relever au
       // socle est ce qui garantit qu'une zone mal cuite ne creuse pas un trou
       // dans une carte qui marchait.
