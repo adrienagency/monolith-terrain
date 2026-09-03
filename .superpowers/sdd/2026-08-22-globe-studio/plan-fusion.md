@@ -710,3 +710,26 @@ arbitrage validé sur la Caspienne, **juste mais sur-argumenté** sur la
 Méditerranée (B3 mettait les deux cas dans le même sac ; la plaine ionienne
 ratait de 13 m, pas de 200 km). ➡️ **Un noteur qui applique un barème sans le
 vérifier note la mauvaise chose.**
+
+---
+
+# 2026-09-03, soir — cinq agents en vol
+
+| tâche | sujet | arbre | état |
+|---|---|---|---|
+| **BT-A** | audit BlueTopo — **fusionné** : côtes US justes à 6,08 m, mais **la carte cesse d'ajouter du détail à z8 (488 m)**, facteur 30 sur le catalogue ; la descente meurt sur un **plafond d'index**, zéro 404 ; le tuileur ignore `waterLevelM` → **lac Érié rendrait zéro tuile sans erreur** ; barème 7 critères, éliminatoire sur la non-régression | `wt-bt1` | ✅ |
+| **BT-I** | intégration BlueTopo (reconnaissance de l'index vivant, cuisson Chesapeake, branchement, poids) | `wt-bt2` | en vol |
+| **GE1** | spécification souris Google Earth (Web vs Pro, URL), état actuel mesuré, barème + tests rouges | `wt-ge1` | en vol |
+| **GE2** | implémentation : clic droit, molette enfoncée, double-clic, modificateurs, menu contextuel, inertie — inclinaison **manuelle** partout, D16 ter pour l'**automatique** | `wt-ge2` | en vol |
+| **B5** | **carrés plats autour des côtes du sud** (Hyères, Marseille) — piste n° 1 : la quantification à 1 m + `v = raw < 0 ? quantize : 0` fait tomber le platier ]−1 ; 0[ sur **0 = marqueur muet = terre** ; critère en **pixels de terre là où la vérité dit mer** | `wt-bat3` (B3 repris) | en vol |
+
+**En attente de `globe.js` libre** (BT-I y touche peut-être) : le **raffinement
+partiel** demandé par Adrien contre le flou de zoom — dessiner les enfants prêts
+et ne garder le parent que sous les manquants (`_traverse`, boucle `pretes`,
+`globe.js` ~8746), prélecture un niveau à l'avance, ne jamais évincer une tuile
+dont le parent est dessiné, fondu parent→enfant. ⚠️ `test/veille-repos.test.js` ⑦
+verrouille « le crop est dessiné par exactement les mêmes tuiles » — à réécrire,
+pas à contourner.
+
+⚠️ **Conflit prévu** : B5 et BT-I peuvent toucher `scripts/build-bathy-tiles.mjs`
+et `dem.js`. B5 a ordre de le dire en tête de rapport ; fusion à la main.
