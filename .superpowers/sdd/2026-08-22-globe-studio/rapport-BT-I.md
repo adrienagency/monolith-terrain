@@ -243,6 +243,27 @@ sur ce point : les côtes américaines étaient déjà justes à ~6 m. Ce qui ma
 | Plateau louisianais | −19,38 / 0,21 | −19,38 / 0,41 | −19,38 / 0,83 | **1,000** |
 | Puget Sound (NCEI) | −198,00 / 9,43 | −198,13 / **10,78** | −198,00 / 9,70 | 0,450 |
 
+### Au GPU, avant / après, sur les points du barème
+
+| point | AVANT (globe) | **APRÈS (globe)** | damier | externe |
+|---|---|---|---|---|
+| **Chesapeake — embouchure** | **−4,4 m** | **−11,6 m** à z10, z11, z12 **et** z13 | −12 | gebco2020 −10 |
+| Chesapeake — bassin médian | −13 (GEBCO surzoomé) | **−13,1 m** à quatre niveaux | −13 | −13 |
+| Virginia Beach | — | **−27,3 m** | −27 | −24 |
+| New York Bight | — | **−11,8 m** | −12 | −10 |
+| Tête du canyon de l'Hudson | — | **−75,2 / −75,4 m** | −76 | −76 |
+| Georges Bank | — | **−39,7 m** | −37 | −40 |
+
+Et la **pente par kilomètre** monte avec le zoom, ce qui est la signature d'une
+carte qui **reçoit** de la donnée neuve au lieu d'en interpoler :
+
+```
+Chesapeake embouchure   z10 2,161 → z11 1,877 → z12 3,032 → z13 3,811 m/km
+Chesapeake bassin médian z10 0,491 → z11 0,607 → z12 0,860 → z13 2,124 m/km
+Virginia Beach           z11 1,447 → z12 1,957 → z13 5,127 m/km
+New York Bight           z10 0,986 → z11 1,553 → z12 3,129 m/km
+```
+
 **Avant, ces six points n'avaient AUCUNE tuile au-delà de z8** : le rapport
 d'étendue y valait la signature de l'interpolation pure, et la carte cessait
 d'ajouter du détail à **488 m au sol** pour une source annoncée à 16 m —
@@ -389,6 +410,43 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
   gradient — l'un des fonds les plus plats du golfe. Le barème compare aux
   11,5 m/km de la Manche, qui est un plateau à courants de marée : **deux
   régimes sédimentaires différents, pas deux qualités de carte.**
+- ⛔ **« Le câblage de `blendDepthM` est sans risque : c'est un champ optionnel
+  de plus. »** **Je l'ai cassé, et le globe s'est tu.** `src/globe.js` portait
+  `tuilePorteDeLaMer(heights, opts ? opts.seaLevel : 0)` — juste tant qu'`opts`
+  ne pouvait contenir que la nappe. Dès qu'il peut ne porter **que** la bande de
+  fondu, `opts.seaLevel` vaut `undefined`, toutes les comparaisons rendent
+  `false`, la tuile est refusée, et **le globe rendait 0,0 m pendant que le
+  damier rendait −12 m dans la même session** :
+
+  ```
+  Chesapeake z11/256  globe  0.0   damier -12      ← après mon câblage
+  Chesapeake z11/256  globe -11.6  damier -12      ← après le `?? 0`
+  ```
+
+  Aucune erreur, aucune exception, aucun 404. **C'est la mesure qui l'a
+  attrapé, pas la relecture** — et je venais d'écrire dans un commit que le
+  correctif était sans effet de bord. Corrigé en `opts?.seaLevel ?? 0`.
+- ⛔ **« Le pas vertical de 0,125 m plafonne la pente mesurée : il faut
+  descendre à 1/32. »** Raisonnement séduisant — le globe rendait 0,038 m de
+  peigne à Virginia Beach, soit un tiers du pas — et j'allais payer la
+  recuisson. **Faux, mesuré sur trois cuissons complètes de la même zone :**
+
+  | pas vertical | poids z12+z13 | peigne z12 | peigne z13 |
+  |---|---|---|---|
+  | 0,125 m | **5,01 Mo** | 0,0677 | 0,0590 |
+  | 0,031 25 m | 8,64 Mo (**+72 %**) | 0,0668 | 0,0516 |
+  | 0,003 906 m (1/256) | 16,16 Mo (**+223 %**) | 0,0661 | 0,0516 |
+
+  **Le peigne ne monte pas — il baisse.** Le pas n'était donc pas le plafond :
+  le peigne propre de nos tuiles vaut ~0,066 m et ne bouge plus au 1/256.
+  J'aurais payé **+72 % d'octets pour zéro mètre de relief**. ⚡ Le vrai
+  plafond est ailleurs et je l'ai trouvé en cherchant celui-là : **le globe sert
+  des tuiles d'altitude de 512 px alors que nos tuiles bathy font 256 px par
+  construction**. La fenêtre 9×9 du barème couvre donc **4,5 texels de donnée
+  réelle**, les autres étant du Catmull-Rom — ce qui **divise mécaniquement le
+  peigne par deux**, puis la pente est encore divisée par un texel de 512.
+  C'est architectural, pas de la donnée : nos tuiles rendent **2,22 m/km** à
+  z12 sur la Chesapeake là où le globe en lit 1,88.
 - ✅ **Ce que je confirme de l'audit BT-A** : la carte cessait bien d'ajouter du
   détail à z8, le relevé réseau était bien un plafond d'index et non des 404, et
   **le tuileur rendait bien zéro tuile en silence sur un lac d'altitude** — les
@@ -398,7 +456,49 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
 
 ---
 
-## ⑧ RESTE OUVERT
+## ⑧ LE BARÈME BT-A, TEST PAR TEST
+
+`npm run dev -- --host 127.0.0.1 --port 6611` puis
+`BTA_PORT=6611 node --test test/attaque-bt-ROUGE.mjs`.
+
+| # | ce qu'il demande | verdict | la mesure |
+|---|---|---|---|
+| **BT-1** | étendue z12→z13 ≥ 0,70 | **0,687** — manque de 2 % | sur **nos tuiles** le rapport vaut **0,857** et sur le **pivot brut 0,714** : la donnée passe la barre, la cascade la perd (voir ci-dessous) |
+| **BT-2** | fond bougé de ≥ 1,00 m entre z11 et z13 | **réfuté** | le **levé NOAA lui-même** ne bouge que de **0,017 à 0,043 m** entre ces deux empreintes |
+| **BT-3** | baie ≥ 9 m de fond à z11 et z12 | ✅ **acquis** | **−11,6 m** aux deux niveaux (était −4,4) |
+| **BT-4** | 4 plateaux ≥ 2 m/km à z12 | **2 sur 4** | Georges Bank ✅ · ouest-Floride ✅ · Virginia Beach **1,957** · Louisiane **0,755** — voir la réfutation |
+| **BT-5** | tuiles bathy sous z8 à Chesapeake **et** Puget | ✅ **acquis** | et Puget n'a **aucune** dalle BlueTopo : c'est NCEI qui le couvre |
+| **BT-6** | une zone `bluetopo` à zmax ≥ 12 | ✅ **acquis** | **sept** zones bluetopo à z13 (une à z10) |
+| **BT-7** | Grands Lacs ≥ 30 m sous la nappe | **réfuté** | le levé NCEI dit **22,70 m** au point du barème, le globe **22,49 m** — 0,21 m d'écart |
+| **BT-8** | ⛔ **éliminatoire** — 5 témoins hors USA à ±5 m | ✅ **acquis** | et prouvé plus fort : **21 960 tuiles identiques AU BIT** |
+
+### ⚠️ BT-1 : les 2 % qui manquent ne sont pas dans la donnée
+
+Les trois lectures indépendantes ne disent pas la même chose, et c'est
+l'information :
+
+| lecture | rapport z12→z13 |
+|---|---|
+| **pivot BlueTopo brut** (4 m, avant tout tuilage) | **0,714** |
+| **nos tuiles**, lues à leur taille native de 256 px | **0,857** |
+| **le globe**, sur une tuile d'altitude de 512 px | **0,687** |
+
+La donnée passe la barre ; la **cascade** la perd. La cause est architecturale :
+**nos tuiles bathy font 256 px par construction, et le globe sert des tuiles
+d'altitude de 512 px à z12 et z13.** La fenêtre 9×9 du barème couvre donc
+**4,5 texels de donnée réelle** et 4,5 de Catmull-Rom. C'est la même cause qui
+divise le peigne par deux et qui explique les 1,957 m/km de Virginia Beach.
+
+➡️ **La piste, chiffrée mais non tentée** : `BATHY_TILE_PX = 256` n'est pas une
+hypothèse figée côté client — `src/dem.js:191` lit `img.width || BATHY_TILE_PX`.
+Cuire les niveaux fins en **512 px**, pour qu'ils aient la taille de la tuile
+d'altitude qu'ils habillent, rendrait à la fenêtre ses 9 texels réels.
+⛔ **Je ne l'ai pas fait, et c'est un choix, pas un oubli** : BT-8 est
+**éliminatoire**, et je ne changeais pas la taille des tuiles à la fin d'une
+session pour 2 % sur un autre critère. Le coût est chiffré (×3 à ×4 d'octets sur
+les niveaux concernés), le point d'entrée est nommé, la vérification est écrite.
+
+## ⑨ RESTE OUVERT
 
 - ⚠️ **`copernicus` reste sans zone** : elle exige un compte (B3 l'a établi),
   ce n'est pas une décision d'agent. `bluetopo` en a maintenant **sept**, `ncei`
