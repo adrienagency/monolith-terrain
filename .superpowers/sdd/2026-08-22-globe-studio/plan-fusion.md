@@ -653,3 +653,60 @@ translation rigide vers le point + distance ÷2. Réserve d'Adrien : le déclenc
 reste le **simple clic** (Google Earth : double-clic). Piège d'instrument neuf :
 Vite sans `--host 127.0.0.1` n'écoute que sur `[::1]` — la sonde ne dessinait
 jamais. **Plus aucun agent en vol.**
+
+---
+
+# CAMPAGNE BATHYMÉTRIE (B1→B4) — 2026-09-03 · **NOTÉE 9,33 / 10** (exigence : 7,5)
+
+**Le vrai défaut n'était pas celui qu'on croyait.** Au repos, globe et damier
+étaient d'accord (496,5 contre 488,0 m d'erreur moyenne) : le terrarium AWS
+**porte de l'ETOPO1 jusqu'à z10**. ⛔ **La falaise était à z11** — fosse de la
+Sonde, même session : **z10 → −7 067,6 m, z11 → 0,0 m**, écart globe/damier
+**7 105 m**. Et **le globe ne demandait jamais `/data/bathy/`** : 544 requêtes
+contre 0 en 54 s.
+
+| critère | avant | après | note |
+|---|---|---|---|
+| fond en approche (Java z11) | 0,0 m | **−7 105,1 m** | 2,5/2,5 |
+| accord globe/damier (mer Noire) | 2 200 m | **0,04–0,24 m** | 2,0/2,0 |
+| relief, pas aplat | aplat 0,00 | pente 0,87–1,09 du damier | 1,0/1,5 |
+| cascade vivante sur le globe | **0/189 requêtes** | **74 · 71 · 71**, zéro 404 | 1,5/1,5 |
+| mers fermées + Caspienne | Casp. −29 · Médit. **0** | Casp. **−1 047,9** · Calypso **−5 135** | 0,83/1,0 |
+| lacs | surface ±7 m | **Baïkal −745 m · Léman −296 m** | 0,5/0,5 |
+| rien payé ailleurs | 4 748·0 | **4 755·0**, audit 253=253 | 1,0/1,0 |
+
+**Bonus non demandé** : la plaine ionienne réparée **sur les deux chemins**
+(0 → −3 686 m). Cause : `SHELF = −500` dans le tuileur — les tuiles purement
+abyssales n'avaient **jamais été cuites**.
+
+**Léman** : swissBATHY3D (swisstopo, 2 m, licence commerciale explicite),
+404 tuiles, **3,22 Mo**, fond **310,05 m contre 309,70 m** CIPEL. Le pivot
+retrouve le point le plus profond **à la position documentée sans qu'on la lui
+donne**. Deux gardes indépendantes protègent la vallée du Rhône (sans elles,
+**347,67 m** détruits : l'exutoire de Genève est sous la cote du lac).
+**Baïkal : zéro octet ajouté** — son lit était dans GEBCO, il manquait la nappe.
+
+## ⚠️ CE QUI RESTE OUVERT, remonté par le noteur
+- **Hors Baïkal et Léman, tous les lacs du monde sont des plaques plates.**
+  Quatorze sondés : le Baïkal est **le seul au monde** dont GEBCO porte le lit.
+  Lacune de couverture, pas régression (Supérieur, Tanganyika, Titicaca sont
+  exactement où B1 les avait laissés).
+- **Le réseau DOUBLE au large** — coût assumé de la cascade vivante.
+- **La Manche a bougé de 4 m**, soit **80 % de la tolérance** du critère
+  éliminatoire. À surveiller au prochain travail sur le fond.
+- **BlueTopo** cuisible (S3 public, CC0) mais gros téléchargement ;
+  **Copernicus exige un compte** — décision d'Adrien. Les deux restent
+  catalogués-non-cuits ; ⛔ **ne pas les retirer de `SOURCES` pour verdir un test**.
+- Pour le 10 : plancher absolu d'étendue (+0,25) · mer Noire z12, qui **exige une
+  cuisson** (+0,25) · ancrer Calypso sur la mesure de 2020, −5 109 m (+0,17).
+
+## LEÇON DE MÉTHODE — le barème lui-même peut être faux
+Deux seuils étaient **ancrés sur de mauvaises coordonnées** (Caspienne et
+Calypso, à 80 et 200 km des fosses réelles) : ils exigeaient que la carte soit
+fausse de 460 m. Le coordinateur a réancré **sans changer les seuils**, et le
+noteur a **vérifié l'arbitrage avant de l'appliquer**, avec un décodeur réécrit
+de zéro et une source **hors du dépôt** (`api.opentopodata.org`). Verdict :
+arbitrage validé sur la Caspienne, **juste mais sur-argumenté** sur la
+Méditerranée (B3 mettait les deux cas dans le même sac ; la plaine ionienne
+ratait de 13 m, pas de 200 km). ➡️ **Un noteur qui applique un barème sans le
+vérifier note la mauvaise chose.**
