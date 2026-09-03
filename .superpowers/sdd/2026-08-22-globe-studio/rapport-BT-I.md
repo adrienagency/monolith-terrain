@@ -464,7 +464,7 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
 | # | ce qu'il demande | verdict | la mesure |
 |---|---|---|---|
 | **BT-1** | étendue z12→z13 ≥ 0,70 | **0,687** — manque de 2 % | sur **nos tuiles** le rapport vaut **0,857** et sur le **pivot brut 0,714** : la donnée passe la barre, la cascade la perd (voir ci-dessous) |
-| **BT-2** | fond bougé de ≥ 1,00 m entre z11 et z13 | **réfuté** | le **levé NOAA lui-même** ne bouge que de **0,017 à 0,043 m** entre ces deux empreintes |
+| **BT-2** | fond bougé de ≥ 1,00 m entre z11 et z13 | **réfuté — et il était VERT quand la carte était FAUSSE** | le **levé NOAA lui-même** ne bouge que de **0,017 à 0,043 m** entre ces deux empreintes |
 | **BT-3** | baie ≥ 9 m de fond à z11 et z12 | ✅ **acquis** | **−11,6 m** aux deux niveaux (était −4,4) |
 | **BT-4** | 4 plateaux ≥ 2 m/km à z12 | **2 sur 4** | Georges Bank ✅ · ouest-Floride ✅ · Virginia Beach **1,957** · Louisiane **0,755** — voir la réfutation |
 | **BT-5** | tuiles bathy sous z8 à Chesapeake **et** Puget | ✅ **acquis** | et Puget n'a **aucune** dalle BlueTopo : c'est NCEI qui le couvre |
@@ -490,6 +490,28 @@ fond. Le repère du barème est solide — une interpolation pure vaut exactemen
 0,500, et nous en sommes loin, à 0,687 — mais **la marge entre « pas de donnée
 nouvelle » (0,500) et le seuil (0,700) est plus étroite que la dispersion de la
 grandeur elle-même**.
+
+### ⛔ BT-2 : le critère a viré au ROUGE quand la carte est devenue JUSTE
+
+C'est le fait le plus dérangeant de ce rapport, et il est daté.
+
+**Passe 1** — tuiles BlueTopo cuites, bande de fondu encore à 25 m :
+`BT-2 VERT`, `BT-3 ROUGE` (« z11 : globe **−5,2 m** »).
+**Passe 2** — bande de fondu corrigée : `BT-3 VERT` (−11,6 m), **`BT-2 ROUGE`**.
+
+BT-2 était vert **parce que la carte donnait deux profondeurs différentes au
+même endroit selon le zoom** : −5,2 m à z11 (le fondu amputait), autre chose à
+z13. Le critère mesurait cette **incohérence** et la comptait comme du détail.
+Une fois que les quatre niveaux disent tous **−11,6 m** — la valeur du levé, à
+0,1 m près — l'écart tombe à zéro et le critère tombe au rouge.
+
+➡️ **Un critère qui vire au rouge quand on corrige la carte mesure autre chose
+que ce qu'il nomme.** BT-2 nomme « le fond doit changer entre z11 et z13 » ;
+il récompense en fait la divergence entre niveaux. Sur un fond dont le levé à
+4 m ne bouge que de **0,017 m** entre ces deux empreintes, la seule façon de le
+verdir est de **désaccorder les niveaux**. La garde anti-contournement de
+l'attaquant (« BT-1 vert avec BT-2 rouge = du bruit ») visait juste le défaut
+inverse — et c'est la version accordée de la carte qui la déclenche.
 
 ### ⚠️ BT-4 : deux échecs, et ce ne sont PAS le même défaut
 
