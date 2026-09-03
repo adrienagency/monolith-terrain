@@ -599,3 +599,43 @@ demande) → **A/B dans la même session**, alterné avec retour.
 entre deux captures de la même variante (mer, nuages, caustiques à des phases
 différentes ; 99,6 % avec grain, 89 % / 30 % sans). Tout A/B pixel hors orbite
 se fait **dans la même session**.
+
+---
+
+# 2026-09-03, ~06 h — LA VAGUE EST RENTRÉE · 4 732 tests · 0 échec · audit 249 = 249
+
+**✅ PF3 — la mer et les effets n'existent qu'en crop.** Un prédicat
+(`dedansCrop()` = `veilleCrop.pose`), une fonction (`poserRegimeCrop()`, seule à
+écrire `aoPass.enabled` et l'opacité du grain), appelée à la naissance/mort du
+crop par le crochet `surBascule(pose)` — l'interrupteur par image de `tick()`
+est retiré. **DoF intouchée, active partout (D20).** La mer n'avait rien à couper :
+`globe._mer` est `null` hors crop. Ce qui était dessiné hors crop et ne devait
+pas l'être : **le grain 0,26 du look de démarrage** (77 % des pixels, ±24
+niveaux) et, sur demande, N8AO sur la planète (71 %). GPU : surface 130 km
+×6 dpr2 Σ **22,6 → 15,4 ms** ; GPU logiciel **621,9 → 559,6 ms (−10 %)** — et
+**D20 y coûte +247 ms en orbite** (bokeh rallumé) : à connaître pour les
+portables sans carte. Crop identique **0 / 1 024 000**. Sur carte réelle le temps
+d'image ne bouge pas : borné par `PasseFond` et le CPU.
+
+## Bilan de la campagne performance (PF1→PF4), sur CPU ×4, orbite 2 000 km
+| levier | gain | où |
+|---|---|---|
+| cadence de repos (rotation propre à 1/2, figé 1/30) | p50 **31,9 → 13,5 ms** animé, **17,2 → 4,5** figé | PF4 |
+| matériau partagé des tuiles | `composer.render` **−17 %** | PF4 bis |
+| matrices figées (jusqu'à la scène) | **−15 %** | PF4 bis |
+| file de priorité, cache souple, Worker | **−25 % d'octets**, hors tronc 100 → 0 % en rotation, centre au rang 0–3 | PF2 |
+| N8AO/grain hors crop | GPU ×6 dpr2 **−32 %**, logiciel −10 % | PF3 |
+| `GL_INVALID_OPERATION` / gouverneur / voile | 0 erreur ; palier 0 tenu ; gestes qui ferment | PF4 |
+
+## RESTE OUVERT, par ordre de valeur
+1. ⛔ **`flyTo` → caméra `NaN`** (trouvé par PF3, non tracé) — `modes.js`.
+2. **Le clic qui saute** — tracé par PF4 à la ligne : `_posePlongee` borne à
+   `surfaceMaxDistance()` = 150 u (×4,41 en une image), puis `diveTo` lisse 30 %
+   et `_loadDive` repose à `distancePresentation` (70 % en une image). `modes.js`.
+3. **Le retour au nadir après la mort du crop** inachevé sur « vue couchée puis
+   molette » (84,9°, préexistant) — R32 §réserves.
+4. **UBO pour les 120 uniformes partagés** : −60 % de `composer.render` possible,
+   chiffré, non fait (réécriture des déclarations d'un nuanceur de 192 uniformes).
+5. **Arbitrages d'Adrien** : `cloudAltitude` en unités de bloc ; pivot/contraste
+   de rampe gradés sur le domaine du socle et consommés sur celui du globe.
+6. Sept options ✅ de l'inventaire sous le bruit (98, 36, 91, 120, 11, 56, 24).
