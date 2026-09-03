@@ -491,6 +491,29 @@ fond. Le repère du barème est solide — une interpolation pure vaut exactemen
 nouvelle » (0,500) et le seuil (0,700) est plus étroite que la dispersion de la
 grandeur elle-même**.
 
+### ⚠️ BT-4 : deux échecs, et ce ne sont PAS le même défaut
+
+J'ai mesuré la pente **dans le levé brut**, sur la fenêtre exacte du barème
+(9 texels de 512 px à z12), avant tout tuilage :
+
+| plateau | **pente du levé NOAA** | pente lue au globe | verdict |
+|---|---|---|---|
+| Chesapeake embouchure | 3,297 m/km | 3,032 | — |
+| ouest-Floride | 3,382 m/km | ✅ passe | |
+| **Virginia Beach** | **2,973 m/km** | **1,957** | ⛔ **la chaîne perd 34 % de pente réelle** |
+| **Plateau louisianais** | **0,608 m/km** | 0,755 | **le seuil dépasse le fond** |
+
+**Deux diagnostics opposés sous un seul test.**
+Le **plateau louisianais** — vase du large de Terrebonne, l'un des fonds les
+plus plats du golfe — **ne contient que 0,608 m/km dans le levé à 4 m** :
+demander 2 m/km, c'est demander à la carte d'inventer trois fois le relief
+mesuré. Le barème le compare aux 11,5 m/km de la Manche, qui est un plateau à
+courants de marée : **deux régimes sédimentaires, pas deux qualités de carte.**
+**Virginia Beach, au contraire, EST un vrai manque de la chaîne** : le levé y
+porte 2,973 m/km et le globe n'en lit que 1,957. La cause est celle décrite
+ci-dessous — la fenêtre du globe est en 512 px sur un contenu bathy de 256 px,
+et le Catmull-Rom entre deux texels réels **divise le peigne par deux**.
+
 ⛔ **Et j'ai essayé de gagner les 2 %, puis j'ai renoncé sur la mesure.**
 `BATHY_TILE_PX` n'est pas figé côté client (`src/dem.js:191` lit
 `img.width || BATHY_TILE_PX`), donc cuire les niveaux fins en 512 px pour qu'ils
@@ -502,8 +525,25 @@ fenêtre z13 en 256 (0,75 m d'étendue et 3,87 m/km des deux côtés, au chiffre
 près). On ne densifie pas la mesure, **on la rétrécit**. J'aurais déployé
 +150 % d'octets pour perdre 2 points de rapport.
 
+⚡ **L'arbitrage complet, puisque les deux critères tirent en sens contraire :**
+cuire en 512 px **rendrait** à BT-4 la pente que la chaîne perd (Virginia Beach
+remonterait vers ses 2,973 m/km réels) et **coûterait** à BT-1 (0,687 → 0,667).
+Mais **BT-4 échoue de toute façon sur le plateau louisianais**, dont le levé ne
+porte que 0,608 m/km : le 512 px ne fait donc gagner **aucun** des deux tests,
+et en coûte 150 % d'octets. **J'ai gardé 256.** La décision est écrite ici avec
+ses deux chiffres pour qu'elle soit rejugeable, pas pour qu'elle soit crue.
+
 ## ⑨ RESTE OUVERT
 
+- ⛔ **LE PLUS IMPORTANT : la cascade perd un tiers de la pente réelle sur une
+  tuile de 512 px.** Chiffré à Virginia Beach : le levé porte **2,973 m/km**, le
+  globe en lit **1,957** (−34 %). La cause est nommée et reproductible — le
+  contenu bathy est en 256 px, la fenêtre de mesure en 512, et le Catmull-Rom
+  entre deux texels réels divise le peigne par deux. **Ce n'est pas propre à
+  BlueTopo** : ça vaut pour EMODnet et pour GEBCO surzoomée, donc pour toute la
+  carte. Les deux issues possibles (cuire en 512, ou interpoler la bathy autrement
+  que par Catmull-Rom avant la fusion) sont chiffrées ci-dessus ; **aucune n'est
+  gratuite et je n'ai pas tranché.**
 - ⚠️ **`copernicus` reste sans zone** : elle exige un compte (B3 l'a établi),
   ce n'est pas une décision d'agent. `bluetopo` en a maintenant **sept**, `ncei`
   **trois**.
