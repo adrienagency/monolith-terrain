@@ -113,6 +113,73 @@ export function detectFillLevels(land, opts = {}) {
   return out
 }
 
+// ══════════ LE BRUIT AUTOUR DE ZÉRO — B5, Porquerolles ═══════════════════════
+//
+// 🔴 LE REMPLISSAGE DE MER DU TERRARIUM N'EST PAS UNE CONSTANTE, C'EST UN BRUIT.
+// Mapterhorn sert du .webp, c'est-à-dire du lossy : son « zéro » de mer ressort
+// à **0 ± 0,5 m, étalé sur plusieurs valeurs, DES DEUX CÔTÉS du zéro**. Relevé
+// au transect sur la tuile z13/4237/3010 (sud de Porquerolles), nord → sud :
+// terre 0,9…56 m, puis **+0,5 +0,2 +0,3 +0,4 +0,4 … +0,3 sur ~1 km de mer**,
+// puis 0 exact. Les remplissages NÉGATIFS déjà mesurés (−0,094 / −0,344 /
+// −0,406 m, encart ci-dessus) sont le même bruit, de l'autre côté.
+//
+// Trois défenses existaient, aucune ne l'attrape :
+//   · `NODATA_EPS` ne voit que le zéro EXACT ;
+//   · `detectFillLevels` ne voit qu'une valeur UNIQUE tenant ≥ 10 % — un bruit
+//     étalé sur 0,2 / 0,3 / 0,4 / 0,5 n'en donne aucune ;
+//   · et surtout « un aplat POSITIF est de la terre » : +0,3 m est classé TERRE,
+//     la source fine (EMODnet, −80 m) n'est même pas lue, h > 0 sort tel quel.
+// À l'écran : un plateau plat couleur terre, RECTANGULAIRE (c'est l'emprise du
+// remplissage positif), qui déborde le vrai trait de côte et couvre la mer
+// peu profonde ; la mer sombre commence là où le remplissage retombe à 0 pile.
+// Mesuré (scripts/sonde-b5.mjs, îles d'Hyères / Marseille, damier z12–z13) :
+// **77 000 à 300 000 pixels par bloc** rendus à 0 ou au-dessus sur de la mer.
+//
+// LA SIGNATURE EST LA MÊME QUE POUR LES APLATS : LA PART, PAS LA VALEUR. Un
+// vrai trait de côte occupe la bande |h| ≤ 0,6 m sur une LIGNE — quelques
+// pour-mille des pixels que la source fine dit immergés. Un remplissage bruité
+// l'occupe sur un CHAMP. On compte donc, parmi les pixels que la source fine
+// dit immergés, la part qui tombe dans la bande ; au-delà de `FILL_SHARE`,
+// la bande est un remplissage et vaut une absence.
+//
+// ⚠️ CE QUI NE BOUGE PAS : la bande est étroite (0,6 m — au-dessus du bruit
+// mesuré, en dessous de toute plage réelle ou d'un polder à −4 m) ; elle
+// n'agit QUE là où la source fine dit immergé ; et elle exige la même part et
+// le même minimum de sondes que `detectFillLevels`. Une plage de 40 pixels à
+// +0,3 m au bord d'un bloc reste de la terre (test/bathy-platier-b5.test.js).
+export const NOISE_BAND = 0.6
+// ⚠️ ET LA SOURCE FINE DOIT DIRE FRANCHEMENT IMMERGÉ. Une cellule EMODnet à
+// cheval sur le rivage rend −1 ou −2 m sous une vraie plage : à ce prix-là, la
+// plage reste de la terre. Le remplissage de Porquerolles, lui, recouvre une
+// mer que la source fine donne à −5…−80 m dès la première cellule.
+export const NOISE_MIN_DEPTH = 2
+
+/**
+ * Le champ porte-t-il, autour du niveau, un REMPLISSAGE BRUITÉ ?
+ * @param {Float32Array} land
+ * @param {Float32Array} sea
+ * @param {{seaLevel?: number, fillShare?: number, noiseBand?: number}} [opts]
+ * @returns {boolean}
+ */
+export function detectNoiseFill(land, sea, opts = {}) {
+  if (!land || !sea || sea.length !== land.length) return false
+  const level = opts.seaLevel ?? 0
+  const part = opts.fillShare ?? FILL_SHARE
+  const bande = opts.noiseBand ?? NOISE_BAND
+  let sondes = 0
+  let dedans = 0
+  const seuilMer = level - (opts.noiseMinDepth ?? NOISE_MIN_DEPTH)
+  for (let i = 0; i < land.length; i += FILL_STEP) {
+    const s = sea[i]
+    if (!(s < seuilMer)) continue // seule la mer FRANCHE de la source fine compte
+    sondes++
+    const d = land[i] - level
+    if (d >= -bande && d <= bande) dedans++
+  }
+  if (sondes < FILL_MIN_SONDES) return false
+  return dedans >= sondes * part
+}
+
 /**
  * Fusionne deux champs d'altitude de MÊME taille, en mètres.
  *
@@ -141,6 +208,9 @@ export function fuseBathymetry(land, sea, opts = {}) {
   // NaN quand aucun aplat n'a été constaté : toutes les comparaisons ci-dessous
   // rendent alors `false`, et le module se comporte exactement comme avant.
   const plancher = aplats.size ? Math.min(...aplats) : NaN
+  // B5 — le bruit autour du zéro, voir l'encart au-dessus de `NOISE_BAND`.
+  const bande = opts.noiseBand ?? NOISE_BAND
+  const bruitZero = detectNoiseFill(land, sea, opts)
   const out = new Float32Array(land.length)
   for (let i = 0; i < land.length; i++) {
     const l = land[i]
@@ -169,7 +239,11 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // serait remis entre les mains de la source fine — la faute que ce module
     // interdit depuis la session polders. Un remplissage est TOUJOURS immergé.
     const remplissage = l < level && l >= plancher
-    const noData = (l > -NODATA_EPS && l < NODATA_EPS) || remplissage
+    // B5 — dans la bande de bruit ET là où la source fine dit immergé : absence.
+    // ⚠️ `sea[i] < level` est lu ICI, avant le test de terre, parce que c'est
+    // précisément un pixel classé terre (+0,3 m) qu'il faut rendre à la mer.
+    const bruit = bruitZero && l >= level - bande && l <= level + bande && sea[i] < level - (opts.noiseMinDepth ?? NOISE_MIN_DEPTH)
+    const noData = (l > -NODATA_EPS && l < NODATA_EPS) || remplissage || bruit
     // TERRE — intouchable, et c'est elle qui définit le rivage
     if (l >= level && !noData) {
       out[i] = l
@@ -236,8 +310,30 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // sous la cote du lac ne passent jamais ici : la sentinelle ci-dessus les a
     // déjà rendus intacts.
     const sousNappe = level > 0
-    const base = noData || sousNappe ? level : l
-    const t = smooth((level - (noData || sousNappe ? deep : l)) / blend)
+    // 🔴 B5 — QUAND LA RÉFÉRENCE EST MUETTE, LA SOURCE FINE PARLE ENTIÈRE.
+    //
+    // Le fondu ci-dessus a UN rôle : raccorder la source fine au relief de
+    // référence près du rivage, là où la référence PORTE un rivage. Sur un pixel
+    // muet (0 exact, ou remplissage détecté), il n'y a rien à raccorder — et le
+    // piloter sur la profondeur de la source fine elle-même la MUSELAIT :
+    // à −1 m, t = smooth(1/25) = 0,5 %, sortie ≈ −0,005 m ; le damier arrondit
+    // en Int16 (« les demis vont du côté de la terre ») → 0 → `h < 0` faux →
+    // TERRE pour le nuanceur. Mesuré (scripts/sonde-b5.mjs, îles d'Hyères et
+    // Marseille, z12/z13) : **77 000 à 300 000 pixels par bloc à 0 exact**,
+    // tous issus d'un terrarium muet et d'un platier EMODnet à −1…−4 m. À
+    // l'écran, des plateaux couleur terre bornés par les rectangles des dalles
+    // (une dalle Mapterhorn remplie à 0 exact → muette → plateau ; sa voisine
+    // remplie à −0,344 → détectée comme remplissage… et muselée pareil).
+    //
+    // La règle est donc : muet ⇒ t = 1, la source fine sort telle quelle,
+    // bornée par `deep ≤ level − SEA_EPS` (elle ne peut toujours pas émerger).
+    // ⚠️ La référence BAVARDE (l < level, non muette) garde le fondu d'origine
+    // au bit : c'est elle qui porte le rivage, et le raccord y reste invisible.
+    // ⚠️ L'ancien contrat « au rivage le fondu reste nul » testait un pixel à
+    // 0 EXACT — c'est-à-dire une absence, pas un rivage. Réécrit (test/bathy.test.js).
+    const seul = noData || sousNappe
+    const base = seul ? level : l
+    const t = seul ? 1 : smooth((level - l) / blend)
     out[i] = base + (deep - base) * t
   }
   return out
