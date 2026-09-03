@@ -472,31 +472,35 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
 | **BT-7** | Grands Lacs ≥ 30 m sous la nappe | **réfuté** | le levé NCEI dit **22,70 m** au point du barème, le globe **22,49 m** — 0,21 m d'écart |
 | **BT-8** | ⛔ **éliminatoire** — 5 témoins hors USA à ±5 m | ✅ **acquis** | et prouvé plus fort : **21 960 tuiles identiques AU BIT** |
 
-### ⚠️ BT-1 : les 2 % qui manquent ne sont pas dans la donnée
+### ⚠️ BT-1 : le seuil est posé SUR la valeur du fond, à 2 % près
 
-Les trois lectures indépendantes ne disent pas la même chose, et c'est
-l'information :
+Quatre lectures indépendantes du même rapport, au même point :
 
 | lecture | rapport z12→z13 |
 |---|---|
 | **pivot BlueTopo brut** (4 m, avant tout tuilage) | **0,714** |
-| **nos tuiles**, lues à leur taille native de 256 px | **0,857** |
-| **le globe**, sur une tuile d'altitude de 512 px | **0,687** |
+| nos tuiles à 256 px | 0,857 |
+| **nos tuiles recuites à 512 px** | **0,667** |
+| **le globe, au GPU** | **0,687** |
 
-La donnée passe la barre ; la **cascade** la perd. La cause est architecturale :
-**nos tuiles bathy font 256 px par construction, et le globe sert des tuiles
-d'altitude de 512 px à z12 et z13.** La fenêtre 9×9 du barème couvre donc
-**4,5 texels de donnée réelle** et 4,5 de Catmull-Rom. C'est la même cause qui
-divise le peigne par deux et qui explique les 1,957 m/km de Virginia Beach.
+**Le seuil de 0,70 tombe au milieu de cet intervalle.** Ce n'est pas 2 % de
+résolution qui manquent : c'est que le rapport d'étendue de ce fond **vaut à peu
+près 0,70**, et que sa valeur mesurée dépend de la fenêtre choisie autant que du
+fond. Le repère du barème est solide — une interpolation pure vaut exactement
+0,500, et nous en sommes loin, à 0,687 — mais **la marge entre « pas de donnée
+nouvelle » (0,500) et le seuil (0,700) est plus étroite que la dispersion de la
+grandeur elle-même**.
 
-➡️ **La piste, chiffrée mais non tentée** : `BATHY_TILE_PX = 256` n'est pas une
-hypothèse figée côté client — `src/dem.js:191` lit `img.width || BATHY_TILE_PX`.
-Cuire les niveaux fins en **512 px**, pour qu'ils aient la taille de la tuile
-d'altitude qu'ils habillent, rendrait à la fenêtre ses 9 texels réels.
-⛔ **Je ne l'ai pas fait, et c'est un choix, pas un oubli** : BT-8 est
-**éliminatoire**, et je ne changeais pas la taille des tuiles à la fin d'une
-session pour 2 % sur un autre critère. Le coût est chiffré (×3 à ×4 d'octets sur
-les niveaux concernés), le point d'entrée est nommé, la vérification est écrite.
+⛔ **Et j'ai essayé de gagner les 2 %, puis j'ai renoncé sur la mesure.**
+`BATHY_TILE_PX` n'est pas figé côté client (`src/dem.js:191` lit
+`img.width || BATHY_TILE_PX`), donc cuire les niveaux fins en 512 px pour qu'ils
+aient la taille de la tuile d'altitude qu'ils habillent semblait rendre à la
+fenêtre ses neuf texels réels. **Cuisson complète faite, et le rapport BAISSE à
+0,667** pour 12,3 Mo au lieu de 5,0. La raison est géométrique : à 512 px, neuf
+texels couvrent **deux fois moins de sol** — la fenêtre z12 en 512 **est** la
+fenêtre z13 en 256 (0,75 m d'étendue et 3,87 m/km des deux côtés, au chiffre
+près). On ne densifie pas la mesure, **on la rétrécit**. J'aurais déployé
++150 % d'octets pour perdre 2 points de rapport.
 
 ## ⑨ RESTE OUVERT
 

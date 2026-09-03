@@ -42,7 +42,35 @@ const ZMIN = +arg('zmin', 4)
 const ZMAX = +arg('zmax', 8)
 const DRY = flag('dry')
 const BBOX = (arg('bbox') || '-180,-90,180,90').split(',').map(Number)
-const TILE = 256
+// ⚡ BT-I — LA TAILLE DE LA TUILE BATHY, ET POURQUOI ELLE DOIT POUVOIR BOUGER.
+// Le globe sert des tuiles d'ALTITUDE de 512 px à z12 et z13 ; nos tuiles bathy
+// en font 256. `peindreBathyTuile` agrandit donc chaque texel de bathy sur 2×2
+// texels de destination, et la fenêtre de mesure 9×9 ne couvre plus que
+// **4,5 texels de donnée réelle** — le reste est du Catmull-Rom. Mesuré : le
+// rapport d'étendue z12→z13 vaut 0,857 sur nos tuiles lues à 256 px et 0,687
+// vu par le globe, et le peigne y est divisé par deux.
+//
+// ⚠️ RIEN CÔTÉ CLIENT NE FIGE 256 : `src/dem.js:191` lit `img.width ||
+// BATHY_TILE_PX`. La taille se déduit de l'image, elle n'est pas supposée.
+//
+// ⛔ ET CUIRE EN 512 NE RÉPARE PAS LE RAPPORT D'ÉTENDUE — MESURÉ, PUIS ÉCARTÉ.
+// C'était l'hypothèse : rendre à la fenêtre 9×9 ses neuf texels réels ferait
+// remonter le rapport z12→z13. Cuisson complète de la Chesapeake dans les deux
+// tailles, même point (37,00 / −76,05) :
+//
+//   256 px   z12 étendue 0,88 m → z13 0,75 m     rapport 0,857
+//   512 px   z12 étendue 0,75 m → z13 0,50 m     rapport 0,667   (12,3 Mo au lieu de 5,0)
+//
+// **Le rapport BAISSE.** La raison est géométrique et je l'avais manquée : à
+// 512 px, neuf texels couvrent DEUX FOIS MOINS DE SOL — la fenêtre z12 en 512
+// est exactement la fenêtre z13 en 256 (0,75 m d'étendue, 3,87 m/km, aux deux).
+// On ne densifie pas la mesure, on la rétrécit. Le rapport d'étendue est une
+// propriété du FOND entre deux empreintes au sol, pas de la finesse
+// d'échantillonnage. L'option reste ici parce qu'elle a servi à le prouver ;
+// elle n'est utilisée par aucune cuisson.
+//
+// Le défaut reste 256, et une cuisson sans `--tuile` est identique AU BIT.
+const TILE = +arg('tuile', 256)
 
 // ─────────────────────────────────────────────────── LE PLATEAU, ET RIEN QUE LUI
 // Arbitrage d'Adrien : on ne cuit QUE la frange côtière, jusqu'à l'isobathe des
