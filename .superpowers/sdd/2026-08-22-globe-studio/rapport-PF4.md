@@ -261,3 +261,103 @@ levier n° 2 et 3 de PF1, hors de ce brief.
 8. **« npm test passe »** écrit une fois avec un test rouge (le mien, ③, après
    avoir remis le SMAA sur sa ligne sans mettre à jour son motif) : corrigé au
    commit suivant, 4 688 · 0.
+
+---
+
+# SECONDE PASSE — LES TROIS LEVIERS CPU DU PROFIL PF1
+
+Base : `regroupement` fusionnée deux fois (R32 + PF2 `2183780`), **npm test 4 722 · 0** (base 4 717 + 5 tests PF4 de cette passe, après retrait du mémo),
+audit 249 = 249. Même banc que plus haut (RTX 3080, Chrome 152 sans tête
+1280×800 / PF1 1280×720, `--disable-gpu-vsync`). Échappatoires par levier :
+`?tuiles=amont`, `?matrices=amont` (et `?crop=amont` tant que le mémo existait),
+et `--url` ajouté à `scripts/profil-pf1.mjs` pour rejouer les mêmes cellules
+dans les deux variantes.
+
+## ⚠️ Ce que les bancs PF1 entre sessions NE peuvent PAS dire
+
+Quatre cellules ×4/×6r, amont et après, sur la base fusionnée
+(`.banc/PF4/pf1-x{4,6r}-{amont,apres}.json`) : le ralentissement CPU **mesuré**
+par PF1 varie d'une session à l'autre — **×4,00 contre ×4,50**, **×5,20 contre
+×7,80** pour la même demande — et l'écart entre variantes est du même ordre
+(surface ×4 : 10,0 / 13,6 après contre 7,6 / 12,1 amont, `_traverse` et `reste`,
+que ces leviers ne touchent pas, bougent de 25 % dans le même sens). **Ces
+cellules ne tranchent rien** ; je les laisse dans `.banc/`, je ne les publie pas
+comme avant/après. Le tableau qui compte est l'A/B **dans la même session**,
+même scène, même jeu de tuiles, alterné avec retour à l'état initial
+(`.banc/PF4/q-abc`, orbite 2 000 km, 55 tuiles visibles sur 158, CPU ×4,
+animations coupées, `composer.render` p50 sur ≥ 600 images) :
+
+| variante | composer.render p50 | passe de fond p50 |
+|---|---|---|
+| **C** un matériau par tuile (l'amont) | **4,7 – 4,9 ms** | 2,4 – 2,7 |
+| **A** partagé + `onBeforeRender` (livré) | **3,9 – 4,0 ms** (−17 %) | 1,8 – 2,5 |
+| **B** partagé SANS téléversement (borne, image fausse) | 1,8 ms (−60 %) | 0,6 |
+| A, retour | 4,0 ms | 2,2 |
+
+## Levier 1 — un matériau pour toutes les tuiles : livré, −17 %, et la borne dit le reste
+
+`src/monde/materiau-tuile.js`, `globe.js` (`_materialFor` → fabrique partagée,
+`_buildMesh` équipe le maillage, `_habillerPhoto` écrit sur le maillage, les
+quatre `dispose()` passent par `libererMateriauTuile`). Ce qui est propre à la
+tuile — `uTex`, `uTilePx`, `uUvParMonde`, `uPhoto`, `uPhotoOn`, `uPhotoUv` — vit
+sur `mesh.userData.tuile` et est posé par `onBeforeRender` avec
+`uniformsNeedUpdate`. Tests `test/materiau-tuile.test.js` (5, dont la vraie
+`_buildMesh` empruntée). Pixel : **orbite identique au bit** entre sessions,
+amont / après / après-bis (hash 2770209078 ×4, 62 tuiles, même nuanceur).
+
+**Mesuré avant d'écrire, puis réfuté à moitié.** Donner le MÊME matériau à
+toutes les tuiles rendait −50 % (8,6 → 4,6 ms) — mais c'était la borne B : sans
+téléversement du tout. Avec `uniformsNeedUpdate`, three rejoue
+`WebGLUniforms.upload` sur la liste ENTIÈRE du matériau (128 entrées, dont ~10
+samplers re-liés à chaque dessin) : le gain n'est que ce que `refreshMaterial`
+coûtait (−17 %). **Pour aller chercher les −60 %, il faut rétrécir la liste
+téléversée par dessin** — les 120 uniformes partagés dans un `UniformsGroup`
+(UBO, `std140`) et les samplers partagés hors de `material.uniforms` — c'est-à-dire
+réécrire les déclarations d'un nuanceur de 192 uniformes touché par sept tâches
+cette semaine. Non fait ; chiffré.
+
+## Levier 2 — tuiles, groupe et scène figés : livré, −15 %, identique au bit
+
+`matrixAutoUpdate = false` + `updateMatrix()` à la pose des tuiles, de la mer et
+des parois (`globe.js`), **et sur `globe.group` et `sceneGlobe`** (`main.js`) —
+sans quoi three propage `force = true` depuis tout ancêtre qui se recompose et
+les tuiles se recomposent quand même : mesuré, tuiles seules −0,3 ms, avec
+groupe et scène **−1,3 ms** (8,6 → 7,2 ms, CPU ×4, orbite). **De loin** :
+`--scenario pixelab` bascule en session tout ce qui est figé (224 / 263 / 313
+objets) en auto-recomposition, rend, refige, rend — **quatre hachages égaux sur
+les trois postes** (surface, crop, orbite). Rien ne se décale.
+
+## Levier 3 — `contexteCrop()` mémoïsé : fait, mesuré, RETIRÉ
+
+Mémo par empreinte (relecture plate de toutes les sources, reconstruction au
+premier changement), branché sur `veilleCrop`, identique au constructeur champ
+à champ (`pixelab`). Puis chronométré en page au poste crop
+(`--scenario memo`, 2 000 appels) : **constructeur 5,3 – 6,8 µs par appel, mémo
+4,3 – 5,0 µs**. Six microsecondes par image, pas 14 % de l'image. Le mémo est
+retiré (60 lignes, une empreinte à maintenir, pour rien). Le « `reste` 26–28 %
+au crop » de PF1 est ailleurs — sur la base fusionnée, `reste` vaut 2,3 ms sur
+un tick de 5,7 au crop ×4, et `contexteCrop` n'en est pas.
+
+## Pixel, entre sessions : ce que j'ai cru puis réfuté (suite)
+
+9. **« Une image avant/après identique au bit sur les trois postes »** — entre
+   deux sessions, seule l'orbite l'est. En surface et au crop, **deux captures
+   de la MÊME variante diffèrent** : 99,6 % des pixels tant que le grain tourne
+   (le bruit n'a pas la même phase), encore 89 % / 30 % grain coupé et heure
+   fixée (mer, nuages, caustiques figés à des phases différentes). Le plancher
+   de bruit est aussi haut que l'écart entre variantes (après/amont 89,4 % ·
+   après/après-bis 89,4 %). D'où l'A/B **en session** pour les matrices et le
+   mémo, et l'orbite (déterministe) pour le matériau.
+10. **« Un matériau partagé rend 15–25 % de l'image »** (PF1) — avec three tel
+    qu'il téléverse, −17 % de `composer.render`, soit ~9 % de l'image ; le
+    reste exige l'UBO.
+11. **« `contexteCrop` = 14 % au crop »** (PF1) — 6 µs par appel sur la base
+    fusionnée.
+12. **Deux bancs PF1 dans deux sessions se comparent** — non : le ralentissement
+    mesuré va de ×4,0 à ×4,5 et de ×5,2 à ×7,8 pour la même demande.
+
+## Commits de la seconde passe
+
+`4d6d048` (les trois leviers, sonde pixel, `--url` PF1) · `65b2e8e` fusion de
+`regroupement` (R32 + PF2) · `2821487` sondes pixelab/memo · puis le retrait du
+mémo et ce rapport.

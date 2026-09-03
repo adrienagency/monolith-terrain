@@ -531,13 +531,16 @@ async function scenarioPixelAB(p) {
 }
 
 // LE COÛT DU CONTEXTE DU CROP, chronométré en page : N appels du constructeur
-// contre N appels du mémo, au poste crop (les deux sont exposés sur __exp).
+// (et du mémo tant qu'il a existé), au poste crop. Mesuré : 5,3–6,8 µs par appel
+// — pas les 14 % de l'image que PF1 lui attribuait ; le mémo a été retiré.
 async function scenarioMemo(p) {
   await poserPoste(p, 'crop')
   return p.evaluer(`(() => { const e = window.__exp; const N = 2000
     const chrono = (f) => { f(); const t0 = performance.now(); for (let i = 0; i < N; i++) f(); return +((performance.now() - t0) / N * 1000).toFixed(1) }
-    const direct = chrono(() => e.contexteCrop()), memo = chrono(() => e.contexteCropMemo()), direct2 = chrono(() => e.contexteCrop()), memo2 = chrono(() => e.contexteCropMemo())
-    return { crop: !!e.contexteCrop().centre, usParAppel: { constructeur: [direct, direct2], memo: [memo, memo2] }, rapport: +((direct + direct2) / (memo + memo2)).toFixed(1) } })()`)
+    // le mémo (levier 3) a été RETIRÉ après cette mesure (5–7 µs par appel du constructeur) : s'il n'existe plus, on ne chronomètre que le constructeur
+    const memoExiste = typeof e.contexteCropMemo === 'function'
+    const direct = chrono(() => e.contexteCrop()), memo = memoExiste ? chrono(() => e.contexteCropMemo()) : null, direct2 = chrono(() => e.contexteCrop()), memo2 = memoExiste ? chrono(() => e.contexteCropMemo()) : null
+    return { crop: !!e.contexteCrop().centre, usParAppel: { constructeur: [direct, direct2], memo: memoExiste ? [memo, memo2] : 'retiré' }, rapport: memoExiste ? +((direct + direct2) / (memo + memo2)).toFixed(1) : null } })()`)
 }
 
 async function scenarioFuites(p) {
