@@ -710,3 +710,31 @@ arbitrage validé sur la Caspienne, **juste mais sur-argumenté** sur la
 Méditerranée (B3 mettait les deux cas dans le même sac ; la plaine ionienne
 ratait de 13 m, pas de 200 km). ➡️ **Un noteur qui applique un barème sans le
 vérifier note la mauvaise chose.**
+
+---
+
+# 2026-09-03, soir — cinq agents en vol
+
+| tâche | sujet | arbre | état |
+|---|---|---|---|
+| **BT-A** | audit BlueTopo — **fusionné** : côtes US justes à 6,08 m, mais **la carte cesse d'ajouter du détail à z8 (488 m)**, facteur 30 sur le catalogue ; la descente meurt sur un **plafond d'index**, zéro 404 ; le tuileur ignore `waterLevelM` → **lac Érié rendrait zéro tuile sans erreur** ; barème 7 critères, éliminatoire sur la non-régression | `wt-bt1` | ✅ |
+| **BT-I** | intégration BlueTopo (reconnaissance de l'index vivant, cuisson Chesapeake, branchement, poids) | `wt-bt2` | en vol |
+| **GE1** | spécification souris Google Earth (Web vs Pro, URL), état actuel mesuré, barème + tests rouges | `wt-ge1` | en vol |
+| **GE2** | implémentation : clic droit, molette enfoncée, double-clic, modificateurs, menu contextuel, inertie — inclinaison **manuelle** partout, D16 ter pour l'**automatique** | `wt-ge2` | en vol |
+| **B5** | **carrés plats autour des côtes du sud** (Hyères, Marseille) — piste n° 1 : la quantification à 1 m + `v = raw < 0 ? quantize : 0` fait tomber le platier ]−1 ; 0[ sur **0 = marqueur muet = terre** ; critère en **pixels de terre là où la vérité dit mer** | `wt-bat3` (B3 repris) | en vol |
+
+**En attente de `globe.js` libre** (BT-I y touche peut-être) : le **raffinement
+partiel** demandé par Adrien contre le flou de zoom — dessiner les enfants prêts
+et ne garder le parent que sous les manquants (`_traverse`, boucle `pretes`,
+`globe.js` ~8746), prélecture un niveau à l'avance, ne jamais évincer une tuile
+dont le parent est dessiné, fondu parent→enfant. ⚠️ `test/veille-repos.test.js` ⑦
+verrouille « le crop est dessiné par exactement les mêmes tuiles » — à réécrire,
+pas à contourner.
+
+⚠️ **Conflit prévu** : B5 et BT-I peuvent toucher `scripts/build-bathy-tiles.mjs`
+et `dem.js`. B5 a ordre de le dire en tête de rapport ; fusion à la main.
+| **R37** | **raffinement partiel** contre le flou de zoom (dessiner les enfants prêts, parent seulement sous les manquants ; prélecture ; pas d'éviction sous un parent dessiné) — `_traverse` ~8746, `veille-repos.test.js` ⑦ à réécrire | `wt-raf` | en vol |
+| ~~GE2~~ | **FUSIONNÉ** — clic droit V = zoom (centre 0 px), clic droit H inerte (doc muette), milieu/Ctrl/Maj = inclinaison +20,31° et cap −50,000° à |Δln d| = 0, Alt = saisie seule 0,06 px, double-clic droit, inertie 4,35 °/s ; D19 glissé 0,00 px, molette 0,00 px, clic 1,0171, D16 ter 0,000° sur 1 194 images ; **arbitrage ouvert `PIVOT_VERS_LE_CURSEUR`** (double-clic : Google = curseur, D19 = centre) ; 4 774 · 0, audit 254 | `wt-ge2` | ✅ |
+| ~~GE1~~ | **FUSIONNÉ** — référence Web/Pro avec URL ; **contradiction non tranchée** : Google publie « zoom toward cursor » (double-clic) et rien sur la molette, D19 dit « centre » ; barème C0 éliminatoire + C1–C8, 13 tests rouges (`GE_VISEE=centre|curseur`) ; ⚠️ **D19 §1 bimodale 5/8** (point saisi 0 ou ~752 px, facteur 4,65) — R32 sous-échantillonnée, pas contredite ; ⚠️ **le socle disait « le globe tourne seul à ~2 °/s » : témoin 0,000° sur 90 images et 5 s → à retirer du socle** ; Échap **fige** le vol de démarrage là où il en est | `wt-ge1` | ✅ |
+| ~~R37~~ | **FUSIONNÉ** — le défaut vu par Adrien était **le recul** (zone nette qui redevient floue, 63–72 % du flou), pas le parent étiré : `demanderEmprise` jetait les tuiles prêtes du centre pour relire leurs hauteurs ; raffinement partiel + rechargement sur place + éviction protégée + prélecture au centre ; flou moyen **13 % → 3,9 %**, p90 50 % → **0**, recul **100 % → 0 %**, trous 0 ; `_traverse` 0,3/1,3 → 0,4/1,4 ms, requêtes 568 → 610 ; `veille-repos` ⑦ réécrit | `wt-raf` | ✅ |
+| ~~B5~~ | **FUSIONNÉ** — les carrés plats du sud : **pas la quantification** (515–849 px dans ]−1;0[ contre 77 000–300 000 de plateau), **le terrarium Mapterhorn en `.webp` lossy** dont le zéro de mer ressort à **0 ± 0,5 m, des deux côtés du signe** ; les +0,3 étaient classés TERRE sans lire EMODnet (−80 m dessous) ; bande de bruit `|h| ≤ 0,6 m` sur ≥ 10 % des pixels que la source fine dit < −2 m ; pixels de mer émergés Porquerolles **131 010 → 17 496**, Frioul **300 599 → 18 599** ; rivage vrai noyé = 0 sur 12 vues, Manche −72,0 ; **zéro octet recuit**, tout dans `bathy.js` | `wt-bat3` | ✅ |

@@ -849,6 +849,29 @@ const PLANCHER_DIST_M = 1
 const PLANCHER_DIST = PLANCHER_DIST_M * (R_GLOBE / EARTH_RADIUS_M)
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
+// ══════════ LE RAFFINEMENT PARTIEL ET LA PRÉLECTURE — R37 ═══════════════════
+//
+// **Adrien, vidéo du 2026-09-03 :** « je vois les zones déjà chargées qui
+// redeviennent floues puis se remettent en haute définition à chaque niveau ».
+//
+// La règle sans-trou était TOUT OU RIEN : un seul enfant manquant sur quatre
+// gardait le parent étiré sur tout le quadrant. Depuis R37, les enfants prêts
+// se dessinent et le parent ne se dessine que SOUS les manquants (un masque par
+// quadrant, porté par les groupes d'index du maillage — voir `_dessinerPartiel`).
+// C'est ce que fait Cesium, qui a abandonné la règle stricte en profondeur.
+//
+// `PRELECTURE_RATIO` : sous ce ratio (`chord / dist`), une tuile dessinée qui
+// n'a pas encore besoin de se refendre demande déjà ses enfants du champ, à
+// une priorité en retrait (`PRELECTURE_RETRAIT`, soustrait à la clé de PF2) :
+// ils partent après tout ce que l'image réclame vraiment, et ils sont souvent
+// là quand le seuil est franchi. Mesuré au banc R37 (rapport-R37.md).
+const PRELECTURE_RATIO = SPLIT_RATIO * 0.7
+const PRELECTURE_RETRAIT = 10
+// la clé de PF2 vaut 1000 au centre de l'écran et décroît de 250 par unité NDC
+// (bord de tuile) : 850 = le bord de la tuile à moins de 0,6 NDC du centre
+const PRELECTURE_CENTRE = 850
+// sous ce crédit de création (place libre + récupérable), on ne prélit pas
+const PRELECTURE_CREDIT_MIN = 400
 
 // LE TRI SPATIAL (plan « globe continu », Tâche 4) — derrière `globeContinu`.
 //
@@ -3103,6 +3126,13 @@ function tileKey(z, x, y) {
   return `${z}/${x}/${y}`
 }
 
+// Le quadrant d'un enfant dans son parent, en bit : 1 = nord-ouest, 2 = nord-est,
+// 4 = sud-ouest, 8 = sud-est — le même ordre que `_children` et que la découpe
+// d'index de `_decouperEnQuadrants` (R37).
+function quadrantDe(k) {
+  return 1 << ((k.x & 1) + ((k.y & 1) << 1))
+}
+
 // ══════════ L'IRRADIANCE D'UNE LAMPE — Tâche P3 ════════════════════════════
 //
 // ⚠️ **`WebGLLights` FAIT EXACTEMENT CE PRODUIT, ET IL LE FAIT UNE FOIS** :
@@ -3942,6 +3972,22 @@ export class Globe {
     this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
     this._refusFile = 0 // requêtes REFUSÉES par PLAFOND_FILE à la dernière image
     this._purgees = 0 // entrées de file PÉRIMÉES retirées à la dernière image
+    // R37 : les parents dessinés PARTIELLEMENT à cette image (masque par
+    // quadrant) — leur matériau redevient le partagé à l'image suivante
+    this._partiels = new Set()
+    this._nPartiels = 0 // parents partiels à la dernière image (mesure)
+    this._prelues = 0 // enfants PRÉLUS (demandés avant le seuil) à la dernière image
+    this._materiauInvisible = null // le matériau « ne pas dessiner » des quadrants couverts
+    // la prélecture ne part qu'en DESCENTE (la direction est connue) — `update`
+    // compare la distance de la caméra au centre d'une image à l'autre
+    this.prelecture = true
+    this.prelectureRatio = PRELECTURE_RATIO // réglable, pour le banc R37
+    // les deux autres leviers de R37, débrayables pour l'A/B du banc dans la
+    // MÊME session (le pixel n'est comparable qu'ainsi) — levés en production
+    this.raffinementPartiel = true
+    this.protegerEnfants = true
+    this._descend = false
+    this._rayonCamPrec = 0
     // zones z8 dont la sonde de couverture est EN VOL — voir `_sonder`
     this._sondes = new Set()
     // tuiles laissées `empty` faute de sonde à la dernière image (Tâche 4 alpha)
@@ -7553,7 +7599,8 @@ export class Globe {
    */
   _melangeCrop(actif) {
     for (const t of this.tiles.values()) {
-      const m = t.mesh?.material
+      const mm = t.mesh?.material
+      const m = Array.isArray(mm) ? mm[0] : mm // R37 : un parent partiel porte un tableau
       if (!m || m.transparent === actif) continue
       m.transparent = actif
       m.depthWrite = true
@@ -8088,6 +8135,55 @@ export class Globe {
     return n
   }
 
+  // ══════════ REDEMANDER SANS EFFACER — R37 ═══════════════════════════════════
+  //
+  // **C'est LE défaut qu'Adrien filme.** Le flux du socle (`demanderEmprise`,
+  // étape 3) réclame les hauteurs des tuiles de son emprise ; celles qui sont
+  // prêtes mais dont `_buildMesh` a relâché les hauteurs étaient jetées
+  // (maillage, texture, `state = 'empty'`) puis redemandées. Or ces tuiles sont
+  // EXACTEMENT celles du centre de l'écran, à l'altitude du bloc : pendant leur
+  // vol, la règle sans-trou remontait au parent (z9 sur toute l'image, mesuré
+  // au banc R37 : 100 % de l'écran en recul d'un à trois niveaux, 0,5 à 4 s par
+  // niveau), et le cache souple évinçait leurs descendants devenus non porteurs
+  // — à retélécharger ensuite. La zone nette redevenait floue sans que
+  // l'utilisateur ait bougé.
+  //
+  // Ici la tuile reste `ready`, son maillage reste dessiné, et une entrée de
+  // file part chercher la donnée ; à l'arrivée seulement, `_pump` remplace le
+  // maillage (`_jeterMaillage` puis `_buildMesh`). Rien ne change à l'écran
+  // entre les deux — pas un pixel.
+  //
+  // ⚠️ L'entrée n'est pas « suivie » (priorité fixe, celle du flux) et la
+  // tuile est dans `gardeHauteurs`, donc `_purgerFile` la garde. Si la tuile
+  // n'est pas prête (ou sans maillage), c'est l'ancien chemin : `empty` puis
+  // `_request` — rien à préserver.
+  //
+  // @returns {boolean} vrai si un rechargement est parti (ou déjà en vol)
+  redemanderSurPlace(t, priority = 1e9) {
+    if (t.state !== 'ready' || !t.mesh) return false
+    if (t.enVolSurPlace) return true
+    if (!t.plan) t.plan = planTuile(t.z, t.x, t.y)
+    if (!t.plan) return false
+    t.enVolSurPlace = true
+    t.retried = false
+    this.queue.push({ t, priority, suivie: false, surPlace: true })
+    this._pump()
+    return true
+  }
+
+  _jeterMaillage(t) {
+    if (t.mesh) {
+      this.group.remove(t.mesh)
+      t.mesh.geometry.dispose()
+      libererMateriauTuile(this, t.mesh)
+      t.mesh = null
+    }
+    t.texture?.dispose()
+    t.texture = null
+    t._partiel = 0
+    this._partiels.delete(t)
+  }
+
   _pump() {
     // ⚠️ PAS PENDANT LE PARCOURS (PF2). `_request` appelait la pompe à chaque
     // enfilement, donc les `MAX_CONCURRENT` créneaux d'une image partaient aux
@@ -8099,7 +8195,7 @@ export class Globe {
     if (!this.queue.length || this.inFlight >= MAX_CONCURRENT) return
     this.queue.sort((a, b) => b.priority - a.priority)
     while (this.inFlight < MAX_CONCURRENT && this.queue.length) {
-      const { t } = this.queue.shift()
+      const { t, surPlace } = this.queue.shift()
       this.inFlight++
       fetchTile(t.z, t.x, t.y, t.plan)
         .then(({ texture, heights, size }) => {
@@ -8113,14 +8209,34 @@ export class Globe {
             texture.dispose()
             return
           }
+          // R37 : le rechargement SUR PLACE remplace un maillage encore dessiné
+          // — l'ancien ne part qu'à l'instant où le neuf peut prendre sa place
+          // ⚠️ ET LE NEUF HÉRITE DE LA VISIBILITÉ DE L'ANCIEN : la promesse se
+          // résout entre `update()` et le rendu de la même image (mémoire de
+          // tuiles → microtâche) ; un maillage neuf né invisible ferait un
+          // trou d'une image exactement là où l'ancien dessinait.
+          const visible = surPlace && !!(t.mesh && t.mesh.visible)
+          if (surPlace) {
+            t.enVolSurPlace = false
+            this._jeterMaillage(t)
+          }
           t.texture = texture
           t.heights = heights
           t.size = size
           t.state = 'ready'
           this._buildMesh(t)
+          if (visible && t.mesh) t.mesh.visible = true
         })
         .catch((err) => {
           const vivante = this.tiles.get(t.key) === t
+          // R37 : un rechargement sur place qui échoue laisse la tuile telle
+          // qu'elle est — prête, dessinée, sans hauteurs ; le flux la
+          // redemandera à la prochaine emprise, et rien ne s'efface à l'écran
+          if (surPlace) {
+            t.enVolSurPlace = false
+            if (vivante) console.warn('globe tile (sur place) failed:', err.message)
+            return
+          }
           // one retry, then give up — the parent keeps covering this area
           if (!t.retried && vivante) {
             t.retried = true
@@ -8460,6 +8576,17 @@ export class Globe {
     // sait rendre : une tuile prête qui n'a porté ni dessiné à la frame d'avant.
     const prev = this.frame - 1
     let marge = 0
+    // R37 : un parent dessiné partiellement à l'image d'avant reprend son
+    // matériau entier ; `_traverse` remettra le masque s'il le faut encore
+    for (const t of this._partiels) this._restaurerEntier(t)
+    this._partiels.clear()
+    this._nPartiels = 0
+    this._prelues = 0
+    {
+      const r = camPos.length()
+      this._descend = this._rayonCamPrec > 0 && r < this._rayonCamPrec * (1 - 1e-7)
+      this._rayonCamPrec = r
+    }
     for (const t of this.tiles.values()) {
       if (t.mesh) t.mesh.visible = false
       if (t.z > ROOT_Z && t.state === 'ready' && t.coverFrame !== prev && t.lastUsed !== prev) marge++
@@ -8762,40 +8889,54 @@ export class Globe {
       // ⚠️ `lastUsed` n'est posé QUE sur les enfants du champ : un enfant hors
       // champ resté en file est purgé à l'image suivante (`_purgerFile`), et
       // un `empty` hors champ est évinçable au rang 0 — il ne coûte rien.
-      let pretes = true
+      // ══════ LE RAFFINEMENT PARTIEL — R37 ══════════════════════════════════
+      //
+      // `masque` porte les quadrants que le parent doit encore couvrir : ceux
+      // d'un enfant du champ qui n'est pas prêt. Un enfant hors champ, ou hors
+      // crop (absent de `kids`), ne met rien dans le masque : aucun pixel ne
+      // dépend de lui. Quand le masque est vide, c'est l'ancienne règle
+      // sans-trou ; sinon les enfants prêts se dessinent et le parent ne se
+      // dessine que sous le masque — jamais deux fois le même pixel, jamais
+      // un pixel sans tuile.
+      let masque = 0
+      let prets = 0
       for (const k of kids) {
         if (!this._dansLeChamp(k, camDir)) continue
         k.lastUsed = this.frame // protect loading/fresh children from LRU
         if (k.state === 'empty') this._request(k)
-        if (k.state !== 'ready' || !k.mesh) pretes = false
+        if (k.state !== 'ready' || !k.mesh) masque |= quadrantDe(k)
+        else prets++
       }
-      // hole-free rule: descend only when all children IN THE FIELD can draw —
-      // any error keeps the parent covering the whole quad
-      //
       // ⚠️ **AU REPOS, `kids` NE CONTIENT QUE LES ENFANTS DU CROP — Tâche N**,
-      // et la règle sans-trou tient toujours : ce qui manque à la couverture est
+      // et la couverture tient toujours : ce qui manque à la couverture est
       // ce qu'on a décidé de ne pas montrer. Sans ce filtrage, un quart de
       // z11 chevauchant le bord du crop attendrait quatre enfants dont deux ne
       // seront JAMAIS demandés — le crop resterait grossier pour toujours.
       //
       // ⛔ **IL Y AVAIT ICI UN `kids.length > 0 &&`, ET C'ÉTAIT DU CODE MORT —
-      // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
-      // raisonnement écrit à côté était plausible (« une liste vide passerait
-      // `every` et on descendrait dans le vide, donc une encoche »), et il est
-      // sans objet : **`tuileDansCrop` est un test d'INTERSECTION D'EMPRISES
-      // sur les deux axes** — en latitude par `y1 <= cy − demi || y0 >= cy +
-      // demi`, en longitude par `|dx| < demi + demiTuile` sur le CENTRE, ce qui
-      // est la même chose. Les quatre enfants PAVENT exactement leur parent :
-      // si le parent recoupe l'emprise du crop, au moins un enfant la recoupe.
-      // Un parent qui atteint cette ligne a forcément passé `_horsCropSeul`,
-      // donc `kids` n'est jamais vide. Une mutation qui retirait la garde
-      // SURVIVAIT. **Retirée plutôt que testée à vide** — sixième code mort de
-      // ce chantier. Ce qui garde réellement l'absence de trou est l'assertion
-      // d'ensemble de `test/veille-repos.test.js` ⑦ : le crop doit être dessiné
-      // par EXACTEMENT les mêmes tuiles avec et sans le drapeau.
-      if (pretes) {
+      // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Les quatre
+      // enfants PAVENT exactement leur parent : si le parent recoupe l'emprise
+      // du crop, au moins un enfant la recoupe (`tuileDansCrop` est un test
+      // d'intersection sur les deux axes). Ce qui garde réellement l'absence de
+      // trou est l'assertion de COUVERTURE de `test/veille-repos.test.js` ⑦ :
+      // chaque point du crop est dessiné par exactement une tuile (ou un
+      // quadrant de parent), avec et sans le drapeau — plus « les mêmes
+      // tuiles », qu'un raffinement partiel change par construction.
+      if (masque === 0) {
         t.refined = true
         for (const k of kids) this._traverse(k, camPos, camDir)
+        return
+      }
+      // ⚠️ LE PARENT DOIT POUVOIR DESSINER pour couvrir le masque ; sinon on
+      // remonte au grand-parent comme avant (il nous voit « pas prêt »).
+      if (this.raffinementPartiel && prets > 0 && t.state === 'ready' && t.mesh) {
+        // `refined` garde son sens d'avant — « les quatre enfants dessinent » —
+        // pour que l'hystérésis de MERGE_RATIO ne change pas de seuil ici
+        t.refined = false
+        for (const k of kids) {
+          if (k.state === 'ready' && k.mesh && !(masque & quadrantDe(k)) && this._dansLeChamp(k, camDir)) this._traverse(k, camPos, camDir)
+        }
+        this._dessinerPartiel(t, masque)
         return
       }
     }
@@ -8804,6 +8945,15 @@ export class Globe {
     if (t.state === 'ready' && t.mesh) {
       t.mesh.visible = true
       this._drawn++
+      // ══════ LA PRÉLECTURE — R37 ═══════════════════════════════════════════
+      // La tuile se dessine entière et n'a pas encore à se refendre ; mais
+      // si le ratio approche le seuil, ses enfants du champ partent déjà, en
+      // retrait de priorité. Le crédit se paie comme pour un vrai raffinement
+      // (les enfants naissent), et `lastUsed` les protège de la purge tant
+      // que l'image les prélit encore.
+      // ⚠️ sur le chemin CONTINU seulement : c'est lui qui a le tri spatial et la
+      // clé d'écran de PF2 ; sans eux, prélire, c'est remplir le cache d'invisible
+      if (this.continu && this.prelecture && this._descend && !zCrop && t.z < MAX_Z && ratio > this.prelectureRatio) this._prelire(t, camDir)
       // ══════ L'IMAGERIE — Tâche R16, ET C'EST **ICI** QUE ÇA SE JOUE ═══════
       //
       // ⚠️⚠️ **SUR LES TUILES DESSINÉES, PAS SUR LES TUILES PARCOURUES — PIÈGE ①
@@ -8819,6 +8969,134 @@ export class Globe {
       // lignes plus haut. La photo hérite du tri du quadtree, elle n'en refait pas.
       this._habillerPhoto(t)
     }
+  }
+
+  // ══════════ LA PRÉLECTURE UN NIVEAU À L'AVANCE — R37 ═══════════════════════
+  //
+  // Les enfants du champ d'une tuile dessinée partent avant que le seuil ne
+  // soit franchi. ⚠️ **RÉUTILISE LA CLÉ DE PF2** (`_priorite`), en retrait
+  // fixe : la file trie en décroissant, donc `clé − PRELECTURE_RETRAIT` passe
+  // après tout ce que l'image demande vraiment (une clé de PF2 vaut au plus
+  // ~1,4 en écran). L'entrée n'est pas « suivie » (pas reclassée) : elle est
+  // purgée dès qu'une image ne la prélit plus, et redemandée s'il le faut.
+  _prelire(t, camDir) {
+    // ⚠️ SEULEMENT AU CENTRE DE L'ÉCRAN : une descente va vers le centre, et
+    // ce sont les bords qui sortent du champ en descendant — prélire leurs
+    // enfants, c'est payer des tuiles qui ne seront jamais dessinées (mesuré :
+    // +28 % de requêtes par descente sans ce garde-fou, +9 % avec).
+    if (this._priorite(t) < PRELECTURE_CENTRE) return
+    if (!this._enfantsPresents(t)) {
+      // ⚠️ ET SEULEMENT QUAND LE CACHE A DE LA PLACE : sur un cache saturé,
+      // un enfant prélu prend la place d'une tuile qu'on rechargera — mesuré
+      // (`test/globe-eviction`, cache 600) : ×1,85 de requêtes par vol. Le
+      // crédit compte la place libre plus la place récupérable.
+      if (this._credit < PRELECTURE_CREDIT_MIN) return
+      this._credit -= 4
+    }
+    for (const k of this._children(t)) {
+      if (!this._dansLeChamp(k, camDir)) continue
+      k.lastUsed = this.frame
+      if (k.state === 'empty') {
+        this._request(k, this._priorite(k) - PRELECTURE_RETRAIT)
+        if (k.state === 'loading') this._prelues++
+      }
+    }
+  }
+
+  // ══════════ LE PARENT SOUS LES QUADRANTS MANQUANTS — R37 ═══════════════════
+  //
+  // Le maillage d'une tuile est un seul appel de dessin. Pour n'en dessiner
+  // que certains quadrants sans toucher au nuanceur, l'index est réordonné une
+  // fois par quadrant ([Q0][Q1][Q2][Q3][jupe]) et découpé en GROUPES ; three ne
+  // dessine les groupes que si le matériau est un tableau, et il saute un
+  // groupe dont le matériau est `visible = false`. Le tableau vaut donc
+  // `[partagé, invisible]`, et chaque groupe pointe l'un ou l'autre.
+  //
+  // ⚠️ La jupe se dessine toujours avec le parent : elle est sous la surface
+  // des enfants (rabattue vers le centre de la planète), invisible là où un
+  // enfant couvre, et elle ferme les fentes contre les voisins ailleurs.
+  // ⚠️ Le matériau redevient le partagé à l'image suivante (`update`) — aucun
+  // lecteur de `mesh.material` ne voit le tableau entre deux parcours.
+  _dessinerPartiel(t, masque) {
+    const mesh = t.mesh
+    const geo = mesh.geometry
+    let q = geo.userData.quadrants
+    if (!q || q.index !== geo.index) q = this._decouperEnQuadrants(geo)
+    if (!q) {
+      // pas de découpe possible (maillage étranger) : le parent entier, comme avant
+      mesh.visible = true
+      this._drawn++
+      this._habillerPhoto(t)
+      return
+    }
+    if (!this._materiauInvisible) this._materiauInvisible = new THREE.MeshBasicMaterial({ visible: false })
+    const m = this._materiauEntier(mesh)
+    if (!t._materiaux || t._materiaux[0] !== m) t._materiaux = [m, this._materiauInvisible]
+    mesh.material = t._materiaux
+    const groupes = geo.groups
+    for (let i = 0; i < 4; i++) groupes[i].materialIndex = masque & (1 << i) ? 0 : 1
+    if (groupes[4]) groupes[4].materialIndex = 0
+    mesh.visible = true
+    t._partiel = masque
+    this._partiels.add(t)
+    this._nPartiels++
+    this._drawn++
+    this._habillerPhoto(t)
+  }
+
+  _materiauEntier(mesh) {
+    const m = mesh.material
+    return Array.isArray(m) ? m[0] : m
+  }
+
+  _restaurerEntier(t) {
+    const mesh = t.mesh
+    t._partiel = 0
+    if (mesh && Array.isArray(mesh.material)) mesh.material = mesh.material[0]
+  }
+
+  // Réordonne l'index d'un maillage de tuile par quadrant (uv), la jupe en
+  // dernier, et pose les cinq groupes. Une fois par tuile, à la première
+  // couverture partielle ; `userData.quadrants.index` dit sur quel index la
+  // découpe a été faite (si quelqu'un remplace l'index, on recoupe).
+  _decouperEnQuadrants(geo) {
+    const index = geo.index
+    const uv = geo.attributes.uv
+    if (!index || !uv) return null
+    const src = index.array
+    const nV = geo.userData.jupe ? geo.userData.jupe.nV : Infinity
+    const nT = (src.length / 3) | 0
+    const classe = new Uint8Array(nT)
+    const compte = [0, 0, 0, 0, 0]
+    for (let i = 0; i < nT; i++) {
+      const a = src[i * 3], b = src[i * 3 + 1], c = src[i * 3 + 2]
+      let g
+      if (a >= nV || b >= nV || c >= nV) g = 4
+      else {
+        const u = (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3
+        const v = (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3
+        // uv v = 1 − v de tuile : le nord (dy = 0) est en v > 0,5
+        g = (u >= 0.5 ? 1 : 0) + (v < 0.5 ? 2 : 0)
+      }
+      classe[i] = g
+      compte[g]++
+    }
+    const debut = [0, 0, 0, 0, 0]
+    for (let g = 1; g < 5; g++) debut[g] = debut[g - 1] + compte[g - 1]
+    const dst = new src.constructor(src.length)
+    const curseur = debut.slice()
+    for (let i = 0; i < nT; i++) {
+      const g = classe[i]
+      const o = curseur[g]++ * 3
+      dst[o] = src[i * 3]; dst[o + 1] = src[i * 3 + 1]; dst[o + 2] = src[i * 3 + 2]
+    }
+    const neuf = new THREE.BufferAttribute(dst, 1)
+    geo.setIndex(neuf)
+    geo.clearGroups()
+    for (let g = 0; g < 5; g++) geo.addGroup(debut[g] * 3, compte[g] * 3, 0)
+    const q = { index: neuf, debut, compte }
+    geo.userData.quadrants = q
+    return q
   }
 
   // Lie à la tuile la meilleure photo disponible — la sienne, ou celle d'un
@@ -8970,9 +9248,20 @@ export class Globe {
       ? vivantes.filter((t) => this._bloquee(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b))
       : []
     const candidates = vivantes.filter((t) => t.state === 'ready' && !(t.mesh && t.mesh.visible))
+    // R37 : une tuile dont le PARENT est dessiné est le prochain niveau de
+    // l'écran — l'évincer, c'est la retélécharger dès que le parent se refend
+    // (mesuré : 181 tuiles évincées en une image quand l'écran reculait au
+    // parent, puis redemandées). Elle passe APRÈS les autres non porteuses.
+    const parentDessine = (t) => {
+      if (!this.protegerEnfants) return false
+      const p = this.tiles.get(tileKey(t.z - 1, t.x >> 1, t.y >> 1))
+      return !!(p && p.mesh && p.mesh.visible)
+    }
+    const libres = candidates.filter((t) => !porte(t))
     const victimes = [
       ...bloquees,
-      ...candidates.filter((t) => !porte(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b)),
+      ...libres.filter((t) => !parentDessine(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b)),
+      ...libres.filter(parentDessine).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b)),
       ...candidates.filter(porte).sort((a, b) => parProfondeur(a, b) || a.lastUsed - b.lastUsed),
     ]
     for (let i = 0; i < Math.min(excess, victimes.length); i++) {

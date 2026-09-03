@@ -440,6 +440,13 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE, aussi = null
       // prix, et le seul, du relâchement du canevas et des hauteurs ». Le
       // geste est UNIQUE par tuile : au retour, la clé est réservée, donc les
       // hauteurs restent.
+      //
+      // ⚠️ **SANS L'EFFACER — R37.** Ces tuiles sont celles du centre de
+      // l'écran : les jeter faisait remonter tout l'écran au parent le temps
+      // du vol (« la zone nette redevient floue », vidéo d'Adrien). Un globe
+      // qui sait recharger SUR PLACE garde le maillage dessiné jusqu'à
+      // l'arrivée ; un globe de papier (tests) suit l'ancien chemin.
+      if (typeof g.redemanderSurPlace === 'function' && g.redemanderSurPlace(t, secondes.has(t.key) ? 9e8 : 1e9)) continue
       if (t.mesh) {
         g.group.remove(t.mesh)
         t.mesh.geometry.dispose()

@@ -1,0 +1,10 @@
+import fs from 'node:fs'; import zlib from 'node:zlib'
+function decodePng(buf){let o=8,w=0,h=0,bpp=3;const idat=[];while(o<buf.length){const len=buf.readUInt32BE(o);const t=buf.toString('ascii',o+4,o+8);const d=buf.subarray(o+8,o+8+len);if(t==='IHDR'){w=d.readUInt32BE(0);h=d.readUInt32BE(4);bpp=d[9]===6?4:d[9]===2?3:1}else if(t==='IDAT')idat.push(d);else if(t==='IEND')break;o+=12+len}
+ const raw=zlib.inflateSync(Buffer.concat(idat));const s=w*bpp;const out=Buffer.alloc(h*s);for(let y=0;y<h;y++){const f=raw[y*(s+1)];const line=raw.subarray(y*(s+1)+1,y*(s+1)+1+s);for(let i=0;i<s;i++){const a=i>=bpp?out[y*s+i-bpp]:0;const b=y>0?out[(y-1)*s+i]:0;const c=i>=bpp&&y>0?out[(y-1)*s+i-bpp]:0;let v=line[i];if(f===1)v+=a;else if(f===2)v+=b;else if(f===3)v+=(a+b)>>1;else if(f===4){const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);v+=pa<=pb&&pa<=pc?a:pb<=pc?b:c}out[y*s+i]=v&0xff}}return {w,h,bpp,data:out}}
+const lon2x=(lon,z)=>((lon+180)/360)*2**z, lat2y=(lat,z)=>{const r=lat*Math.PI/180;return((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2)*2**z}
+const [lat,lon,z,W,H]=[+process.argv[2],+process.argv[3],+process.argv[4],+(process.argv[5]||70),+(process.argv[6]||28)]
+const wx=lon2x(lon,z),wy=lat2y(lat,z); const cx=Math.floor(wx*256),cy=Math.floor(wy*256)
+const cache={}; const lire=(X,Y)=>{const tx=Math.floor(X/256),ty=Math.floor(Y/256);const k=tx+'/'+ty;if(!(k in cache)){const f=`public/data/bathy/${z}/${tx}/${ty}.png`;cache[k]=fs.existsSync(f)?decodePng(fs.readFileSync(f)):null}const p=cache[k];if(!p)return null;const px=X-tx*256,py=Y-ty*256;const i=(py*p.w+px)*p.bpp;return p.data[i]*256+p.data[i+1]+p.data[i+2]/256-32768}
+const mpp=40075000*Math.cos(lat*Math.PI/180)/2**z/256
+console.log(`z${z} autour de ${lat}/${lon} — 1 caractere = ${mpp.toFixed(0)} m · '.' absent  '0' = 0 exact  '~' ]-1,0[  '1'..'9' = -1..-9 m  'a' -10..-19  'b' -20..-49  'c' -50..-199  'd' <-200`)
+for(let y=cy-H/2;y<cy+H/2;y++){let l='';for(let x=cx-W/2;x<cx+W/2;x++){const m=lire(x,y);l+=m==null?'.':m===0?'0':m>-1?'~':m>-10?String(Math.ceil(-m)):m>-20?'a':m>-50?'b':m>-200?'c':'d'}console.log(l)}

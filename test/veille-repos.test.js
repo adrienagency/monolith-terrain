@@ -621,6 +621,52 @@ async function globeAuBloc({ cropSeulDesLeDepart = false } = {}) {
   return { globe, camera }
 }
 
+// ══════ LA COUVERTURE DU CROP, POINT PAR POINT — R37 ═══════════════════════
+//
+// ⚠️ **CE QUE ⑦ GARDAIT PAR « LES MÊMES TUILES », IL LE GARDE DÉSORMAIS PAR
+// « CHAQUE POINT DESSINÉ EXACTEMENT UNE FOIS ».** Le raffinement partiel (R37)
+// change l'ensemble des tuiles dessinées par construction — un parent peut ne
+// dessiner que sous ses enfants manquants — mais ce qu'on voulait garder
+// n'était pas la liste, c'était l'absence de trou (et de double). On le mesure
+// donc là où il se voit : sur une grille de points DANS le crop, la tuile (ou
+// le quadrant de parent) qui dessine chaque point.
+const R2D = 180 / Math.PI
+function tuileXY(lat, lon, z) {
+  const n = 2 ** z
+  const la = lat / R2D
+  return [Math.floor(((lon + 180) / 360) * n), Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n)]
+}
+function dessinentSous(globe, lat, lon) {
+  const out = []
+  for (let z = 2; z <= 15; z++) {
+    const [x, y] = tuileXY(lat, lon, z)
+    const t = globe.tiles.get(`${z}/${x}/${y}`)
+    if (!t || !t.mesh || !t.mesh.visible) continue
+    if (t._partiel) {
+      const [cx, cy] = tuileXY(lat, lon, z + 1)
+      if (!(t._partiel & (1 << ((cx & 1) + ((cy & 1) << 1))))) continue
+    }
+    out.push(t.key)
+  }
+  return out
+}
+const mercLat = (my) => Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * R2D
+function couvertureCrop(globe, pas = 24) {
+  const rep = globe._crop
+  if (!rep) return null
+  let trous = 0, doubles = 0, points = 0, zMin = 99
+  for (let j = 0; j < pas; j++) for (let i = 0; i < pas; i++) {
+    const mx = rep.cx - rep.demi + (2 * rep.demi * (i + 0.5)) / pas
+    const my = rep.cy - rep.demi + (2 * rep.demi * (j + 0.5)) / pas
+    const qui = dessinentSous(globe, mercLat(my), mx * 360 - 180)
+    points++
+    if (qui.length === 0) trous++
+    else if (qui.length > 1) doubles++
+    for (const k of qui) zMin = Math.min(zMin, +k.split('/')[0])
+  }
+  return { points, trous, doubles, zMin }
+}
+
 function bilan(globe) {
   let dessinees = 0
   let dessineesHors = 0
@@ -637,7 +683,7 @@ function bilan(globe) {
       else dedansDessinees.add(cle)
     }
   }
-  return { dessinees, dessineesHors, maillees, horsCrop, dedansDessinees, visites: globe._visites, cache: globe.tiles.size }
+  return { dessinees, dessineesHors, maillees, horsCrop, dedansDessinees, visites: globe._visites, cache: globe.tiles.size, couverture: couvertureCrop(globe) }
 }
 
 test('⑦ AVANT : le `discard` laisse dessiner des tuiles entièrement hors crop', async () => {
@@ -664,16 +710,20 @@ test('⑦ APRÈS : hors crop, plus rien n’est parcouru ni dessiné', async () 
   assert.equal(ap.dessineesHors, 0, `${ap.dessineesHors} tuiles hors crop sont encore dessinées`)
   assert.ok(ap.visites < av.visites, `le parcours n’a pas diminué (${av.visites} → ${ap.visites})`)
   assert.ok(ap.dessinees > 0, 'le crop lui-même a disparu')
-  // ⚠️ **AUCUN TROU, ET C'EST LA MOITIÉ DU CONTRAT.** Le crop doit être dessiné
-  // par EXACTEMENT les mêmes tuiles qu'avant — pas une de moins. Un quart de
-  // quadtree dont les quatre enfants tombent hors du crop alors que lui-même y
-  // touche descendrait dans le vide et ouvrirait une encoche d'une tuile ;
-  // c'est ce que garde le `kids.length > 0` de la règle sans-trou.
-  assert.deepEqual(
-    [...ap.dedansDessinees].sort(),
-    [...av.dedansDessinees].sort(),
-    'le crop n’est plus dessiné par les mêmes tuiles : il s’est ouvert un trou',
-  )
+  // ⚠️ **AUCUN TROU, ET C'EST LA MOITIÉ DU CONTRAT.** Un quart de quadtree
+  // dont les quatre enfants tombent hors du crop alors que lui-même y touche
+  // descendrait dans le vide et ouvrirait une encoche d'une tuile. Ce test
+  // demandait « EXACTEMENT les mêmes tuiles qu'avant » ; depuis R37 (le
+  // raffinement partiel) l'ensemble dessiné n'est plus une constante — un
+  // parent dessine sous ses enfants manquants — et ce qu'on garde est ce qu'on
+  // voulait garder : **chaque point du crop dessiné exactement une fois**,
+  // avec et sans le drapeau, et pas plus grossier qu'avant.
+  assert.ok(av.couverture.points >= 500)
+  assert.equal(av.couverture.trous, 0, `${av.couverture.trous} point(s) du crop sans tuile AVANT le drapeau`)
+  assert.equal(av.couverture.doubles, 0, `${av.couverture.doubles} point(s) du crop dessinés deux fois AVANT le drapeau`)
+  assert.equal(ap.couverture.trous, 0, `${ap.couverture.trous} point(s) du crop sans tuile : le crop seul a ouvert un trou`)
+  assert.equal(ap.couverture.doubles, 0, `${ap.couverture.doubles} point(s) du crop dessinés deux fois`)
+  assert.ok(ap.couverture.zMin >= av.couverture.zMin, `le crop seul dessine plus grossier (z${ap.couverture.zMin} contre z${av.couverture.zMin})`)
 })
 
 test('⑦ un quart au BORD n’attend pas les enfants qu’il ne créera jamais', async () => {
@@ -692,20 +742,16 @@ test('⑦ un quart au BORD n’attend pas les enfants qu’il ne créera jamais'
   assert.equal(globe._enfantsPresents(bord.t), true, 'le quart attend des enfants qui ne naîtront pas')
 })
 
-test('⑦ MI-CHARGEMENT : UN SEUL enfant manquant sur quatre garde le parent dessiné (règle sans-trou)', async () => {
-  // ⚠️ **CE QUE CE TEST MORD, ET RIEN D'AUTRE NE LE MORDAIT** : `_traverse`
-  // ne descend que si `kids.every((k) => k.state === 'ready' && k.mesh)` — LES
-  // QUATRE, PAS « AU MOINS UN ». Une mutation en `kids.some(...)` passait les
-  // 181 tests de ce fichier ET des cinq autres qui touchent `_traverse`, parce
-  // qu'aucun d'eux n'inspecte l'état à MI-CHARGEMENT (avant que `calme()` n'ait
-  // laissé le réseau tout terminer) : ils comparent tous un état de REPOS à un
-  // autre état de REPOS, jamais l'instant où 1 à 3 enfants sur 4 sont prêts.
-  // C'est justement l'instant où `every` et `some` divergent : sous `some`, le
-  // parent se raffine (`t.refined = true`, il ARRÊTE de se dessiner) alors que
-  // l'enfant manquant, encore `state !== 'ready'`, ne dessine rien non plus —
-  // une encoche d'exactement une tuile s'ouvre dans le crop, précisément ce que
-  // le commentaire du code invoque pour justifier le retrait du `kids.length >
-  // 0 &&` voisin.
+test('⑦ MI-CHARGEMENT : UN SEUL enfant manquant sur quatre — le parent reste dessiné SOUS lui, les trois autres dessinent (raffinement partiel, R37)', async () => {
+  // ⚠️ **CE QUE CE TEST MORD, ET RIEN D'AUTRE NE LE MORDAIT** : l'instant de
+  // MI-CHARGEMENT, où 1 à 3 enfants sur 4 sont prêts. Aucun test de repos ne
+  // le voit. Avant R37 la règle était tout ou rien (le parent couvrait tout le
+  // quadrant tant qu'un enfant manquait — c'est le flou qu'Adrien a filmé) ;
+  // une mutation en `kids.some(...)` aurait ouvert une encoche d'une tuile.
+  // Depuis R37 le contrat est : **les enfants prêts dessinent, le parent
+  // dessine exactement les quadrants des manquants, et aucun point n'est
+  // dessiné zéro ou deux fois.** Une mutation qui dessinerait le parent entier
+  // (double) ou l'éteindrait (trou) rougit ici.
   const { globe, camera } = await globeAuBloc({ cropSeulDesLeDepart: true })
   let cible = null
   for (const t of globe.tiles.values()) {
@@ -732,14 +778,30 @@ test('⑦ MI-CHARGEMENT : UN SEUL enfant manquant sur quatre garde le parent des
 
   const camPos = camera.position
   const camDir = camPos.clone().normalize()
+  // ce que `update()` fait avant chaque parcours : tout s'éteint, le parcours rallume
+  for (const k of globe.tiles.values()) if (k.mesh) k.mesh.visible = false
   globe._traverse(t, camPos, camDir)
 
-  assert.equal(t.refined, false, 'un enfant manquant ne doit pas déclencher le raffinement du parent')
-  assert.equal(
-    t.mesh.visible, true,
-    'le parent doit rester dessiné tant que les 4 enfants ne sont pas TOUS prêts — sinon la tuile ' +
-      'manquante ouvre un trou d’une tuile dans le crop',
-  )
+  assert.equal(t.refined, false, '`refined` veut dire « les quatre dessinent » : pas à mi-chargement')
+  assert.equal(t.mesh.visible, true, 'le parent doit rester dessiné sous l’enfant manquant — sinon un trou d’une tuile')
+  const bit = 1 << ((enfants[3].x & 1) + ((enfants[3].y & 1) << 1))
+  assert.equal(t._partiel, bit, 'le parent doit ne dessiner QUE le quadrant du manquant')
+  // un enfant prêt HORS du champ n'est ni dessiné ni couvert : aucun pixel n'en dépend
+  const dansChamp = enfants.map((k) => globe._dansLeChamp(k, camDir))
+  assert.ok(dansChamp[3], 'le harnais a choisi un manquant hors champ : rien n’est mesuré')
+  // un enfant prêt dessine — ou, s'il a lui-même ses quatre enfants en cache (le
+  // crop prescrit z13), ce sont eux qui dessinent sous lui
+  for (let i = 0; i < 3; i++) if (dansChamp[i]) assert.ok(enfants[i].mesh.visible || enfants[i].refined, `l’enfant prêt ${enfants[i].key} n’est pas dessiné`)
+  // le point-par-point : sous les trois prêts, UNE tuile et pas plus grossière
+  // que l'enfant ; sous le manquant, le parent seul
+  const centre = (k) => { const n = 2 ** k.z; return [mercLat((k.y + 0.5) / n), ((k.x + 0.5) / n) * 360 - 180] }
+  for (let i = 0; i < 3; i++) {
+    if (!dansChamp[i]) continue
+    const qui = dessinentSous(globe, ...centre(enfants[i]))
+    assert.equal(qui.length, 1, `sous ${enfants[i].key} : ${qui.join(', ')}`)
+    assert.ok(+qui[0].split('/')[0] >= enfants[i].z, `sous ${enfants[i].key}, c’est ${qui[0]} qui dessine`)
+  }
+  assert.deepEqual(dessinentSous(globe, ...centre(enfants[3])), [t.key])
 })
 
 test('⑦ APRÈS : plus une seule URL hors crop n’est demandée', async () => {

@@ -51,6 +51,10 @@ export const ACTION = Object.freeze({
   ROTATION: 'rotation',
   DEPLACEMENT: 'deplacement', // déplacement latéral de la CAMÉRA (pan)
   GLISSE: 'glisse-terrain', // déplacement de la FENÊTRE de terrain (mode continu)
+  // ══════════ LE VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ═══════════════════
+  SAISIE: 'saisie-terre', // on attrape la Terre (R32)
+  ZOOM: 'zoom-glisse', // le glissé de zoom du clic droit (Google Earth Pro)
+  INCLINAISON: 'inclinaison', // l'inclinaison et le cap MANUELS — voir gestes-terre.js §3
 })
 
 /**
@@ -59,9 +63,34 @@ export const ACTION = Object.freeze({
  * @param {object} o
  * @param {boolean} o.continu - le mode continu 3×3 est-il actif
  * @param {boolean} o.surface - est-on en mode surface (par opposition au globe)
+ * @param {boolean} o.terre - le RÉGIME DE LA TERRE (orbite, ou surface hors du
+ *   crop) : le vocabulaire de Google Earth y a la main sur les trois boutons
  * @returns {{gauche:string, milieu:string, droit:string, majGauche:string}}
  */
-export function boutonsSouris({ continu = false, surface = true } = {}) {
+export function boutonsSouris({ continu = false, surface = true, terre = false } = {}) {
+  // ══════════ LE RÉGIME DE LA TERRE — Tâche GE2 ════════════════════════════
+  //
+  // En orbite et en surface hors du crop, les trois boutons appartiennent au
+  // vocabulaire de Google Earth (`monde/gestes-terre.js`), pas à OrbitControls :
+  // gauche = on attrape la Terre (R32), droit = le glissé de zoom, milieu =
+  // l'inclinaison MANUELLE. ⛔ **Le déplacement d'OrbitControls doit alors
+  // partir de TOUS les boutons**, et pas seulement du gauche.
+  //
+  // ⚠️ **CE N'EST PAS UN GOÛT, C'EST UNE MESURE** (`.banc/GE2/avant-surface.json`,
+  // 5 915 km hors du crop, glissé de 200 px) : le déplacement d'OrbitControls
+  // laissé sur le clic droit produisait `|Δ ln(distance caméra→cible)| = 5,27e-2`,
+  // soit **527 fois le seuil de `veille-repos`** — le signal même qui arme la
+  // bascule de trois quarts de D16 ter. Ctrl + gauche rendait 1,88e-1 (1 880 ×),
+  // Maj + gauche 1,15e-1 (1 150 ×). Trois gestes qui déclaraient un changement
+  // d'échelle sans qu'aucune échelle ne change.
+  if (terre) {
+    return {
+      gauche: ACTION.SAISIE,
+      milieu: ACTION.INCLINAISON,
+      majGauche: ACTION.INCLINAISON,
+      droit: ACTION.ZOOM,
+    }
+  }
   // La glisse n'a de sens qu'en surface : il n'y a pas de fenêtre continue
   // autour d'un globe. Sans cette condition, entrer en mode globe avec la
   // préférence allumée laisserait un clic droit mort.
@@ -91,6 +120,28 @@ export function boutonsSouris({ continu = false, surface = true } = {}) {
  * OrbitControls s'en charge (voir l'en-tête).
  */
 export function versTroisJs(map, MOUSE) {
+  // ⛔ **DANS LE RÉGIME DE LA TERRE, LES TROIS BOUTONS SONT RENDUS INERTES POUR
+  // LA BIBLIOTHÈQUE.** `-1` est la valeur qu'OrbitControls emploie lui-même pour
+  // « aucune action » (`default: mouseAction = -1`), et aucun `case` de son
+  // switch ne l'attrape. Le gauche n'a pas besoin d'être coupé ici — la saisie
+  // le prend par `controls.enableRotate = false` (R32) —, mais le milieu et le
+  // droit portaient un `PAN` qui, lui, écrivait `controls.target` sans que rien
+  // ne l'ait demandé : c'est le 5,27e-2 mesuré (voir `boutonsSouris`).
+  // ⛔ **LE GAUCHE AUSSI, ET C'EST UNE MESURE QUI L'A IMPOSÉ.** Première passe :
+  // `LEFT: MOUSE.ROTATE` gardé, en croyant que `controls.enableRotate = false`
+  // (R32) suffisait à le neutraliser. **Faux, et le banc l'a hurlé** : lu dans
+  // la source vendue (`OrbitControls.js`, `case MOUSE.ROTATE`), un ctrl / meta /
+  // shift tenu bascule en PAN — et ce PAN-là est gardé par `enablePan`, **pas
+  // par `enableRotate`**. Maj + glissé horizontal faisait donc l'inclinaison
+  // manuelle ET le déplacement d'OrbitControls en même temps :
+  // `|Δ ln d| = 1,88` (18 800 × le seuil de `veille-repos`), altitude
+  // 4 651 → 418 km, centre de la vue à **49 142 px**
+  // (`.banc/GE2/apres-surface.json`, première passe).
+  // ⚠️ Le repli que l'en-tête de ce fichier célèbre — « Maj + clic gauche déplace
+  // NATIVEMENT » — est précisément ce qu'il faut couper ICI, et seulement ici :
+  // dans le régime de la Terre, Ctrl et Maj portent l'inclinaison de Google
+  // Earth. Hors de ce régime (le crop), la ligne suivante le rend intact.
+  if (map.droit === ACTION.ZOOM) return { LEFT: -1, MIDDLE: -1, RIGHT: -1 }
   return {
     LEFT: MOUSE.ROTATE,
     MIDDLE: MOUSE.PAN,

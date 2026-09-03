@@ -236,11 +236,23 @@ test('un polder NÉGATIF ne se fait pas noyer par une source fine muette', () =>
   assert.equal(out[1], -6)
 })
 
-test('au rivage le fondu reste nul : le trait de côte ne bouge pas', () => {
-  const land = new Float32Array([0])
-  const sea = new Float32Array([-0.01]) // la source fine dit « à peine immergé »
+// 🔴 B5 — CE TEST DISAIT LE CONTRAIRE, ET C'ÉTAIT LE DÉFAUT. Il exigeait
+// qu'un pixel de référence à 0 EXACT reste à ±0,05 m quand la source fine le
+// dit immergé. Or 0 exact n'est PAS un rivage : c'est une ABSENCE (NODATA_EPS,
+// ci-dessus). En museler la source fine, on rendait tout platier à −1…−4 m à
+// ≈ −0,005 m, arrondi Int16 → 0 → TERRE pour le nuanceur : les plateaux
+// couleur terre en escalier autour des îles d'Hyères (77 000 à 300 000 pixels
+// par bloc, mesuré). Le rivage, lui, est la TERRE (l ≥ level hors absence), et
+// elle reste intouchable — c'est le test « même à 1 mm » plus bas.
+test('au rivage le fondu reste nul : un pixel à 0 EXACT est une absence, pas un rivage — la source fine y parle', () => {
+  const land = new Float32Array([0, 0])
+  const sea = new Float32Array([-0.01, -1]) // « à peine immergé », puis un platier
   const out = fuseBathymetry(land, sea)
-  assert.ok(Math.abs(out[0]) < 0.05, `le rivage a bougé de ${out[0]} m`)
+  // −0,01 est borné à −SEA_EPS (0,05) : de la mer, pas de la terre
+  assert.ok(out[0] <= -0.05 && out[0] > -0.06, `un pixel muet à peine immergé rend ${out[0]} m`)
+  assert.ok(Math.abs(out[1] - -1) < 0.01, `un platier à −1 m sur une référence muette rend ${out[1]} m`)
+  // et un VRAI rivage — de la terre à 4 mm — ne bouge pas
+  assert.equal(fuseBathymetry(new Float32Array([0.004]), new Float32Array([-0.01]))[0], new Float32Array([0.004])[0])
 })
 
 // --- RÉGRESSION La Ciotat / Nice / Brest z14 (2026-07-28) -------------------
@@ -308,13 +320,28 @@ test('⚠️ un plancher détecté ne doit JAMAIS relâcher la TERRE', () => {
   for (let i = 0; i < n; i += 4) assert.equal(out[i], land[i], `la terre a bougé en ${i}`)
 })
 
-test('un aplat POSITIF reste de la terre : on ne regarde que le côté immergé', () => {
-  // une plaine littorale rigoureusement plate à +0,25 m, c est de la TERRE
+// 🔴 B5 — CE CONTRAT DISAIT « une plaine rigoureusement plate à +0,25 m, c'est
+// de la TERRE » — quelle que soit la source fine en dessous. Porquerolles l'a
+// démenti : le terrarium y remplit la mer à +0,2…+0,5 m (bruit .webp autour
+// du zéro) sur un kilomètre où EMODnet donne −80 m, et ce « plateau » sortait
+// tel quel, en terre. Une plaine à +0,25 m posée sur 900 m d'eau n'existe pas ;
+// ce qui existe, c'est une plaine à +0,25 m dont les cellules de la source
+// fine, à cheval sur le rivage, rendent −1 ou −2 m. C'est ce cas-là qui reste
+// de la terre, et c'est lui qu'on teste désormais. L'autre est une absence.
+test('un aplat POSITIF reste de la terre quand la source fine ne le dit pas franchement immergé', () => {
+  const n = 4096
+  const land = champMer(n, (i) => (i % 2 ? 0.25 : -500))
+  const sea = champMer(n, (i) => (i % 2 ? -1.5 : -900)) // sous la plaine : cellules à cheval, −1,5 m
+  const out = fuseBathymetry(land, sea)
+  for (let i = 1; i < n; i += 2) assert.equal(out[i], 0.25, `la terre a bougé en ${i}`)
+})
+
+test('B5 · un aplat à +0,25 m posé sur une mer que la source fine donne à −900 m est un remplissage, pas une plaine', () => {
   const n = 4096
   const land = champMer(n, (i) => (i % 2 ? 0.25 : -500))
   const sea = champMer(n, () => -900)
   const out = fuseBathymetry(land, sea)
-  for (let i = 1; i < n; i += 2) assert.equal(out[i], 0.25, `la terre a bougé en ${i}`)
+  for (let i = 1; i < n; i += 2) assert.ok(out[i] < -800, `le remplissage positif a été gardé en ${i} : ${out[i]}`)
 })
 
 test('une VRAIE bathymétrie n est pas prise pour un remplissage', () => {
