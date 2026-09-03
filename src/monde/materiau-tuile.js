@@ -80,7 +80,9 @@ export function creerFabriqueMateriau({ creer, amont = false } = {}) {
     },
     // ne jette jamais le matériau partagé : il survit à la tuile
     liberer(mesh) {
-      const m = mesh && mesh.material
+      const mm = mesh && mesh.material
+      // R37 : un parent dessiné partiellement porte `[partagé, invisible]`
+      const m = Array.isArray(mm) ? mm[0] : mm
       if (m && m !== partage) m.dispose()
     },
     // le maillage d'une tuile : ses valeurs propres et son `onBeforeRender`,
