@@ -276,6 +276,43 @@ test('le repli bathy s ARRÊTE à z7 : on n écrase plus de l ETOPO1 par du 8 km
   assert.ok(limite.data[mid] < -900, `z7 reste légitime : ${limite.data[mid]}`)
 })
 
+test('B3 · mais si le terrarium est MUET en mer, le repli grossier reprend la main', async () => {
+  // ⚠️ L'AUTRE MOITIÉ DE L'ARBITRAGE CI-DESSUS, ET ELLE N'EST PAS SYMÉTRIQUE.
+  // Le plancher z7 protège l'ETOPO1 du terrarium. Au-delà de z10, il n'y a plus
+  // d'ETOPO1 : le terrarium rend **0,000 m pile** sur tout le champ immergé
+  // (B1, mesuré au GPU à z11 et z12 — étendue 9×9 = 0,00 m). Refuser le repli
+  // n'y préserve alors plus rien : ça interdit la seule donnée disponible.
+  //
+  // Ce n'est pas un cas de bord. Le tuileur n'écrit QUE la frange côtière
+  // (`SHELF = −500`), donc au large la cascade s'arrête souvent au-dessus de z7.
+  // Mesuré sur disque à 35,5°N / 19°E (plaine ionienne) : z8 et z7 ABSENTES,
+  // z6 présente à −3 688 m. Les DEUX chemins y rendaient 0 m.
+  const cible = { lat: 43.0, lon: 5.9, zoom: 12, bathy: true }
+
+  _resetTileCaches()
+  // `landElev: 0` = le terrarium muet, exactement ce que B1 décrit à z11+
+  serve({ zmax: 12, bathy: true, landElev: 0, bathyZooms: [6, 5, 4] })
+  const muet = await loadDem(cible)
+  const mid = (muet.size / 2) * muet.size + muet.size / 2
+  assert.ok(
+    muet.data[mid] < -900,
+    `terrarium muet : le repli doit remplir le vide, or ${muet.data[mid]} m`
+  )
+
+  // ⛔ ET LE CONTRAT D'AVANT TIENT TOUJOURS : bavard ⇒ refusé. Sans cette
+  // seconde moitié, le test resterait vert si on avait simplement descendu le
+  // plancher pour tout le monde — il ne prouverait pas que l'exception est
+  // CONDITIONNÉE, qui est tout son intérêt.
+  _resetTileCaches()
+  serve({ zmax: 12, bathy: true, landElev: -1500, bathyZooms: [6, 5, 4] })
+  const bavard = await loadDem(cible)
+  assert.equal(
+    bavard.data[mid],
+    -1500,
+    `terrarium bavard : le repli sous z7 doit rester refusé, or ${bavard.data[mid]} m`
+  )
+})
+
 test('à z5, une tuile bathy z5 est la résolution NATIVE, pas un repli dégradé', async () => {
   // ⚠️ `modes.js` charge des blocs CONTINENTAUX à z4 et z5. Un plancher absolu
   // à 7 y aurait supprimé toute bathymétrie — le plancher est donc relatif au
