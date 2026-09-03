@@ -13,8 +13,9 @@ Serveur `npm run dev -- --host 127.0.0.1 --port 6311`.
 `globe.js` a porté une sonde de débogage pendant la mesure ; **son diff est
 vide** au commit.
 
-**`npm test` → 4 756 · 0 échec · 2 sautés** (avant inscription du nouveau
-fichier ; il ajoute 8 tests, 254 = 254 à l'audit). **`attaque-b1-ROUGE` : 4 verts
+**`npm test` → 4 764 · 0 échec · 2 sautés** (4 755 avant B5 ; le fichier
+`bathy-platier-b5` ajoute 8 tests, `bathy.test.js` un ; `audit:tests` 254 = 254,
+aucun écart). **`attaque-b1-ROUGE` : 4 verts
 / 3 rouges — les mêmes qu'avant. `attaque-b3-REANCRE` : 5 / 5. Manche z10 :
 −72,0 m, inchangée.**
 
