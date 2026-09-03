@@ -38,7 +38,7 @@ export function hauteursTerrarium(rgba, px, out = new Float32Array(px * px)) {
 // ⚠️ Le corps du Worker ne s'installe QUE dans un Worker : sous node (les
 // tests) et sur le fil principal, ce module n'est qu'une fonction pure.
 if (typeof self !== 'undefined' && typeof OffscreenCanvas !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
-  self.onmessage = (ev) => {
+  self.onmessage = async (ev) => {
     const { id, bitmap, px, scale, ox, oy } = ev.data
     try {
       const c = new OffscreenCanvas(px, px)
@@ -51,7 +51,23 @@ if (typeof self !== 'undefined' && typeof OffscreenCanvas !== 'undefined' && typ
       }
       const rgba = ctx.getImageData(0, 0, px, px).data
       const heights = hauteursTerrarium(rgba, px)
-      const image = c.transferToImageBitmap()
+      // ⛔ R36 — LE BITMAP PART DÉJÀ RETOURNÉ, ET C'EST LA CAUSE DES BANDES.
+      //
+      // `texture.flipY` (vrai par défaut, ce que trois écrit dans
+      // UNPACK_FLIP_Y_WEBGL) est **IGNORÉ quand la source est une ImageBitmap**
+      // — mesuré au pixel dans Chrome 152 (`scripts/sonde-r36.mjs --scenario
+      // flip`) : même drapeau, même appel, le canevas rend la ligne du haut en
+      // `v = 1` et l'ImageBitmap la rend en `v = 0`. **Aucune erreur GL** (0),
+      // aucun avertissement : le chemin Worker rendait donc une texture
+      // retournée en latitude pendant que la géométrie, elle, restait juste.
+      // À l'écran : le globe coupé en bandes de latitude au contenu décalé.
+      //
+      // On retourne donc la dalle ICI (le Worker, où ça ne coûte pas le fil
+      // principal) et `fetchTile` pose `texture.flipY = false` : le résultat est
+      // le même que le chemin canevas, que le navigateur honore le drapeau ou
+      // non. ⚠️ Les HAUTEURS sont lues AVANT le retournement — elles sont
+      // indexées en lignes d'image, du nord au sud, comme `sampleHeights`.
+      const image = await createImageBitmap(c, { imageOrientation: 'flipY' })
       self.postMessage({ id, heights, image }, [heights.buffer, image])
     } catch (err) {
       self.postMessage({ id, erreur: String(err?.message || err) })

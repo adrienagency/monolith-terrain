@@ -3424,6 +3424,12 @@ async function fetchTile(z, x, y, plan) {
       const r = await horsFil
       heights = r.heights
       texture = new THREE.Texture(r.image)
+      // ⛔ R36 : `flipY` est IGNORÉ quand la source est une ImageBitmap (mesuré
+      // au pixel, Chrome 152 — voir `monde/decodeur-terrarium.js`). Le Worker
+      // rend donc la dalle DÉJÀ retournée, et on le dit ici : la texture arrive
+      // dans la même orientation que le `CanvasTexture` du chemin de repli, que
+      // le navigateur honore le drapeau ou non.
+      texture.flipY = false
       texture.needsUpdate = true
     } catch {
       heights = null
