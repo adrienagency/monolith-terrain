@@ -1,0 +1,14 @@
+[
+  { "regime": "mer fermee", "nom": "Fosse sud de la Caspienne", "lat": 38.962, "lon": 50.738, "ref": -1048,
+    "srcRef": "REANCRE — point le plus profond de la Caspienne dans NOS tuiles z8 (balayage 45..56E / 35..48N). La profondeur documentee du bassin sud est 1 025 m sous une surface a -28 m, soit -1 053 m : nos tuiles sont a 5 m." },
+  { "regime": "mer fermee", "nom": "Calypso, fosse de Mediterranee", "lat": 36.547, "lon": 21.102, "ref": -5136,
+    "srcRef": "REANCRE — point le plus profond de la mer Ionienne dans NOS tuiles z8 (balayage 15..24E / 33..38N). La fosse Calypso est documentee a -5 267 m en 36,57 / 21,13 : nos tuiles la retrouvent a sa position." },
+  { "regime": "fosse", "nom": "Kouriles (fosse)", "lat": 45.5, "lon": 152.0, "ref": -5136,
+    "srcRef": "point HORS BAREME — le noteur ira le chercher. Nos tuiles z7 y disent -5 136 m ; le point le plus profond de la fosse dans nos tuiles est -9 576 m en 44,141 / 150,455." },
+  { "regime": "abyssale", "nom": "Large du Cap", "lat": -35.5, "lon": 18.0, "ref": -2968,
+    "srcRef": "point HORS BAREME. Nos tuiles z7 y disent -2 968 m." },
+  { "regime": "mer fermee", "nom": "Mer Rouge (centre)", "lat": 20.0, "lon": 38.5, "ref": -2088,
+    "srcRef": "point HORS BAREME. Nos tuiles z8 y disent -2 088 m." },
+  { "regime": "lac", "nom": "Titicaca", "lat": -15.9, "lon": -69.3, "ref": 3808,
+    "srcRef": "point HORS BAREME. Surface +3 812 m, fond max 281 m plus bas. AUCUNE bathymetrie dans nos tuiles (GEBCO est marin) : attendu = la surface, inchange, PAS une regression." }
+]

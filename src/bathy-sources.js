@@ -96,6 +96,25 @@ export const SOURCES = {
     url: 'https://nauticalcharts.noaa.gov/data/bluetopo_faq.html',
     notForNavigation: true,
   },
+  // ⚠️ **L'ATTRIBUTION N'EST PAS UNE POLITESSE ICI** : les conditions swisstopo
+  // pour les géodonnées gratuites disent « A reference to the source is
+  // mandatory ». En contrepartie elles autorisent EN TOUTES LETTRES l'usage
+  // commercial et la redistribution — « may be used, distributed and made
+  // accessible […] and also used commercially ». Sans cette entrée,
+  // `creditsForBounds` rend « Source bathymétrique "swisstopo" — attribution à
+  // compléter » : le mécanisme rend le trou visible au lieu de le taire, ce qui
+  // est bien conçu, mais publier dans cet état serait une FAUTE DE LICENCE.
+  swisstopo: {
+    id: 'swisstopo',
+    label: 'swissBATHY3D',
+    // 2 m sur le Léman (1 m sur d'autres lacs suisses, 3 m sur Constance)
+    resolutionM: 2,
+    license:
+      'conditions swisstopo pour les géodonnées gratuites (OGD) — usage commercial et redistribution explicitement autorisés',
+    credit: 'Federal Office of Topography swisstopo',
+    url: 'https://www.swisstopo.admin.ch/en/height-model-swissbathy3d',
+    notForNavigation: true,
+  },
   copernicus: {
     id: 'copernicus',
     label: 'Copernicus Marine — bathymétrie côtière satellitaire 100 m',

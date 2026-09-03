@@ -12,6 +12,18 @@
       "_note": "Premier jalon. 546 tuiles z10 estimées, ~4 Mo. EMODnet DTM 2024 à 115 m contre 464 m pour GEBCO : 4× en linéaire. Zone de contrôle : rade de Brest (48.35 / -4.5)."
     },
     {
+      "id": "leman",
+      "source": "swisstopo",
+      "zmax": 14,
+      "waterLevelM": 372.05,
+      "bbox": [6.1267, 46.2035, 6.9328, 46.522],
+      "_note": "swissBATHY3D, 2 m natif, CHLV95/LN02. CUIT ET VERIFIE par B3 : 404 tuiles z9..z14, 3,22 Mo, fond lu 62,00 m soit 310,05 m sous la nappe contre 309,70 m de reference CIPEL (+0,35 m). Le pivot retrouve le point le plus bas a 46.44064 N / 6.59996 E, la position documentee, sans qu'on la lui donne.",
+      "_licence": "Attribution IMPOSEE mot pour mot : « Federal Office of Topography swisstopo » (entree `swisstopo` de src/bathy-sources.js). Usage commercial et redistribution explicitement autorises.",
+      "_sentinelle": "Le tuileur ecrit nappe + 1 m HORS du lac, jamais 0. Mesure par B2 : avec 0, la vallee du Rhone en aval de Geneve se fait creuser de 347,67 m, l'exutoire etant sous la cote du lac.",
+      "_limite": "Emprise SUISSE seulement. La rive francaise (Evian, Thonon) n'est pas dans swissBATHY3D et retombe sur GEBCO, qui est marin et ne dit rien du Leman : cette partie sera muette, pas fausse. La ligne de partage se voit a l'oeil sur le fond du Petit Lac.",
+      "_zone_de_controle": "46.44064 N / 6.59996 E — fond 62,05 m, soit 310,05 m sous la nappe"
+    },
+    {
       "id": "baikal",
       "source": "gebco",
       "zmax": 8,

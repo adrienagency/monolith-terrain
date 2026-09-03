@@ -240,6 +240,21 @@ const POINTS = [
   ['lac', 'Leman (Grand Lac)', 46.45, 6.55, 63, 'surface +372 m, 309 m de fond'],
 ]
 
+// ══════════ POINTS SUPPLÉMENTAIRES — B3, ADDITIF ET SANS EFFET PAR DÉFAUT ═════
+//
+// ⚠️ **LA LISTE `POINTS` CI-DESSUS N'EST PAS TOUCHÉE, ET C'EST LA CONDITION.**
+// `test/attaque-b1-ROUGE.mjs` cherche ses lieux par `nom.includes(...)` et prend
+// le PREMIER qui correspond : ajouter « Caspienne (fosse sud) » à la liste de
+// base aurait pu détourner B1-4 vers un autre point que celui qu'il vise, et le
+// verdir sans que rien ne le dise. Les points de B3 n'entrent donc QUE si
+// `--points` est passé — ce que les tests de B1 ne font jamais.
+function pointsEnPlus() {
+  const f = opt('--points', null)
+  if (!f) return []
+  const brut = JSON.parse(fs.readFileSync(f, 'utf8'))
+  return brut.map((p) => [p.regime, p.nom, p.lat, p.lon, p.ref, p.srcRef || ''])
+}
+
 async function principal() {
   const p = await ouvrirPage()
   const res = { scenario: SCENARIO, chrome: p.version, quand: new Date().toISOString() }
@@ -259,7 +274,7 @@ async function principal() {
       const zoomCrop = Number(opt('--zoomcrop', '8'))
       res.altKm = altKm; res.zoomCrop = zoomCrop
       res.points = []
-      for (const pt of POINTS) {
+      for (const pt of [...POINTS, ...pointsEnPlus()]) {
         const [regime, nom, lat, lon, ref, srcRef] = pt
         await p.evaluer('(() => { const s = window.__b1; s.lat = ' + lat + '; s.lon = ' + lon + '; s.altKm = ' + altKm + '; s.actif = true; return 1 })()')
         await dors(ATTENTE)
@@ -279,7 +294,7 @@ async function principal() {
       const alts = (opt('--alts', '2500,600,200,60')).split(',').map(Number)
       const noms = (opt('--lieux', 'Manche,Mer Noire,Caspienne,Mediterranee,Baikal,Leman,Java')).split(',')
       res.descente = []
-      for (const pt of POINTS) {
+      for (const pt of [...POINTS, ...pointsEnPlus()]) {
         const [regime, nom, lat, lon, ref] = pt
         if (!noms.some((n) => nom.toLowerCase().includes(n.toLowerCase().slice(0, 7)))) continue
         for (const altKm of alts) {

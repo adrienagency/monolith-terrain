@@ -45,3 +45,9 @@ _staging/
 
 # banc de mesure jetable de la Tâche 2 (fenêtre bornée) — hors dépôt par décision du plan
 prototype/
+
+# B3 — la source swissBATHY3D et son pivot : 390 Mo de zip, 1,4 Go d'ASCII et
+# 167 Mo de pivot, tous reconstructibles par les trois commandes du rapport.
+# Ce qui est DÉPLOYÉ (les 404 tuiles) vit dans public/data/bathy, déjà ignoré.
+data/swissbathy3d/
+data/pivot-leman/
