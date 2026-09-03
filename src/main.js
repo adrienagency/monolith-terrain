@@ -305,6 +305,7 @@ import { sonderMachine } from './palier-machine.js'
 import { sansLectureDeProfondeur, copieStableDistincte } from './profondeur-compositeur.js'
 import { dessinerCetteImage } from './cadence-repos.js'
 import { creerAccalmie } from './accalmie-gouverneur.js'
+import { amontDemande } from './monde/materiau-tuile.js'
 import { lanceCuissonVolume } from './cloud-volume.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
@@ -4804,6 +4805,11 @@ const _upY = new THREE.Vector3(0, 1, 0)
 //     réversible sans brancher de second chemin.**
 const frontiereActive = frontiereRenduActive()
 const sceneGlobe = frontiereActive ? new THREE.Scene() : null
+// PF4 — la scène du globe ne bouge jamais : figée, elle cesse de forcer la
+// recomposition de toutes les tuiles à chaque image (three propage `force`
+// depuis tout ancêtre qui se recompose). Voir globe.js, « LES TUILES SONT
+// STATIQUES ». Échappatoire : `?matrices=amont`.
+if (sceneGlobe && !amontDemande('matrices')) { sceneGlobe.updateMatrix(); sceneGlobe.matrixAutoUpdate = false }
 const camGlobe = frontiereActive ? new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.01, 1400) : null
 if (frontiereActive) {
   sceneGlobe.add(globe.group)

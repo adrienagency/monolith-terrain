@@ -580,3 +580,22 @@ vitesse (non), le tiers central comme dénominateur (trop étroit pour des z6), 
 « glissé de planète » existait (non — R32 l'a créé depuis).
 
 **En vol** : PF3 (mer et effets au crop seul, `dofPass` active partout), PF4 bis.
+
+**✅ PF4 bis — les leviers CPU, fusionnés · 4 722 · 0 · audit 249 = 249.**
+Ce qui décide : les bancs PF1 *entre sessions* ne tranchent rien (le
+ralentissement mesuré varie de ×4,0 à ×4,5 et de ×5,2 à ×7,8 pour la même
+demande) → **A/B dans la même session**, alterné avec retour.
+- **Matériau partagé** (`monde/materiau-tuile.js`) : `composer.render` p50
+  **4,7–4,9 → 3,9–4,0 ms (−17 %)** à ×4 ; borne sans téléversement 1,8 ms (−60 %)
+  — les −60 % exigent un UBO pour les 120 uniformes partagés, **non fait,
+  chiffré**. Orbite identique au bit. `?tuiles=amont`.
+- **Matrices figées** (tuiles, mer, parois, **et `globe.group` + `sceneGlobe`**,
+  sinon three propage `force`) : **−15 %**. Vérifié de loin (`--scenario
+  pixelab`, quatre hachages égaux). `?matrices=amont`.
+- ⛔ **`contexteCrop()` : PF1 RÉFUTÉ.** Chronométré en page : **5,3–6,8 µs par
+  appel**, pas 14 % de l'image. Mémo écrit, mesuré, **retiré** (60 lignes pour
+  rien).
+⚠️ **Le pixel n'est déterministe qu'en orbite** : surface et crop diffèrent
+entre deux captures de la même variante (mer, nuages, caustiques à des phases
+différentes ; 99,6 % avec grain, 89 % / 30 % sans). Tout A/B pixel hors orbite
+se fait **dans la même session**.

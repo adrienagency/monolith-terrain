@@ -17,6 +17,10 @@
 //   clic    un clic au centre du globe en orbite : rapport d'altitude par image
 //   fuites  trois changements de lieu : textures / géométries / programmes /
 //           écouteurs avant et après
+//   pixel   les trois postes de PF1 (orbite 2 000 km · surface 130 km · crop
+//           5 km), animations coupées, deux rendus à la main : l'image est
+//           écrite en RGBA brut (`--dossier`) pour une comparaison AU BIT entre
+//           deux variantes (`--comparer a.rgba b.rgba`, sans navigateur)
 //
 // OPTIONS : --port 6311 · --url "?x=1" (suffixe d'URL) · --images 600 ·
 //           --secondes 60 · --cpu 1 · --bokeh 0 · --sortie fichier.json ·
@@ -51,7 +55,10 @@ const DBG_PORT = Number(opt('--dbg', '9333'))
 const ORBITE = opt('--orbite', '0') === '1'
 const ALTITUDE = Number(opt('--altitude', '0')) // m ; 0 = altitude d'entrée par défaut de enterOrbit
 const CLICS = Number(opt('--clics', '11'))
-const ERREURS = opt('--erreurs', '1') === '1' // gl : lire gl.getError() après chaque image (un point de synchronisation : à couper pour chronométrer)
+const ERREURS = opt('--erreurs', '1') === '1'
+const DOSSIER = opt('--dossier', '.banc/PF4/pixel')
+const COMPARER = A.indexOf('--comparer') >= 0 ? A.slice(A.indexOf('--comparer') + 1, A.indexOf('--comparer') + 3) : null
+const POSTES = opt('--postes', 'surface,crop,orbite').split(',').filter(Boolean) // l'ordre de PF1 : la surface d'abord, l'orbite en dernier (diveTo ne ramène pas de l'orbite) // gl : lire gl.getError() après chaque image (un point de synchronisation : à couper pour chronométrer)
 
 function trouverChrome() {
   const donne = opt('--chrome', process.env.CHROME_PATH)
@@ -428,6 +435,114 @@ async function scenarioClic(p) {
   return { images: trames.length, clics, sauts, marques: await p.evaluer(`window.__pf4.marques.map((m) => m.texte)`), modeFinal: trames[trames.length - 1]?.mode }
 }
 
+// LES TROIS POSTES DE PF1 — la même pose (scripts/profil-pf1.mjs, poserPoste), recopiée
+const POSTES_PF1 = { surface: { alt: 130000, zoom: 9 }, crop: { alt: 5000, zoom: 13 }, orbite: { alt: 2000000, orbite: true } }
+const LIEU_PF1 = { lat: -21.115, lon: 55.536 } // La Réunion, comme PF1
+async function poserPoste(p, poste) {
+  const P = POSTES_PF1[poste]
+  if (P.orbite) {
+    await p.evaluer(`(async () => { const m = window.__exp.modes; const alt = ${P.alt}
+      if (m.mode !== 'orbital') await m.enterOrbit(alt)
+      await new Promise((r) => setTimeout(r, 1500))
+      for (let i = 0; i < 6; i++) { const parM = m.orbAlt / Math.max(m.altM, 1); m.orbAlt = m.orbAltTarget = alt * parM; await new Promise((r) => setTimeout(r, 300)); if (Math.abs(m.altM - alt) / alt < 0.005) break }
+      return m.altM })()`)
+  } else {
+    await p.evaluer(`(async () => { const e = window.__exp; const m = e.modes; const lieu = ${JSON.stringify(LIEU_PF1)}; const zoom = ${P.zoom}; const alt = ${P.alt}
+      if (m.mode === 'orbital') { await m.diveTo?.({ lat: lieu.lat, lon: lieu.lon }); await new Promise((r) => setTimeout(r, 3000)) }
+      await m._rescale({ lat: lieu.lat, lon: lieu.lon, zoom }, 'PF4')
+      await new Promise((r) => setTimeout(r, 1500))
+      const cam = e.camera, ct = e.controls
+      ct.minDistance = 1e-4; ct.maxDistance = 1e12
+      const dir = cam.position.clone().sub(ct.target).normalize()
+      for (let i = 0; i < 40; i++) { const a = e.altitudeCadrageM(); if (!Number.isFinite(a) || a <= 0) break; const d = cam.position.distanceTo(ct.target); const nd = d * (alt / a); if (!Number.isFinite(nd) || nd <= 0) break; cam.position.copy(ct.target).addScaledVector(dir, nd); ct.update?.(); if (Math.abs(e.altitudeCadrageM() - alt) / alt < 0.004) break }
+      return e.altitudeCadrageM() })()`)
+  }
+  const t0 = Date.now()
+  while (Date.now() - t0 < 90000 && !(await p.evaluer(`(() => { const e = window.__exp; return !e.modes.busy && (!e.globe.tuilesEnVol || e.globe.tuilesEnVol() === 0) })()`))) await dors(250)
+  await dors(4000)
+  const t1 = Date.now()
+  while (Date.now() - t1 < 60000 && !(await p.evaluer(`(() => { const e = window.__exp; return !e.globe.tuilesEnVol || e.globe.tuilesEnVol() === 0 })()`))) await dors(250)
+  await dors(1500)
+}
+
+async function scenarioPixel(p) {
+  fs.mkdirSync(DOSSIER, { recursive: true })
+  const etiquette = (URL_SUFFIXE || 'apres').replace(/[^a-z0-9=&]/gi, '').replace(/&/g, '_').replace(/=/g, '-') || 'apres'
+  const out = {}
+  for (const poste of POSTES) {
+    await poserPoste(p, poste)
+    const r = await p.evaluer(`(() => { const e = window.__exp; e.params.animations = false; e.aq.setTier(0, true)
+      // ⚠️ l'heure est FIXÉE : le soleil du monde suit l'horloge réelle, deux sessions à
+      // quelques minutes d'écart n'ont pas le même ombrage (mesuré : 99,7 % des pixels)
+      if (e.applyTimeOfDay) e.applyTimeOfDay(12)
+      // ⚠️ et le GRAIN est coupé : le bruit du NoiseEffect n'a pas la même phase d'une session
+      // à l'autre — mesuré : 99,6 % des pixels différents entre deux captures de la MÊME variante
+      // en surface, 0 en orbite (où les effets sont éteints)
+      e.params.grain = 0
+      for (const pass of e.composer.passes) for (const f of pass.effects || []) if (f.constructor.name === 'NoiseEffect') f.blendMode.opacity.value = 0
+      const gl = e.renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
+      if (e.majCameraFond) e.majCameraFond()
+      e.composer.render(0); e.composer.render(0)
+      const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px)
+      let s = 0; for (let i = 0; i < px.length; i += 7) s = (s * 31 + px[i]) >>> 0
+      let bin = ''; for (let i = 0; i < px.length; i += 8192) bin += String.fromCharCode.apply(null, px.subarray(i, i + 8192))
+      let tuiles = 0, vis = 0; e.globe.group.traverse((o) => { if (o.isMesh && o.userData && (o.userData.tuile || (o.material && o.material.uniforms && o.material.uniforms.uTex))) { tuiles++; if (o.visible) vis++ } })
+      return { w, h, hash: s, mode: e.modes.mode, altG: ((e.camGlobe || e.camera).position.length() - 100) * 63710, altCadrage: e.altitudeCadrageM ? e.altitudeCadrageM() : null, tuiles, vis, appels: e.renderer.info.render.calls, b64: btoa(bin) } })()`)
+    const fichier = path.join(DOSSIER, `${poste}-${etiquette}.rgba`)
+    fs.writeFileSync(fichier, Buffer.from(r.b64, 'base64'))
+    delete r.b64
+    out[poste] = { ...r, fichier }
+    console.log(`  ${poste} : ${r.w}×${r.h} hash ${r.hash} · mode ${r.mode} · alt ${Math.round(r.altG / 1000)} km (cadrage ${r.altCadrage && Math.round(r.altCadrage)}) · tuiles ${r.vis}/${r.tuiles} → ${fichier}`)
+  }
+  return out
+}
+
+// A/B DANS LA MÊME SESSION — pour ce qui se bascule en page : les matrices figées
+// (levier 2) et le mémo du contexte (levier 3). Le matériau partagé (levier 1) ne
+// se bascule pas à chaud ; l'orbite (62 tuiles, même nuanceur) le prouve au bit
+// entre sessions, là où la scène est déterministe.
+async function scenarioPixelAB(p) {
+  const out = {}
+  for (const poste of POSTES) {
+    await poserPoste(p, poste)
+    out[poste] = await p.evaluer(`(() => { const e = window.__exp; e.params.animations = false; e.aq.setTier(0, true)
+      if (e.applyTimeOfDay) e.applyTimeOfDay(12)
+      e.params.grain = 0
+      for (const pass of e.composer.passes) for (const f of pass.effects || []) if (f.constructor.name === 'NoiseEffect') f.blendMode.opacity.value = 0
+      const gl = e.renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
+      const px = new Uint8Array(w * h * 4)
+      const lire = () => { if (e.majCameraFond) e.majCameraFond(); e.composer.render(0); e.composer.render(0); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); let s = 0; for (let i = 0; i < px.length; i++) s = (s * 31 + px[i]) >>> 0; return s }
+      const figees = lire(), figeesBis = lire()
+      // matrices : on rend l'auto-recomposition à TOUT (scène, groupe, tuiles, mer, parois)
+      const objets = []
+      e.sceneGlobe.traverse((o) => { if (o.matrixAutoUpdate === false) { objets.push(o); o.matrixAutoUpdate = true } })
+      const auto = lire()
+      for (const o of objets) { o.updateMatrix(); o.matrixAutoUpdate = false }
+      const refigees = lire()
+      // mémo du contexte : mêmes clés, mêmes valeurs (identité pour les objets) que le constructeur, à cet instant
+      const direct = e.contexteCrop ? e.contexteCrop() : null, memo = e.contexteCropMemo ? e.contexteCropMemo() : null
+      const ecarts = []
+      const cmp = (a, b, chemin) => { if (a === b) return; if (a && b && typeof a === 'object' && typeof b === 'object' && !(a.isTexture || a.isColor || a.isVector2)) { for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) cmp(a[k], b[k], chemin + '.' + k); return } if (typeof a === 'function' && typeof b === 'function') return; if (Number.isNaN(a) && Number.isNaN(b)) return; ecarts.push(chemin) }
+      if (direct && memo) cmp(direct, memo, 'ctx')
+      return { objetsBascules: objets.length, matricesIdentiques: figees === auto && auto === refigees, deterministe: figees === figeesBis, hashes: [figees, figeesBis, auto, refigees], memoIdentique: !!(direct && memo) && ecarts.length === 0, ecarts: ecarts.slice(0, 10), crop: !!(direct && direct.centre) } })()`)
+    console.log(`  ${poste} : ${JSON.stringify(out[poste])}`)
+  }
+  return out
+}
+
+// LE COÛT DU CONTEXTE DU CROP, chronométré en page : N appels du constructeur
+// (et du mémo tant qu'il a existé), au poste crop. Mesuré : 5,3–6,8 µs par appel
+// — pas les 14 % de l'image que PF1 lui attribuait ; le mémo a été retiré.
+async function scenarioMemo(p) {
+  await poserPoste(p, 'crop')
+  return p.evaluer(`(() => { const e = window.__exp; const N = 2000
+    const chrono = (f) => { f(); const t0 = performance.now(); for (let i = 0; i < N; i++) f(); return +((performance.now() - t0) / N * 1000).toFixed(1) }
+    // le mémo (levier 3) a été RETIRÉ après cette mesure (5–7 µs par appel du constructeur) : s'il n'existe plus, on ne chronomètre que le constructeur
+    const memoExiste = typeof e.contexteCropMemo === 'function'
+    const direct = chrono(() => e.contexteCrop()), memo = memoExiste ? chrono(() => e.contexteCropMemo()) : null, direct2 = chrono(() => e.contexteCrop()), memo2 = memoExiste ? chrono(() => e.contexteCropMemo()) : null
+    return { crop: !!e.contexteCrop().centre, usParAppel: { constructeur: [direct, direct2], memo: memoExiste ? [memo, memo2] : 'retiré' }, rapport: memoExiste ? +((direct + direct2) / (memo + memo2)).toFixed(1) : null } })()`)
+}
+
 async function scenarioFuites(p) {
   await p.evaluer(SONDE)
   const ecouteurs = async () => {
@@ -454,6 +569,20 @@ async function scenarioFuites(p) {
 }
 
 // ------------------------------------------------------------------ main
+if (COMPARER) {
+  const [fa, fb] = COMPARER
+  const a = fs.readFileSync(fa), b = fs.readFileSync(fb)
+  if (a.length !== b.length) { console.log(JSON.stringify({ identiques: false, raison: 'tailles différentes', a: a.length, b: b.length })); process.exit(0) }
+  let pixelsDiff = 0, maxDelta = 0, somme = 0
+  for (let i = 0; i < a.length; i += 4) {
+    let d = 0
+    for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(a[i + c] - b[i + c]))
+    if (d > 0) { pixelsDiff++; somme += d; if (d > maxDelta) maxDelta = d }
+  }
+  const n = a.length / 4
+  console.log(JSON.stringify({ identiques: pixelsDiff === 0, pixels: n, pixelsDifferents: pixelsDiff, part: +(pixelsDiff / n * 100).toFixed(3) + ' %', maxDelta, deltaMoyen: pixelsDiff ? +(somme / pixelsDiff).toFixed(2) : 0 }))
+  process.exit(0)
+}
 const p = await ouvrirPage()
 console.log(`Chrome ${p.version} · ${LARGEUR}×${HAUTEUR} dpr ${DPR} · CPU ×${CPU}${SWIFT ? ' · SwiftShader' : ''} · scénario ${SCENARIO}`)
 let resultat
@@ -499,6 +628,9 @@ try {
     else if (SCENARIO === 'palier') resultat = await scenarioPalier(p, tPret)
     else if (SCENARIO === 'clic') resultat = await scenarioClic(p)
     else if (SCENARIO === 'fuites') resultat = await scenarioFuites(p)
+    else if (SCENARIO === 'pixel') resultat = await scenarioPixel(p)
+    else if (SCENARIO === 'pixelab') resultat = await scenarioPixelAB(p)
+    else if (SCENARIO === 'memo') resultat = await scenarioMemo(p)
     else throw new Error('scénario inconnu : ' + SCENARIO)
     resultat.etatDepart = etat
   }
