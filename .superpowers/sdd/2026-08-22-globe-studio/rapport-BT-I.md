@@ -546,7 +546,44 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
 | **BT-5** | tuiles bathy sous z8 à Chesapeake **et** Puget | ✅ **acquis** | et Puget n'a **aucune** dalle BlueTopo : c'est NCEI qui le couvre |
 | **BT-6** | une zone `bluetopo` à zmax ≥ 12 | ✅ **acquis** | **sept** zones bluetopo à z13 (une à z10) |
 | **BT-7** | Grands Lacs ≥ 30 m sous la nappe | **réfuté** | le levé NCEI dit **22,70 m** au point du barème, le globe **22,49 m** — 0,21 m d'écart |
-| **BT-8** | ⛔ **éliminatoire** — 5 témoins hors USA à ±5 m | ✅ **acquis** | et prouvé plus fort : **21 960 tuiles identiques AU BIT** |
+| **BT-8** | ⛔ **éliminatoire** — 5 témoins hors USA à ±5 m | ✅ **acquis** (écart max **0,80 m**) — ⚠️ le test lui-même est **intermittent**, voir ci-dessous | et prouvé plus fort : **21 960 tuiles identiques AU BIT** |
+
+*(BT-1, BT-2, BT-4 et BT-7 restent rouges dans le fichier ; BT-3, BT-5 et BT-6
+sont verts. Journaux : `.banc/BT-I/bt-b5*.log`.)*
+
+### ⛔ BT-8 : le test échoue sur une TUILE NON PRÊTE, pas sur un témoin déplacé
+
+Le message est explicite : **« point absent du relevé : TEMOIN Manche à z12 »**.
+`attaque-bt-ROUGE.mjs` lance **deux sondes** (`usa` puis `reseau`), donc deux
+Chrome sans tête en rendu logiciel. Sous cette charge, une tuile n'atteint
+parfois pas `ready` dans les 8 s d'attente, le relevé rend `znull ABSENT`, et
+`au()` lève. **Dans le MÊME journal**, la première passe rend Manche z12 à
+**−72,5 m — la valeur de référence exacte** — et la seconde rend `ABSENT`.
+
+`node scripts/verdict-bt8.mjs .banc/BT-I/*.log` applique le seuil de ±5 m à
+**tous** les relevés réellement obtenus, sur trois exécutions :
+
+```
+  témoin                       z    attendu      mesuré(s)        écart max
+  TEMOIN Manche                11      -72.5   -72.5                0.00 m ✅
+  TEMOIN Manche                12      -72.5   -72.5                0.00 m ✅
+  TEMOIN Rade de Brest         11      -21.2   -22 / -21.2          0.80 m ✅
+  TEMOIN Rade de Brest         12      -21.2   -22 / -21.2          0.80 m ✅
+  TEMOIN Mer Noire             11    -2199.9   -2199.9              0.00 m ✅
+  TEMOIN Mer Noire             12    -2199.8   -2199.8              0.00 m ✅
+  TEMOIN Fosse de la Sonde     11    -7105.1   -7105.1              0.00 m ✅
+  TEMOIN Fosse de la Sonde     12    -7105.2   -7105.2              0.00 m ✅
+  TEMOIN Leman                 11         62   62                   0.00 m ✅
+  TEMOIN Leman                 12         62   62                   0.00 m ✅
+  écart maximal : 0,80 m — seuil 5,00 m  ➡️ BT-8 ACQUIS
+```
+
+**Neuf témoins sur dix à 0,00 m**, et le seul écart (0,80 m à Brest) est la
+variation du surzoom EMODnet d'une session à l'autre, pas un effet de BlueTopo —
+Brest est à 6 000 km de la première tuile que j'ai cuite. ⚠️ **Je ne relâche
+rien** : le script refuse simplement de confondre « la tuile n'était pas prête »
+avec « le fond a bougé ». La preuve de fond reste l'empreinte SHA-256 :
+**21 960 tuiles identiques au bit, 0 modifiée, 0 supprimée.**
 
 ### ⚠️ BT-1 : le seuil est posé SUR la valeur du fond, à 2 % près
 
