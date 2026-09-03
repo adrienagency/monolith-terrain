@@ -639,3 +639,17 @@ d'image ne bouge pas : borné par `PasseFond` et le CPU.
 5. **Arbitrages d'Adrien** : `cloudAltitude` en unités de bloc ; pivot/contraste
    de rampe gradés sur le domaine du socle et consommés sur celui du globe.
 6. Sept options ✅ de l'inventaire sous le bruit (98, 36, 91, 120, 11, 56, 24).
+
+**✅ R35 — les deux restes de caméra, fusionnés.** Le `flyTo` → NaN n'était
+**pas dans `modes.js`** : `main.js:2209`, `tween.p1.copy(pos)` — le `flyTo(pos,
+target)` de `main.js` (deux `Vector3`) est l'**homonyme** de `modes.flyTo(lat,
+lon, zoom)` ; appelé avec un lat/lon, `Vector3.copy(-21.115)` rend `undefined`
+et l'image suivante pose la caméra à NaN pour toujours. Correctif à la source :
+`exigerPose()` (`camera-poses.js`) lève une `TypeError` nommant l'appel juste
+avant la première écriture. Le clic : **×4,407 → 1,023** au premier clic, puis
+**1,42 → 1,01** sur les sept suivants, centre de la Terre à 0 px, D16 ter tenu ;
+en orbite un `travel` géométrique (altitude ÷2 sur 0,9 s), en surface une
+translation rigide vers le point + distance ÷2. Réserve d'Adrien : le déclencheur
+reste le **simple clic** (Google Earth : double-clic). Piège d'instrument neuf :
+Vite sans `--host 127.0.0.1` n'écoute que sur `[::1]` — la sonde ne dessinait
+jamais. **Plus aucun agent en vol.**
