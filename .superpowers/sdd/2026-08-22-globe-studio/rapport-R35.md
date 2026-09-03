@@ -12,7 +12,7 @@ vérifié (`elementFromPoint(640, 400)` = `CANVAS`). Journaux `.banc/R35/`
 (ignoré par git) : `flyto-{modes,modes-anim0,exp}-avant.json`,
 `flyto-exp-apres.json`, `clic-avant.json`, `clic-apres-{1,2}.json` (deux
 passes intermédiaires, chacune a réfuté quelque chose), `clic-apres.json`.
-`npm test` **4 744 · 4 742 verts · 0 échec** (base 4 732 ; +12) ·
+`npm test` **4 745 · 4 743 verts · 0 échec** (base 4 732 ; +13, 2 ignorés préexistants) ·
 `npm run audit:tests` **251 = 251**.
 
 ---
