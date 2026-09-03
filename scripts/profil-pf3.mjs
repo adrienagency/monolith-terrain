@@ -66,6 +66,10 @@ const BASCULE = opt('--bascule', '0') !== '0'
 const MACHINES = (opt('--machines', 'mienne,x4,x6dpr2')).split(',')
 const POSTES = (opt('--postes', 'crop,surface,orbite')).split(',')
 const SEUIL_PX = Number(opt('--seuil', '4'))
+// ⚠️ **GPU LOGICIEL** (`--swiftshader 1`) : le pire cas, un portable sans carte.
+// PF1 l'a mesuré à 337–490 ms par image, dont 11–15 % dans l'EffectPass — c'est
+// là que « les effets hors crop » pèsent vraiment. Le nom de machine est suffixé.
+const SWIFTSHADER = opt('--swiftshader', '0') !== '0'
 const dodo = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ══════════ --comparer : le tableau avant/après, en markdown ═══════════════
@@ -219,8 +223,19 @@ function poserBanc() {
 
 // Attendre N images RENDUES (celles que le composer produit vraiment).
 async function releverImages(page, n, { capture = false } = {}) {
-  await page.evaluate((cap) => { const b = window.__pf3; b.images = []; b.attente = []; b.capture = cap; b.precedent = null; b.on = true }, capture)
-  await page.waitForFunction((n) => window.__pf3.images.length >= n, { polling: 50, timeout: 180000 }, n)
+  // ⚠️ **LA PHASE DU GRAIN EST REMISE À ZÉRO AVANT UNE CAPTURE.** `EffectMaterial.time`
+  // avance de `deltaTime` à chaque image rendue ; figée par `animations = false`,
+  // elle garde la valeur atteinte au gel — différente d'un chargement à l'autre
+  // (mesuré : 78 % de pixels « changés », moyenne 13 niveaux, sur deux images
+  // par ailleurs identiques). Même phase, même bruit.
+  await page.evaluate((cap) => {
+    const b = window.__pf3
+    if (cap) for (const p of window.__exp.composer.passes) if (p.fullscreenMaterial && 'time' in p.fullscreenMaterial) p.fullscreenMaterial.time = 0
+    b.images = []; b.attente = []; b.capture = cap; b.precedent = null; b.on = true
+  }, capture)
+  // ⚠️ sur GPU logiciel le fil principal est saturé par SwiftShader : les sondes
+  // CDP mettent des secondes à répondre, 25 images ont dépassé 180 s. 20 min.
+  await page.waitForFunction((n) => window.__pf3.images.length >= n, { polling: 200, timeout: SWIFTSHADER ? 1200000 : 180000 }, n)
   const recolte = await page.evaluate(async () => { const b = window.__pf3; b.on = false; b.capture = false; return b.recolter() })
   const images = await page.evaluate(() => window.__pf3.images)
   return { images, recolte }
@@ -291,16 +306,43 @@ async function allerAuPoste(page, poste) {
       m.orbAlt = m.orbAltTarget = a * parM
     }, 2_000_000)
   } else {
-    const dedans = (alt) => poste === 'crop' ? alt <= 6500 && alt > 2500 : alt >= 100000 && alt <= 150000
-    for (let i = 0; i < 400; i++) {
-      const s = await lireAlt(page)
-      if (s.mode !== 'surface') { console.log('  ⚠️ hors surface pendant le placement : ' + JSON.stringify(s)); break }
-      if (dedans(s.alt)) break
-      const sens = poste === 'crop' ? (s.alt > 6500 ? -1 : +1) : (s.alt < 100000 ? +1 : -1)
-      await molette(page, sens)
-    }
-    const s = await attendreRepos(page)
-    if (!dedans(s.alt)) console.log('  ⚠️ poste ' + poste + ' non atteint : ' + JSON.stringify(s))
+    // ⛔ **PAS DE MOLETTE POUR SE PLACER, ET C'EST MESURÉ.** Deux chargements
+    // posés « au même endroit » à la molette rendaient 80 % de pixels différents
+    // (moyenne 15 niveaux) alors qu'une même page ne dérive pas d'un pixel en
+    // deux minutes : les ancres de l'échelle continue (`oublierAncres`,
+    // globe.js) dépendent des CRANS visités, et la molette n'en fait jamais le
+    // même nombre. On part donc de la pose de démarrage, sans geste.
+    // ⚠️ **LA POSE EST FIGÉE PAR VALEUR, ET C'EST CE QUI REND LES PIXELS
+    // COMPARABLES.** La molette ne s'arrête pas au même cran d'un chargement à
+    // l'autre (5 668 m contre 5 020 m relevés) : deux images de deux caméras ne
+    // prouvent rien. On fige donc le BLOC (`_rescale` sur un centre et un zoom
+    // fixes — en mode continu il ne déplace pas la caméra) puis la CAMÉRA, en
+    // unités de bloc : cible au sol au centre, altitude métrique convertie par
+    // l'échelle du bloc, inclinaison ~20° du nadir.
+    // ⚠️ `__exp.dem` est NUL sous `terre unique` (pas de bloc plat) : l'échelle
+    // « mètres par unité » n'est pas lisible. On pose donc la hauteur par
+    // ITÉRATION sur `altitudeCadrageM()` — trois passes suffisent, l'altitude est
+    // linéaire en la hauteur au-dessus du sol.
+    await page.evaluate(async (a) => {
+      const e = window.__exp, m = e.modes
+      await m._rescale({ lat: a.lat, lon: a.lon, zoom: a.zoom }, 'PF3 pose fixe')
+      const gy = (typeof e.terrain?.sample === 'function' ? e.terrain.sample(0, 0) : 0) || 0
+      let H = 20
+      for (let n = 0; n < 3; n++) {
+        e.controls.target.set(0, gy, 0)
+        e.camera.position.set(0, gy + H * 0.94, H * 0.342)
+        e.controls.update()
+        const alt = e.altitudeCadrageM()
+        if (!(alt > 0)) break
+        H = H * (a.altM / alt)
+      }
+      e.controls.target.set(0, gy, 0)
+      e.camera.position.set(0, gy + H * 0.94, H * 0.342)
+      e.controls.update()
+    }, poste === 'crop' ? { lat: -21.115, lon: 55.536, zoom: 13, altM: 5000 } : { lat: -21.115, lon: 55.536, zoom: 9, altM: 130000 })
+    await attendreRepos(page)
+    const s2 = await lireAlt(page)
+    console.log('  pose fixe ' + poste + ' : ' + JSON.stringify(s2))
   }
   await page.waitForFunction(() => { const g = window.__exp.globe; return !g || g.tuilesEnVol() === 0 }, { polling: 250, timeout: 90000 }).catch(() => {})
   await dodo(5000)
@@ -341,7 +383,11 @@ async function ouvrirPage(nav, machine) {
   page.on('console', (m) => { const t = m.text(); if (/not compiled|not linked|ERROR: 0:|WebGL/.test(t)) journal.push(t.slice(0, 300)) })
   page.on('pageerror', (e) => journal.push('pageerror: ' + String(e.message).slice(0, 200)))
   await page.evaluateOnNewDocument(() => { try { localStorage.setItem('shibumap-ui-advanced', '1') } catch {} })
-  await page.goto('http://localhost:' + PORT + '/', { waitUntil: 'domcontentloaded', timeout: 180000 })
+  // ⚠️ `?cadence=pleine` : PF4 (`cadence-repos.js`) ne dessine plus qu'une image
+  // sur 2 (sur 30 si figé) en orbite au repos. Ce banc pèse le coût d'UNE image
+  // composée, passe par passe : il rend donc toutes les images. Le gain de PF4
+  // est orthogonal et se mesure chez lui.
+  await page.goto('http://localhost:' + PORT + '/?cadence=pleine', { waitUntil: 'domcontentloaded', timeout: 180000 })
   await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe, { timeout: 180000, polling: 100 })
   await dodo(10000)
   await page.keyboard.press('Escape')
@@ -381,11 +427,19 @@ async function ouvrirPage(nav, machine) {
 // ══════════ LE RELEVÉ ═══════════════════════════════════════════════════════
 const nav = await puppeteer.launch({
   executablePath: trouverChrome(), headless: 'new',
+  // ⚠️ GPU logiciel : un `Runtime.callFunctionOn` peut attendre des minutes derrière
+  // une image SwiftShader ; le délai de protocole par défaut (180 s) tuait le banc.
+  protocolTimeout: SWIFTSHADER ? 1200000 : 180000,
+  // ⚠️ sans `--disable-frame-rate-limit` / `--disable-gpu-vsync`, toute cellule
+  // rapide rend 16,7 ms : le temps d'image serait celui du vsync, pas du travail
+  // (même réglage que `profil-pf1.mjs`).
   args: ['--headless=new', '--no-sandbox', '--hide-scrollbars', '--mute-audio', '--window-size=1280,900',
-    '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--disable-dev-shm-usage'],
+    '--disable-frame-rate-limit', '--disable-gpu-vsync',
+    ...(SWIFTSHADER ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist']),
+    '--disable-dev-shm-usage'],
 })
 fs.mkdirSync(SORTIE, { recursive: true })
-const rapport = { etiquette: ETIQ, quand: new Date().toISOString(), images: IMAGES, effets: EFFETS, bascule: BASCULE, machines: [] }
+const rapport = { etiquette: ETIQ, quand: new Date().toISOString(), images: IMAGES, effets: EFFETS, bascule: BASCULE, swiftshader: SWIFTSHADER, machines: [] }
 try {
   for (const machine of (BASCULE ? ['mienne'] : MACHINES)) {
     const { page, cdp, journal, contexte, taux, dpr } = await ouvrirPage(nav, machine)
@@ -424,6 +478,56 @@ try {
       }
       const fond = quantiles(images.filter((x) => x.px != null).map((x) => x.px))
       console.log(`  fond de mouvement (px changés/image) : p50 ${fond.p50} · p99 ${fond.p99} · n ${fond.n}`)
+      M.journal = journal
+      rapport.machines.push(M)
+      await page.close()
+      continue
+    }
+
+    // ══════════ --pixelab : l'A/B en pixels DANS LA MÊME SESSION (méthode PF4) ═══════
+    //
+    // Entre deux sessions, seule l'orbite est déterministe (mer, nuages,
+    // caustiques ont des phases différentes). Ici, sur la page « après », on
+    // capture l'image du régime (A), puis on rejoue l'ÉTAT que l'ancien code
+    // posait — grain à `params.grain` en surface / 0 en orbite, occlusion sur
+    // `ssaoEnabled && surface`, profondeur de champ coupée en orbite — on
+    // capture (B), et on rend la main au régime (`poserRegimeCrop`). Le crop doit
+    // rendre 0 pixel (même état) ; hors crop, l'écart EST ce que l'ancien code
+    // dessinait de trop.
+    if (opt('--pixelab', '0') !== '0') {
+      for (const poste of POSTES) {
+        await allerAuPoste(page, poste)
+        await page.evaluate(() => { if (typeof window.__exp.poserRegimeCrop === 'function') window.__exp.poserRegimeCrop() })
+        await dodo(500)
+        const r = await page.evaluate(() => {
+          const e = window.__exp, gl = e.renderer.getContext()
+          const passes = e.composer.passes
+          const fx = passes.find((p) => p.effects && p.effects.some((f) => f.constructor.name === 'NoiseEffect'))
+          const grain = fx && fx.effects.find((f) => f.constructor.name === 'NoiseEffect')
+          const ao = passes.find((p) => p.configuration && p.configuration.aoRadius !== undefined)
+          const dofP = passes.find((p) => p.effects && p.effects.some((f) => f.constructor.name === 'DepthOfFieldEffect'))
+          const cap = () => { for (const p of passes) if (p.fullscreenMaterial && 'time' in p.fullscreenMaterial) p.fullscreenMaterial.time = 0; e.composer.render(0); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const a = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, a); return a }
+          const diff = (a, b) => { let n = 0, m = 0, s = 0; for (let i = 0; i < a.length; i += 4) { const d = Math.max(Math.abs(a[i]-b[i]), Math.abs(a[i+1]-b[i+1]), Math.abs(a[i+2]-b[i+2])); if (d > 4) n++; if (d > m) m = d; s += d } return { n, max: m, moyen: +(s / (a.length / 4)).toFixed(4), N: a.length / 4 } }
+          const etatA = { ao: ao ? ao.enabled : null, dof: dofP ? dofP.enabled : null, grain: grain ? grain.blendMode.opacity.value : null }
+          const A = cap()
+          const temoin = diff(A, cap())
+          // l'état de l'ANCIEN code
+          const surface = e.modes.mode === 'surface'
+          if (grain) grain.blendMode.opacity.value = surface ? e.params.grain : 0
+          if (ao) ao.enabled = !!e.params.ssaoEnabled && e.params._aoTierOk !== false && surface && !e.modes.busy
+          if (dofP) dofP.enabled = surface && !!e.params.bokehEnabled && e.params.bokehScale > 0
+          const etatB = { ao: ao ? ao.enabled : null, dof: dofP ? dofP.enabled : null, grain: grain ? grain.blendMode.opacity.value : null }
+          const B = cap()
+          const ecart = diff(A, B)
+          e.poserRegimeCrop()
+          if (dofP) dofP.enabled = !!e.params.bokehEnabled && e.params.bokehScale > 0
+          const C = cap()
+          const retour = diff(A, C)
+          return { mode: e.modes.mode, alt: e.modes.mode === 'orbital' ? e.modes.altM : e.altitudeCadrageM(), crop: !!e.globe._crop, etatA, etatB, temoin, ecart, retour }
+        })
+        M.postes.push({ poste, pixelab: r })
+        console.log(`[${machine} · ${poste}] ${r.mode} ${Math.round(r.alt)} m crop ${r.crop} — régime ${JSON.stringify(r.etatA)} → ancien code ${JSON.stringify(r.etatB)} : ${r.ecart.n} px / ${r.ecart.N} (${(100 * r.ecart.n / r.ecart.N).toFixed(3)} %), max ${r.ecart.max}, moyen ${r.ecart.moyen} | témoin ${r.temoin.n} px | retour au régime ${r.retour.n} px`)
+      }
       M.journal = journal
       rapport.machines.push(M)
       await page.close()
@@ -509,7 +613,7 @@ try {
       if (rgba) {
         const buf = Buffer.from(rgba, 'base64')
         const w = images.at(-1).w, h = images.at(-1).h
-        fichierImage = path.join(SORTIE, `${ETIQ}-${machine}-${poste}${EFFETS ? '-effets' : ''}-${w}x${h}.rgba.gz`)
+        fichierImage = path.join(SORTIE, `${ETIQ}-${machine}-${poste}${EFFETS ? '-effets' : ''}${SWIFTSHADER ? '-swiftshader' : ''}-${w}x${h}.rgba.gz`)
         fs.writeFileSync(fichierImage, zlib.gzipSync(buf))
       }
       const P = { poste, etat0, etat: res.etat, resume: res, temoin, echelleTemoin: ech, recolte, image: fichierImage ? path.basename(fichierImage) : null, w: images.at(-1).w, h: images.at(-1).h,
@@ -528,7 +632,7 @@ try {
 } finally {
   await nav.close()
 }
-const cible = path.join(SORTIE, `${ETIQ}${EFFETS ? '-effets' : ''}${BASCULE ? '-bascule' : ''}.json`)
+const cible = path.join(SORTIE, `${ETIQ}${EFFETS ? '-effets' : ''}${BASCULE ? '-bascule' : ''}${SWIFTSHADER ? '-swiftshader' : ''}${opt('--pixelab', '0') !== '0' ? '-pixelab' : ''}.json`)
 fs.writeFileSync(cible, JSON.stringify(rapport, null, 1))
 console.log('\nécrit : ' + cible)
 
