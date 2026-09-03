@@ -733,3 +733,4 @@ pas à contourner.
 
 ⚠️ **Conflit prévu** : B5 et BT-I peuvent toucher `scripts/build-bathy-tiles.mjs`
 et `dem.js`. B5 a ordre de le dire en tête de rapport ; fusion à la main.
+| **R37** | **raffinement partiel** contre le flou de zoom (dessiner les enfants prêts, parent seulement sous les manquants ; prélecture ; pas d'éviction sous un parent dessiné) — `_traverse` ~8746, `veille-repos.test.js` ⑦ à réécrire | `wt-raf` | en vol |
