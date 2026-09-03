@@ -1,0 +1,36 @@
+{
+  "_pourquoi": "PROPOSITION B2 — les zones de bathymétrie LACUSTRE. Fichier séparé de scripts/bathy-zones.json exprès : B2 ne modifie pas src/ ni les fichiers que B3 va éditer. À fusionner dans bathy-zones.json au moment de l'intégration.",
+  "_bloquant": "⛔ Une zone de lac est INERTE tant que trois choses ne sont pas faites, dans cet ordre : (1) `waterLevelM` doit survivre à `normalizeIndex` (src/bathy-sources.js), qui aujourd'hui le JETTE — vérifié ; (2) `src/dem.js:495` doit passer `{ seaLevel: waterLevelM + 0.5 }` au lieu d'appeler `fuseBathymetry(data, seaData)` sans options ; (3) la source doit être ajoutée au catalogue SOURCES, sinon `creditsForBounds` rend « attribution à compléter » et le site est en faute de licence.",
+  "_sentinelle": "⚠️ Les tuiles de lac écrivent `nappe + 1 m` HORS du lac, jamais 0. Mesuré : avec 0, la vallée du Rhône en aval de Genève se fait creuser de 347,67 m. Voir scripts/controle-lac-b2.mjs, contrôle ④.",
+  "zones": [
+    {
+      "id": "leman",
+      "source": "swisstopo",
+      "zmax": 14,
+      "waterLevelM": 372.05,
+      "bbox": [6.1267, 46.2035, 6.9328, 46.522],
+      "_note": "swissBATHY3D, 2 m natif (Léman livré à 2 m), CHLV95/LN02. CUIT ET VÉRIFIÉ : 404 tuiles z9..z14, 3,22 Mo, fond lu 310,05 m contre 309,70 m de référence CIPEL (+0,35 m). Emprise = partie SUISSE seulement ; la rive française du Léman n'est pas dans swissBATHY3D et retombe sur GEBCO, ce qui est visible sur la carte.",
+      "_zone_de_controle": "point le plus profond, 46.44064 N / 6.59996 E"
+    }
+  ],
+  "_reserve": [
+    {
+      "id": "lacs-suisses",
+      "source": "swisstopo",
+      "zmax": 14,
+      "_note": "Les 22 lacs de swissBATHY3D, ~2 180 km². Extrapolé depuis le Léman (348 km² pour 3,22 Mo) : ~20 Mo. Chaque lac a SA nappe, donc une entrée par lac — pas une bbox unique. Constance est à cheval sur trois pays."
+    },
+    {
+      "id": "grands-lacs-us",
+      "source": "ncei-greatlakes",
+      "zmax": 11,
+      "_note": "NOAA NCEI, 3 secondes d'arc (~90 m), domaine public américain. z11 = 54 m/px à 45°, c'est le natif. ~244 000 km² → ~1 300 tuiles, ~10 Mo. Le Supérieur n'est que PARTIELLEMENT levé côté NCEI."
+    },
+    {
+      "id": "monde-globathy",
+      "source": "globathy",
+      "zmax": 10,
+      "_note": "⚠️ GLOBathy est MODÉLISÉ, pas mesuré : forme plausible, pas une vérité. Plafond volontairement BAS (z10) pour ne pas prétendre à une précision qui n'existe pas, et pour ne jamais passer devant une source mesurée. CC0. Les rasters font 16,7 Go pour 1,4 M de lacs : il faut trier par surface avant de cuire."
+    }
+  ]
+}
