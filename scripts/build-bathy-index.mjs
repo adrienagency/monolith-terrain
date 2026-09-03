@@ -112,7 +112,31 @@ function main() {
           y2lat(t.y + 0.5, z) <= n &&
           inSpan(x2lon(t.x + 0.5, z), w, e)
       )
-      if (!dedans.length) break // un niveau vide arrête la montée : on ne saute pas un cran
+      if (!dedans.length) {
+        // ⛔ BT-I — « UN NIVEAU VIDE ARRÊTE LA MONTÉE » EST FAUX POUR UNE PETITE
+        // ZONE, et ça a coûté CINQ zones cuites pour rien, EN SILENCE.
+        //
+        // La règle d'origine est juste tant que la zone est plus grande qu'une
+        // tuile : un z9 absent y signifie « pas cuit », et publier z13 par
+        // dessus mentirait au client. Mais on teste le CENTRE de la tuile, et
+        // une tuile z9 fait 0,703° de large : une zone de 0,4° peut ne contenir
+        // AUCUN centre de tuile z9 tout en étant intégralement couverte à
+        // z10…z13. Mesuré : `virginia`, `ny-bight`, `chesa-median`, `georges`
+        // et `puget` — 700 tuiles sur le disque, écartées de l'index sans un
+        // mot, et la cascade serait restée au socle z8 sur les cinq.
+        //
+        // On ne confond donc plus « niveau non cuit » et « zone trop petite
+        // pour contenir un centre » : on le CALCULE.
+        const largeurTuile = 360 / 2 ** z
+        // la hauteur d'une tuile en degrés varie avec la latitude (Mercator) :
+        // on la mesure à la latitude de la zone, on ne la suppose pas carrée.
+        const yMid = Math.floor(
+          ((0.5 - Math.log(Math.tan(Math.PI / 4 + (((s + n) / 2) * Math.PI) / 360)) / (2 * Math.PI)) * 2 ** z),
+        )
+        const hauteurTuile = Math.abs(y2lat(yMid, z) - y2lat(yMid + 1, z))
+        if (e - w >= largeurTuile && n - s >= hauteurTuile) break // vraiment pas cuit
+        continue // trop petite pour garantir un centre : l'absence ne prouve rien
+      }
       zmaxReel = z
       tuiles += dedans.length
       const b = dedans.reduce((a, t) => a + t.bytes, 0)

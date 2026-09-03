@@ -115,6 +115,29 @@ export const SOURCES = {
     url: 'https://www.swisstopo.admin.ch/en/height-model-swissbathy3d',
     notForNavigation: true,
   },
+  // ⚡ BT-I — LA SOURCE QUI BOUCHE LES TROUS DE BLUETOPO, ET POURQUOI IL EN FAUT UNE.
+  // BlueTopo est trouée par construction — 4 481 des 12 684 dalles de son schéma
+  // n'ont AUCUN GeoTIFF — et le trou n'est pas anecdotique : dans toute la
+  // fenêtre −126…−121 / 45…50, c'est-à-dire TOUT le Pacifique Nord-Ouest,
+  // 0 dalle sur 278 est publiée. Le détroit de Puget n'y est pas. Les Grands
+  // Lacs non plus, et ils ne peuvent pas y être : BlueTopo est marine, GEBCO
+  // aussi. NCEI publie les deux, à 1/3″ ≈ 10 m pour Puget et 3″ ≈ 93 m pour les
+  // lacs, sous le MÊME régime juridique que BlueTopo : œuvre du gouvernement
+  // fédéral américain, donc non soumise au copyright (17 U.S.C. §105).
+  ncei: {
+    id: 'ncei',
+    label: 'NOAA NCEI — modèles de terrain régionaux (Grands Lacs, Puget Sound)',
+    // On annonce le PLUS GROSSIER des deux : un catalogue ne doit jamais
+    // promettre son meilleur cas, c'est ce qui a rendu caduque la promesse
+    // « 2-16 m sur la côte est » pendant deux campagnes.
+    resolutionM: 93,
+    license:
+      'œuvre du gouvernement fédéral des États-Unis, non soumise au copyright (17 U.S.C. §105) — usage commercial et redistribution autorisés',
+    // NCEI ne l'exige pas, elle le demande — et ça ne coûte rien.
+    credit: 'NOAA National Centers for Environmental Information (NCEI)',
+    url: 'https://www.ncei.noaa.gov/maps/bathymetry/',
+    notForNavigation: true,
+  },
   copernicus: {
     id: 'copernicus',
     label: 'Copernicus Marine — bathymétrie côtière satellitaire 100 m',

@@ -75,6 +75,27 @@ const quantize = (d) => {
   return s <= 1 ? Math.round(d) : Math.round(d / s) * s
 }
 
+// ────────────────────────────────── LE PAS VERTICAL, ET POURQUOI IL DOIT BOUGER
+// ⚠️ BT-I. `encodeTerrarium` arrondissait AU MÈTRE sans condition, et
+// l'argumentaire écrit plus bas est JUSTE — pour GEBCO : « GEBCO est en mètres
+// ENTIERS », le canal B ne porterait donc que du bruit d'anti-aliasing, et le
+// PNG passait de 8,6 à 76 Ko par tuile.
+//
+// ⛔ IL EST FAUX POUR BLUETOPO, et c'est mesuré, pas argumenté. À 4 m natif,
+// dans une baie qui fait 12 m de fond, le mètre EST la lecture. Relevé sur nos
+// propres tuiles AVANT ce correctif, à l'embouchure de la Chesapeake
+// (37,00 / −76,05) : étendue de la fenêtre 9×9 = 2 m à z11, 1 m à z12 — soit
+// UN OU DEUX PAS de quantification. Le rapport d'étendue z12→z13, la grandeur
+// qui dit si la carte ajoute du détail, n'y mesurait plus le fond mais l'arrondi.
+//
+// ⚡ LE DÉFAUT RESTE 1, ET C'EST LA CONDITION : `Math.round(m / 1) * 1` est
+// exactement `Math.round(m)`. GEBCO, EMODnet et les tuiles déjà cuites sortent
+// donc AU BIT comme avant — vérifié par recuisson et comparaison d'empreintes.
+// BlueTopo se cuit à 0,125 m : 8 valeurs par mètre, 3 bits dans le canal B au
+// lieu de 8. On garde le décimètre — l'ordre de grandeur de l'incertitude
+// verticale que NOAA publie dans sa bande 2 — sans payer les 8 bits de bruit.
+const PAS_V = +arg('pas-vertical', 1)
+
 // ------------------------------------------------------------- géographie
 const lon2x = (lon, z) => ((lon + 180) / 360) * 2 ** z
 const lat2y = (lat, z) => {
@@ -247,7 +268,9 @@ function openOne(dir) {
 // tuile avec fractions contre 8,6 Ko sans. Un fond marin donné à 464 m de
 // résolution n'a de toute façon rien à dire sous le mètre.
 function encodeTerrarium(mRaw) {
-  const m = Math.round(mRaw)
+  // ⚡ `PAS_V` vaut 1 par défaut : `Math.round(m / 1) * 1` est exactement
+  // `Math.round(m)`, l'expression d'origine, au bit près. Voir PAS_V plus haut.
+  const m = PAS_V === 1 ? Math.round(mRaw) : Math.round(mRaw / PAS_V) * PAS_V
   const v = Math.min(32767.99, Math.max(-32768, m)) + 32768
   const r = Math.floor(v / 256)
   const g = Math.floor(v - r * 256)
@@ -306,8 +329,53 @@ function main() {
   }
 
   const src = openSources(SRC)
+
+  // ─── LE GARDE-FOU QUI MANQUAIT : « zéro tuile, sans une erreur » ───────────
+  // ⛔ BT-I, défaut signalé par l'audit BT-A. La boucle d'écriture fait
+  // `raw = m == null || m >= 0 ? 0 : m` : elle n'a AUCUNE notion de niveau
+  // d'eau. Un lac d'altitude est positif de bout en bout — le lac Érié a sa
+  // nappe à +174 m et son fond à +110 m — donc CHAQUE pixel sort à 0, `anySea`
+  // reste faux, et le tuileur rend **zéro tuile en n'affichant aucune erreur**.
+  // On a déjà payé une nuit pour ce motif exact (B2, §⑥-1).
+  //
+  // ⚡ ON NE DUPLIQUE PAS LE CORRECTIF : `scripts/build-lake-tiles.mjs` (B2)
+  // fait déjà ce travail, sentinelle comprise, et il est éprouvé sur le Léman
+  // (404 tuiles, fond à +0,35 m de la référence CIPEL). Ce qu'il manquait
+  // n'était pas un second tuileur, c'était que le premier DISE qu'il n'est pas
+  // le bon outil. Il le dit maintenant, avant les trois minutes de cuisson.
+  {
+    const [w, s, e, n] = BBOX
+    let vus = 0
+    let negatifs = 0
+    let plusBas = Infinity
+    for (let j = 0; j < 24; j++) {
+      const lat = s + ((j + 0.5) / 24) * (n - s)
+      for (let i = 0; i < 24; i++) {
+        const v = src.sample(w + ((i + 0.5) / 24) * (e - w), lat)
+        if (v == null) continue
+        vus++
+        if (v < 0) negatifs++
+        if (v < plusBas) plusBas = v
+      }
+    }
+    if (vus > 0 && negatifs === 0) {
+      console.error(
+        `\n⛔ ARRÊT — le pivot n'a AUCUNE valeur négative sur cette emprise ` +
+          `(${vus} sondes, la plus basse à ${plusBas.toFixed(2)} m).\n` +
+          `   Ce tuileur n'écrit QUE la mer : il aplatit tout pixel ≥ 0 et rendrait ZÉRO TUILE,\n` +
+          `   sans une erreur. C'est le cas d'un lac au-dessus du niveau de la mer\n` +
+          `   (lac Érié : nappe +174 m, fond +110 m).\n` +
+          `   ➡️ utiliser scripts/build-lake-tiles.mjs --nappe <cote>, qui porte la SENTINELLE.\n`,
+      )
+      process.exit(3)
+    }
+  }
   let written = 0
   let skipped = 0
+  // BT-I : les DEUX motifs d'écart, comptés SÉPARÉMENT. Les confondre a produit
+  // un faux constat sur ce chantier même (voir le commentaire à l'écart).
+  let sansMer = 0
+  let sansPlateau = 0
   let bytes = 0 // cumulé au fil de l'eau : rescanner le dossier serait quadratique
   const t0 = Date.now()
 
@@ -325,6 +393,7 @@ function main() {
         // étroit pour tomber sous le tamis (côtes escarpées type Chili).
         if (!BAKE_ALL && !probeWorthIt(src, z, tx, ty)) {
           skipped++
+          sansMer++
           continue
         }
         const rgb = Buffer.alloc(TILE * TILE * 3)
@@ -364,8 +433,23 @@ function main() {
         }
         if (!anySea || !anyShelf) {
           skipped++
-          // entièrement à terre, OU entièrement plus profonde que l'isobathe
-          // retenue : dans les deux cas l'ancien relief fait déjà l'affaire
+          // ⚠️ BT-I — LES DEUX MOTIFS D'ÉCART NE SONT PAS LE MÊME DÉFAUT, et les
+          // confondre a produit un faux constat sur ce chantier même (un taux de
+          // « 71 % écartées par SHELF » où 1 108 des 1 208 l'étaient en réalité
+          // FAUTE DE DONNÉE). On les compte séparément, et on les dit :
+          //   · !anySea       = la tuile n'a aucun pixel de mer — l'écarter est
+          //                     gratuit, l'ancien relief est déjà bon ;
+          //   · !anyShelf     = la tuile a du fond, mais TOUT sous l'isobathe.
+          //                     C'est ici que se perd le TALUS CONTINENTAL, et
+          //                     c'est la plaine ionienne de B3 : le trou n'était
+          //                     pas dans le code du damier, il était dans ce qui
+          //                     n'a jamais été cuit. Une source FINE (BlueTopo à
+          //                     4-16 m contre 464 m au socle) a beaucoup à dire
+          //                     sur un talus : cuire ces zones avec le défaut
+          //                     -500 les jetterait EN SILENCE.
+          //                     ➡️ passer `--shelf -99999` pour une source fine.
+          if (anySea) sansPlateau++
+          else sansMer++
           continue
         }
         const dir = path.join(OUT, String(z), String(tx))
@@ -386,6 +470,9 @@ function main() {
   const s = (Date.now() - t0) / 1000
   const mo = bytes / 1024 / 1024
   console.log(`\n✓ ${written.toLocaleString('fr-FR')} tuiles écrites, ${skipped.toLocaleString('fr-FR')} écartées en ${s.toFixed(0)} s`)
+  console.log(`  dont ${sansMer.toLocaleString('fr-FR')} SANS DONNÉE de mer (écart gratuit) et ${sansPlateau.toLocaleString('fr-FR')} avec du fond mais TOUT sous ${SHELF} m`)
+  if (sansPlateau)
+    console.log(`  ⚠️ ces ${sansPlateau.toLocaleString('fr-FR')} tuiles sont du TALUS ou de l'abysse : avec une source FINE, relancer avec --shelf -99999`)
   console.log(`  ${mo.toFixed(0)} Mo au total, ${((bytes / Math.max(written, 1)) / 1024).toFixed(1)} Ko par tuile`)
   console.log(`  → ${OUT}\n`)
 }

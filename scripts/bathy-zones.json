@@ -54,18 +54,124 @@
     {
       "id": "chesapeake",
       "source": "bluetopo",
-      "zmax": 12,
+      "zmax": 13,
       "bbox": [
         -76.5,
         36.9,
         -75.9,
         37.6
       ],
-      "_note": "BT-I — NOAA BlueTopo, 4 m natif (NAD83/UTM 18N + NAVD88), CUIT ET VERIFIE : 127 tuiles z9..z12, 585 Ko, fond le plus bas 44,49 m a 37,24512 N / -76,07313 E (chenal principal de la baie). Le pivot fond 106 GeoTIFF, 265,5 M pixels source, et remplit 78,5 % des cellules — les 21,5 % restants sont les TROUS de BlueTopo, laisses a NaN et non interpoles.",
-      "_licence": "CC0-1.0, domaine public federal americain. Aucune attribution imposee ; l entree `bluetopo` de src/bathy-sources.js cite quand meme NOAA Office of Coast Survey, comme la FAQ le demande poliment.",
-      "_index_vivant": "⛔ NE JAMAIS FIGER DE CHEMIN. L index gpkg de BlueTopo est horodate — ET LE NOM DE SA COUCHE INTERNE AUSSI (mesure : fichier BlueTopo_Tile_Scheme_20260903_145453.gpkg, couche du meme nom). scripts/recon-bluetopo.mjs balaie le prefixe BlueTopo/_ et prend le plus recent, a chaque execution.",
-      "_shelf": "Le filtre SHELF = -500 du tuileur est un NON-EVENEMENT ici, prouve au bit : cuisson a -500 et cuisson a -99999 --all rendent 127 tuiles IDENTIQUES (diff -r vide). La baie plafonne a -44,5 m. ⚠️ MAIS PAS AILLEURS : trois dalles BlueTopo du large (16 m) mesurees a 100 % sous -500 m (min -5134 m au large de la Californie, -4887 m au large de la Caroline, -3466 m dans le golfe). Etendre BlueTopo au large SANS --shelf -99999 jetterait ces 233 dalles en silence — c est exactement la plaine ionienne de B3, avant qu on la paie.",
-      "_zone_de_controle": "37,24512 N / -76,07313 E — fond BlueTopo -44,49 m, la ou GEBCO z8 ne descend pas sous -12 m"
+      "_note": "BT-I — Embouchure et bas de la baie (caps Charles et Henry, Thimble Shoal, Hampton Roads). 106 GeoTIFF, 4 m natif."
+    },
+    {
+      "id": "chesa-median",
+      "source": "bluetopo",
+      "zmax": 13,
+      "bbox": [
+        -76.5,
+        38,
+        -76.1,
+        38.4
+      ],
+      "_note": "BT-I — Bassin median de la baie. 46 GeoTIFF, 4 m natif."
+    },
+    {
+      "id": "virginia",
+      "source": "bluetopo",
+      "zmax": 13,
+      "bbox": [
+        -75.5,
+        36.6,
+        -75.1,
+        37
+      ],
+      "_note": "BT-I — Plateau au large de Virginia Beach. 6 GeoTIFF, 8 m natif."
+    },
+    {
+      "id": "ny-bight",
+      "source": "bluetopo",
+      "zmax": 13,
+      "bbox": [
+        -74.1,
+        40.3,
+        -73.7,
+        40.7
+      ],
+      "_note": "BT-I — Sortie de l Hudson / New York Bight. 34 GeoTIFF, 4 et 8 m."
+    },
+    {
+      "id": "georges",
+      "source": "bluetopo",
+      "zmax": 10,
+      "bbox": [
+        -67.7,
+        41.1,
+        -67.3,
+        41.5
+      ],
+      "_note": "BT-I — Georges Bank. UNE dalle de 16 m couvrant 1,2 deg2 : plafond z10, pas z13 — le natif ne le porterait pas."
+    },
+    {
+      "id": "louisiane",
+      "source": "bluetopo",
+      "zmax": 13,
+      "bbox": [
+        -90.7,
+        28.6,
+        -90.3,
+        29
+      ],
+      "_note": "BT-I — Plateau louisianais, large de Terrebonne. 10 GeoTIFF, 4 et 8 m."
+    },
+    {
+      "id": "floride-o",
+      "source": "bluetopo",
+      "zmax": 13,
+      "bbox": [
+        -83.4,
+        27.3,
+        -83,
+        27.7
+      ],
+      "_note": "BT-I — Plateau ouest-Floride, large de Tampa. 20 GeoTIFF, 4/8/16 m."
+    },
+    {
+      "id": "puget",
+      "source": "ncei",
+      "zmax": 13,
+      "bbox": [
+        -122.65,
+        47.4,
+        -122.25,
+        47.8
+      ],
+      "_note": "BT-I — ⛔ PAS DE BLUETOPO ICI, et c est mesure : 0 dalle publiee sur 278 dans -126..-121 / 45..50, tout le Pacifique Nord-Ouest. Remplacee par le DEM NCEI Puget Sound 1/3 arc-seconde (10,3 m, NAVD88), meme regime juridique. Fond le plus bas du pivot -298,33 m a 47,4546 N / -122,4225 E ; le bassin principal est documente autour de -280 m."
+    },
+    {
+      "id": "erie",
+      "source": "ncei",
+      "zmax": 10,
+      "bbox": [
+        -84,
+        41,
+        -78,
+        43
+      ],
+      "_note": "BT-I — Lac Erie, grille lld NCEI 3\" (93 m). ⛔ AU-DESSUS DU NIVEAU DE LA MER DE BOUT EN BOUT (nappe +173,8, fond +111,2) : le tuileur MARIN aurait rendu ZERO TUILE sans une erreur — c est build-lake-tiles.mjs et sa SENTINELLE qui cuisent, et le tuileur marin refuse maintenant bruyamment. Fond lu 62,58 m sous la nappe, contre 64 m documentes.",
+      "waterLevelM": 173.8
+    },
+    {
+      "id": "michigan",
+      "source": "ncei",
+      "zmax": 10,
+      "bbox": [
+        -88,
+        41.6,
+        -84.5,
+        46.1
+      ],
+      "_note": "BT-I — Lac Michigan, grille lld NCEI 3\" (93 m). Fond lu 275,89 m sous la nappe, contre 281 m documentes. Nappes relevees sur api.opentopodata.org/v1/ned10m (USGS 10 m) aux points de controle.",
+      "waterLevelM": 176.91
     }
   ],
   "_reserve": [
@@ -94,5 +200,10 @@
       "_note": "NOAA BlueTopo, CC0-1.0, 2-16 m natif. Bucket s3://noaa-ocs-nationalbathymetry-pds listable sans compte (vérifié), avec un geopackage d'index des tuiles. Le plus propre juridiquement du dossier, mais aucun visiteur français ne le verra.",
       "_cout_mesure": "BT-I — CHIFFRE, plus estime. Bucket entier : 8 203 GeoTIFF, 89,17 Go, mediane 5,7 Mo, plus gros 472 Mo ; grille de 12 684 dalles dont 4 481 SANS GeoTIFF (35,3 % de trous, structurel). Par classe : 2 m 20 dalles/0,13 Go, 4 m 7 431/43,79 Go (41,8 deg2), 8 m 519/9,94 Go (40,2 deg2), 16 m 233/35,31 Go (302,5 deg2 — le large). Le littoral utile (2+4+8 m) = 82,0 deg2 pour 53,9 Go de source. Chesapeake a coute 0,42 deg2 -> 577 Mo de source -> 585 Ko de tuiles z9..z12 : etendre a tout le littoral americain vaut donc ~114 Mo de tuiles pour ~54 Go a telecharger."
     }
-  ]
+  ],
+  "_bt_i": {
+    "cuisson": "Les zones bluetopo/ncei MARINES se cuisent avec scripts/cuisson-bluetopo.mjs : --shelf -99999 (le filtre du plateau est fait pour GEBCO et perd le TALUS), --no-quant --pas-vertical 0.125 (l arrondi au metre est fait pour une source en metres entiers ; a 4 m natif dans une baie de 12 m, il EFFACAIT la grandeur mesuree : etendue 9x9 = 1 m a z12, soit UN pas de quantification).",
+    "index_vivant": "⛔ L index gpkg de BlueTopo est horodate, ET LE NOM DE SA COUCHE INTERNE AUSSI. scripts/recon-bluetopo.mjs relit le prefixe BlueTopo/_ a chaque execution. Passer une couche figee ne leve pas : duckdb spatial TUE le processus (exit 139, vu).",
+    "deploiement": "build:bathytiles n entre PAS dans npm run deploy (arbitrage confirme) : les tuiles se cuisent hors ligne et se versionnent. 21,17 Mo ajoutes ici."
+  }
 }
