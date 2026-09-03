@@ -108,3 +108,47 @@ test('versTroisJs : Maj+gauche n’a rien à traduire — OrbitControls le sert 
   assert.equal(m.LEFT, MOUSE.ROTATE, 'LEFT reste ROTATE : c’est ce qui donne Maj+gauche = pan')
   assert.equal(Object.keys(m).length, 3, 'rien de plus que les trois boutons')
 })
+
+// ══════════ LE RÉGIME DE LA TERRE — Tâche GE2 ═══════════════════════════════
+
+test('GE2 — dans le régime de la Terre, le milieu et le droit quittent OrbitControls', () => {
+  // MESURÉ (`.banc/GE2/avant-surface.json`, 6 449 km hors du crop, glissé de
+  // 200 px) : le déplacement d'OrbitControls laissé sur le clic droit produisait
+  // |Δ ln(distance caméra→cible)| = 5,27e-2 — 527 fois le seuil 1e-4 de
+  // `veille-repos`, le signal qui arme la bascule de trois quarts de D16 ter.
+  // Ctrl + gauche rendait 1,88e-1, Maj + gauche 1,15e-1. Trois gestes qui
+  // déclaraient un changement d'échelle sans qu'aucune échelle ne change.
+  const m = versTroisJs(boutonsSouris({ terre: true }), MOUSE)
+  assert.equal(m.MIDDLE, -1, 'le milieu ne déplace plus : il incline')
+  assert.equal(m.RIGHT, -1, 'le droit ne déplace plus : il zoome')
+  // ⛔ ET LE GAUCHE AUSSI : lu dans la source vendue (OrbitControls.js, case
+  // MOUSE.ROTATE), un ctrl/meta/shift tenu bascule en PAN — et ce PAN-là est
+  // gardé par enablePan, PAS par enableRotate. Le laisser à ROTATE faisait donc
+  // Maj + glissé = inclinaison ET déplacement en même temps : |Δ ln d| = 1,88
+  // (18 800 × le seuil de veille-repos), altitude 4 651 → 418 km, centre de la
+  // vue à 49 142 px (.banc/GE2/apres-surface.json, première passe).
+  assert.equal(m.LEFT, -1, 'le gauche est inerte : la saisie de R32 le sert elle-même')
+})
+
+test('GE2 — hors du régime de la Terre, RIEN ne change : le crop garde ses boutons', () => {
+  // R13, l'exception qu'Adrien nomme : sur le bloc croppé le pivot est l'axe du
+  // bloc et OrbitControls garde tout. Ce test est la promesse de non-régression.
+  for (const continu of [false, true]) {
+    for (const surface of [false, true]) {
+      const avant = versTroisJs(boutonsSouris({ continu, surface }), MOUSE)
+      const apres = versTroisJs(boutonsSouris({ continu, surface, terre: false }), MOUSE)
+      assert.deepEqual(apres, avant, `continu=${continu} surface=${surface}`)
+    }
+  }
+})
+
+test('GE2 — le régime de la Terre l’emporte sur le mode continu, et c’est voulu', () => {
+  // La fenêtre continue 3×3 prend le clic droit pour glisser le terrain — mais
+  // elle n'existe qu'AU BLOC, et le régime de la Terre s'arrête à sa naissance.
+  // Les deux ne peuvent donc pas être vrais ensemble ; si un appelant l'affirme,
+  // c'est le vocabulaire de Google Earth qui gagne, jamais un état mixte.
+  const b = boutonsSouris({ continu: true, surface: true, terre: true })
+  assert.equal(b.droit, ACTION.ZOOM)
+  assert.equal(b.gauche, ACTION.SAISIE)
+  assert.equal(b.milieu, ACTION.INCLINAISON)
+})
