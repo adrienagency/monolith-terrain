@@ -831,6 +831,16 @@ const VERBES_INERTES = {
   followPivot: 'lecture de la pose du rail de suivi',
   syncToCamera: 'recale le rail sur la caméra que l\'utilisateur vient de bouger',
   recentrerBloc: 'R32 — recharge le bloc au même niveau SOUS la caméra, qui ne bouge pas d\'un mètre (rigide, _suivreEmprise) : rien n\'est confié',
+  // GE2 — le clic droit glissé et le double-clic droit de Google Earth passent par
+  // LA PORTE DE LA MOLETTE, `modes._zoomGesture`, et pas par un dolly (doctrine de
+  // `gestes.js` : « le zoom de ShibuMap n'est pas un dolly, c'est un ESCALIER »).
+  // ⚠️ Cette porte-là REND L'EMPRUNT ELLE-MÊME, à sa première ligne de mode
+  // surface : `if (this.hooks.cadrageWheel?.(e.deltaY)) { … return }` — et
+  // `cadrageWheel` EST `molettePendantCadrageDamier`, qui remet
+  // `controls.maxDistance` avant de rendre `false`. Poser un
+  // `quitteCadrageDamier()` en amont doublerait la restitution, et surtout la
+  // ferait INCONDITIONNELLEMENT — ce dont la molette se garde précisément.
+  _zoomGesture: 'GE2 — LA porte de la molette : elle consulte hooks.cadrageWheel (= molettePendantCadrageDamier) avant toute chose, donc elle rend l\'emprunt elle-même',
 }
 
 test('toute porte qui confie la camera rend D\'ABORD ce que le cadrage a emprunte', () => {

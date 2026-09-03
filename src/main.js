@@ -145,6 +145,7 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 import { creerVeilleRepos } from './monde/veille-repos.js'
 import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
 import { deplacementDeSaisie, elanDeSaisie, pointSousLePixel, latLonDe, vecteurDe, enroulerLon, LAT_MAX_DEG } from './monde/saisie-terre.js'
+import { GESTE, REGIME, regimeTerreActif, gesteDuBouton, zoomDuGlisseDroit, zoomDuDoubleClic, pasInclinaison, estDoubleClic, PIVOT_VERS_LE_CURSEUR } from './monde/gestes-terre.js'
 import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
@@ -3126,13 +3127,36 @@ const f3ParPixel = () => TERRAIN_SIZE / Math.max(1, window.innerHeight)
 // réglages à chaque entrée en surface, et une bascule de mode ne notifie
 // personne. L'assignation est gardée — trois comparaisons d'entiers.
 let _boutonsDroit = null
+let _boutonsMilieu = null
+// ⚠️ **APPELÉ AU MONTAGE, AVANT QUE `regimeGeste` NE SOIT DÉFINIE.** Ce fichier
+// la déclare 700 lignes plus bas ; le `typeof` évite la zone morte du `const`
+// qui la porterait autrement — et au montage il n'y a de toute façon ni `modes`
+// ni caméra globe, donc pas de régime de la Terre.
+const regimeGesteSiPret = () => (typeof regimeGeste === 'function' ? regimeGeste() : null)
+// ⛔ **`!!regimeGeste()` EST FAUX, ET LE BANC L'A ATTRAPÉ.** `regimeGeste()` rend
+// TROIS valeurs non vides — orbite, surface, ET **crop** —, donc `!!` rendait
+// `true` sur le crop et lui retirait ses trois boutons. Mesuré
+// (`.banc/GE2/apres-crop.json`, première passe, vol vers z12, altitude 10 km) :
+// **glissé gauche, clic droit, milieu et Ctrl rendaient tous 0 px et 0°** — la
+// vue était devenue inerte sur le bloc, c'est-à-dire l'exception d'Adrien (R13)
+// purement et simplement supprimée. Le régime de la Terre s'ARRÊTE au crop, et
+// c'est ici que ça s'écrit, pas dans une double négation.
+// ⚡ Le prédicat vit dans `monde/gestes-terre.js` — module pur, donc testable :
+// c'est le seul endroit où la faute ne peut plus se recommettre en silence.
+const regimeTerreIci = () => regimeTerreActif(regimeGesteSiPret())
 function appliqueBoutonsSouris() {
+  // ⚠️ **`terre` EST LE RÉGIME DE LA TÂCHE GE2** : en orbite et en surface hors
+  // du crop, les trois boutons appartiennent au vocabulaire de Google Earth et
+  // le déplacement d'OrbitControls est retiré du milieu ET du droit — mesuré à
+  // **527 fois le seuil de `veille-repos`** quand il y restait
+  // (`.banc/GE2/avant-surface.json`, clic droit glissé de 200 px à 6 449 km).
   const m = versTroisJs(
-    boutonsSouris({ continu: fenetreContinueActive(), surface: modes?.mode === 'surface' }),
+    boutonsSouris({ continu: fenetreContinueActive(), surface: modes?.mode === 'surface', terre: regimeTerreIci() }),
     THREE.MOUSE
   )
-  if (m.RIGHT === _boutonsDroit) return
+  if (m.RIGHT === _boutonsDroit && m.MIDDLE === _boutonsMilieu) return
   _boutonsDroit = m.RIGHT
+  _boutonsMilieu = m.MIDDLE
   controls.mouseButtons = m
 }
 appliqueBoutonsSouris()
@@ -13638,6 +13662,11 @@ function pivoterAutourDuBloc(azAvant) {
 // interdite par D16 ter, et le reste garde le comportement d'avant.
 
 const SEUIL_RECENTRAGE_U = 20
+// Au-delà de cette inclinaison, le modèle `poseNadir` de `saisie-terre.js` ne
+// décrit plus la caméra : la saisie n'itère plus, elle se contente de la pose
+// RÉELLE (voir le commentaire à l'appel de `deplacementDeSaisie`). Un degré,
+// parce qu'au-dessous l'écart au nadir est sous le pixel à toute altitude.
+const SEUIL_MODELE_NADIR_DEG = 1
 const saisieTerre = {
   active: false, // le bouton est tenu, en régime de saisie
   pointerId: null,
@@ -13760,6 +13789,234 @@ renderer.domElement.addEventListener('pointercancel', annulerSaisie)
 // scrolle vers le point visé au centre », et le centre ne doit pas glisser.
 renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0 }, { passive: true })
 
+// ══════════ LE RESTE DU VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ════════════
+//
+// > **Adrien, 2026-09-03 :** *« Attribue à notre programme exactement les mêmes
+// > fonctions à la souris que celles qui sont dans Google Earth (clic droit,
+// > gauche, roulette), tout doit fonctionner pareil. »*
+//
+// Le glissé gauche (R32), la molette (D19) et le clic (R35) étaient faits.
+// Restaient : **le clic droit glissé, le bouton du milieu, le double-clic, les
+// modificateurs, le menu contextuel, l'inertie**. La table geste → action, ses
+// URL, les écarts Web/Pro et **la contradiction avec D19 laissée à Adrien**
+// vivent dans `monde/gestes-terre.js` — ce bloc-ci n'est que sa plomberie.
+//
+// ⚠️ **LES DEUX MOTIFS AUTORISÉS, ET AUCUN AUTRE.** `veille-repos` surveille
+// `|Δ ln(distance caméra→cible)|` au seuil `1e-4`, et c'est ce signal qui arme
+// la bascule de trois quarts de D16 ter :
+//   · **la translation rigide** (R32) — caméra ET cible reçoivent le même
+//     vecteur ; la distance est invariante par construction ;
+//   · **la rotation à rayon constant** autour de `controls.target` — le motif
+//     exact de `redresserSurLeSol` (R29 bis) : `cible + d·(sin φ·sin az,
+//     cos φ, sin φ·cos az)`, donc `|Δ ln d| = 0` par ALGÈBRE, pas par réglage.
+// ⛔ Le déplacement d'OrbitControls, lui, n'en est pas un : mesuré à
+// **5,27e-2 — 527 fois le seuil** sur un clic droit glissé de 200 px hors du
+// crop (`.banc/GE2/avant-surface.json`). C'est pourquoi `boutons-camera.js`
+// rend le milieu et le droit inertes pour la bibliothèque dans ce régime.
+//
+// ⚠️ **LE ZOOM DU CLIC DROIT ET DU DOUBLE-CLIC PASSENT PAR LA PORTE DE LA
+// MOLETTE**, `modes._zoomGesture`. C'est la doctrine de `gestes.js`, écrite pour
+// le pincement et vraie ici mot pour mot : le zoom de ShibuMap n'est pas un
+// dolly, c'est un ESCALIER. Un dolly natif grossirait la même géométrie sans
+// jamais changer de palier — la carte s'approche, le relief reste grossier.
+const gestesTerre = {
+  actif: GESTE.INERTE,
+  pointerId: null,
+  pointeur: null, // [px, py] du dernier `pointermove`
+  precedent: null, // le dernier clic, pour reconnaître le double
+  dInclinaisonDeg: 0, // le pas d'inclinaison en attente, appliqué à l'image
+  dCapDeg: 0,
+  crans: 0, // les `deltaY` de zoom en attente
+  images: 0, // sonde : images où un pas a été appliqué
+  refus: 0, // sonde : gestes tombés hors du régime permis
+}
+window.__exp.gestesTerre = gestesTerre
+
+// LE RÉGIME, dans le vocabulaire de `gestes-terre.js`. `null` = régime hérité
+// (pas de frontière de rendu) : on ne touche à rien.
+function regimeGeste() {
+  if (!modes) return null
+  if (modes.mode === 'orbital') return REGIME.ORBITE
+  if (modes.mode !== 'surface') return null
+  if (!cameraGlobe()) return null
+  return modes.hooks?.horsDuCrop?.() ? REGIME.SURFACE : REGIME.CROP
+}
+window.__exp.regimeGeste = regimeGeste
+
+// ⚠️ **LE CLIC ÉTEINT LE MOUVEMENT — ET C'EST DOCUMENTÉ CHEZ GOOGLE**, pas
+// déduit : « Click once in the 3D viewer to stop motion » (guide Google Earth
+// v4, § « Using a Mouse »), le pendant du geste de lancer (« as if you are
+// throwing the scene ») que R32 a déjà implémenté sous le nom d'élan.
+function eteindreLeMouvement() {
+  saisieTerre.elan.dLat = 0
+  saisieTerre.elan.dLon = 0
+}
+
+// L'inclinaison COURANTE, en degrés : l'angle polaire d'OrbitControls. Hors du
+// crop, la cible est le point du sol sous la caméra, donc l'angle polaire EST
+// l'angle de l'axe optique à la verticale locale — c'est la grandeur de D16 ter,
+// et c'est celle que la sonde mesure à l'écran.
+function inclinaisonCouranteDeg() {
+  return THREE.MathUtils.radToDeg(controls.getPolarAngle())
+}
+window.__exp.inclinaisonCouranteDeg = inclinaisonCouranteDeg
+
+function surPointerDownGeste(ev) {
+  if (ev.pointerType !== 'mouse') return
+  const regime = regimeGeste()
+  if (!regime) return
+  eteindreLeMouvement()
+  const g = gesteDuBouton({ bouton: ev.button, ctrl: ev.ctrlKey || ev.metaKey, maj: ev.shiftKey, alt: ev.altKey, regime })
+  // ⚠️ La SAISIE a son propre gestionnaire (R32, plus haut) : on ne la double
+  // pas. Ce bloc ne prend que ce que R32 laissait tomber.
+  if (g === GESTE.SAISIE) return
+  if (g === GESTE.INERTE) {
+    // ⛔ **UN GESTE NON DOCUMENTÉ CHEZ GOOGLE NE FAIT RIEN.** Sur le crop,
+    // `regimeGeste()` rend `CROP` : on sort ici sans rien capturer, et le clic
+    // droit y garde le déplacement d'OrbitControls — l'exception d'Adrien.
+    if (ev.button !== 0) gestesTerre.refus++
+    return
+  }
+  gestesTerre.actif = g
+  gestesTerre.pointerId = ev.pointerId
+  gestesTerre.pointeur = [ev.clientX, ev.clientY]
+  gestesTerre.dInclinaisonDeg = 0
+  gestesTerre.dCapDeg = 0
+  gestesTerre.crans = 0
+  try { renderer.domElement.setPointerCapture(ev.pointerId) } catch { /* rien */ }
+  surPriseDeCamera()
+}
+
+function surPointerMoveGeste(ev) {
+  if (gestesTerre.actif === GESTE.INERTE || ev.pointerId !== gestesTerre.pointerId) return
+  const [x0, y0] = gestesTerre.pointeur
+  const dx = ev.clientX - x0, dy = ev.clientY - y0
+  gestesTerre.pointeur = [ev.clientX, ev.clientY]
+  lastUserInput = performance.now()
+  if (gestesTerre.actif === GESTE.ZOOM) {
+    // ⚠️ **SEUL L'AXE VERTICAL COMPTE** — Google ne documente que lui (le guide
+    // Pro : « move the mouse backward or pull toward you »). Un clic droit
+    // glissé horizontal qui ferait quelque chose serait une invention.
+    gestesTerre.crans += zoomDuGlisseDroit(dy)
+  } else if (gestesTerre.actif === GESTE.INCLINAISON) {
+    const p = pasInclinaison({ dxPx: dx, dyPx: dy, inclinaisonDeg: inclinaisonCouranteDeg() + gestesTerre.dInclinaisonDeg })
+    gestesTerre.dInclinaisonDeg += p.dInclinaisonDeg
+    gestesTerre.dCapDeg += p.dCapDeg
+  }
+}
+
+function relacherGeste(ev) {
+  if (gestesTerre.actif === GESTE.INERTE || (ev && ev.pointerId !== gestesTerre.pointerId)) return
+  gestesTerre.actif = GESTE.INERTE
+  gestesTerre.pointerId = null
+  gestesTerre.pointeur = null
+  surRelacheDeCamera()
+}
+
+// LE DOUBLE-CLIC. ⚠️ **LE GAUCHE N'EST PAS RÉÉCRIT ICI, ET C'EST DÉLIBÉRÉ** :
+// Google Earth documente « Zoom toward cursor location — Double click (left) »,
+// et **le clic simple de R35 fait déjà exactement ça** (un glissé d'un niveau
+// vers le point visé, mesuré au rapport 1,023 entre deux images) ; deux clics
+// valent donc deux approches. Y ajouter un troisième zoom le compterait deux
+// fois, et R35 est un acquis verrouillé par des tests.
+// **Le DROIT, lui, ne faisait rien** — c'est la moitié manquante :
+// « Zoom away from cursor location — Double click (right) ».
+function surClicGeste(ev) {
+  if (ev.pointerType !== 'mouse') return
+  const regime = regimeGeste()
+  if (!regime || regime === REGIME.CROP) return
+  const clic = { t: performance.now(), x: ev.clientX, y: ev.clientY, bouton: ev.button }
+  const double = estDoubleClic({ precedent: gestesTerre.precedent, ...clic })
+  gestesTerre.precedent = double ? null : clic
+  if (!double || ev.button !== 2) return
+  gestesTerre.crans += zoomDuDoubleClic(ev.button)
+}
+
+// ⛔ **AUCUN MENU CONTEXTUEL SUR LE GLOBE — et c'est la référence qui le dit**,
+// pas une préférence : ni l'aide de Google Earth Web ni le guide Pro ne
+// documentent de menu au clic droit sur le terrain nu (Pro n'en documente un que
+// sur les OBJETS : repères, dossiers, résultats de recherche). Et le clic droit y
+// PORTE UN GESTE — le glissé de zoom : laisser le menu du navigateur s'ouvrir
+// dessus l'interromprait à chaque fois.
+// ⚠️ Mesuré avant d'y toucher (`.banc/GE2/avant-surface.json`) : le menu était
+// DÉJÀ empêché (`empeche: true` sur les trois relevés) — mais par le
+// gestionnaire interne d'OrbitControls, donc par un détail d'implémentation de
+// la bibliothèque. On l'écrit ici pour que ça n'en dépende plus.
+renderer.domElement.addEventListener('contextmenu', (e) => { if (regimeGeste()) e.preventDefault() })
+renderer.domElement.addEventListener('pointerdown', surPointerDownGeste)
+renderer.domElement.addEventListener('pointermove', surPointerMoveGeste)
+renderer.domElement.addEventListener('pointerup', (e) => { surClicGeste(e); relacherGeste(e) })
+renderer.domElement.addEventListener('pointercancel', relacherGeste)
+
+// ══════════ L'INCLINAISON MANUELLE, ET POURQUOI ELLE NE COÛTE RIEN ═════════
+//
+// ⚡ **LA DISTINCTION QUE D16 TER IMPOSE, ÉCRITE DANS LE CODE.** D16 ter dit que
+// la vue de trois quarts n'arrive qu'au bloc ; Google Earth Pro, lui, incline au
+// clic droit PARTOUT. Les deux se décroisent sur un mot :
+//   · **AUTOMATIQUE** — la machine incline sans qu'on le lui demande (la pose
+//     d'arrivée `PENTE_ARRIVEE`, l'« automatic tilt » du clic droit de Pro).
+//     ⛔ **D16 ter la garde pour le bloc, et rien ici ne la déplace** : c'est
+//     pourquoi `GESTE.ZOOM` ne porte AUCUNE inclinaison, alors que Google Earth
+//     en met une sur exactement le même geste.
+//   · **MANUELLE** — l'utilisateur tient le bouton du milieu, ou Ctrl, ou Maj,
+//     et ne demande que ça. ✅ **Permise dans tout le régime de la Terre.**
+//
+// ⚠️ **ET ELLE EST INVISIBLE À `veille-repos` PAR CONSTRUCTION** : la caméra est
+// reposée sur la sphère de MÊME RAYON `d` autour de `controls.target` — le motif
+// littéral de `redresserSurLeSol` —, donc `|Δ ln d| = 0` par algèbre. Aucun
+// réglage à tenir d'accord avec quoi que ce soit.
+function appliquerInclinaison(dInclinaisonDeg, dCapDeg) {
+  if (!dInclinaisonDeg && !dCapDeg) return false
+  const d = controls.getDistance()
+  if (!(d > 0)) return false
+  const phi = controls.getPolarAngle() + THREE.MathUtils.degToRad(dInclinaisonDeg)
+  const az = controls.getAzimuthalAngle() + THREE.MathUtils.degToRad(dCapDeg)
+  if (!Number.isFinite(phi) || !Number.isFinite(az)) return false
+  const s = Math.sin(phi)
+  camera.position.set(
+    controls.target.x + d * s * Math.sin(az),
+    controls.target.y + d * Math.cos(phi),
+    controls.target.z + d * s * Math.cos(az)
+  )
+  camera.lookAt(controls.target)
+  return true
+}
+
+// Le pas de l'image : le zoom en attente part par la porte de la molette,
+// l'inclinaison se pose. Appelé depuis `appliquerSaisieTerre`, donc AVANT
+// `updateCameraMotion` — le même ordre que R32, pour la même raison.
+function appliquerGestesTerre() {
+  const regime = regimeGeste()
+  if (!regime || regime === REGIME.CROP) {
+    if (gestesTerre.actif !== GESTE.INERTE) relacherGeste(null)
+    gestesTerre.crans = 0
+    gestesTerre.dInclinaisonDeg = 0
+    gestesTerre.dCapDeg = 0
+    return
+  }
+  if (gestesTerre.crans) {
+    const dy = gestesTerre.crans
+    gestesTerre.crans = 0
+    // ⛔ **LE PIVOT EST CELUI DE D19 — LE CENTRE DE L'ÉCRAN — ET LE PRÉDICAT EST
+    // SEUL SUR SA LIGNE.** Google Earth documente son double-clic comme « Zoom
+    // toward CURSOR location » ; D19 écrit « je scrolle vers le point visé au
+    // centre de l'écran ». La contradiction est réelle, elle est signalée en tête
+    // de `monde/gestes-terre.js`, et **l'exécutant ne la tranche pas** :
+    // `PIVOT_VERS_LE_CURSEUR` vaut `false` (D19), un caractère la bascule.
+    const p = PIVOT_VERS_LE_CURSEUR && gestesTerre.pointeur
+      ? { clientX: gestesTerre.pointeur[0], clientY: gestesTerre.pointeur[1] }
+      : { clientX: innerWidth / 2, clientY: innerHeight / 2 }
+    modes._zoomGesture({ deltaY: dy, ...p, preventDefault: () => {} })
+    gestesTerre.images++
+  }
+  if (gestesTerre.dInclinaisonDeg || gestesTerre.dCapDeg) {
+    const di = gestesTerre.dInclinaisonDeg, dc = gestesTerre.dCapDeg
+    gestesTerre.dInclinaisonDeg = 0
+    gestesTerre.dCapDeg = 0
+    if (appliquerInclinaison(di, dc)) gestesTerre.images++
+  }
+}
+
 // Déplacer le point SOUS LA CAMÉRA de (dLat, dLon), à altitude constante.
 function deplacerSousLaCamera(S, pas) {
   const borne = (lat) => Math.max(-LAT_MAX_DEG, Math.min(LAT_MAX_DEG, lat))
@@ -13827,8 +14084,20 @@ function appliquerSaisieTerre(dt) {
   const hauteur = Math.hypot(pose.position[0], pose.position[1], pose.position[2]) - R_GLOBE
   let pas = null
   if (saisieTerre.active && saisieTerre.pointeur) {
+    // ⚠️ **UNE SEULE ITÉRATION QUAND LA VUE EST INCLINÉE — GE2, et c'est une
+    // mesure.** `deplacementDeSaisie` itère sur `poseNadir`, un modèle de caméra
+    // AU NADIR ; l'inclinaison manuelle que GE2 vient d'autoriser le rend faux,
+    // et les itérations 2 à 5 convergent alors vers un point qui n'existe pas.
+    // Mesuré à 418 km sous 55° d'inclinaison héritée (`.banc/GE2/apres-surface.json`,
+    // première passe) : le point saisi finissait à **3 225 px** du curseur.
+    // L'itération 0, elle, part de la pose RÉELLE — celle qui a dessiné l'image
+    // que l'utilisateur regarde — donc elle reste juste sous toute inclinaison ;
+    // le résidu se résorbe à l'image suivante, qui relit la réalité. C'est
+    // exactement l'argument que `saisie-terre.js` écrit pour le premier ordre.
+    const inclineeDeg = Math.abs(THREE.MathUtils.radToDeg(controls.getPolarAngle()))
     const d = deplacementDeSaisie({
       saisi: saisieTerre.saisi, sousCamera: S, hauteur, poseReelle: pose,
+      iterations: inclineeDeg > SEUIL_MODELE_NADIR_DEG ? 1 : undefined,
       ...projectionSaisie(saisieTerre.pointeur[0], saisieTerre.pointeur[1]),
     })
     saisieTerre.residuDeg = d.residuDeg
@@ -13902,6 +14171,12 @@ function tick() {
   // `modes.update()` zoome depuis elle. Placée après, elle serait relue une
   // image plus tard par `majCameraFond` — et `redresserSurLeSol` (R29 bis) a
   // déjà payé ce genre d'ordre.
+  // ⚠️ **LE RESTE DU VOCABULAIRE AVANT LA SAISIE, ET C’EST L’ORDRE QUI COMPTE.**
+  // L’inclinaison manuelle repose la caméra ; la saisie relit ensuite la pose
+  // RÉELLE pour résoudre sa contrainte (le point saisi sous le pointeur). Posée
+  // après, elle résoudrait sur une pose d’avant l’inclinaison — et l’image
+  // suivante corrigerait, ce qui se voit à l’œil comme un flottement.
+  appliquerGestesTerre()
   appliquerSaisieTerre(dt)
   updateCameraMotion(dt)
   // La fenêtre continue, juste après la caméra : le geste se projette sur les
