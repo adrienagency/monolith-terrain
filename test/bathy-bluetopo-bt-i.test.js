@@ -52,30 +52,90 @@ test('BT-I-2 · un blendDepthM absent, nul ou absurde laisse le défaut de 25 m 
 //
 // Les nombres ci-dessous ont été relevés en exécutant `fuseBathymetry` sur les
 // valeurs de nos propres tuiles, et vérifiés au GPU (le globe rendait −5,2 m).
-test('BT-I-3 · la bande de 25 m amputait de 55 % un fond de baie ; 2 m le rend entier', () => {
-  const un = (l, s, o) => fuseBathymetry(Float32Array.from([l]), Float32Array.from([s]), o)[0]
-  // La baie, telle que nos tuiles la portent
-  assert.ok(Math.abs(un(0, -11.63, {}) - -5.21) < 0.02,
-    `le défaut de ${BLEND_DEPTH} m doit rendre −5,21 m — il rend ${un(0, -11.63, {}).toFixed(2)}`)
-  assert.ok(Math.abs(un(0, -11.63, { blendDepth: 2 }) - -11.63) < 0.02,
-    'avec une bande de 2 m, le fond doit sortir ENTIER')
-  // ⚡ ET LA BANDE EST SANS EFFET DÈS QU'ON QUITTE LE RÉGIME DES BAIES : ce
-  // n'est donc pas un réglage global déguisé, c'est une correction locale.
-  for (const fond of [-27.25, -31, -44.5, -198, -2200])
-    assert.equal(un(0, fond, {}), un(0, fond, { blendDepth: 2 }),
-      `à ${fond} m, les deux bandes doivent donner le MÊME nombre`)
+// ⚠️ ON MESURE SUR UN CHAMP DE 256×256, JAMAIS SUR UN PIXEL — et ce n'est pas
+// une précaution de style. `detectFillLevels` échantillonne un pixel sur 17
+// (`FILL_STEP`) et exige 64 sondes (`FILL_MIN_SONDES`) ; `detectNoiseFill` (B5)
+// travaille elle aussi sur une PART du champ. Sur un tableau d'un élément,
+// aucune des deux ne se déclenche, et la fonction ne fait pas ce qu'elle fera
+// en production. **B2 s'est fait prendre exactement là** (rapport-B2, §⑥-3 :
+// « ma sonde travaillait sur des dalles 16×16 … elle ne se déclenchait
+// jamais ») — et je m'y suis fait prendre à mon tour, avec l'avertissement écrit
+// trois rapports plus haut : ma première version de ce test affirmait −5,21 m,
+// ce qui n'est vrai que du pixel isolé.
+const TUILE = 256 * 256
+const champ = (fLand, fSea) => {
+  const L = new Float32Array(TUILE)
+  const S = new Float32Array(TUILE)
+  for (let i = 0; i < TUILE; i++) {
+    L[i] = fLand(i)
+    S[i] = fSea(i)
+  }
+  return [L, S]
+}
+const moyenne = (x) => {
+  let s = 0
+  for (const v of x) s += v
+  return s / x.length
+}
+// une baie de 11,6 m, comme la Chesapeake dans nos tuiles
+const FOND = (i) => -11.6 + Math.sin(i * 0.01) * 0.4
+
+test('BT-I-3 · la bande de 25 m ampute le fond quand le relief de référence en porte un', () => {
+  // ⚡ LE RÉGIME OÙ LA BANDE MORD : le terrarium porte une VRAIE bathymétrie
+  // grossière (ETOPO1 côtier, un haut-fond, une pente). Le fondu se pilote alors
+  // sur `l`, et à 25 m de bande la source fine sort pondérée à une fraction.
+  const regimes = {
+    'ETOPO1 côtier, −1 à −20 m': (i) => -1 - 19 * Math.abs(Math.sin(i * 0.0007)),
+    'haut-fond, −0,5 à −3 m': (i) => -0.5 - 2.5 * Math.abs(Math.sin(i * 0.0013)),
+    'pente, −2 à −40 m': (i) => -2 - 38 * ((i % 256) / 256),
+  }
+  for (const [nom, fl] of Object.entries(regimes)) {
+    const [L, S] = champ(fl, FOND)
+    const large = moyenne(fuseBathymetry(L, S, {}))
+    const court = moyenne(fuseBathymetry(L, S, { blendDepth: 2 }))
+    assert.ok(court < large - 0.5,
+      `${nom} : la bande de ${BLEND_DEPTH} m rend ${large.toFixed(2)} m et celle de 2 m ${court.toFixed(2)} m — ` +
+      `le raccourcissement doit rendre au moins 0,5 m de fond`)
+    assert.ok(court <= moyenne(S) + 1.6,
+      `${nom} : à 2 m de bande le fond doit approcher la source (${moyenne(S).toFixed(2)} m), il rend ${court.toFixed(2)} m`)
+  }
 })
 
 test('BT-I-4 · raccourcir la bande ne peut pas faire émerger un pixel ni bouger un rivage', () => {
-  const un = (l, s, o) => fuseBathymetry(Float32Array.from([l]), Float32Array.from([s]), o)[0]
-  // TERRE : la branche est en amont du fondu, elle sort intacte quoi qu'il arrive
-  for (const l of [0.5, 5, 120, 3000])
-    assert.equal(un(l, -50, { blendDepth: 2 }), l, `la terre à ${l} m a bougé`)
-  // MER : la source fine ne peut que creuser, jamais émerger — même à bande courte
-  for (const s of [-0.01, -0.5, -2, -11.63])
-    assert.ok(un(0, s, { blendDepth: 2 }) < 0, `un fond de ${s} m est ressorti émergé`)
-  // Un fond ne peut pas devenir plus haut que le niveau sous une bande courte
-  assert.ok(un(0, -0.001, { blendDepth: 2 }) <= 0)
+  // TERRE — la branche est EN AMONT du fondu : elle sort intacte quoi qu'il
+  // arrive. C'est la garantie structurelle des polders, et elle se vérifie sur
+  // un champ entier, pas sur un pixel choisi.
+  // ⚠️ ON COMMENCE À +1 m, ET PAS À +0,5 m, DEPUIS B5. Le terrarium Mapterhorn
+  // est servi en `.webp` LOSSY : son zéro de mer ressort à 0 ± 0,5 m, des deux
+  // côtés du signe. B5 a donc posé une BANDE DE BRUIT (|h| ≤ 0,6 m sur ≥ 10 %
+  // des pixels que la source fine dit < −2 m ⇒ absence, signe compris), parce
+  // qu'autour de Porquerolles un terrarium à +0,2/+0,5 m était classé TERRE et
+  // interdisait de lire les −80 m d'EMODnet dessous.
+  // ⛔ Un pixel à +0,5 m qui devient de la mer N'EST PAS un rivage déplacé :
+  // c'est du bruit de compression reconnu comme tel. Ma première version de ce
+  // test l'a compté comme une régression — c'était le test qui datait, pas le
+  // code. La garantie que ce test doit défendre porte sur la terre RÉELLE,
+  // c'est-à-dire au-dessus de la bande de bruit.
+  for (const alt of [1, 5, 120, 3000]) {
+    const [L, S] = champ(() => alt, () => -50)
+    const out = fuseBathymetry(L, S, { blendDepth: 2 })
+    for (const v of out) assert.equal(v, alt, `la terre à ${alt} m a bougé`)
+  }
+  // MER — la source fine ne peut que CREUSER sous le niveau, jamais émerger,
+  // même à bande courte. Un seul pixel ressorti positif serait un rivage déplacé.
+  for (const fond of [-0.01, -0.5, -2, -11.63]) {
+    const [L, S] = champ(() => 0, () => fond)
+    for (const v of fuseBathymetry(L, S, { blendDepth: 2 }))
+      assert.ok(v <= 0, `un fond de ${fond} m est ressorti à ${v} m, donc émergé`)
+  }
+  // Et un littoral MIXTE : la moitié terre, la moitié mer. Aucun pixel de terre
+  // ne doit bouger, aucun pixel de mer ne doit émerger.
+  const [L, S] = champ((i) => (i % 512 < 256 ? 3 : 0), () => -11.63)
+  const out = fuseBathymetry(L, S, { blendDepth: 2 })
+  for (let i = 0; i < TUILE; i++) {
+    if (i % 512 < 256) assert.equal(out[i], 3, 'un pixel de terre du littoral a bougé')
+    else assert.ok(out[i] <= 0, 'un pixel de mer du littoral a émergé')
+  }
 })
 
 // ─── ③ LE CATALOGUE ET LES LICENCES ──────────────────────────────────────────

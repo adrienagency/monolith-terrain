@@ -166,6 +166,40 @@ profondeur, **à 20 km de toute côte**. Et la bande **ne fait déjà plus rien
 au-delà de −27 m** : ce n'est donc pas un réglage global déguisé, c'est une
 correction qui ne touche que le régime que BlueTopo est là pour décrire.
 
+### ⚠️ ET APRÈS LA FUSION DE B5, LE MÉRITE EST PARTAGÉ — mesuré, sur la vraie tuile
+
+B5 a trouvé la **même amputation par une autre porte** : le terrarium Mapterhorn
+est servi en `.webp` **lossy**, son zéro de mer ressort à 0 ± 0,5 m des deux
+côtés du signe, et sa bande de bruit rend la source fine **seule autorité** là
+où la référence est muette. **Ça recouvre mon cas là où le terrarium est nul.**
+
+J'ai donc départagé sur la **vraie tuile z11 de l'embouchure** (11/591/797,
+terrarium AWS réel contre notre tuile BlueTopo), et non sur un pixel fabriqué :
+
+```
+terrarium au point du barème  0,000 m EXACT
+  (75,7 % de la tuile à zéro exact, 80,6 % dans |h| ≤ 0,6 m)
+fusion au texte du barème  sans blendDepthM  −11,625 m
+                           avec blendDepthM  −11,625 m      ← AUCUN écart
+sur la tuile entière : 288 texels sur 65 536 diffèrent (0,44 %), pire écart 4,42 m
+```
+
+➡️ **Au point exact du barème, c'est la règle du muet — celle que B5 a étendue —
+qui fait le travail, pas ma bande.** Ma bande agit sur les **0,44 % de texels où
+le terrarium porte une vraie bathymétrie côtière grossière** (ni nulle, ni du
+bruit), et elle y vaut jusqu'à **4,42 m**. Les deux correctifs couvrent deux
+régimes distincts et **aucun des deux ne rend l'autre inutile** :
+
+| régime du relief de référence | qui répare | gain mesuré |
+|---|---|---|
+| **muet** (0 exact) ou **bruit lossy** (\|h\| ≤ 0,6 m) | **B5** | tout le fond |
+| **vraie bathymétrie grossière** (ETOPO1 côtier, haut-fond, pente) | **`blendDepthM`** | 0,8 à 7,8 m selon le régime |
+
+⚠️ **Le chiffre « −5,21 m » de mon relevé est daté du socle PRÉ-B5** et je le
+laisse tel quel : c'est ce que la carte rendait quand je l'ai mesuré, et c'est ce
+que le correctif a changé ce jour-là. Sur la base fusionnée, ce même pixel sort à
+−11,625 m **des deux côtés**.
+
 ⚠️ **Et le rivage ne peut pas bouger, structurellement, pas par promesse** : la
 branche TERRE (`l >= level && !noData`) est **en amont** du fondu, et
 `deep = min(s, level − SEA_EPS)` interdit toujours à la source marine d'émerger.
@@ -420,6 +454,38 @@ déjà (B3) — et il le fallait, puisque `index.json` est *gitignore* et que
   gradient — l'un des fonds les plus plats du golfe. Le barème compare aux
   11,5 m/km de la Manche, qui est un plateau à courants de marée : **deux
   régimes sédimentaires différents, pas deux qualités de carte.**
+- ⛔ **« Ma bande de fondu répare la baie de la Chesapeake. »** Vrai le jour où
+  je l'ai mesuré — le globe est passé de −5,2 à −11,6 m — et **faux sur la base
+  fusionnée avec B5**, qui a trouvé la même amputation par la porte du terrarium
+  lossy. J'ai départagé sur la **vraie tuile** plutôt que de garder mon chiffre :
+  au point du barème le terrarium vaut **0,000 m exact**, c'est donc la règle du
+  muet qui rend le fond, et ma bande n'y change **rien** (−11,625 des deux
+  côtés). Elle agit sur **288 texels de 65 536** (0,44 %), là où le terrarium
+  porte une vraie bathymétrie grossière, et elle y vaut jusqu'à **4,42 m**.
+  ⚡ **Je garde les deux, et j'ai vérifié que ce n'est pas de la redondance** :
+  sur trois régimes de relief de référence (ETOPO1 côtier, haut-fond, pente), la
+  bande de 25 m coûte encore **0,8 à 7,8 m** de fond après B5. **Deux agents ont
+  trouvé le même symptôme par deux causes différentes la même semaine ; aucune
+  des deux corrections ne rend l'autre inutile, et il a fallu la mesure sur une
+  tuile réelle pour le dire.**
+- ⛔ **« Mon test le prouve. »** Ma première version de `BT-I-3` affirmait que
+  la fusion rend −5,21 m — et elle travaillait sur des tableaux **d'un seul
+  pixel**. Or `detectFillLevels` échantillonne un pixel sur 17 et exige 64
+  sondes, et `detectNoiseFill` de B5 raisonne elle aussi sur une PART du champ :
+  **sur un tableau d'un élément, aucune des deux ne se déclenche.** Le test
+  mesurait une fonction amputée de ses deux détecteurs. ⚠️ **C'est mot pour mot
+  le piège que B2 a documenté** (rapport-B2 §⑥-3 : *« ma sonde travaillait sur
+  des dalles 16×16 … elle ne se déclenchait jamais »*) — **avec l'avertissement
+  écrit trois rapports plus haut, et je m'y suis fait prendre quand même.**
+  Réécrit sur des champs de 256×256, la vraie taille d'une tuile.
+- ⛔ **« Un pixel de terre à +0,5 m qui devient de la mer est un rivage
+  déplacé. »** Mon test l'a compté comme une régression après la fusion de B5.
+  **Faux : c'était le test qui datait.** Le terrarium lossy rend 0 ± 0,5 m des
+  deux côtés du signe ; un +0,5 m en pleine mer est du **bruit de compression**,
+  et le reconnaître comme tel est précisément le correctif de B5 (Porquerolles :
+  la fusion refusait de lire les −80 m d'EMODnet sous un terrarium à +0,2 m).
+  La garantie à défendre porte sur la terre **réelle**, au-dessus de la bande de
+  bruit — le test commence maintenant à +1 m et le dit.
 - ⛔ **« Le câblage de `blendDepthM` est sans risque : c'est un champ optionnel
   de plus. »** **Je l'ai cassé, et le globe s'est tu.** `src/globe.js` portait
   `tuilePorteDeLaMer(heights, opts ? opts.seaLevel : 0)` — juste tant qu'`opts`
