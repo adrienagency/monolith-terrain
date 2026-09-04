@@ -5023,6 +5023,26 @@ class PasseFond extends RenderPass {
 // **Le critère n'est donc pas « y a-t-il deux passes » mais « la seconde
 // dessine-t-elle quelque chose »**, et la réponse ne dépend que de `terre=unique`.
 const fusionDesPasses = frontiereActive && terreUniqueBranchee
+
+// LE RELAIS DE POSE DU CALQUE GPX — Tâche GX2. Un dépôt, pas une logique : la
+// chaîne de passes ci-dessous sait QUELLE caméra dessine et QUELLE fabrique de
+// poseur porte la similitude bloc → globe, mais le calque GPX, lui, n'existe
+// pas encore à cet endroit du fichier (`const gpxLayer`, ~3 400 lignes plus
+// bas — le nommer ici empêche la page de démarrer, mesuré). Il vient donc
+// prendre ce dépôt à sa construction.
+const gpxPoseGlobe = {
+  camera: null,
+  fabricant: null,
+  setCamera(c) { this.camera = c },
+  poserFabricantDePoseur(fn) { this.fabricant = fn },
+  // ⚠️ La SCÈNE ne passe pas par ici : elle est nommée en clair au site
+  // d'adoption, sous la même condition de régime, pour qu'un lecteur du
+  // constructeur voie de ses yeux dans quelle scène le tracé atterrit.
+  appliquer(gestionnaire) {
+    if (this.camera) gestionnaire.setCamera(this.camera)
+    if (this.fabricant) gestionnaire.poserFabricantDePoseur(this.fabricant)
+  },
+}
 if (frontiereActive) {
   const passeFond = new PasseFond(sceneGlobe, camGlobe)
   passeFond.skipShadowMapUpdate = true
@@ -5103,15 +5123,39 @@ if (fusionDesPasses) {
   // PRÈS** (`main.js:3433` l'écrit déjà ainsi) : c'est elle qui convertit les
   // mètres du globe en unités de bloc, et une seconde écriture divergerait en
   // silence le jour où l'exagération bougerait.
-  mapLayers.poserFabricantDePoseur(({ dem, terrain, params, sample }) =>
+  const faitPoseurGlobe = ({ dem, terrain, params, sample }) =>
     poseurPourReconstruction({
       globe,
       dem,
       sample,
       echelleBloc: (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1) / dem.extentMeters) * lireExageration(params),
       actif: true,
-    }),
-  )
+    })
+  mapLayers.poserFabricantDePoseur(faitPoseurGlobe)
+  // ══════ ET LE TRACÉ GPX AVEC EUX — Tâche GX2 ═══════════════════════════════
+  //
+  // > **Adrien :** « Le tracé ne s'affiche plus lorsqu'on lance la lecture d'un
+  // > tracé GPX ; le passage du mode plat au mode sphère a dû rendre le tracé
+  // > inefficient. »
+  //
+  // ⛔ **LE SIXIÈME OBJET DU DÉMÉNAGEMENT AVAIT ÉTÉ OUBLIÉ.** Le disque
+  // solaire, le cartouche, les nuages, les cotes et la cartographie sont
+  // au-dessus ; `gpx.js` faisait toujours `scene.add(this.group)` — la scène
+  // que `passeSurface.enabled = false` a cessé de dessiner. Mesuré au
+  // navigateur le 2026-09-04 (rapport GX1) : **0 pixel posé par le calque**, six
+  // relevés sur six, témoin de bruit à 0, là où la géométrie en prédit 2 019.
+  // Sous `?terre=deux` le même tracé au même cadrage en posait 1 053. Le tracé
+  // n'était pas mal placé : il n'était pas dessiné.
+  //
+  // ⚠️ **ET L'ADOPTION NE PEUT PAS SE FAIRE ICI — MESURÉ, LA PAGE NE DÉMARRE
+  // PLUS.** `gpxLayer` est construit ~3 400 lignes plus bas : le nommer dans ce
+  // bloc le lit dans la zone morte de son `const`, et la première image n'arrive
+  // jamais. On DÉPOSE donc ici ce qui appartient à ce régime — la caméra qui
+  // dessine et la fabrique de poseur, les deux objets que la chaîne de passes
+  // connaît et que le site de construction ne devrait pas réinventer — et le
+  // calque vient les prendre à sa construction (`gpxPoseGlobe.appliquer`).
+  gpxPoseGlobe.setCamera(camGlobe)
+  gpxPoseGlobe.poserFabricantDePoseur(faitPoseurGlobe)
 }
 
 // LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
@@ -8483,6 +8527,18 @@ function cartoucheSuitLeDamier() {
 }
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
+// ══════ LE TRACÉ GPX REJOINT LA SCÈNE QUI EST RENDUE — Tâche GX2 ════════════
+//
+// La condition est celle de la chaîne de passes (`fusionDesPasses`, ~ligne
+// 5 040) et pas une autre : sous `?terre=deux` la passe de surface dessine
+// ENCORE le bloc, et déménager le tracé l'en ferait disparaître — c'est la
+// régression que la fusion des passes avait déjà payée à 17,80 dB de PSNR en
+// s'appliquant au mauvais régime. Le détail de la mesure est en tête du bloc
+// `if (fusionDesPasses)`, avec le dépôt `gpxPoseGlobe` que cette ligne consomme.
+if (fusionDesPasses) {
+  gpxLayer.poserScene(sceneGlobe)
+  gpxPoseGlobe.appliquer(gpxLayer)
+}
 
 // ---- Race Studio : état de la course + cartouches espace-écran ------------
 // raceState est rempli par le studio (src/ui/studio.js) ; les cartouches se

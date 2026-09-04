@@ -112,8 +112,42 @@ export class GpxLayerManager {
     this.onSequenceDone = null // (lastLayer) => {}
     this.onChange = null // (layers) => {} — panel re-render hook (add/remove/reorder)
 
+    this.sceneCourante = scene // la scène RETENUE — voir poserScene()
+    this._faitPoseur = null // la fabrique de poseur retenue — voir poserFabricantDePoseur()
     this._transitionEl = null
     this._buildTransitionDom()
+  }
+
+  // ══════════ L'ADOPTION DE SCÈNE — Tâche GX2 ═══════════════════════════════
+  //
+  // Trois relais vers les calques, exactement ceux que `MapLayers` reçoit déjà
+  // de `main.js`. Sous `terre unique`, la passe qui dessinait la scène du bloc
+  // est éteinte (`main.js`, `passeSurface.enabled = false`) et tout ce qui doit
+  // rester visible a déménagé dans `sceneGlobe`. **Le calque GPX avait été
+  // oublié** : il posait **0 pixel** à l'écran, six relevés sur six, témoin de
+  // bruit à 0 (rapport GX1, 2026-09-04).
+  //
+  // ⚠️ **LA SCÈNE EST RETENUE, PAS SEULEMENT TRANSMISE.** `addLayer` construit
+  // un `GpxLayer` neuf : s'il repartait de la scène du constructeur, le
+  // DEUXIÈME tracé chargé serait le seul invisible — le piège exact de la
+  // tâche 22, un défaut qui ne se voit qu'au second chargement.
+  poserScene(scene) {
+    if (!scene) return
+    this.scene = scene
+    this.sceneCourante = scene
+    for (const l of this.layers) l.gpx?.poserScene?.(scene)
+  }
+  setCamera(camera) {
+    if (!camera) return
+    this.camera = camera
+    for (const l of this.layers) l.gpx?.setCamera?.(camera)
+  }
+  // La fabrique de poseur (`poseurPourReconstruction`, `monde/sol-globe.js`) :
+  // c'est elle qui porte la similitude bloc → globe, sans laquelle l'adoption
+  // de scène ne suffit pas — mesuré, 0 pixel quand même (voir `gpx.js`).
+  poserFabricantDePoseur(fn) {
+    this._faitPoseur = typeof fn === 'function' ? fn : null
+    for (const l of this.layers) l.gpx?.poserFabricantDePoseur?.(this._faitPoseur)
   }
 
   // ---------------------------------------------------------------- derived state
@@ -176,6 +210,9 @@ export class GpxLayerManager {
     if (!canAddLayer(this.layers.length)) return null
     const { points, name } = parseGpx(text)
     const gpx = new GpxLayer({ scene: this.scene, camera: this.camera, terrain: this.terrain, params: this.params, getDem: this.getDem, getGrid: this.getGrid })
+    // ⚠️ LA POSE SUIT LE CALQUE NEUF — voir `poserFabricantDePoseur`. Sans
+    // cette ligne, le premier tracé serait dessiné et le deuxième pas.
+    if (this._faitPoseur) gpx.poserFabricantDePoseur(this._faitPoseur)
     gpx.onCleared = () => this.onTrackCleared?.(this) // ✕ du profil → main.js resynchronise le damier
     gpx.setTrack(points, name)
     // sourceText : le XML d'origine, conservé pour l'export projet Race Studio

@@ -235,3 +235,30 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
     exagerationGlobe: globe.exaggeration ?? 1,
   })
 }
+
+/**
+ * LE PASSAGE D'UN TABLEAU DE SOMMETS DU BLOC À LA SCÈNE — Tâche GX2.
+ *
+ * ⚠️ **C'EST LE GESTE QUI PORTE LES PIXELS**, et c'est pour ça qu'il vit ici
+ * plutôt qu'en ligne dans `gpx.js` : un correctif qui se contente d'adopter la
+ * scène du globe (et même d'y ajouter la caméra) laisse la géométrie en
+ * coordonnées de BLOC et rend **0 pixel** — mesuré. Une fonction pure se teste
+ * en exécution ; une ligne noyée dans une méthode de 200 lignes ne se garde
+ * qu'en lisant du texte, et ce chantier a déjà vu une mutation survivre à
+ * 4 082 tests derrière une garde qui ne faisait que lire.
+ *
+ * `positions` est un tableau plat `[x, y, z, x, y, z, …]` en unités de BLOC,
+ * modifié EN PLACE. Avec `poseurPlat`, c'est l'identité au flottant près.
+ *
+ * @param {ArrayLike<number>} positions
+ * @param {{globe:boolean, placer:Function}} poseur
+ */
+export function poseTableauEnPlace(positions, poseur) {
+  if (!poseur?.globe) return positions
+  for (let i = 0; i < positions.length; i += 3) {
+    // ⚠️ `placer(x, z, y)` — l'ordre du poseur, pas celui du tableau.
+    const v = poseur.placer(positions[i], positions[i + 2], positions[i + 1])
+    positions[i] = v.x; positions[i + 1] = v.y; positions[i + 2] = v.z
+  }
+  return positions
+}

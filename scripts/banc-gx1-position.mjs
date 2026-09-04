@@ -102,7 +102,31 @@ await page.evaluate(async () => {
   // ⚠️ premier/dernier point d'une BOUCLE sont au même endroit : l'échelle
   // calculée dessus rendait 728 m/unité au lieu de ~1 800. Piège payé ici.
   window.__etat = (n = 48) => {
-    const T = e.THREE, gl = e.gpxLayer, c = window.__c(), t = c?.track, cam = e.camera
+    // ⚠️ **LA CAMÉRA QUI REND, PAS CELLE DU BLOC** — Tâche GX2. Sous
+    // `terre unique` l'image sort de `camGlobe` (`composer.setMainCamera`,
+    // `main.js`) ; projeter avec `camera` mesurait la position du tracé dans une
+    // vue que personne n'affiche — 0/48 sommets « à l'écran » sur une image où
+    // le tracé occupe le centre. `camera` reste le repli hors frontière.
+    const T = e.THREE, gl = e.gpxLayer, c = window.__c(), t = c?.track
+    // ⚡ ET ON NE DEVINE PAS LAQUELLE : on projette les sommets AVEC LES DEUX et
+    // on garde celle qui en met le plus à l'écran. Sous `?terre=deux` c'est la
+    // caméra du bloc (la passe de surface dessine encore), sous `terre unique`
+    // c'est `camGlobe` — et un banc qui aurait choisi la mauvaise aurait rendu
+    // « 0/48 sommets à l'écran » sur une image où le tracé se voit.
+    const cam = (() => {
+      const cands = [e.camGlobe, e.camera].filter(Boolean)
+      if (cands.length < 2 || !c?.track?.world?.length) return cands[0] || e.camera
+      const compte = (k) => {
+        let n = 0
+        for (let i = 0; i < c.track.world.length; i += Math.ceil(c.track.world.length / 24)) {
+          const s = c._worldScene?.[i] ?? c.track.world[i]
+          const q = new e.THREE.Vector3(s.x, s.y, s.z).project(k)
+          if (Math.abs(q.x) <= 1 && Math.abs(q.y) <= 1 && q.z > -1 && q.z < 1) n++
+        }
+        return n
+      }
+      return compte(cands[0]) >= compte(cands[1]) ? cands[0] : cands[1]
+    })()
     const W = innerWidth, H = innerHeight
     const out = {
       mode: e.modes.mode, lecture: gl.isPlaying(), headT: gl.headT, revealT: c?._revealT,
@@ -154,7 +178,14 @@ await page.evaluate(async () => {
     for (let k = 0; k < n; k++) {
       const i = Math.round((k / (n - 1)) * (w.length - 1))
       const p = w[i]
-      const v = new T.Vector3(p.x + c.group.position.x, p.y, p.z + c.group.position.z)
+      // ⚠️ **ON PROJETTE LES SOMMETS DE LA SCÈNE, PAS CEUX DU BLOC** — Tâche
+      // GX2. `track.world` est en coordonnées de CHAMP ; depuis la correction,
+      // ce que le GPU dessine est le jumeau posé sur le globe (`_worldScene`,
+      // `gpx.js`). Projeter des coordonnées de bloc avec `camGlobe` rendrait
+      // 0/48 sommets retrouvés SUR UN TRACÉ PARFAITEMENT VISIBLE — un faux
+      // constat de plus. Hors globe, `_worldScene` EST `track.world`.
+      const ws = c._worldScene?.[i] ?? p
+      const v = new T.Vector3(ws.x + c.group.position.x, ws.y, ws.z + c.group.position.z)
       const q = v.clone().project(cam)
       const px = (q.x * 0.5 + 0.5) * W, py = (-q.y * 0.5 + 0.5) * H
       let sol = null
@@ -170,7 +201,12 @@ await page.evaluate(async () => {
     out.longueurEcranPx = longueurEcranPx
     // largeur du ruban À L'ÉCRAN, au point médian : mètres → pixels
     const mid = ech[Math.floor(ech.length / 2)]
-    const demiLargeurU = (c.params.gpxWidth ?? 3) * 0.022
+    // ⚠️ **LA DEMI-LARGEUR EST UNE LONGUEUR DE BLOC** (0,022 unité par cran de
+    // `gpxWidth`) : sur le globe elle vaut `× k` de moins — 1/87,56 au cadrage
+    // du Mont-Blanc. Sans ce facteur, les « pixels attendus » sortaient 87 fois
+    // trop grands et aucun tracé, si net soit-il, n'aurait pu les atteindre.
+    const kSim = c._k ?? 1
+    const demiLargeurU = (c.params.gpxWidth ?? 3) * 0.022 * kSim
     const hauteurEcranU = 2 * Math.tan((cam.fov * Math.PI / 180) / 2) * (mid?.distCam || 1)
     out.largeurRubanPx = hauteurEcranU > 0 ? (2 * demiLargeurU) * (H / hauteurEcranU) : null
     out.pixelsAttendus = out.longueurEcranPx * (out.largeurRubanPx || 0)
@@ -184,7 +220,24 @@ const snap = async () => 'data:image/png;base64,' + await page.screenshot({ enco
 
 const gpxTexte = fs.readFileSync(GPX, 'utf8')
 await page.evaluate((t) => window.__exp.loadGpxText(t), gpxTexte)
-for (let i = 0; i < 12; i++) { await tourner(120); await new Promise((r) => setTimeout(r, 1500)) }
+// ⚠️ **LA POSE SE MESURE, ELLE NE SE COMPTE PAS EN TOURS** — Tâche GX2. Les
+// douze salves fixes d'origine ont rendu, un soir de réseau lent, un relevé où
+// le MNT n'était même pas encore centré sur le tracé : les 48 sommets sortaient
+// tous à `y = DRAPE_LIFT` (drapage nul, hors bloc) et le banc mesurait
+// consciencieusement une image où le tracé n'a rien à faire. On tourne donc
+// jusqu'à ce que le DRAPAGE existe — c'est la seule preuve que le relief sous le
+// tracé est arrivé — avec le même plafond de temps qu'avant en garde-fou.
+const drapePret = async () => page.evaluate(() => {
+  const c = window.__c(); const w = c?.track?.world
+  if (!w?.length) return false
+  let variables = 0
+  for (let i = 1; i < w.length; i++) if (Math.abs(w[i].y - w[0].y) > 1e-4) variables++
+  return variables > w.length * 0.5
+})
+for (let i = 0; i < 40; i++) {
+  await tourner(120); await new Promise((r) => setTimeout(r, 1500))
+  if (i >= 11 && await drapePret()) break
+}
 
 // ── AU REPOS : le tracé pose-t-il des pixels, et lesquels ───────────────────
 async function mesureAuRepos(nom, repeats = 6) {
