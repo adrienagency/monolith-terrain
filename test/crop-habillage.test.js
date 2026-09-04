@@ -612,6 +612,8 @@ test('⑧ le décodage de classe garde les trois précautions du socle', () => {
 //     une VALEUR, et l'assertion tombe.
 
 import { Globe } from '../src/globe.js'
+// ⚠️ TÂCHE GRA — le repos du monde, pour que les stubs portent un domaine réel
+import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 // R25 — l etat de repos de la matiere du relief : la table factice ci-dessous
 // en part, comme elle part de HABILLAGE_MONDE et d APPARENCE_MONDE. Un litteral
@@ -657,6 +659,12 @@ const vec3 = (x, y, z) => ({
 function globeStub(crop = REPERE) {
   return {
     _crop: crop,
+    // ⚠️ **AJOUTÉ PAR LA TÂCHE GRA** : `poserHabillage` ne pose plus
+    // `uHeightPivot` / `uHeightContrast` lui-même — il mémorise l'entrée du
+    // socle et RAPPELLE `_majGradeBloc`, l'écrivain unique. Un stub qui ne le
+    // porte pas fait lever la méthode empruntée au vrai prototype. **La table
+    // factice suit l'écrivain, elle ne le contourne pas.**
+    _majGradeBloc: Globe.prototype._majGradeBloc,
     uniforms: {
       uHabOn: val(0),
       uCoastMask: val(null),
@@ -716,6 +724,11 @@ function globeStub(crop = REPERE) {
       uRampCropOn: val(0),
       uHeightContrast: val(NATUREL_MONDE.heightContrast),
       uHeightPivot: val(NATUREL_MONDE.heightPivot),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE GRA** : `_majGradeBloc` convertit le grade
+      // dans le domaine VIVANT du nuanceur, donc il LIT ces deux-là. Les poser
+      // au repos du monde garde le stub neutre.
+      uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
+      uLandMax: val(RAMPE_MONDE.terreHaut),
       uHazeAmt: val(NATUREL_MONDE.hazeAmt),
       uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),

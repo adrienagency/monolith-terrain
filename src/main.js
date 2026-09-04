@@ -6422,6 +6422,31 @@ function contexteCrop() {
       treeLine: terrain.mapUniforms.uTreeLine.value,
       heightContrast: terrain.mapUniforms.uHeightContrast.value,
       heightPivot: terrain.mapUniforms.uHeightPivot.value,
+      // ══════ LE GRADE DU BLOC — Tâche GRA ═══════════════════════════════
+      //
+      // ⛔ **CES DEUX-LÀ SONT GRADÉS SUR LE MNT CHARGÉ, DONC SUR UN AUTRE
+      // RELIEF QUE CELUI QU'ILS VONT PEINDRE**, et le §⑨ de `rampe-crop.js`
+      // porte la mesure : sur un bloc immobile, le pivot rendu passait de
+      // 1 519,5 m à z13 à 2 323,6 m à z9. Le bloc se grade désormais
+      // lui-même ; ce que le socle lui transmet encore, c'est **le geste
+      // d'Adrien** — l'écart entre son curseur et l'auto — et **le domaine
+      // dans lequel ce geste est exprimé**.
+      //
+      // ⚠️ **`shadeGrade` EST L'AUTO, ET IL EST `null` QUAND `shadeAuto` EST
+      // ÉTEINT** (ou avant le premier relief). `gradeBlocEffectif` traite
+      // alors la valeur du socle comme une ALTITUDE ABSOLUE et la transpose :
+      // c'est ce qu'un gabarit qui pose 5,1 / 0,53 en dur veut dire.
+      //
+      // ⚠️ **`dem`, PAS `fenetreBornee` : le curseur est exprimé dans le
+      // domaine du MNT CHARGÉ**, celui que `applyAutoShade` a gradé
+      // (`currentReliefGrade` → `dem.minM` / `dem.maxM`) et que le nuanceur du
+      // socle normalise (`uHeightRange`). Prendre la fenêtre du bloc ici
+      // convertirait le geste dans un domaine où il n'a pas été fait — la
+      // classe de défaut n° 1 du chantier, prise par l'autre bout.
+      pivotAutoSocle: shadeGrade?.heightPivot ?? null,
+      contrasteAutoSocle: shadeGrade?.heightContrast ?? null,
+      socleBasM: Number.isFinite(dem?.minM) ? dem.minM : null,
+      socleAmpM: Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null,
       hazeAmt: terrain.mapUniforms.uHazeAmt.value,
       hazeAlt: terrain.mapUniforms.uHazeAlt.value,
       hazeDist: terrain.mapUniforms.uHazeDist.value,

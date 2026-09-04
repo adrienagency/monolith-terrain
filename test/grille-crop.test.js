@@ -57,6 +57,8 @@ import {
 } from '../src/monde/habillage-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
 import { Globe } from '../src/globe.js'
+// ⚠️ TÂCHE GRA — le repos du monde, pour que les stubs portent un domaine réel
+import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 
 const GLOBE = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
@@ -285,6 +287,12 @@ const couleurStub = (hex) => ({ hex, set(v) { this.hex = v; return this }, getHe
 function globeStub(crop = RELEVE.crop) {
   return {
     _crop: crop,
+    // ⚠️ **AJOUTÉ PAR LA TÂCHE GRA** : `poserHabillage` ne pose plus
+    // `uHeightPivot` / `uHeightContrast` lui-même — il mémorise l'entrée du
+    // socle et RAPPELLE `_majGradeBloc`, l'écrivain unique. Un stub qui ne le
+    // porte pas fait lever la méthode empruntée au vrai prototype. **La table
+    // factice suit l'écrivain, elle ne le contourne pas.**
+    _majGradeBloc: Globe.prototype._majGradeBloc,
     uniforms: {
       uHabOn: val(0), uCoastMask: val(null), uCoastMaskOn: val(0), uMargeCoteM: val(0),
       uSol: val(null), uSolLut: val(null), uSolOn: val(0), uSolOpacite: val(1),
@@ -301,6 +309,11 @@ function globeStub(crop = RELEVE.crop) {
       uTexShade: val(0), uWetK: val(0), uExpoK: val(0), uHemi: val(0), uTreeLine: val(0),
       uRampCrop: val(null), uRampCropOn: val(0),
       uHeightContrast: val(0), uHeightPivot: val(0),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE GRA** : `_majGradeBloc` convertit le grade
+      // dans le domaine VIVANT du nuanceur, donc il LIT ces deux-là. Les poser
+      // au repos du monde garde le stub neutre.
+      uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
+      uLandMax: val(RAMPE_MONDE.terreHaut),
       uHazeAmt: val(0), uHazeAlt: val(0), uHazeDist: val(0),
       uHazeColor: val(couleurStub('#ffffff')),
       uEclairageOn: val(0),

@@ -407,6 +407,13 @@ function faussGlobe(crop = REPERE, hauteur = () => 400) {
     },
     _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
     _poserUniformesRampe: Globe.prototype._poserUniformesRampe,
+    // ⚠️ **AJOUTÉ PAR LA TÂCHE GRA, ET C'EST LA MÊME RÈGLE QUE CI-DESSUS** :
+    // `_poserUniformesRampe` RAPPELLE désormais `_majGradeBloc` (le domaine
+    // vient de bouger, donc la conversion du grade aussi). Un faux globe qui
+    // ne le porte pas fait lever la méthode empruntée au vrai prototype. **La
+    // table factice suit l'écrivain, elle ne le contourne pas** — un bouchon
+    // laisserait passer une pose qui n'écrit rien.
+    _majGradeBloc: Globe.prototype._majGradeBloc,
     _melangeCrop() {},
     tuilesAvecHauteurs: () => [],
     hauteurSurface: (lat, lon) => hauteur(lat, lon),

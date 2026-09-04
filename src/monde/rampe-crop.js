@@ -202,6 +202,24 @@ export function mesurerRelief({
   let maxTerreM = -Infinity
   let vus = 0
   let manquants = 0
+  // ══════ LA DISTRIBUTION, ET PAS SEULEMENT LES EXTREMA — Tâche GRA ═════════
+  //
+  // ⛔ **DEUX EXTREMA NE SUFFISENT PAS À GRADER, ET C'EST TOUT LE §⑨.** Le
+  // pivot est une MÉDIANE et le contraste une LARGEUR DE BANDE : `gradeForDem`
+  // les lit dans un HISTOGRAMME. Sans lui, le crop ne peut pas se grader
+  // lui-même et doit emprunter le grade du socle — le défaut que R31 §⑥ a
+  // mesuré (805 m d'écart de pivot sur un bloc qui n'a pas bougé d'un octet).
+  //
+  // ⚠️ **ON GARDE LES HAUTEURS, PUIS ON BINE — DEUX PASSES, ET ELLES SONT
+  // FORCÉES** : les bornes de l'histogramme sont `minM` / `maxM`, qui ne sont
+  // connus qu'à la fin du balayage. Le coût est un `Float32Array` de `pas²` =
+  // **16 384 flottants (64 Ko)** au défaut, alloué dans une fonction qui ne
+  // tourne **qu'à l'arrêt** (décision 5, « la gravure ne s'écrit qu'à
+  // l'arrêt ») et qui interroge déjà `hauteurSurface` 16 384 fois. Le §1 de
+  // `/threejs-optimisation` demande le chiffre avant d'optimiser : le voici, et
+  // il ne pèse rien devant le balayage lui-même.
+  const echantillons = new Float32Array(n * n)
+  let somme = 0
   // ⚠️ **LES CENTRES DE CELLULE, PAS LES NŒUDS.** Sur les nœuds, la rangée
   // `i = 0` tombe EXACTEMENT sur `u = -1`, c'est-à-dire sur la frontière, où
   // `dansDalle` répond « non » et où la hauteur du bord manque : la couverture
@@ -217,6 +235,8 @@ export function mesurerRelief({
         manquants++
         continue
       }
+      echantillons[vus] = h
+      somme += h
       vus++
       if (h < minM) minM = h
       if (h > maxM) maxM = h
@@ -235,18 +255,68 @@ export function mesurerRelief({
   }
   const couverture = vus + manquants > 0 ? vus / (vus + manquants) : 0
   if (couverture < couvertureMin) {
-    return { refus: 'couverture', couverture, vus, manquants, minM: 0, maxM: 0, minTerreM: 0, maxTerreM: 0 }
+    return {
+      refus: 'couverture', couverture, vus, manquants,
+      minM: 0, maxM: 0, minTerreM: 0, maxTerreM: 0,
+      moyenneM: 0, histogramme: null,
+    }
   }
+  const bas = Number.isFinite(minM) ? minM : 0
+  const haut = Number.isFinite(maxM) ? maxM : 0
   return {
     refus: null,
     couverture,
     vus,
     manquants,
-    minM: Number.isFinite(minM) ? minM : 0,
-    maxM: Number.isFinite(maxM) ? maxM : 0,
+    minM: bas,
+    maxM: haut,
     minTerreM: Number.isFinite(minTerreM) ? minTerreM : 0,
     maxTerreM: Number.isFinite(maxTerreM) ? maxTerreM : 0,
+    // ⚠️ **`vus`, PAS `n²`** : le balayage saute les points hors superellipse
+    // (`dansCrop`) et ceux dont la hauteur manque. Diviser par `n²` diluerait la
+    // moyenne avec des zéros fantômes — c'est la même faute que « prendre
+    // `null` pour le niveau de la mer », prise par l'autre bout.
+    moyenneM: vus > 0 ? somme / vus : 0,
+    // ⚠️ **1 024 CASES, LA MÊME FINESSE QUE `histogrammeDesQuantiles`**, et pour
+    // la même raison chiffrée : sur les 2 513 m de La Réunion cela fait **2,45 m
+    // par case**, soit 0,1 % de l'amplitude. `elevationHistogram` du dépôt en
+    // pose 256 par défaut sur ~590 k pixels ; ici on n'a que 16 384 points, mais
+    // c'est la QUANTIFICATION du pivot qui compte, pas le bruit de comptage.
+    histogramme: vus > 0 ? histogrammeDesHauteurs(echantillons, vus, bas, haut) : null,
   }
+}
+
+/**
+ * L'histogramme des `vus` premières hauteurs de `echantillons`, sur `[bas ;
+ * haut]`.
+ *
+ * ⚠️ **JUMEAU DE `elevationHistogram` (`relief-grade.js`), ET IL NE PEUT PAS
+ * L'APPELER** : celui-là bine `data` ENTIER, or notre tampon est
+ * SURDIMENSIONNÉ (`n²` alloué, `vus` remplis — les points hors superellipse
+ * n'y écrivent rien). Lui passer le tampon complet compterait `n² − vus` zéros,
+ * c'est-à-dire de faux points AU NIVEAU DE LA MER, qui tireraient le pivot d'un
+ * crop montagneux de plusieurs centaines de mètres vers le bas.
+ *
+ * ⚠️ **ET LE CHIFFRE EST CELUI DU COIN, PAS UNE CONSTANTE — MESURÉ, PAS
+ * SUPPOSÉ.** Au réglage par défaut du socle (`coin = 2,24/28`, `expo = 4,4`) la
+ * superellipse n'écarte que **4 points sur 16 384** au pas 128, soit 0,02 %.
+ * Mais le lissage de coin est une TIRETTE d'Adrien, et au maximum (coin plein,
+ * exposant 2) elle écarte `1 − π/4` = **21,5 %** du tampon — relevé à 21,3 % au
+ * pas 64. `test/grade-bloc.test.js` ②b exerce LES DEUX formes. **La borne `vus`
+ * EST la correction, et c'est pourquoi cette fonction existe plutôt qu'un
+ * appel.** ⚠️ J'avais d'abord écrit ces 21 % comme le cas PAR DÉFAUT : c'était
+ * faux, et c'est le test qui l'a dit — avant le rapport.
+ */
+export function histogrammeDesHauteurs(echantillons, vus, bas, haut, bins = 1024) {
+  const hist = new Uint32Array(bins)
+  const span = haut - bas
+  if (!(span > 0) || !(vus > 0)) return hist
+  const k = bins / span
+  for (let i = 0; i < vus; i++) {
+    const b = (echantillons[i] - bas) * k
+    hist[b <= 0 ? 0 : b >= bins ? bins - 1 : b | 0]++
+  }
+  return hist
 }
 
 // ══════════ ③ L'ÉCHELLE — TROIS NOMBRES, ET RIEN D'AUTRE ═══════════════════
@@ -525,6 +595,206 @@ export const GRADE_MONDE = Object.freeze(
     return { heightContrast: g.heightContrast, heightPivot: g.heightPivot }
   })()
 )
+
+// ══════════ ⑨ LE GRADE DU BLOC — Tâche GRA ══════════════════════════════════
+//
+// > **Adrien, 2026-09-04 :** *« Le même bloc doit avoir la même couleur, quel
+// > que soit le zoom. »*
+//
+// ⛔ **LE DÉFAUT, MESURÉ PAR R31 §⑥ ET REPRODUIT AU MÈTRE PRÈS ICI.**
+// `uHeightPivot` et `uHeightContrast` étaient **GRADÉS sur le domaine du
+// SOCLE** (`terrain.mapUniforms.uHeightRange`, l'amplitude du MNT chargé, qui
+// suit le zoom de la carte) et **CONSOMMÉS sur celui du GLOBE**
+// (`[uReliefBas ; uLandMax]`, le relief de l'emprise z13 du crop, qui ne le
+// suit pas). Relevé le 2026-09-04, `.banc/GRA/domaines-avant.json`, sur un bloc
+// dont les ancres n'ont pas bougé d'un octet (La Réunion, crop
+// [539,6 ; 3 052,3] m) :
+//
+//     pivot rendu     z13 1 519,5 m · z11 1 946,7 m · z9 2 323,6 m
+//     fenêtre utile   z13 1 047,0 m · z11   866,5 m · z9   502,6 m
+//
+// ⚡ **ET LA MESURE A SÉPARÉ LES DEUX CAUSES, CE QUE R31 N'AVAIT PAS FAIT.** Le
+// pivot du socle, ramené EN MÈTRES par son propre MNT, vaut **1 519,2 / 897,2 /
+// 728,3 m** aux trois zooms. Donc :
+//
+//   ① le **désaccord de domaines** pèse +1 595 m à z9 (2 323,6 − 728,3) ;
+//   ② la **regradation** — `applyAutoShade` recalcule le grade sur le MNT
+//      chargé, qui à z9 couvre 219 km au lieu de 13,7 et descend à −4 941 m —
+//      pèse −791 m (1 519,2 → 728,3), soit **52 % de dérive résiduelle**.
+//
+// ⛔ **C'EST CE CHIFFRE QUI TRANCHE ENTRE LES DEUX DIRECTIONS DU BRIEF.** La
+// direction B (« convertir à l'entrée », garder le grade du socle et le
+// transposer) supprime ① et laisse ② : **791 m de dérive à La Réunion, 1 693 m
+// à l'Everest**, contre les ≤ 2 % (≤ 30 m) demandés. Elle ne peut pas tenir le
+// critère, et aucune conversion ne le peut : **le grade du socle décrit un
+// AUTRE relief.** On prend donc la direction **A — grader sur le domaine où
+// l'on consomme**.
+//
+// ⚡ **ET CE N'EST PAS UNE INVENTION : R28 A DÉJÀ FAIT EXACTEMENT ÇA POUR LE
+// MONDE.** `GRADE_MONDE`, vingt lignes plus haut, grade `[−6 000 ; 5 600]` —
+// « l'échelle compte, et s'y tromper est silencieux » — avec la MÊME fonction
+// `gradeForDem`. Le crop était le seul régime resté à emprunter le grade d'un
+// autre relief.
+
+/**
+ * Le grade du **BLOC**, exprimé **EN MÈTRES** : l'altitude où tombe le milieu
+ * de la rampe, et la largeur de la fenêtre utile.
+ *
+ * ⛔ **EN MÈTRES, ET C'EST LA DÉCISION QUI ÉVITE DE REJOUER LE DÉFAUT.** Rendre
+ * un `hNorm` obligerait à dire DANS QUEL DOMAINE — et ce domaine glisse :
+ * `majEchelleRampe` réévalue `[uReliefBas ; uLandMax]` **par image** au-dessus
+ * du crop (Tâche K bis, l'échelle continue). Un `hNorm` figé au moment de la
+ * mesure serait consommé plus tard dans un domaine qui a bougé : le désaccord
+ * de R31 §⑥, réinventé un étage plus bas. **Un mètre, lui, ne dépend d'aucun
+ * domaine.** La conversion vers celui du nuanceur est faite par
+ * `gradeBlocEffectif`, au dernier moment, avec les uniformes VIVANTS.
+ *
+ * ⚠️ **LA RÈGLE EST CELLE DU CURSEUR, PAS UNE SECONDE RÈGLE.** `gradeForDem`
+ * est la fonction que `applyAutoShade` appelle pour le socle : même `SPAN`,
+ * mêmes garde-fous, mêmes quantiles p08 / p50 / p92. Ce qui change est la
+ * DONNÉE — le relief du bloc au lieu du MNT chargé — pas la loi. C'est ce qui
+ * garantit que le curseur « Ombrage » garde son sens.
+ *
+ * ⚠️ **LE DOMAINE DE LECTURE EST CELUI DE L'HISTOGRAMME**, `[minM ; maxM]`, et
+ * la sortie de `gradeForDem` y est normalisée. La remontée en mètres est donc
+ * littérale, sans facteur :
+ *
+ *     pivotM   = minM + heightPivot × (maxM − minM)
+ *     fenêtreM = (maxM − minM) / heightContrast
+ *
+ * ⚠️ **REND `null` PLUTÔT QU'UN GRADE NEUTRE SUR UNE MESURE REFUSÉE.** Un
+ * `NEUTRAL_GRADE` rendu ici serait indiscernable d'un vrai grade côté appelant,
+ * et repeindrait le bloc en silence — la faute que le refus de couverture de
+ * `mesurerRelief` existe pour éviter. `null` veut dire « garde ce que tu as ».
+ *
+ * @param {ReturnType<typeof mesurerRelief>} mesure
+ * @param {{extentM?:number}} [opts]
+ * @returns {{pivotM:number, fenetreM:number}|null}
+ */
+export function gradeCrop(mesure, { extentM } = {}) {
+  if (!mesure || mesure.refus || !mesure.histogramme) return null
+  const amp = mesure.maxM - mesure.minM
+  if (!(amp > 0)) return null
+  const g = gradeForDem({
+    minM: mesure.minM,
+    maxM: mesure.maxM,
+    meanM: mesure.moyenneM,
+    histogram: mesure.histogramme,
+    extentM,
+  })
+  return {
+    pivotM: mesure.minM + g.heightPivot * amp,
+    fenetreM: amp / g.heightContrast,
+  }
+}
+
+/**
+ * Le grade que le nuanceur du bloc doit recevoir, une fois le curseur d'Adrien
+ * pris en compte.
+ *
+ * ⛔ **LE CURSEUR N'EST PAS ÉCRASÉ, ET C'EST LA CONDITION N° 2 DU BRIEF.**
+ * `uHeightPivot` est un RÉGLAGE : le corriger ne doit ni le figer, ni changer
+ * ce qu'il veut dire. Trois cas, et un seul est nouveau :
+ *
+ *   ① **pas de grade de bloc** (`gradeBloc == null` — banc, test, échelle
+ *      imposée, mesure refusée) → **les valeurs du socle, telles quelles**.
+ *      C'est le chemin du dépôt AU BIT PRÈS ; `poserRampe({ echelle })` ne
+ *      mesure pas, donc ne grade pas, donc ne change rien.
+ *   ② **pas de grade AUTO côté socle** (`shadeAuto` éteint, ou un gabarit qui
+ *      pose 5,1 / 0,53 en dur) → la valeur du socle est une ALTITUDE ABSOLUE,
+ *      qu'on transpose d'un domaine à l'autre :
+ *
+ *          pivotM = socleBasM + pivotSocle × socleAmpM
+ *          fenêtreM = socleAmpM / contrasteSocle
+ *
+ *   ③ **auto vivant** (le cas d'Adrien au démarrage) → le grade du BLOC, décalé
+ *      de ce que le curseur s'écarte de l'auto DU SOCLE. Le décalage se compose
+ *      **en mètres pour le pivot** (une altitude) et **en rapport pour la
+ *      fenêtre** (une échelle) :
+ *
+ *          pivotM   = pivotBlocM + (pivotSocle − pivotAutoSocle) × socleAmpM
+ *          fenêtreM = fenêtreBlocM × (contrasteAutoSocle / contrasteSocle)
+ *
+ * ⚠️ **ET LA SORTIE EST CONVERTIE DANS LE DOMAINE VIVANT DU NUANCEUR, AVEC SON
+ * FACTEUR ÉCRIT** — c'est la seule conversion du chantier, et elle est ici :
+ *
+ *          heightPivot    = (pivotM − uReliefBas) / (uLandMax − uReliefBas)
+ *          heightContrast = (uLandMax − uReliefBas) / fenêtreM
+ *
+ *      soit, pour le contraste, un facteur `ampGlobeM / socleAmpM` par rapport
+ *      à la valeur du socle. Relevé le 2026-09-04 à La Réunion : **1,000** à
+ *      z13 (2 512,8 / 2 539,0 après arrondi du MNT), **0,511** à z11 et
+ *      **0,315** à z9 — c'est-à-dire exactement le facteur qui manquait, et
+ *      dont l'absence valait 805 m de pivot.
+ *
+ * ⚡ **POURQUOI UN DÉCALAGE ET NON LA VALEUR NUE.** Curseur au repos, le
+ * décalage vaut **exactement zéro** (`pivotSocle === pivotAutoSocle`, même
+ * objet, même nombre) : le bloc prend son propre grade, invariant par
+ * construction puisque son relief ne change pas avec le zoom. Curseur tiré, le
+ * bloc se déplace du **même nombre de mètres que le socle sous les yeux
+ * d'Adrien** — donc « même sens, même effet ». Poser la valeur nue aurait rendu
+ * le curseur inopérant sur le bloc dès que les deux reliefs diffèrent.
+ *
+ * ⚠️ **LE CONTRASTE SE COMPOSE EN RAPPORT, PAS EN DIFFÉRENCE, ET C'EST MESURÉ.**
+ * `heightContrast` est un facteur d'échelle (`rampT = 0,5 + (hNorm − pivot) ×
+ * contraste`) : une différence y serait un non-sens dimensionnel, et sur les
+ * Pays-Bas — où l'auto monte au plafond de 12 — une différence aurait pu rendre
+ * un contraste NÉGATIF, c'est-à-dire une rampe inversée. Le rapport, lui, est
+ * borné en dessous par `CONTRAST_MIN / CONTRAST_MAX = 0,1` et ne peut pas
+ * changer de signe.
+ *
+ * @param {object} a
+ * @param {{pivotM:number,fenetreM:number}|null} a.gradeBloc
+ * @param {number} a.pivotSocle - `terrain.mapUniforms.uHeightPivot`, vivant
+ * @param {number} a.contrasteSocle - `terrain.mapUniforms.uHeightContrast`
+ * @param {number|null} a.pivotAutoSocle - `shadeGrade.heightPivot`, ou `null`
+ * @param {number|null} a.contrasteAutoSocle - `shadeGrade.heightContrast`
+ * @param {number} a.socleBasM - `dem.minM`
+ * @param {number} a.socleAmpM - `dem.maxM − dem.minM`
+ * @param {number} a.reliefBasM - `uReliefBas`
+ * @param {number} a.ampGlobeM - `uLandMax − uReliefBas`
+ * @returns {{heightPivot:number, heightContrast:number}}
+ */
+export function gradeBlocEffectif({
+  gradeBloc,
+  pivotSocle,
+  contrasteSocle,
+  pivotAutoSocle = null,
+  contrasteAutoSocle = null,
+  socleBasM,
+  socleAmpM,
+  reliefBasM,
+  ampGlobeM,
+}) {
+  // ① le chemin du dépôt, au bit près
+  if (!gradeBloc) return { heightPivot: pivotSocle, heightContrast: contrasteSocle }
+  const domaineOk = Number.isFinite(reliefBasM) && Number.isFinite(ampGlobeM) && ampGlobeM > 0
+  if (!domaineOk) return { heightPivot: pivotSocle, heightContrast: contrasteSocle }
+
+  const socleOk = Number.isFinite(socleBasM) && Number.isFinite(socleAmpM) && socleAmpM > 0
+  const autoOk = Number.isFinite(pivotAutoSocle) && Number.isFinite(contrasteAutoSocle)
+    && contrasteAutoSocle > 0
+
+  // ② valeur absolue du socle, transposée
+  if (!autoOk) {
+    if (!socleOk) return { heightPivot: pivotSocle, heightContrast: contrasteSocle }
+    const pivotM = socleBasM + pivotSocle * socleAmpM
+    const fenetreM = socleAmpM / Math.max(contrasteSocle, 1e-6)
+    return {
+      heightPivot: (pivotM - reliefBasM) / ampGlobeM,
+      heightContrast: ampGlobeM / Math.max(fenetreM, 1e-6),
+    }
+  }
+
+  // ③ le grade du bloc, décalé du geste d'Adrien
+  const decalageM = socleOk ? (pivotSocle - pivotAutoSocle) * socleAmpM : 0
+  const pivotM = gradeBloc.pivotM + decalageM
+  const fenetreM = gradeBloc.fenetreM * (contrasteAutoSocle / Math.max(contrasteSocle, 1e-6))
+  return {
+    heightPivot: (pivotM - reliefBasM) / ampGlobeM,
+    heightContrast: ampGlobeM / Math.max(fenetreM, 1e-6),
+  }
+}
 
 /**
  * Le plancher d'amplitude d'un crop donné, en mètres — jumeau de
