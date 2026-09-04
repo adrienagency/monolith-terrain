@@ -13,7 +13,14 @@
 // Catmull-Rom l'a depuis SORTI du chemin de loadDem — il ne servait plus à
 // rien une fois l'agrandissement corrigé, et coûtait 84 ms par bloc. Il reste
 // exporté et testé pour une future source côtière (voir le corps du fichier).
-import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
+import {
+  bandeBruitAdmise,
+  decodeTerrarium,
+  fuseBathymetry,
+  overzoomTile,
+  resampleCatmullRom,
+  resolutionBathyM,
+} from './bathy.js'
 import { normalizeIndex, tileMaxZoom, zoneAt } from './bathy-sources.js'
 import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
 import { quantizeElevation, quantizeElevations } from './dem-quant.js'
@@ -456,9 +463,10 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // BATHYMÉTRIE : on peint le même damier dans un second canevas, puis on
   // fusionne. Tout échec est silencieux et sans conséquence — la carte reste
   // celle d'avant.
-  const seaData = bathy === false
+  const nappeBathy = bathy === false
     ? null
     : await loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx: TILE_PX, muet: terrariumMuetEnMer(rgba) })
+  const seaData = nappeBathy?.patch ?? null
   // ⚠️ FLOAT32, ET PAS INT16 — LA MESURE, POUR QUE PERSONNE NE LA REFASSE.
   //
   // 1536² × 4 octets = 9,44 Mo par bloc. Le passer en Int16 rendrait 4,72 Mo et
@@ -540,11 +548,25 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // où une baie de 11,6 m à 20 km de toute côte sortait à −5,21 m (45 %).
   // ⚠️ Champ absent ⇒ rien n'est passé ⇒ BLEND_DEPTH = 25 comme avant, AU BIT.
   const fonduZone = zoneIci?.blendDepthM
+  // 🔴 PLAT — LA BANDE DE BRUIT NE VAUT QU'À ÉCHELLE COMPARABLE.
+  // On compare la maille de la tuile bathy la plus GROSSIÈRE réellement peinte
+  // au pas du bloc. Au-delà de `CELLULE_MAX_PX`, `bandeBruitAdmise` rend 0 et la
+  // reclassification terre → mer est suspendue — le reste de la fusion ne bouge
+  // pas d'un bit. Voir l'encart de `bandeBruitAdmise` (src/bathy.js) et le
+  // tableau des six lieux mesurés.
+  // ⚠️ `metersPerPixel` est calculé PLUS BAS dans la fonction ; on refait ici le
+  // même produit plutôt que de le remonter — le remonter changerait l'ordre de
+  // `latRad` et personne ne verrait la différence avant un bloc de travers.
+  const pasBlocM = ((156543.03392 * Math.cos(latRad)) / 2 ** zoom) * (256 / TILE_PX)
+  const bandeBruit = seaData
+    ? bandeBruitAdmise(resolutionBathyM(nappeBathy.zPire, lat), pasBlocM)
+    : undefined
   const optsFusion =
-    Number.isFinite(nappeZone) || Number.isFinite(fonduZone)
+    Number.isFinite(nappeZone) || Number.isFinite(fonduZone) || bandeBruit === 0
       ? {
           ...(Number.isFinite(nappeZone) ? { seaLevel: nappeZone + 0.5 } : {}),
           ...(Number.isFinite(fonduZone) ? { blendDepth: fonduZone } : {}),
+          ...(bandeBruit === 0 ? { noiseBand: 0 } : {}),
         }
       : undefined
   const fused = seaData ? fuseBathymetry(data, seaData, optsFusion) : data
@@ -724,6 +746,14 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx, muet = fa
   // valeur non finie (c'est ce que faisait l'alpha nul du canevas d'avant)
   const patch = new Float32Array(sizePx * sizePx).fill(NaN)
   let painted = 0
+  // 🔴 PLAT — LE NIVEAU LE PLUS GROSSIER RÉELLEMENT PEINT. C'est lui qui décide
+  // si la source fine a encore le droit de RECLASSER de la terre en mer (voir
+  // `bandeBruitAdmise`, src/bathy.js) : une emprise servie par une seule cellule
+  // EMODnet z10 étalée sur 256 px de bloc n'est pas une source fine, c'est un
+  // carré. On prend le PLUS GROSSIER des niveaux peints, pas le plus fin : la
+  // règle est globale au bloc, et c'est la cellule la plus large qui dessine les
+  // carrés qu'Adrien voit.
+  let zPire = -1
   const jobs = []
   // Un seul aller-retour pour tout le damier : l'index est mémorisé, et les 25
   // dalles du damier de blocs attendent la MÊME promesse.
@@ -745,7 +775,7 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx, muet = fa
           zoom, tx, ty, index,
           dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
         }).then((z) => {
-          if (z >= 0) { painted++; return }
+          if (z >= 0) { painted++; if (zPire < 0 || z < zPire) zPire = z; return }
           // 🔴 B3 — LA SECONDE CHANCE, ET SEULEMENT QUAND ELLE NE COÛTE RIEN.
           // La case n'a rien trouvé au-dessus du plancher de `BATHY_ZMIN`. Si le
           // terrarium était bavard ici, on s'arrête : c'est exactement
@@ -758,13 +788,13 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx, muet = fa
           return peindreBathyTuile({
             zoom, tx, ty, index, plancher: index.zmin,
             dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
-          }).then((z2) => { if (z2 >= 0) painted++ })
+          }).then((z2) => { if (z2 >= 0) { painted++; if (zPire < 0 || z2 < zPire) zPire = z2 } })
         })
       )
     }
   }
   await Promise.all(jobs)
-  return painted ? patch : null
+  return painted ? { patch, zPire } : null
 }
 
 /**

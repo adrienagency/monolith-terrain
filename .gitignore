@@ -51,3 +51,4 @@ prototype/
 # Ce qui est DÉPLOYÉ (les 404 tuiles) vit dans public/data/bathy, déjà ignoré.
 data/swissbathy3d/
 data/pivot-leman/
+banc-vide.html

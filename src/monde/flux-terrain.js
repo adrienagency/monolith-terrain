@@ -154,7 +154,7 @@ import { MERCATOR_MAX_LAT } from '../geo.js'
 // vers `globe.js`, `terrain.js` ou ce module. Le piège que la Tâche 6 bis A a
 // payé (un cycle qui ne casse **qu'en production**) ne se referme donc pas ici.
 import { peindreBathyTuile, indexBathy } from '../dem.js'
-import { fuseBathymetry } from '../bathy.js'
+import { bandeBruitAdmise, fuseBathymetry, resolutionBathyM } from '../bathy.js'
 
 // ⚠️ **IMPORTÉE, PAS RECOPIÉE — et c'est la différence avec `seuil-socle.js`.**
 // Là-bas la recopie se justifie : ce module-là est PUR (ni DOM, ni three, ni
@@ -521,6 +521,12 @@ export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
     cle, patch, largeurPx, hauteurPx,
     n: r.n, ix0: r.ix0, iy0: r.iy0, colonnes: r.colonnes, lignes: r.lignes,
     peintes: 0, prete: false, promesse: null,
+    // 🔴 PLAT — LE NIVEAU BATHY LE PLUS GROSSIER RÉELLEMENT PEINT sur l'emprise.
+    // C'est lui qui décide si la source fine a encore le droit de RECLASSER de
+    // la terre en mer (`bandeBruitAdmise`, src/bathy.js). −1 = rien de peint.
+    // ⚠️ Le PLUS grossier, pas le plus fin : c'est la cellule la plus large qui
+    // dessine les carrés, et la règle est globale à l'emprise fusionnée.
+    zPire: -1,
   }
   flux.bathy = etat
   etat.promesse = (async () => {
@@ -539,7 +545,7 @@ export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
             zoom: r.z, tx, ty, index,
             dst: patch, dstStride: largeurPx,
             dx: i * BATHY_PX, dy: j * BATHY_PX, dw: BATHY_PX, dh: BATHY_PX,
-          }).then((zt) => { if (zt >= 0) etat.peintes++ })
+          }).then((zt) => { if (zt >= 0) { etat.peintes++; if (etat.zPire < 0 || zt < etat.zPire) etat.zPire = zt } })
         )
       }
     }
@@ -767,7 +773,18 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
     // (son `RangeError` ne refuse que le trop COURT), et fusionner le tampon
     // entier écrirait dans la queue de l'appelant, en silence.
     const champ = out.length === total ? out : out.subarray(0, total)
-    champ.set(fuseBathymetry(champ, mer))
+    // 🔴 PLAT — LA BANDE DE BRUIT NE VAUT QU'À ÉCHELLE COMPARABLE.
+    // C'EST CE CHEMIN-CI QUI PEINT LE CROP, ET C'EST LUI QU'ADRIEN VOIT.
+    // Corriger `src/dem.js` seul n'a rien changé à l'écran : mesuré, la Camargue
+    // gardait ses carrés (`.banc/PLAT/apres/camargue.png`, premier tour). La
+    // fenêtre continue appelle `fuseBathymetry` SANS AUCUNE option, donc avec la
+    // bande de B5 toujours armée — et à 0,43 m par échantillon contre une
+    // cellule EMODnet de 111,8 m, elle rendait 31 % de la Camargue à la mer.
+    // Voir l'encart de `bandeBruitAdmise` (src/bathy.js) et son tableau de six lieux.
+    const latMid = ((Number(emprise.nord) + Number(emprise.sud)) / 2) * (Math.PI / 180)
+    const pasSolM = dx * 40075016.686 * Math.cos(latMid)
+    const bande = bandeBruitAdmise(resolutionBathyM(e.zPire, (latMid * 180) / Math.PI), pasSolM)
+    champ.set(fuseBathymetry(champ, mer, bande === 0 ? { noiseBand: 0 } : undefined))
   }
 
   return { remplis, manquants: total - remplis, bathy, sortie: out }
