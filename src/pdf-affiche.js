@@ -497,9 +497,11 @@ export const CONDITION_SORTIE = 'sRGB IEC61966-2.1'
  * inversés). Un encodeur non conforme à cette convention produirait une affiche
  * EN NÉGATIF, sans le moindre avertissement, et le défaut ne se verrait qu'au
  * tirage. Vérifier sur une épreuve avant d'encaisser quoi que ce soit.
+ *
+ * ⚠️ `INTENTION_RVB = true` vivait ici et n'était lue par personne : retirée le
+ * 2026-09-04. L'intention de sortie reste écrite là où elle s'applique ; ce
+ * bloc garde l'explication, qui elle sert.
  */
-export const INTENTION_RVB = true
-
 /** Le sous-type d'intention de sortie qui distingue PDF/X de PDF/A. */
 export const SOUS_TYPE_PDFX = 'GTS_PDFX'
 

@@ -668,10 +668,12 @@ export function planAttribution({ fini, texte, cartouche = false, sombre = false
 // directement ces octets par le facteur de vignettage donnerait une image
 // visiblement différente de celle validée à l'écran — plus claire dans les
 // coins, parce que la courbe sRVB relève les valeurs basses. On décode, on
-// applique, on ré-encode. Une seule constante commande ce choix, pour qu'il
-// puisse se démentir en un endroit s'il se révélait faux un jour.
-export const EFFETS_EN_LINEAIRE = true
-
+// applique, on ré-encode.
+//
+// ⚠️ Ce commentaire annonçait « une seule constante commande ce choix »
+// (`EFFETS_EN_LINEAIRE`). Elle ne commandait RIEN : personne ne la lisait, le
+// choix est écrit en dur plus bas. Constante retirée le 2026-09-04 plutôt que
+// de laisser une promesse de réglage qui n'en était pas une.
 /**
  * Le facteur de vignettage en un point, transcrit de `vignette.frag`
  * (postprocessing 6.36.4, technique DEFAULT — celle de `new VignetteEffect`

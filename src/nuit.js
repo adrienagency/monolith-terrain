@@ -190,10 +190,6 @@ export function largeurDalleKm(bbox, empriseCote) {
 //   · zéro strict entre 7 h et 19 h. Pas « presque zéro » : à zéro, l'appelant
 //     peut sauter le rendu entier plutôt que de peindre du noir sur du noir.
 
-/** L'heure où la nuit est pleine, et celle où le jour est plein. */
-export const NUIT_PLEINE = [21, 5]
-export const JOUR_PLEIN = [7, 19]
-
 /**
  * L'intensité des lumières nocturnes à une heure donnée, de 0 à 1.
  *

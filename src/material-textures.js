@@ -305,9 +305,3 @@ export const TEXTURE_BUILDERS = {
   frost: frostTextures,
 }
 
-// list offered on the terrain surface (Shaders panel)
-export const SURFACE_MATERIALS = [
-  { id: 'carbon', label: 'Carbon fibre' },
-  { id: 'wood', label: 'Wood (oak)' },
-  { id: 'frost', label: 'Frosted glass' },
-]

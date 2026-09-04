@@ -395,7 +395,6 @@ uniform float uDepthMax;
 uniform float uGloss;
 uniform float uDetail;
 uniform float uFoam;
-uniform float uCaustics;
 uniform float uTransp; // user slider: 0 = milky, 1 = crystal
 uniform float uSunFx;  // user slider: sun on the water, above AND below (glint + caustics)
 uniform float uDayLight; // 0 nuit -> 1 jour (sunLook.dayLight) : la mer s'éteint la nuit
@@ -895,7 +894,6 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uGloss: { value: look.gloss },
         uDetail: { value: look.detail },
         uFoam: { value: look.foam },
-        uCaustics: { value: 2.4 },
         uDayLight: { value: 1 },
         uTransp: { value: params.waterTransparency ?? 0.4 },
         uSunFx: { value: params.waterSunFx ?? 1 },

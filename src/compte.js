@@ -189,11 +189,6 @@ const MESSAGES = {
 const MSG_RESEAU = 'Impossible de joindre le service pour l’instant. Vérifie ta connexion, puis réessaie.'
 const MSG_CONFIGURATION = 'La connexion aux comptes n’est pas disponible pour l’instant. ShibuMap fonctionne sans, tout est là.'
 
-/** Les codes que ce module peut émettre — la liste, en toutes lettres.
- *  Elle sert de garde de lecture ; le test de cohésion, lui, relit la SOURCE
- *  (une constante exportée qu'on oublie de mettre à jour ne prouve rien). */
-export const CODES_REFUS = Object.freeze(Object.keys(MESSAGES))
-
 const refus = (raison, erreur) => ({ ok: false, raison, erreur: erreur || MESSAGES[raison] })
 
 /**

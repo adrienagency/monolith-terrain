@@ -461,7 +461,5 @@ export class DroneCam {
 const _subj = new THREE.Vector3()
 const _desired = new THREE.Vector3()
 const _headPt = new THREE.Vector3()
-const _diff = new THREE.Vector3()
 const _fwd = new THREE.Vector3()
 const _look = new THREE.Vector3()
-const _tDir = new THREE.Vector3()

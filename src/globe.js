@@ -6649,7 +6649,6 @@ export class Globe {
         uMerChop: { value: chop },
         uMerVitesse: { value: 1 },
         uMerLambda: { value: echelleH },
-        uMerMaille: { value: maille },
         uMerPortee: { value: p },
         // ⚠️ **LA MÊME VALEUR QUE CELLE QUI A NORMALISÉ LE CANAL G** — elle sort
         // de `_cuireChampMer`, elle n'est pas recalculée ici (Tâche P4).
