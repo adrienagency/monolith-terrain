@@ -459,7 +459,7 @@ async function porterA(altM) {
   return (await lire1()).alt
 }
 
-const DIAG = () => page.evaluate(() => { const e = window.__exp, c = e.controls, k = e.camera; return { phiDeg: c.getPolarAngle() * 180 / Math.PI, azDeg: c.getAzimuthalAngle() * 180 / Math.PI, up: [k.up.x, k.up.y, k.up.z], cible: [c.target.x, c.target.y, c.target.z], pos: [k.position.x, k.position.y, k.position.z], levelZoom: e.modes._levelZoom, zoomVel: e.modes._zoomVel, busy: !!e.modes.busy, damping: c.enableDamping, sph: c._sphericalDelta ? [c._sphericalDelta.theta, c._sphericalDelta.phi] : null } })
+const DIAG = () => page.evaluate(() => { const e = window.__exp, c = e.controls, k = e.camera; return { phiDeg: c.getPolarAngle() * 180 / Math.PI, azDeg: c.getAzimuthalAngle() * 180 / Math.PI, up: [k.up.x, k.up.y, k.up.z], cible: [c.target.x, c.target.y, c.target.z], pos: [k.position.x, k.position.y, k.position.z], levelZoom: e.modes._levelZoom, zoomVel: e.modes._zoomVel, busy: !!e.modes.busy, damping: c.enableDamping, retoursNadir: e.gestesTerre?.retoursNadir ?? null, inclinaisonManuelle: e.gestesTerre?.inclinaisonManuelle ?? null, fonduPose: !!e.modes._fonduPose, cropPose: !!e.veilleCrop?.pose, horsDuCrop: !!e.modes.hooks?.horsDuCrop?.(), regime: e.regimeGeste?.() ?? null, altFondM: ((e.camGlobe ?? e.camera).position.length() - 100) * 63710, sph: c._sphericalDelta ? [c._sphericalDelta.theta, c._sphericalDelta.phi] : null } })
 const SERIE = (f) => f.map((x) => [Math.round(x.now), +x.azimut.toFixed(3), +x.tilt.toFixed(3), +x.d.toFixed(4), x.busy ? 1 : 0, x.pointer ? 1 : 0])
 const ELAN = (f, s) => {
   {
