@@ -2810,6 +2810,63 @@ test('⑯c l ATTÉNUATION vaut 1 dedans et EXACTEMENT 0 au bord — la coupe est
   assert.equal(att(fin - 1e-3, fin, 0), 1)
 })
 
+// ══════════ ⑰ DENT — LE BORD DESSINÉ NE DÉPEND PAS DE L EXTINCTION ═════════
+//
+// ⚡ **CE TEST FERME UNE ERREUR QUE J AI FAILLI COMMETTRE, ET QUE LE PROCHAIN
+// AGENT FERA S IL N EST PAS RETENU.** Adrien filme « la nappe ne couvre plus
+// les parois » ; le réflexe est d élargir l emprise ou de rétrécir la bande.
+// Or la mesure (rapport DENT §①) dit que la nappe COUVRE le socle — écart
+// médian **0,21 % du demi-côté**, soit moins d un pixel — et que le bord
+// dessiné est posé par `bordDeMer()` SEUL.
+//
+// ⛔ La bande d extinction de D24 (`bandeHouleBord`) éteint la HOULE avant le
+// bord ; elle ne doit JAMAIS déplacer le bord lui-même. Le jour où quelqu un
+// fera dépendre `bordDeMer()` de la houle ou de la bande — « pour que la mer
+// aille plus loin » —, la nappe se mettra à respirer au rythme de la cambrure.
+test('⑰a le BORD DESSINÉ est posé par `bordDeMer()` seul — ni la houle ni la bande ne le déplacent', () => {
+  const ref = bordDeMer()
+  // `bordDeMer` ne prend aucun argument : lui en passer ne doit rien changer.
+  for (const arg of [undefined, 0, 1, { bande: 0.5 }, { houle: 12, chop: 3 }, 0.42]) {
+    const b = bordDeMer(arg)
+    assert.equal(b.fin, ref.fin, `bordDeMer a bougé sur ${JSON.stringify(arg)}`)
+    assert.equal(b.debut, ref.debut, `bordDeMer a bougé sur ${JSON.stringify(arg)}`)
+  }
+  // et il vaut EXACTEMENT le retrait de l eau, du côté DEDANS
+  assert.equal(ref.fin, -RETRAIT_EAU_CROP)
+  assert.ok(ref.fin < 0, 'le bord dessiné tombe DANS le crop, jamais au-delà')
+  assert.equal(ref.debut, ref.fin - RETRAIT_EAU_CROP)
+})
+
+test('⑰b la bande d extinction est CONTENUE dans la nappe : elle éteint la houle, elle ne coupe pas la mer', () => {
+  const { fin } = bordDeMer()
+  const lissage = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
+  const att = (d, bande) => 1 - lissage(fin - Math.max(bande, 1e-7), fin, d)
+  // ⚠️ **ON BALAIE LES BANDES, ON NE CROIT PAS L ALGÈBRE** — le plafond de
+  // `bandeHouleBord` vaut 0,5 demi-côté ; on va jusque-là.
+  for (let k = 0; k <= 100; k++) {
+    const bande = (k / 100) * 0.5
+    // ① au bord dessiné, la houle est déjà EXACTEMENT éteinte : la coupe est plate
+    assert.equal(att(fin, bande), 0, `la houle survit au bord pour bande = ${bande}`)
+    // ② et DEDANS, avant le début de la bande, la mer est intacte au bit près —
+    //    c est ce qui garantit « la mer au large ne change pas » (D24 §③)
+    // ⚠️ la marge est prise sur la bande EFFECTIVE (`max(bande, 1e-7)`) : à
+    // bande nulle, un 1e-9 tombe DANS le plancher de 1e-7 et rend 0,0003 — le
+    // premier jet de ce test rougissait là-dessus, et c est le balayage qui l a
+    // dit, pas l algèbre.
+    assert.equal(att(fin - Math.max(bande, 1e-7) - 1e-6, bande), 1, `la mer du large est entamée pour bande = ${bande}`)
+    // ③ ⛔ **ET SURTOUT** : quelle que soit la bande, il reste de la mer DESSINÉE
+    //    strictement à l intérieur — l extinction ne peut pas manger la nappe.
+    // (à bande nulle les deux coïncident : c est la mer d huile, sans extinction)
+    assert.ok(fin - bande <= fin, 'la bande doit commencer AVANT le bord')
+    if (bande > 0) assert.ok(fin - bande < fin, 'une bande non nulle commence STRICTEMENT avant')
+  }
+  // la bande, elle, dépend bien de la cambrure — mais par `bandeHouleBord`,
+  // et jamais par `bordDeMer` (⑰a)
+  assert.ok(bandeHouleBord(0.01, 0.43) > 0)
+  assert.equal(bandeHouleBord(0, 0.43), 0, 'une mer d huile ne porte aucune bande')
+  assert.equal(bandeHouleBord(1e6, 0.43), 0.5, 'et le plafond d un demi-côté est celui de bandeHouleBord')
+})
+
 test('⑯d la GÉOMÉTRIE s arrête à l emprise du socle, et le CHAMP garde sa portée', () => {
   // ⚡ **LA SECONDE MOITIÉ DE LA DEMANDE.** Un `discard` après déplacement
   // n aurait rien économisé ; ici les sommets n existent plus.
