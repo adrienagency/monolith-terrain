@@ -261,6 +261,21 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'treeLine',
   'heightContrast',
   'heightPivot',
+  // ══════ LE GRADE DU BLOC — Tâche GRA ═══════════════════════════════════════
+  //
+  // ⚠️ **QUATRE SCALAIRES DE PLUS, ET LEUR ABSENCE D'ICI SE PAIERAIT COMME
+  // CELLE DE `normaleFine` DEUX CENTS LIGNES PLUS HAUT.** `pivotAutoSocle` et
+  // `contrasteAutoSocle` changent à **chaque `applyAutoShade`**, c'est-à-dire à
+  // chaque chargement de relief ; `socleBasM` / `socleAmpM` changent à chaque
+  // changement de MNT, donc **à chaque zoom**. Or c'est précisément le zoom que
+  // cette tâche répare : un champ absent de cette liste n'est jamais comparé,
+  // donc jamais reposé, et la correction n'arriverait qu'au prochain changement
+  // de palette. Le défaut serait muet un chargement sur deux — la course que la
+  // Tâche K ter a nommée.
+  'pivotAutoSocle',
+  'contrasteAutoSocle',
+  'socleBasM',
+  'socleAmpM',
   'hazeAmt',
   'hazeAlt',
   'hazeDist',

@@ -50,6 +50,13 @@ import {
   // ⚠️ **DEUX FONCTIONS PURES, PAS UNE REGLE RECOPIEE ICI** : la loi se
   // verifie sous node, et `globe.js` ne fait que poser sa valeur.
   poidsRecollage,
+  // LE GRADE DU BLOC — Tache GRA, §⑨ de rampe-crop.js.
+  // ⚠️ **DEUX FONCTIONS PURES, VERIFIABLES SOUS NODE** : `gradeCrop` rend le
+  // pivot et la fenetre du bloc EN METRES (donc sans domaine), `gradeBlocEffectif`
+  // les convertit dans le domaine VIVANT du nuanceur et y compose le curseur
+  // d'Adrien. `globe.js` ne fait que poser leur valeur.
+  gradeCrop,
+  gradeBlocEffectif,
 } from './monde/rampe-crop.js'
 // L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis. Pur lui aussi : il ne rend que
 // des nombres. ⚠️ **C'EST LUI QUI TIENT LES QUATRE NOMBRES DE RAMPE, ET PLUS
@@ -5080,6 +5087,25 @@ export class Globe {
     treeLine = NATUREL_MONDE.treeLine,
     heightContrast = NATUREL_MONDE.heightContrast,
     heightPivot = NATUREL_MONDE.heightPivot,
+    // ══════ LE GRADE DU BLOC — Tache GRA ═════════════════════════════════════
+    //
+    // ⚠️ **QUATRE CHAMPS, ET LEUR ABSENCE EST UN ETAT LEGITIME, PAS UN OUBLI.**
+    // Sans eux (un appelant d'avant, un banc, un test), `gradeBlocEffectif`
+    // n'a ni auto de reference ni domaine de socle : il retombe sur le chemin
+    // du depot et pose `heightPivot` / `heightContrast` TELS QUELS. C'est le
+    // meme contrat que `soleilCouleur == null` vingt lignes plus bas — l'absence
+    // de donnee EST l'interrupteur, il n'y a pas de second booleen a tenir
+    // d'accord.
+    //
+    // ⚠️ **`pivotAutoSocle` EST L'AUTO, PAS LE VIVANT.** Les deux se confondent
+    // tant qu'Adrien ne touche a rien ; leur DIFFERENCE est exactement son
+    // geste, et c'est la seule chose que le bloc doit reprendre du socle.
+    pivotAutoSocle = null,
+    contrasteAutoSocle = null,
+    // le domaine du SOCLE, EN METRES (`dem.minM`, `dem.maxM − dem.minM`) —
+    // celui dans lequel son curseur est exprime.
+    socleBasM = null,
+    socleAmpM = null,
     hazeAmt = NATUREL_MONDE.hazeAmt,
     hazeAlt = NATUREL_MONDE.hazeAlt,
     hazeDist = NATUREL_MONDE.hazeDist,
@@ -5326,8 +5352,47 @@ export class Globe {
     u.uTreeLine.value = treeLine
     u.uRampCrop.value = rampe2D
     u.uRampCropOn.value = rampe2D ? 1 : 0
-    u.uHeightContrast.value = heightContrast
-    u.uHeightPivot.value = heightPivot
+    // ══════ ⛔ LE MEME BLOC, LA MEME COULEUR A TOUS LES ZOOMS — Tache GRA ════
+    //
+    // > **Adrien, 2026-09-04 :** *« Le meme bloc doit avoir la meme couleur,
+    // > quel que soit le zoom. »*
+    //
+    // ⛔ **CES DEUX NOMBRES ARRIVENT DU SOCLE, GRADES SUR LE MNT CHARGE — DONC
+    // SUR UN AUTRE RELIEF QUE CELUI QU'ILS VONT PEINDRE.** Le §⑨ de
+    // `rampe-crop.js` porte la mesure et le depart entre les deux directions du
+    // brief ; en une ligne : sur un bloc dont les ancres n'ont pas bouge d'un
+    // octet, le pivot rendu passait de **1 519,5 m a z13 a 2 323,6 m a z9** et
+    // la fenetre utile de **1 047 a 503 m**. Trois echelles de couleur pour un
+    // seul relief.
+    //
+    // ⚡ **ET LE CURSEUR RESTE CELUI D'ADRIEN.** `gradeBlocEffectif` ne pose pas
+    // le grade du bloc a la place du sien : il pose le grade du bloc DECALE DE
+    // CE QUE SON CURSEUR S'ECARTE DE L'AUTO DU SOCLE, en metres pour le pivot et
+    // en rapport pour la fenetre. Curseur au repos, le decalage vaut exactement
+    // zero ; curseur tire, le bloc se deplace du meme nombre de metres que le
+    // socle sous ses yeux.
+    //
+    // ⚠️ **LE DOMAINE LU EST L'UNIFORME VIVANT, PAS CELUI DE LA MESURE** :
+    // `majEchelleRampe` fait glisser `[uReliefBas ; uLandMax]` par image
+    // (echelle continue, Tache K bis). Lire `this._rampe` ici figerait la
+    // conversion a l'instant de la mesure — le desaccord de domaines,
+    // reinvente un etage plus bas.
+    // ⚠️ **ON MEMORISE L'ENTREE, ET UN SEUL SITE ECRIT LES DEUX UNIFORMES.** Le
+    // grade depend de DEUX sources qui n'arrivent pas ensemble : le socle (ici)
+    // et le domaine du globe (`_poserUniformesRampe`, reevalue PAR IMAGE).
+    // Ecrire depuis les deux endroits aurait fait deux ecrivains pour un meme
+    // uniforme — le defaut que `_poserUniformesRampe` existe pour avoir
+    // supprime (« il y en avait DEUX, plus un troisieme »). `_majGradeBloc` est
+    // l'ecrivain ; les deux sites ne font que le rappeler.
+    this._gradeSocle = {
+      pivotSocle: heightPivot,
+      contrasteSocle: heightContrast,
+      pivotAutoSocle: pivotAutoSocle ?? null,
+      contrasteAutoSocle: contrasteAutoSocle ?? null,
+      socleBasM,
+      socleAmpM,
+    }
+    this._majGradeBloc()
     u.uHazeAmt.value = hazeAmt
     u.uHazeAlt.value = hazeAlt
     u.uHazeDist.value = hazeDist
@@ -5625,6 +5690,11 @@ export class Globe {
     // déjà payé un (`uContourInterval`, la planète entière à 250 m).
     u.uAnalysis.value = null
     u.uAnalysisOn.value = 0
+    // ⚠️ **L'ENTREE DU GRADE DE BLOC PART AVEC L'HABILLAGE — Tache GRA**, et
+    // c'est ce qui rend `_majGradeBloc` inoffensif hors du crop : sans elle il
+    // ne fait rien, et les deux lignes `GRADE_MONDE` / `NATUREL_MONDE` d'en bas
+    // reprennent la main sans avoir a se defendre d'un second ecrivain.
+    this._gradeSocle = null
     // ⚡ **SAUF SOUS D15 — Tâche R28, et c'est ici que la moitié ④ se refermait.**
     // Ce site est appelé à CHAQUE mort de crop, donc dans la vue lointaine
     // elle-même. Rendre zéro y aurait éteint le peigne du monde au moment précis
@@ -5814,6 +5884,29 @@ export class Globe {
       if (mesure.refus) return { refus: mesure.refus, echelle: null, mesure }
       e = echelleRampe(mesure, { plancherM: plancherRampeDuCrop(this._crop) })
     }
+    // ══════ LE GRADE DU BLOC — Tache GRA ═════════════════════════════════════
+    //
+    // ⛔ **IL NE SE CALCULE QUE SUR UNE MESURE, ET C'EST LA GARDE DE L'AFFICHE.**
+    // `poserRampe({ echelle })` — les bancs, les tests, le reglage manuel — ne
+    // mesure pas : il n'y a alors ni histogramme ni grade, `_gradeBlocM` retombe
+    // a `null`, et `gradeBlocEffectif` rend les valeurs du socle TELLES QUELLES.
+    // Le globe de ces appelants-la est celui d'avant, au bit pres. C'est la meme
+    // discipline que le zero de `uRecollage` sans altitude (R31).
+    //
+    // ⚠️ **ET IL EST EN METRES**, donc il survit au glissement de
+    // `[uReliefBas ; uLandMax]` que `majEchelleRampe` opere par image. Le §⑨ de
+    // `rampe-crop.js` dit pourquoi un `hNorm` fige ici rejouerait le defaut.
+    this._gradeBlocM = mesure
+      ? gradeCrop(mesure, { extentM: largeurCropM(this._crop) })
+      : null
+    // ⚠️ **LA MESURE SE GARDE, SANS SON HISTOGRAMME.** Les bancs de GRA lisent
+    // `minM` / `maxM` / `moyenneM` / `vus` pour verifier que le bloc s'est bien
+    // grade sur LE MEME relief d'un zoom a l'autre — sans quoi on ne saurait pas
+    // distinguer « le grade derive » de « le relief lu derive ». Les 4 Ko de
+    // l'histogramme, eux, ne servent plus une fois le grade calcule.
+    this._mesureBloc = mesure
+      ? { minM: mesure.minM, maxM: mesure.maxM, minTerreM: mesure.minTerreM, maxTerreM: mesure.maxTerreM, moyenneM: mesure.moyenneM, vus: mesure.vus, couverture: mesure.couverture }
+      : null
     // ⚠️ **LE ZÉRO DE LA MER SUIT LA RAMPE, ET IL EST OPTIONNEL** — Tâche K
     // bis. `false` par défaut : un appelant qui ne le demande pas retrouve le
     // globe d'avant au bit près, et les bancs de la Tâche D continuent de poser
@@ -5888,6 +5981,42 @@ export class Globe {
     // `poserRampe({ echelle })` (les bancs, le réglage manuel, les tests) ne
     // passe pas d'altitude : le globe rend alors l'image d'avant AU BIT PRÈS.
     u.uRecollage.value = Number.isFinite(altitudeM) ? poidsRecollage(altitudeM) : 0
+    // ⚠️ **LE GRADE DU BLOC SUIT LE DOMAINE — Tache GRA.** Les quatre lignes
+    // au-dessus viennent de bouger `[uReliefBas ; uLandMax]`, qui est le
+    // denominateur du pivot et du contraste. Sans ce rappel, la conversion
+    // resterait celle du domaine PRECEDENT : le desaccord de R31 §⑥, reinvente
+    // un etage plus bas et cette fois dans le sens du temps.
+    this._majGradeBloc()
+  }
+
+  /**
+   * **L'ECRIVAIN UNIQUE DE `uHeightPivot` ET `uHeightContrast` SOUS CROP —
+   * Tache GRA.**
+   *
+   * ⚠️ **IL NE FAIT RIEN SANS HABILLAGE, ET C'EST CE QUI LE REND SUR.**
+   * `_gradeSocle` n'existe qu'entre `poserHabillage` et `retirerHabillage` ;
+   * hors de cet intervalle, `_majRampeMonde` et `retirerHabillage` gardent la
+   * main avec `GRADE_MONDE` / `NATUREL_MONDE`, exactement comme avant. Il n'y a
+   * donc jamais deux ecrivains au meme instant, seulement deux regimes qui se
+   * relaient — le patron de `uRampCrop` lui-meme.
+   */
+  _majGradeBloc() {
+    const s = this._gradeSocle
+    if (!s) return
+    const u = this.uniforms
+    const g = gradeBlocEffectif({
+      gradeBloc: this._gradeBlocM || null,
+      pivotSocle: s.pivotSocle,
+      contrasteSocle: s.contrasteSocle,
+      pivotAutoSocle: s.pivotAutoSocle,
+      contrasteAutoSocle: s.contrasteAutoSocle,
+      socleBasM: s.socleBasM,
+      socleAmpM: s.socleAmpM,
+      reliefBasM: u.uReliefBas.value,
+      ampGlobeM: u.uLandMax.value - u.uReliefBas.value,
+    })
+    u.uHeightPivot.value = g.heightPivot
+    u.uHeightContrast.value = g.heightContrast
   }
 
   /**
@@ -5919,6 +6048,11 @@ export class Globe {
   /** Rend la rampe MONDIALE — le globe reprend ses couleurs d'avant, au bit près. */
   retirerRampe() {
     const u = this.uniforms
+    // ⚠️ **LE GRADE DU BLOC TOMBE AVEC LA RAMPE — Tache GRA**, et pour la meme
+    // raison que les ancres vingt lignes plus bas : survivant a la mort du crop,
+    // il ferait grader la PLANETE sur le relief d'une ile qu'on a quittee.
+    // `_majRampeMonde` reprend alors la main avec `GRADE_MONDE`.
+    this._gradeBlocM = null
     u.uLandBas.value = RAMPE_MONDE.terreBas
     u.uReliefBas.value = RAMPE_MONDE.terreBas - RAMPE_MONDE.creux
     u.uLandMax.value = RAMPE_MONDE.terreHaut
