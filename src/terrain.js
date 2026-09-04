@@ -447,6 +447,15 @@ export class Terrain {
       uHazeAlt: { value: params.hazeAlt ?? 0.5 },
       uHazeDist: { value: params.hazeDist ?? 0.5 },
       uHazeColor: { value: new THREE.Color(params.hazeColor ?? '#b9c6d6') },
+      // ══════ LE DOMAINE DE RÉFÉRENCE DU MODE NATUREL — Tâche BLA ══════════
+      // `hNorm` vivant → `hNorm` de référence pour la limite des arbres et le
+      // voile d'altitude (rampe-fixe.js, `facteursHNormRef`). ⚠️ (1, 0) EST
+      // L'IDENTITÉ AU BIT : sans référence posée, le nuanceur lit `hNorm`.
+      uHNormRefA: { value: 1 },
+      uHNormRefB: { value: 0 },
+      // la distance du voile en mètres : `fd` × ce facteur (`facteurDistanceVoile`),
+      // 1 = la grandeur d'avant, en demi-côtés de bloc
+      uFdFacteur: { value: 1 },
       // ═══ DIFFUSION SOUS-SURFACIQUE — UNE PROPRIÉTÉ DE MATIÈRE, PAS UN EFFET ═
       //
       // Adrien : « on peut plutôt tester un matériau avec SSS dans la partie
@@ -550,6 +559,9 @@ uniform float uHazeAmt;
 uniform float uHazeAlt;
 uniform float uHazeDist;
 uniform vec3 uHazeColor;
+uniform float uHNormRefA; // hNorm vivant → hNorm de référence (Tâche BLA)
+uniform float uHNormRefB;
+uniform float uFdFacteur; // demi-côtés de bloc → fractions de DISTANCE_VOILE_M
 uniform float uSeaCausK;
 uniform float uCausT;
 // caustique fond marin — phase itérée (Hoskins), projetée sur le RELIEF
@@ -1071,7 +1083,15 @@ ${GLSL_MELANGE}`
       // ⚠️ LE GAIN 4,86 ET SA JUSTIFICATION SONT DANS naturel-crop.js
       // (GAIN_HUMIDITE) — Tâche P2. Ils y sont écrits UNE fois, et le nuanceur du
       // globe lit le même nombre par le même texte.
-      wetY = natHumiditeY(anl.b, anl.a, hNorm, uWetK, uExpoK, uHemi, uTreeLine);
+      // ⛔ hNorm DE RÉFÉRENCE, PAS hNorm VIVANT — Tâche BLA. uTreeLine et
+      // uHazeAlt sont des réglages posés dans le domaine de RÉFÉRENCE (le
+      // carré de 40 km de la rampe fixe) ; hNorm est normalisé sur
+      // uHeightRange, qui s'effondre au zoom fin. Sans cette conversion, la
+      // limite des arbres et le voile d'altitude se re-normalisaient sur le
+      // bloc — la classe de défaut de RAMP, dans le mode Naturel. Les deux
+      // coefficients sont dérivés et chiffrés dans rampe-fixe.js.
+      float hNormNat = natHNormRef(hNorm, uHNormRefA, uHNormRefB);
+      wetY = natHumiditeY(anl.b, anl.a, hNormNat, uWetK, uExpoK, uHemi, uTreeLine);
     }
     mapCol = texture2D(uRampTex, vec2(rampT, wetY)).rgb;
     if (uColorMode == 1) {
@@ -1089,8 +1109,13 @@ ${GLSL_MELANGE}`
         // ⚠️ fd EST EN DEMI-CÔTÉS DE BLOC, et c'est la grandeur que le globe
         // nomme length(qCrop) : l'en-tête de habillage-crop.js démontre
         // x = 28 · u avec uSlabHalf = 28. Même nombre, deux chemins.
-        float fd = clamp(length(vWorldPos.xz - uBlockOffset) / max(uSlabHalf, 1e-3), 0.0, 1.0);
-        float veil = natVoile(hNorm, fd, uHazeAmt, uHazeAlt, uHazeDist);
+        // ⚠️ ET EN MÈTRES — Tâche BLA : × uFdFacteur = (extentMeters / 2) /
+        // DISTANCE_VOILE_M (80 km, la demi-emprise la plus large). Le quotient
+        // d / uSlabHalf est sans unité, seule la BORNE change (rampe-fixe.js).
+        float fd = clamp(length(vWorldPos.xz - uBlockOffset) / max(uSlabHalf, 1e-3) * uFdFacteur, 0.0, 1.0);
+        // le voile d'altitude lit le domaine de RÉFÉRENCE, comme la limite des
+        // arbres au-dessus — même conversion, même raison (Tâche BLA)
+        float veil = natVoile(natHNormRef(hNorm, uHNormRefA, uHNormRefB), fd, uHazeAmt, uHazeAlt, uHazeDist);
         mapCol = natBrume(mapCol, natLuminance(mapCol), veil, uHazeColor, uHazeAmt);
       }
     } else {

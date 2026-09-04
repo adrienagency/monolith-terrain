@@ -1242,6 +1242,15 @@ export class BlockGrid {
       um.uHeightPivot.value = uc.uHeightPivot.value
       um.uSlopeTint.value = uc.uSlopeTint.value
     }
+    // LE DOMAINE DE RÉFÉRENCE DU NATUREL ET LA BORNE DU VOILE — Tâche BLA.
+    // Posés par `appliqueRampeFixe` à chaque chargement de relief, comme le
+    // pivot et le contraste juste au-dessus : une voisine née avant la pose
+    // gardait la conversion du MNT précédent, et la couture se voyait.
+    if (um.uHNormRefA && uc.uHNormRefA) {
+      um.uHNormRefA.value = uc.uHNormRefA.value
+      um.uHNormRefB.value = uc.uHNormRefB.value
+      um.uFdFacteur.value = uc.uFdFacteur.value
+    }
     // LA MATIÈRE PROCÉDURALE DU RELIEF (bruit en relief + « au-dessus de zéro »)
     if (um.uMatNoiseOn && uc.uMatNoiseOn) {
       um.uMatNoiseOn.value = uc.uMatNoiseOn.value

@@ -347,6 +347,24 @@ export function luminance(rgb) {
 }
 
 /**
+ * `hNorm` vivant → `hNorm` du domaine de RÉFÉRENCE — Tâche BLA.
+ *
+ * ⛔ **C'EST LA CORRECTION DE RAMP APPLIQUÉE AUX DEUX LECTEURS QU'ELLE AVAIT
+ * LAISSÉS** : `humiditeY` (la limite des arbres) et `voile` (l'altitude du
+ * voile) lisent un `hNorm` normalisé sur le domaine VIVANT, qui s'effondre au
+ * zoom fin. La dérivation des deux coefficients et leurs valeurs mesurées sont
+ * dans `src/rampe-fixe.js` (`facteursHNormRef`). Ici, seulement l'affine :
+ *
+ *     hNormRef = hNorm × a + b,  écrêté à [0 ; 1]
+ *
+ * ⚠️ **À `a = 1`, `b = 0` ELLE REND `hNorm` AU BIT** : `x × 1 + 0` est exact en
+ * IEEE 754. C'est la garde du dépôt, et le test la vérifie par `Object.is`.
+ */
+export function hNormRef(hNorm, a, b) {
+  return clamp01(hNorm * a + b)
+}
+
+/**
  * Le voile de la perspective aérienne (Imhof) — DEUX composantes, pas une.
  *
  * ⚠️ **C'EST L'ALTITUDE, PAS LA DISTANCE, QUI DONNE LE BLEU-GRIS DES PLAINES**
@@ -435,6 +453,11 @@ float natPeigneMonde(float ecart, float gain) {
 }
 float natLuminance(vec3 c) {
   return dot(c, vec3(${LUMA_709[0]}, ${LUMA_709[1]}, ${LUMA_709[2]}));
+}
+// hNorm VIVANT vers hNorm de REFERENCE — Tache BLA. Les coefficients viennent
+// de facteursHNormRef (rampe-fixe.js) ; a = 1, b = 0 rend hNorm au bit.
+float natHNormRef(float hNorm, float a, float b) {
+  return clamp(hNorm * a + b, 0.0, 1.0);
 }
 float natVoile(float hNorm, float fd, float hazeAmt, float hazeAlt, float hazeDist) {
   float fa = 1.0 - smoothstep(0.0, max(hazeAlt, 1e-3), hNorm);

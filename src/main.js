@@ -42,14 +42,14 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
+import { worldToLatLon, latLonToWorld, demSpan, parseLatLon, sphereToLatLon, R_GLOBE, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
-import { COTE_REF_M, fenetreRef, statsFenetre, transpose } from './rampe-fixe.js'
+import { COTE_REF_M, fenetreRef, centrerFenetreRef, statsFenetre, transpose, facteursHNormRef, facteurDistanceVoile } from './rampe-fixe.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage, exigerPose } from './camera-poses.js'
 import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
@@ -6608,6 +6608,12 @@ function contexteCrop() {
       contrasteAutoSocle: shadeGradeVivant()?.heightContrast ?? null,
       socleBasM: Number.isFinite(dem?.minM) ? dem.minM : null,
       socleAmpM: Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null,
+      // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+      // Le carré de 40 km de la rampe fixe, EN MÈTRES : c'est là que `treeLine`
+      // et `hazeAlt` ont un sens. `domaineRef()` rend `null` sous l'option de
+      // re-normalisation — le globe lit alors `hNorm` tel quel, comme avant.
+      refBasM: domaineRef()?.basM ?? null,
+      refAmpM: domaineRef()?.ampM ?? null,
       hazeAmt: terrain.mapUniforms.uHazeAmt.value,
       hazeAlt: terrain.mapUniforms.uHazeAlt.value,
       hazeDist: terrain.mapUniforms.uHazeDist.value,
@@ -7742,8 +7748,17 @@ function majRampeRef() {
     return dem._refStats
   }
   const n = Math.round(Math.sqrt(dem.data.length))
-  const fen = fenetreRef(n, dem.extentMeters)
-  if (!fen.couvre && rampeRef) { dem._refStats = null; return null }
+  const fen0 = fenetreRef(n, dem.extentMeters)
+  if (!fen0.couvre && rampeRef) { dem._refStats = null; return null }
+  // ══════ LE CARRÉ EST CENTRÉ SUR LE LIEU, PAS SUR LE MNT — Tâche BLA ══════
+  // Le bloc central est aligné sur les tuiles : à z9 son centre est à 20 km
+  // du lieu, et la référence changeait de 280 m de plafond entre z9 et z11
+  // (`centrerFenetreRef`, rampe-fixe.js, porte le relevé). `dem.lat / dem.lon`
+  // est le centre DEMANDÉ ; `latLonToWorld` le rend en unités monde sur
+  // `demSpan` — la fraction du MNT, sans redire la conversion des tuiles.
+  const centre = latLonToWorld(dem, dem.lat, dem.lon)
+  const span = demSpan(dem)
+  const fen = centrerFenetreRef(fen0, n, centre.x / span + 0.5, centre.z / span + 0.5)
   const st = statsFenetre(dem.data, n, fen)
   if (!st || !(st.maxM > st.minM)) { dem._refStats = null; return null }
   dem._refStats = st
@@ -7775,10 +7790,23 @@ function appliqueRampeFixe() {
   // `test/damier-uniformes.test.js` le lit comme une CESSION EN BLOC de la
   // poignée des uniformes du bloc central, et elle a raison — un alias échappe
   // au péage qui vérifie qu'on prévient bien les dalles voisines. Il a rougi ici.
+  // ══════ LE MODE NATUREL SUIT LA MÊME RÉFÉRENCE — Tâche BLA ═════════════
+  // `uTreeLine` et `uHazeAlt` lisent `hNorm`, normalisé sur `uHeightRange` :
+  // RAMP n'avait transposé que le pivot et le contraste. Ici on pose la
+  // conversion affine `hNorm` vivant → référence (les deux coefficients) et la
+  // borne de distance du voile en mètres (rampe-fixe.js porte la dérivation).
+  const f = facteursHNormRef(domaineRef(), domaineVivant())
+  const fd = facteurDistanceVoile(params.source === 'real' && dem ? dem.extentMeters / 2 : NaN)
   if (terrain.mapUniforms.uHeightContrast.value === t.heightContrast
-    && terrain.mapUniforms.uHeightPivot.value === t.heightPivot) return
+    && terrain.mapUniforms.uHeightPivot.value === t.heightPivot
+    && terrain.mapUniforms.uHNormRefA.value === f.a
+    && terrain.mapUniforms.uHNormRefB.value === f.b
+    && terrain.mapUniforms.uFdFacteur.value === fd) return
   terrain.mapUniforms.uHeightContrast.value = t.heightContrast
   terrain.mapUniforms.uHeightPivot.value = t.heightPivot
+  terrain.mapUniforms.uHNormRefA.value = f.a
+  terrain.mapUniforms.uHNormRefB.value = f.b
+  terrain.mapUniforms.uFdFacteur.value = fd
   // ⚠️ **ET LES DALLES VOISINES** — le péage de `test/damier-uniformes.test.js`,
   // et il a mordu ici avant que je l'écrive. Cette fonction tourne à CHAQUE
   // chargement de relief, y compris quand il n'y a rien à regrader : sans la
