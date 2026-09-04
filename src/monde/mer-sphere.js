@@ -992,53 +992,68 @@ export const RETRAIT_EAU_CROP = (0.16 + 0.06) / (COTE_CROP_UNITES / 2)
  */
 export const MARGE_EAU_CROP = 0.06 / (COTE_CROP_UNITES / 2)
 
-/**
- * La part de l'anneau extérieur sur laquelle le fondu court.
- *
- * ⚠️ **UN CHOIX, ET IL EST DIT COMME TEL** — aucune mesure ne le fonde. La
- * moitié : assez long pour qu'aucune arête ne se lise, assez court pour que la
- * mer garde sa pleine richesse au contact du bloc, qui est ce qu'on regarde.
- */
-export const FRACTION_BANDE_BORD = 0.5
+// ⛔ **`FRACTION_BANDE_BORD` A ÉTÉ RETIRÉE, ET C'EST LE DÉFAUT ② QUI L'EMPORTE.**
+// Elle valait 0,5 et disait « le fondu court sur la moitié de l'anneau
+// EXTÉRIEUR ». Depuis que la nappe s'arrête à l'emprise du socle, il n'y a plus
+// d'anneau extérieur du tout : la bande vaut le retrait, et rien ne la module.
+// Une constante que le corps n'atteint plus est la constante morte que ce
+// chantier a déjà trouvée cinq fois — retirée plutôt que laissée à 0,5.
 
 /**
- * Où la mer s'éteint, en fonction de l'estompage de la Terre autour.
+ * Où la mer s'éteint : **à l'emprise du socle, et à rien d'autre.**
  *
  * Les deux bornes sont exprimées dans la MESURE DE LA DÉCOUPE : `0` est
  * exactement la frontière du crop, `portee − 1` le bord de la calotte. C'est la
  * grandeur que `globe.js` calcule déjà par fragment (`pn − uCropCoin`), donc
  * aucune seconde écriture de la superellipse.
  *
- * ⚠️ **LE SENS N'EST PAS INTERCHANGEABLE.** `estompage = 0` = la planète est
- * ENTIÈRE : la mer peut aller jusqu'au bord de la calotte, elle repose sur des
- * océans dessinés. `estompage = 1` = il ne reste que le crop : la mer doit
- * s'arrêter **au bloc**, sinon c'est le rectangle bleu flottant qu'Adrien a vu.
+ * ⛔ **ELLE PRENAIT L'ESTOMPAGE EN ENTRÉE, ET C'ÉTAIT LE DÉFAUT ② D'ADRIEN
+ * (2026-09-04)** : *« la mer prend beaucoup plus que la taille du crop, et
+ * parfois ne se crope pas du tout »*. La loi d'avant valait
+ * `fin = (portee − 1) · (1 − estompage) − RETRAIT`, donc la nappe s'étendait
+ * jusqu'à **`portee − 1` demi-côtés HORS du crop** dès que l'estompage n'était
+ * pas plein. Or l'estompage n'est plein qu'**au repos** (`veille-repos.js`,
+ * 30 images calmes) : au moindre geste il retombe sur la rampe d'altitude.
+ *
+ * MESURÉ AU GPU, La Réunion, crop posé, `sonde-mer-crop.mjs` (écran 1 280×800) :
+ *
+ *   estompage   uMerBord.fin   mer dessinée HORS de l'emprise du socle
+ *   0,00          +1,992        407 358 px  (39,8 % de l'écran)
+ *   0,22          +1,552        407 352 px  (39,8 %)
+ *   0,50          +0,992        324 292 px  (31,7 %)
+ *   0,75          +0,492        204 742 px  (20,0 %)
+ *   1,00          −0,0079             0 px
+ *
+ * Et l'estompage vu pendant un simple zoom à la molette (aucun réglage forcé) :
+ * **0,295 depuis 31 km sur 178 images sur 180**, **0,000 depuis 55 km sur
+ * 180/180** — c'est-à-dire la calotte entière, trois largeurs de crop. Le
+ * *« parfois »* d'Adrien n'est pas un aléa : c'est le bas de cette rampe.
+ *
+ * ➡️ **D23 TRANCHE, ET C'EST LA RAISON DE FOND** : *« la mer animée et les
+ * effets ne s'activent qu'à partir de ce niveau de crop »*. La nappe simulée
+ * appartient au crop ; hors du crop l'océan est la bathymétrie peinte par le
+ * nuanceur de tuile (rapport PF3 §1). Une nappe qui déborde ne repose donc pas
+ * « sur des océans dessinés » — elle repose sur le fond de l'affiche, et c'est
+ * le grand voile bleu de la capture d'Adrien.
  *
  * ⛔ **ET LE RETRAIT ALLAIT DANS LE MAUVAIS SENS — Tâche P4.** Il portait
- * `fin = max(RETRAIT_EAU_CROP, …)`, donc à estompage plein la mer allait
- * **JUSQU'À `+RETRAIT`, c'est-à-dire 0,22 unité de socle EN DEHORS du crop** :
- * pleine opacité sur la frontière elle-même, puis un fondu au-dessus du vide.
- * Or le mode plat fait l'INVERSE — `plinth.js` :
+ * `fin = max(RETRAIT_EAU_CROP, …)`, donc la mer allait **JUSQU'À `+RETRAIT`,
+ * c'est-à-dire 0,22 unité de socle EN DEHORS du crop** : pleine opacité sur la
+ * frontière elle-même, puis un fondu au-dessus du vide. Or le mode plat fait
+ * l'INVERSE — `plinth.js` :
  * `rayonEauDansSocle() = HALF − SOCLE_CHANFREIN − SOCLE_MARGE_EAU`, l'eau
- * **RENTRE** de 0,22 unité. Les deux se trompaient donc de **0,44 unité**, dans
- * des sens opposés, et c'est **le débordement en porte-à-faux** que le noteur a
- * vu au flanc est (`.banc/vues-P4/Z1-CROP-est.png` : la nappe passe par-dessus
- * l'arête haute de la paroi, avec le mur qui reparaît dessous).
+ * **RENTRE** de 0,22 unité. **Ce retrait-là est gardé au bit près** : c'est lui
+ * qui fait coïncider le bord de la nappe et le bord du socle.
  *
- * ➡️ **À estompage plein, la mer s'éteint donc à `−RETRAIT_EAU_CROP`**, sur une
- * bande d'une même largeur : exactement le chanfrein et la marge d'eau du socle,
- * du bon côté de l'arête. Et pas un plancher à zéro : ce serait une arête dure.
+ * ⚠️ **AUCUN PARAMÈTRE, ET C'EST LE POINT.** Ni l'estompage ni la portée
+ * n'entrent plus : un paramètre que le corps ignore serait le paramètre mort
+ * que ce chantier a déjà trouvé cinq fois. La bande de fondu vaut le retrait —
+ * pas un plancher à zéro, qui serait une arête dure.
  *
- * @param {number} estompage dans [0, 1] — `estompage-terre.js`
- * @param {number} [portee] en demi-côtés de crop
  * @returns {{debut:number, fin:number}} en demi-côtés de crop, mesurés depuis
  *   la frontière du crop (0 = la frontière, négatif = DEDANS)
  */
-export function bordDeMer(estompage, portee = PORTEE_CROP) {
-  const brut = Number(estompage)
-  const e = Number.isFinite(brut) ? Math.min(1, Math.max(0, brut)) : 0
-  const p = Number.isFinite(portee) && portee > 1 ? portee : PORTEE_CROP
-  const fin = (p - 1) * (1 - e) - RETRAIT_EAU_CROP
-  const bande = Math.max(RETRAIT_EAU_CROP, (fin + RETRAIT_EAU_CROP) * FRACTION_BANDE_BORD)
-  return { debut: fin - bande, fin }
+export function bordDeMer() {
+  const fin = -RETRAIT_EAU_CROP
+  return { debut: fin - RETRAIT_EAU_CROP, fin }
 }

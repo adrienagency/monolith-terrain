@@ -70,7 +70,6 @@ import {
   GLSL_JUPE_MER,
   RETRAIT_EAU_CROP,
   bordDeMer,
-  PORTEE_CROP,
 } from '../src/monde/mer-sphere.js'
 import { COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
 import { construireSolideCrop } from '../src/monde/parois-crop.js'
@@ -723,7 +722,7 @@ test('⑤d `poserMer` CONCATÈNE le ruban à la calotte — un seul maillage, un
 // ══════════ ⑥ LA MESURE SIGNÉE DU BORD ═════════════════════════════════════
 
 test('⑥a le bord de la mer RENTRE, il ne déborde plus', () => {
-  const b = bordDeMer(1, PORTEE_CROP)
+  const b = bordDeMer()
   assert.ok(b.fin < 0, `à estompage plein la mer doit s éteindre DEDANS : ${b.fin}`)
   assert.ok(Math.abs(b.fin + RETRAIT_EAU_CROP) < 1e-12)
   assert.ok(b.debut < b.fin)
@@ -763,7 +762,7 @@ test('⑥b `dBord` est SIGNÉ — sans quoi le retrait ne peut pas exister', () 
   }
   assert.equal(ancien(0.5, 0, 0, 2), 0)
   assert.equal(ancien(0, 0, 0, 2), 0)
-  assert.ok(bordDeMer(1).fin < ancien(0.5, 0, 0, 2), 'le fondu tomberait entièrement sous la mesure')
+  assert.ok(bordDeMer().fin < ancien(0.5, 0, 0, 2), 'le fondu tomberait entièrement sous la mesure')
 })
 
 // ══════════ ⑦ L'ÉTAT DE MER — Tâche P5, la réserve n° 1 de P4 ══════════════
