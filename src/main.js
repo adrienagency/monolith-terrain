@@ -86,6 +86,7 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
+import { creerCacheToile } from './monde/rect-toile.js'
 // ══════ LES BOUTONS DU BAS — Tâche R1 ② ═══════════════════════════════
 //
 // > **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
@@ -1212,6 +1213,14 @@ const renderer = new THREE.WebGLRenderer({
 // le rabotage muet de Chrome frappe d'abord au démarrage, sur le plein écran.
 container.appendChild(renderer.domElement)
 applyRenderSize({ renderer, pixelRatio: params.pixelRatio })
+// ══════════ LA BOÎTE DE LA TOILE, LUE UNE FOIS — Tâche FLU ═══════════════════
+//
+// ⛔ **`getBoundingClientRect()` et `clientHeight` forcent une mise en page à
+// chaque lecture dès que le DOM a bougé**, et il bouge à chaque image. Deux
+// lecteurs par image (`projectionSaisie`, `contexteCrop`) valaient 9,6 % du
+// glissé et 15 % du crop à CPU ×4 — la mesure et le raisonnement sont en tête
+// de `monde/rect-toile.js`. Tout lecteur de la boîte de la toile passe par ici.
+const cacheToile = creerCacheToile(renderer.domElement)
 renderer.shadowMap.enabled = true
 // VSM so the shadow blur radius is a real, adjustable softness control
 renderer.shadowMap.type = THREE.VSMShadowMap
@@ -4323,7 +4332,7 @@ async function loadRealTerrain(opts = {}) {
     // se lit comme une carte cassée, et ce serait une régression apportée par
     // une optimisation. `_amorce` est retombé à faux, donc ce rebuild est plein.
     // Il coûte ~370 ms, sur un chemin où le chargement a DÉJÀ échoué.
-    try { terrain.rebuild(params) } catch (e) { console.error('repli procédural impossible:', e) }
+    try { terrain.rebuild(params, { repliProcedural: true }) } catch (e) { console.error('repli procédural impossible:', e) }
     // ⚠️ ET LE DAMIER PART AVEC. Les dalles voisines portent le relief RÉEL du
     // chargement précédent : les laisser autour d'un centre redevenu procédural
     // donne une carte coupée en deux à la jointure — plage hypsométrique, mer
@@ -4383,7 +4392,7 @@ function regenerateTerrain({ sansRideau = false } = {}) {
   // payé trois fois sur ce projet — même à 0 ms, ça reste un setTimeout.
   const delai = Math.max(0, 50 - (performance.now() - loadingVisibleDepuis))
   return new Promise((resolve) =>
-    setTimeout(() => {
+    setTimeout(async () => {
       terrain.rebuild(params)
       // ══════════ LE GRAIN DES DEUX FINESSES, CUIT SOUS LE VOILE ═════════════
       //
@@ -4409,6 +4418,20 @@ function regenerateTerrain({ sansRideau = false } = {}) {
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
+      // ══════════ LA CHAÎNE EST COUPÉE EN DEUX TÂCHES — Tâche FLU, poste ④ ═════
+      //
+      // ⛔ **TOUT CE QUI SUIT TOURNAIT DANS LA MÊME TÂCHE QUE `rebuild`**, et la
+      // tâche entière était la plus longue de la descente : **1 593 ms à CPU ×4**
+      // à l'arrivée du MNT (`.banc/sonde-descente-x4.log` : rebuild 514 +
+      // rugosité 381 + socle 107 + eau 202 + calques…), après que la première
+      // partie a déjà été ramenée de 2 908 à ~400 ms. Le relief, le socle et
+      // la matière sont posés ENSEMBLE ci-dessus — ce sont eux qui doivent être
+      // cohérents à l'image ; l'eau, les calques drapés, les étiquettes et les
+      // nuages suivent à la tâche suivante. Une image entre les deux, pendant
+      // laquelle l'eau et les calques sont ceux d'avant ; contre un gel deux
+      // fois plus long. `setTimeout` et PAS `requestAnimationFrame` — même
+      // raison qu'en tête : un onglet caché ne rend jamais la main à un rAF.
+      await new Promise((r) => setTimeout(r, 0))
       realWater?.rebuild(optionsDeMer()) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
       // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
@@ -4696,13 +4719,45 @@ const tuilesLisiblesDuSocle = (flux) => revisionFlux(flux)
 // SIGNATURE (`revisionFlux`), pas un compte. Un sentinelle numérique à côté
 // d'une chaîne se lit comme un bogue au premier coup d'œil suivant.
 let _socleLisibles = null
+// ══════════ LE RAFFINEMENT, ESPACÉ ET EN DEUX IMAGES — Tâche FLU, poste ④ ════
+//
+// ⛔ **CHAQUE TUILE QUI ATTERRISSAIT REJOUAIT LA CHAÎNE ENTIÈRE DANS L'IMAGE**,
+// et c'est la tâche qu'Adrien ressent. Mesuré sur la descente vers Chamonix, CPU
+// ×4 (`.banc/sonde-descente-x4.log`) : **treize** raffinements en neuf secondes,
+// chacun `rafraichirFenetre` **330 à 810 ms** + `plinth.rebuild` **100 à 250 ms**
+// dans la MÊME tâche — soit des gels de 450 à 1 060 ms, treize fois.
+//
+// Deux gestes, aucun ne change un octet du résultat final :
+//   · **espacer** — une tuile de plus dans les `RAFFINEMENT_SOCLE_MS` qui suivent
+//     un raffinement attend le suivant. Le PREMIER raffinement d'un niveau part
+//     sans délai (c'est lui qui affiche le parent pendant que le fin arrive), le
+//     dernier part toujours (`lisibles` reste différent tant qu'on n'a pas relu) ;
+//   · **le socle une image plus tard** — `plinth.rebuild` lit `terrain.sample`,
+//     qui est posé ; le repousser à l'image suivante coupe la tâche en deux.
+//     ⚠️ Pendant cette image-là, le haut des parois est celui du raffinement
+//     précédent : un écart de quelques mètres au bord, une image durant — contre
+//     un gel de 250 ms à chaque tuile.
+const RAFFINEMENT_SOCLE_MS = 350
+// la hauteur, en mètres, de la nappe PLATE posée en attendant la première tuile
+// (voir `hauteursDeFlux`) : au-dessus de `seaEps` (≈ 0,6 m), donc de la terre
+const HAUTEUR_ATTENTE_M = 1
+let _socleRaffineDepuis = -Infinity
+let _socleAttendPlinthe = false
 function socleRaffine() {
   if (!params.globeContinu || !fluxSocle || !terrain.fenetreBornee) return
+  if (_socleAttendPlinthe) {
+    _socleAttendPlinthe = false
+    plinth.rebuild(terrain, params)
+    return
+  }
   const lisibles = tuilesLisiblesDuSocle(fluxSocle)
   if (lisibles === _socleLisibles) return
+  const t = performance.now()
+  if (t - _socleRaffineDepuis < RAFFINEMENT_SOCLE_MS) return
   _socleLisibles = lisibles
+  _socleRaffineDepuis = t
   if (!terrain.rafraichirFenetre(params)) return
-  plinth.rebuild(terrain, params)
+  _socleAttendPlinthe = true
 }
 
 // ⚠️ **LE CROCHET NE SE POSE QUE SI LE DRAPEAU EST OUVERT, ET C'EST LA GARDE
@@ -4773,7 +4828,32 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
   // ⚠️ **`majHauteurs` NE RECONSTRUIT RIEN** : une passe par TUILE (jamais par
   // pixel — l'interface par pixel coûtait +3,5 ms par reconstruction), puis les
   // `y` et les normales réécrits EN PLACE. 3,5 ms à n = 384, mesuré in situ.
-  majHauteurs(fenetre, flux)
+  // ⚠️ **`normales: false` QUAND LE GRAIN VA SUIVRE — Tâche FLU.** `_ecrireRelief`
+  // ajoute le grain FBM aux `y` puis refait les normales sur la surface FINALE
+  // (`normalesAFaire`) : les calculer ici aussi, c'est deux `gridNormals` par
+  // raffinement. La question est posée à `terrain` avec le MÊME prédicat que
+  // celui de `_ecrireRelief` (`grainSuivra`), et le compte rendu le dit
+  // (`normalesManquantes`) pour que l'écrivain ne puisse pas l'oublier.
+  const grainSuivra = terrain.grainSuivra(params)
+  majHauteurs(fenetre, flux, { normales: !grainSuivra })
+  // ══════════ LA NAPPE D'ATTENTE — Tâche FLU ═════════════════════════════════
+  //
+  // ⛔ **AUCUNE TUILE À LIRE PENDANT UNE PLONGÉE = UN RELIEF PROCÉDURAL DE
+  // 591 361 SOMMETS, 2 908 ms À CPU ×4, QUE PERSONNE NE VOIT.** `entrerEnVol`
+  // pose `dem = null` et reconstruit ; les tuiles viennent d'être demandées
+  // TROIS LIGNES PLUS HAUT et aucune n'est là. `_remplirDepuisFlux` rendait
+  // alors `null` et `terrain.rebuild` retombait sur le sampler procédural — le
+  // `noise` à 1 407 ms du profil de PA. Depuis que le globe garde les hauteurs
+  // récentes (`_retenirHauteurs`), les parents de l'emprise répondent presque
+  // toujours ; à froid, on pose une nappe PLATE à `HAUTEUR_ATTENTE_M` (au-dessus
+  // de la ligne d'eau et de son épaulement de 0,6 m : de la terre) et on le DIT
+  // (`vide`) — le premier raffinement la recouvre.
+  let vide = false
+  if (fenetre.remplis === 0 && params.source === 'real' && !terrain.dem) {
+    fenetre.hauteursM.fill(HAUTEUR_ATTENTE_M)
+    majHauteurs(fenetre, fenetre.hauteursM) // recopie sur place, `y` et normales
+    vide = true
+  }
   // ⚠️ **LE COMPTEUR SE RECALE ICI, ET PAS AILLEURS.** Un cran change d'emprise
   // donc de tuiles réclamées : laissé sur la valeur d'avant, le raffinement
   // pourrait retomber sur le même compte et ne jamais repartir — un socle qui
@@ -4809,6 +4889,9 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
     zoomDemande: borne.zoomDemande,
     debitObserveMbs: borne.debitObserveMbs,
     zoomCouvert,
+    // les normales n'ont PAS été écrites : `_ecrireRelief` doit les faire (FLU)
+    normalesManquantes: grainSuivra && !vide,
+    vide,
   }
 }
 
@@ -6748,7 +6831,15 @@ function contexteCrop() {
       // appliqué au démarrage repose `params.fov`. « 33 n'existe nulle part dans
       // le dépôt » était vrai de la SOURCE et faux de l'application.
       fovDeg: camGlobe?.fov ?? camera.fov,
-      hauteurPx: renderer.domElement?.clientHeight || undefined,
+      // ⛔ **`renderer.domElement.clientHeight` LU ICI À CHAQUE IMAGE ÉTAIT LE
+      // PREMIER POSTE JS DU CROP — Tâche FLU.** Une lecture de `clientHeight`
+      // force la mise en page quand le DOM a bougé, et il bouge à chaque image :
+      // 1 188 ms de temps propre sur 10,2 s à CPU ×4 (15 % du fil), attribués à
+      // `contexteCrop` par le profileur alors que le reste de la fonction coûte
+      // 0,024 ms. Le brief prescrivait une mémoïsation du contexte ; c'était
+      // cette ligne. Le cache est invalidé par `ResizeObserver`/`resize`, et
+      // rend la MÊME grandeur (`clientHeight || undefined`) — `rect-toile.js`.
+      hauteurPx: cacheToile.hauteurClient(),
     },
   }
 
@@ -7215,6 +7306,11 @@ modes = new Modes({
     async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')
       demBusy = true
+      // ⚡ **LE GRAIN PART CUIRE DANS LE WORKER MAINTENANT — Tâche FLU.** Les
+      // tuiles mettent des secondes à arriver ; le Worker met ~0,8 s à cuire le
+      // champ de res 768. Quand `terrain.rebuild` en aura besoin, il sera en
+      // cache — sinon il cuit en ligne, comme avant (`prechauffeGrainHorsFil`).
+      terrain.prechauffeGrainHorsFil(params)
       try {
         params.demLat = lat
         params.demLon = lon
@@ -13527,6 +13623,9 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+  // LE CONTEXTE DU CROP, pour les bancs (FLU) : c'est le premier poste JS nommé
+  // du profil dans le crop, et une sonde doit pouvoir le chronométrer seul.
+  contexteCrop,
   // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Exposée pour la même raison que le
   // reste de `__exp` : c'est le SEUL moyen de vérifier cette tâche, `main.js`
   // n'étant chargé par aucun test. `majCameraFond` est appelable à la main pour
@@ -14053,7 +14152,11 @@ function lirePoseReelle() {
   return _poseReelle
 }
 function projectionSaisie(px, py) {
-  const r = renderer.domElement.getBoundingClientRect()
+  // ⚠️ **LA BOÎTE VIENT DU CACHE, PAS DE `getBoundingClientRect()`** — Tâche FLU.
+  // Lue ici à chaque échantillon de pointeur ET à chaque image d'un glissé,
+  // elle forçait une mise en page synchrone à chaque fois : 9,6 % du fil
+  // principal pendant un glissé en orbite, CPU ×4 (`monde/rect-toile.js`).
+  const r = cacheToile.rect()
   return { fovDeg: camera.fov, aspect: camera.aspect, largeurPx: r.width, hauteurPx: r.height, px: px - r.left, py: py - r.top }
 }
 // Le point de la sphère sous un pointeur — au limbe si le pointeur est dans le
@@ -15512,6 +15615,11 @@ setTimeout(() => {
   if (RETOUR_PAIEMENT.cas) return
   hub.show()
 }, 900)
+
+// le grain du bloc, cuit d'avance pendant que l'application est encore sur
+// l'écran d'accueil (Tâche FLU) — les réglages du gabarit d'ouverture sont posés
+// depuis longtemps à deux secondes ; s'ils changent ensuite, la plongée relance
+setTimeout(() => { try { terrain.prechauffeGrainHorsFil(params) } catch {} }, 2000)
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now

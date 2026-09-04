@@ -15,6 +15,8 @@
 import { analyzeDem, resampleField, minPoolField } from './terrain-analysis.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
 import { detectLakes } from './lake.js'
+import { couleursRelief } from './monde/teinte-relief.js'
+import { cuireDetailField, cuireTintField } from './detail-noise.js'
 
 /**
  * Le calcul, nu. Appelé par le Worker, et directement par le fil principal en
@@ -353,6 +355,61 @@ export function runLakeJob(job) {
   return new Promise((resolve) => {
     enVol.set(id, { resolve, job, calcul: calculLacs })
     w.postMessage({ id, kind: 'lacs', ...job })
+  })
+}
+
+// ══════════ LA TEINTE PAR SOMMET ET LE GRAIN, HORS DU FIL — Tâche FLU ════════
+//
+// ⚠️ **CE SONT LES DEUX POSTES PAR SOMMET DE LA DESCENTE** (profil V8, Chamonix
+// z12, CPU ×4, `.banc/PA/budget-base-x4-vsync.json`) : `noise` **1 407 ms** —
+// la cuisson du champ de grain (`detailField`, 3 + 2 octaves de simplex par
+// sommet, 591 361 sommets à res 768) au premier `rebuild` d'un niveau — et
+// `natGris` **1 118 ms** — deux `Math.pow` par sommet, rejouées à CHAQUE tuile
+// qui atterrit. Ni l'un ni l'autre ne décide de rien sur le fil principal : le
+// grain ne dépend que de (graine, échelle, résolution) et se cuit D'AVANCE ; la
+// couleur n'est lue que par le GPU et peut arriver une image plus tard.
+//
+// Les deux calculs vivent dans des modules PURS (`detail-noise.js`,
+// `monde/teinte-relief.js`) importés à l'identique ici et dans le Worker : le
+// même code, donc le même octet — `test/teinte-relief.test.js` et
+// `test/detail-noise.test.js` le verrouillent.
+
+/** Le calcul nu de la teinte — Worker et repli. Le tampon de sortie est TRANSFÉRÉ. */
+export function computeTeinteJob(job) {
+  const colors = couleursRelief(job)
+  return { colors, transfert: [colors.buffer] }
+}
+
+/** Le calcul nu du grain (détail + teinte) — Worker et repli. */
+export function computeGrainJob({ seed, detailScale, res, size, seedTeinte }) {
+  const detail = cuireDetailField(seed, detailScale, res, size)
+  const teinte = cuireTintField(seedTeinte, res, size)
+  return { detail, teinte, transfert: [detail.buffer, teinte.buffer] }
+}
+
+// ⚠️ **LES ENTRÉES DE LA TEINTE SONT TRANSFÉRÉES, PAS COPIÉES** : `y` et `ny`
+// sont des extraits frais (`extraireYNy`), personne ne les relit côté fil
+// principal. Le repli rend la même forme que le Worker (`{ colors }`).
+const calculTeinte = (job) => ({ colors: computeTeinteJob(job).colors })
+const calculGrain = (job) => { const r = computeGrainJob(job); return { detail: r.detail, teinte: r.teinte } }
+
+export function runTeinteJob(job) {
+  const w = obtenirWorker()
+  if (!w) return Promise.resolve().then(() => calculTeinte(job))
+  const id = ++sequence
+  return new Promise((resolve) => {
+    enVol.set(id, { resolve, job, calcul: calculTeinte })
+    w.postMessage({ id, kind: 'teinte', ...job }, [job.y.buffer, job.ny.buffer])
+  })
+}
+
+export function runGrainJob(job) {
+  const w = obtenirWorker()
+  if (!w) return Promise.resolve().then(() => calculGrain(job))
+  const id = ++sequence
+  return new Promise((resolve) => {
+    enVol.set(id, { resolve, job, calcul: calculGrain })
+    w.postMessage({ id, kind: 'grain', ...job })
   })
 }
 
