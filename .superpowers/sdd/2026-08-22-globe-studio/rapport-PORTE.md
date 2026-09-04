@@ -92,7 +92,7 @@ constante du zoom ordinaire n'a bougé d'un bit.**
 | **altitude de mort** | compatible avec la renaissance | **41 124 – 41 814 m** (avant 41 119 – 58 160) ; sur les 12 tours : **40 634 – 41 660** | ✅ |
 | **altitude au repos après la sortie** | — | **45 619 – 46 619 m** (avant 45 555 – **63 890**) | ✅ |
 | **un cran de dézoom ISOLÉ dans le crop** | le crop vit | `cropPose` **true→true 8/8** (`apres-d19-8.json`, geste `molette-1cran`) | ✅ |
-| **bouton map monde puis descente** | le crop renaît 8/8 | voir le § ⑤ | ✅ |
+| **bouton map monde puis descente** | le crop renaît 8/8 | **le crop renaît 8/8**, en **144 · 144 · 145 · 144 · 144 · 144 · 144 · 145** crans — c'est la descente de l'ORBITE entière (16 000 km), pas celle du crop ; voir le § ⑤ | ✅ |
 | **incliner au-delà de `SEUIL_MORT_M`** | le crop VIT (D21 ①) | ⚠️ voir le § ⑥ — **le geste ne peut pas atteindre le seuil**, et le crop vit 8/8 partout où il va | ✅ *sous réserve* |
 | **D19 — la molette vise le centre** | ≤ 1,4 px | `centre0DerivePx` = **0** sur les 8 | ✅ |
 | **D19 — le glissé attrape la Terre** | ≤ 0,2 px | `terreDerivePx` = **0** sur les 8 | ✅ |
@@ -119,7 +119,15 @@ de **120 crans** l'arrêtait en route. Relevé cran par cran, la descente est
 **parfaitement monotone** : cran 21 → 2 105 385 m, cran 51 → 799 554 m,
 cran 81 → 303 995 m, cran 120 → **79 803 m**, et il restait `ln(79 803/32 274) =
 0,9` nat à faire. **Rien n'était bloqué ; le banc avait rendu la main trop tôt.**
-Épreuve rejouée à plafond 300 : `apres-monde-8.json`.
+Épreuve rejouée à plafond 300 : **le crop renaît 8/8, en 144 à 145 crans**
+(`apres-monde-8.json`), une valeur d'une stabilité remarquable — la descente
+orbitale est déterministe, elle ne dépend pas de la cadence.
+
+⚠️ **144 crans, ce n'est PAS un défaut du crop et il ne faut pas le lire comme
+tel** : c'est le coût de remonter les 16 000 km que le bouton monde vient de
+mettre entre Adrien et son terrain. Le comparer aux 21 crans du retour à la
+molette serait comparer deux voyages qui n'ont ni le même départ ni la même
+longueur.
 
 ⚠️ **Et ce chemin-là ne passe par aucune ligne que j'ai touchée** : la poussée
 n'est pas armée (`poussee` faux du début à la fin), le mode est orbital, et
@@ -202,6 +210,10 @@ restent séparés**.
    orbitale qui part de 16 000 km. La courbe était monotone du premier au dernier
    cran. ⚡ **C'est le même piège que le voile `.ce-elemwrap` de SORTIE** : un
    dispositif qui rend la main trop tôt et un agent qui écrit « c'est cassé ».
+   Rejoué à plafond 300 : **144-145 crans, 8/8**. ⚠️ **Et c'est aussi le piège
+   qui a produit l'attribution que j'ai réfutée au § ①** — « la molette ne fait
+   plus rentrer » est très exactement ce qu'on écrit quand on a arrêté de
+   compter avant l'arrivée.
 
 5. **« Les 42 crans de la première passe sont une régression. »**
    ⛔ **Faux** : l'altitude de mort de cette passe vaut 41 682 m, dans le mille
@@ -219,10 +231,18 @@ restent séparés**.
 
 ## LES OCTETS, ET LES OUTILS
 
-- ⚠️ **Fins de ligne relues à l'octet** : `grep -c $'\r'` rend **0** sur
-  `src/main.js`, `src/modes.js`, `test/porte-crop.test.js`, `package.json` et
-  `scripts/sonde-porte.mjs`. `package.json` a été édité **en binaire**
+- ⚠️ **Fins de ligne relues à l'octet, EN BINAIRE** (`open(f,'rb').read()` puis
+  `.count(b'\r')`) : **CR = 0, CRLF = 0** sur `src/main.js` (15 314 LF),
+  `src/modes.js` (2 220), `test/porte-crop.test.js` (260), `package.json` (50) et
+  `scripts/sonde-porte.mjs` (202). `package.json` a été édité **en binaire**
   (`io.open(..., newline='')`), pas par un outil de texte.
+- ⛔ **ET L'OUTIL DE VÉRIFICATION LUI-MÊME M'A MENTI DANS LES DEUX SENS.**
+  `grep -c $'\r' fichier` a rendu **0** en appel direct et **15 314** — c'est-à-
+  dire le nombre de lignes, donc un motif vide qui matche tout — dans une boucle
+  `for`. **Deux réponses opposées sur le même fichier inchangé.** ⚡ Le brief
+  prévient « relis l'octet écrit » ; la leçon va plus loin : **une commande
+  shell qui construit son motif par échappement n'est pas une lecture d'octet.**
+  Le seul chiffre que je rapporte est celui du comptage binaire ci-dessus.
 - **Un banc neuf** : `scripts/sonde-porte.mjs` — épreuves `retour`, `ar3`,
   `monde`, `inclin` ; `127.0.0.1`, vol de démarrage attendu (distance stable
   1,5 s, `d > 100` — la pose tombe **à cheval** sur le seuil de naissance), voile
