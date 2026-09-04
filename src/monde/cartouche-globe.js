@@ -102,6 +102,35 @@ export function ancrageCartouche({ lat, lon, extentMeters, span }) {
 }
 
 /**
+ * LE REPÈRE DU CARTOUCHE PRIS SUR LES PAROIS DU CROP — Tâche CAR (VID2 N5).
+ *
+ * ⛔ **Pendant WIDENING, `ancrageCartouche` sur l'emprise DEMANDÉE faisait un
+ * cartouche 2× (jusqu'à 4×) plus grand que les parois** : la fenêtre bornée est
+ * recadrée sur le nouveau palier dès `entrerEnVol`, les parois gardent
+ * l'ancienne taille jusqu'à ce que le globe les repose. Mesuré à la sonde rAF :
+ * 1,994 · 1,998 · 2,000 · 4,000.
+ *
+ * Le cartouche est posé AUTOUR des parois ; sa vérité, c'est elles. Leur
+ * maillage porte déjà le repère (§1 : identique à `poseFond` à l'epsilon du
+ * double) et leur largeur en unités de globe : `echelle = largeur / span` est
+ * la MÊME similitude, prise par l'autre bout.
+ *
+ * @param {object|null} o
+ * @param {number[]} o.position position du maillage `crop-parois` (globe)
+ * @param {number[]} o.quaternion son quaternion
+ * @param {number} o.largeur sa largeur, en unités de GLOBE (boîte englobante ×
+ *   échelle du maillage)
+ * @param {number} o.span `TERRAIN_SIZE`
+ * @returns {{position:number[], quaternion:number[], echelle:number}|null}
+ *   `null` sans parois mesurables — jamais une échelle inventée
+ */
+export function poseDepuisParois(o) {
+  if (!o || !(o.largeur > 0) || !(o.span > 0)) return null
+  if (!Array.isArray(o.position) || o.position.length !== 3 || !Array.isArray(o.quaternion) || o.quaternion.length !== 4) return null
+  return { position: o.position, quaternion: o.quaternion, echelle: o.largeur / o.span }
+}
+
+/**
  * LE NIVEAU DE LA BASE, RAMENÉ EN UNITÉS DE BLOC.
  *
  * ⚠️ **C'est la seule conversion d'espace que le cartouche porte à la main** —
