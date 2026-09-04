@@ -92,6 +92,10 @@ const CATALOGUE_POSTES = {
   // le brief C1 demande de chiffrer (tuiles, maillage, temps d'image à ×4/×6),
   // et il n'existait pas : `surface` s'arrêtait à 130 km, sans crop.
   crop7: { alt: 600000, zoom: 7 },
+  // les deux paliers voisins de DIVE_TIERS, pour que la contre-proposition ait
+  // un chiffre et pas une opinion : z8 @ 200 km, z9 @ 100 km
+  crop8: { alt: 200000, zoom: 8 },
+  crop9: { alt: 100000, zoom: 9 },
   // le témoin : le MÊME cadrage, un cran plus haut, où le crop ne naît pas
   // encore (620 km > 600 km). L'écart des deux cellules EST le coût de D21 ③.
   temoinz7: { alt: 700000, zoom: 7 },
