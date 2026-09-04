@@ -4,7 +4,8 @@ import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
 import { gridNormals } from './grid-normals.js'
-import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
+import { detailField, detailFieldEmprise, accordeDetailScale, tintField, detailFieldEnCache, tintFieldEnCache, poserDetailField, poserTintField } from './detail-noise.js'
+import { extraireYNy } from './monde/teinte-relief.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
 import { coteMondialeDepuisChamp, rayonIncertitude, BASSIN_FRAC_DEFAUT } from './sea-mask.js'
 import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
@@ -45,7 +46,7 @@ import { GLSL_MELANGE } from './monde/melange-crop.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
-import { scheduleTerrainJob, jobStillValid, jobCouvertParEnVol } from './terrain-jobs.js'
+import { scheduleTerrainJob, jobStillValid, jobCouvertParEnVol, runTeinteJob, runGrainJob } from './terrain-jobs.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
 import { MATERIALS } from './material-catalog.js'
 import { FX_GLSL } from './fx-glsl.js' // shared with src/ui/fx-thumbs.js — see that file's header
@@ -2136,6 +2137,92 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
   }
 
+  // ══════════ LE GRAIN VA-T-IL S'AJOUTER AUX HAUTEURS DU FLUX ? — Tâche FLU ═══
+  //
+  // ⚠️ **LE MÊME PRÉDICAT QUE `_ecrireRelief`, EXPORTÉ POUR QU'IL N'Y EN AIT
+  // QU'UN.** `main.js` (`hauteursDeFlux`) demande à `appliquerHauteurs` de NE PAS
+  // écrire les normales quand `_ecrireRelief` va les refaire après le grain ;
+  // si les deux se posaient la question chacun de leur côté, une divergence
+  // laisserait une nappe SANS normales — un relief noir, sans une erreur.
+  grainSuivra(params) {
+    return this._detailEffectif(params) > 0
+  }
+
+  // ══════════ LE GRAIN CUIT D'AVANCE, HORS DU FIL — Tâche FLU, poste ④ ═════════
+  //
+  // ⛔ **`noise` = 1 407 ms DE FIL PRINCIPAL SUR LA DESCENTE À CPU ×4**, dans une
+  // seule tâche de 1 604 ms (`terrain.rebuild`, `.banc/sonde-descente-x4.log`) :
+  // c'est la cuisson du champ de grain (`detailField`) et du champ de teinte
+  // (`tintField`) au premier `rebuild` d'une résolution. Ces deux champs ne
+  // dépendent que de (graine, échelle, résolution, taille) — tout est connu
+  // bien avant qu'on descende. On les cuit donc dans le Worker de terrain dès
+  // qu'on sait qu'on va en avoir besoin (le début d'une plongée), et
+  // `_ecrireRelief` les trouve en cache. S'ils n'y sont pas encore (plongée
+  // plus rapide que le Worker), le chemin d'avant cuit en ligne : aucune
+  // régression possible, seulement un gain manqué.
+  //
+  // ⚠️ **LES MÊMES CLÉS QUE `_ecrireRelief`, PAS DES CLÉS RESSEMBLANTES** — le
+  // piège de `prechauffeFinesse` : `detailField(params.seed, params.detailScale,
+  // res, TERRAIN_SIZE)` et `tintField(params.seed + 101, res, TERRAIN_SIZE)`.
+  //
+  // @returns {Promise<boolean>} vrai si quelque chose a été cuit
+  prechauffeGrainHorsFil(params, res = this.resMaillage(params)) {
+    if (!(res > 0)) return Promise.resolve(false)
+    const seed = params.seed
+    const detailScale = params.detailScale
+    const seedTeinte = seed + 101
+    const detailManque = this.grainSuivra(params) && !detailFieldEnCache(seed, detailScale, res, TERRAIN_SIZE)
+    const teinteManque = !tintFieldEnCache(seedTeinte, res, TERRAIN_SIZE)
+    if (!detailManque && !teinteManque) return Promise.resolve(false)
+    const cle = `${seed}|${detailScale}|${res}|${detailManque}|${teinteManque}`
+    if (this._grainEnVol === cle) return Promise.resolve(false) // déjà parti
+    this._grainEnVol = cle
+    return runGrainJob({ seed, detailScale, res, size: TERRAIN_SIZE, seedTeinte })
+      .then((r) => {
+        if (this._grainEnVol === cle) this._grainEnVol = null
+        if (!r) return false
+        if (detailManque && r.detail) poserDetailField(seed, detailScale, res, TERRAIN_SIZE, r.detail)
+        if (teinteManque && r.teinte) poserTintField(seedTeinte, res, TERRAIN_SIZE, r.teinte)
+        return true
+      })
+      .catch(() => { if (this._grainEnVol === cle) this._grainEnVol = null; return false })
+  }
+
+  // ══════════ LA TEINTE PAR SOMMET, UNE IMAGE PLUS TARD — Tâche FLU, poste ④ ══
+  //
+  // ⛔ **`natGris` = 1 118 ms DE FIL PRINCIPAL SUR LA DESCENTE À CPU ×4**, rejouée
+  // à chaque tuile qui atterrit : deux `Math.pow` par sommet sur toute la nappe.
+  // La couleur n'est lue que par le GPU. Sur le chemin du RAFFINEMENT (une nappe
+  // déjà peinte, dont les hauteurs viennent de bouger d'un cran), elle part
+  // donc dans le Worker et revient écrire l'attribut `color` en place, une
+  // image ou deux plus tard — pendant lesquelles la nappe garde la teinte du
+  // raffinement précédent, à quelques millièmes de la nouvelle.
+  //
+  // ⚠️ **PAS SUR UNE GÉOMÉTRIE NEUVE, NI SUR UN CHANGEMENT DE NIVEAU** :
+  // `_ecrireRelief` ne délègue que si l'appelant le demande (`teinteDeportee`),
+  // et seul `rafraichirFenetre` le demande. Un `rebuild` peint en ligne, comme
+  // avant — une nappe sans couleur serait noire le temps du voyage.
+  //
+  // ⚠️ **UN JETON PAR ENVOI, ET LE DERNIER GAGNE** : deux raffinements en vol,
+  // le premier qui revient ne doit pas recouvrir le second. Et si la géométrie
+  // a été remplacée entre-temps (changement de résolution), le résultat est
+  // jeté : sa taille ne serait de toute façon plus la bonne.
+  _posterTeinte(geo, cAtt, { arr, normals, count, minH, maxH, params, res }) {
+    const jeton = (this._teinteJeton = (this._teinteJeton || 0) + 1)
+    const { y, ny } = extraireYNy(arr, normals, count)
+    runTeinteJob({ y, ny, count, minH, maxH, seedTeinte: params.seed + 101, res, size: TERRAIN_SIZE })
+      .then((r) => {
+        if (!r?.colors) return
+        if (jeton !== this._teinteJeton) return // un raffinement plus récent est parti
+        if (this.mesh.geometry !== geo || geo.attributes.color !== cAtt) return // géométrie remplacée
+        if (cAtt.array.length < r.colors.length) return
+        cAtt.array.set(r.colors)
+        cAtt.needsUpdate = true
+        this._teintesDeportees = (this._teintesDeportees || 0) + 1
+      })
+      .catch((err) => console.warn('[teinte] travail perdu, la nappe garde sa teinte précédente', err))
+  }
+
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
   _makeDemSampler(params) {
     const dem = this.dem
@@ -2445,7 +2532,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // sous la ligne d'eau et empêche des îles fantômes.
       const detail = this._detailEffectif(params)
       const hM = depuisFlux.hauteursM
-      const grain = detail > 0 && hM ? detailField(params.seed, params.detailScale, res, TERRAIN_SIZE) : null
+      // ⚠️ pas de grain sur la nappe d'attente (`vide`, Tâche FLU) : elle est plate
+      const grain = !depuisFlux.vide && detail > 0 && hM ? detailField(params.seed, params.detailScale, res, TERRAIN_SIZE) : null
       if (grain) {
         for (let i = 0; i < count; i++) {
           const landFactor = smoothstep(0, 90, hM[i])
@@ -2510,11 +2598,25 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `COTE_MONDE / n`). Les recalculer rendrait exactement les mêmes nombres
     // pour 1,2 ms de plus par image à n = 384 (mesure de la Tâche 6 ter).
     const nAtt = geo.attributes.normal
-    const normals = depuisFlux && nAtt && !depuisFlux.normalesAFaire
+    // ⚠️ **`normalesManquantes` — Tâche FLU** : `appliquerHauteurs` a pu SAUTER
+    // les normales parce qu'on lui a dit que le grain suivrait (voir
+    // `grainSuivra`). Si le grain n'est finalement pas venu (`grain` nul), on les
+    // écrit ici quand même : une nappe sans normales est un relief noir.
+    const normals = depuisFlux && nAtt && !depuisFlux.normalesAFaire && !depuisFlux.normalesManquantes
       ? nAtt.array
       : gridNormals(arr, res, TERRAIN_SIZE, nAtt?.array)
     if (nAtt) nAtt.needsUpdate = true
     else geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+
+    const cAtt = geo.attributes.color
+    // ══════ LA TEINTE DÉPORTÉE — Tâche FLU, voir `_posterTeinte` ══════════════
+    // Sur le chemin du raffinement, la nappe est déjà peinte : la nouvelle
+    // teinte part dans le Worker et reviendra écrire `color` en place. Tout ce
+    // qui suit — le calcul en ligne — est ce qu'elle fera là-bas, à l'octet.
+    if (depuisFlux?.teinteDeportee && cAtt) {
+      this._posterTeinte(geo, cAtt, { arr, normals, count, minH, maxH, params, res })
+      return { minH, maxH }
+    }
 
     // vertex tint: height-graded value + slope darkening + grain jitter
     // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
@@ -2523,7 +2625,6 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // au changement de zoom, au curseur d'exagération et à la palette.
     // Bit-identique, verrouillé par test/detail-noise.test.js.
     const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
-    const cAtt = geo.attributes.color
     // ⚠️ `pos.count` ET NON `count` : un attribut plus court que `position` est
     // une erreur WebGL, pas un dessin partiel. Sur le chemin de production les
     // deux valent `(res+1)²` ; sous la fenêtre bornée, `pos.count` porte la jupe
@@ -2761,6 +2862,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   _remplirDepuisFlux(params, geo, res) {
     if (!params?.globeContinu) return null
     if (typeof this.hauteursDeFlux !== 'function') return null
+    if (this._repliProcedural) return null // réseau tombé : le relief procédural, comme avant
     const f = this.fenetreBornee
     if (!f || f.n !== res) return null
     if (geo?.attributes?.position?.array !== f.geometrie) return null
@@ -2774,10 +2876,26 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       return null
     }
     // ⚠️ **`remplis === 0` N'EST PAS UNE ERREUR, C'EST UN SOCLE VIDE** — aucune
-    // tuile prête ne couvre encore l'emprise. On rend `null` : le MNT écrit ce
-    // qu'il a (au pire le relief procédural), plutôt qu'un pavé rigoureusement
-    // plat qui se lirait comme une panne.
-    if (!r || !(r.remplis > 0)) return null
+    // tuile prête ne couvre encore l'emprise. Le MNT écrit alors ce qu'il a…
+    //
+    // ⛔ **…ET « CE QU'IL A », PENDANT UNE PLONGÉE, C'ÉTAIT LE RELIEF PROCÉDURAL :
+    // 2 908 ms DE FIL PRINCIPAL À CPU ×4 POUR UN BLOC QUE PERSONNE NE VOIT** —
+    // Tâche FLU. `entrerEnVol` pose `dem = null` puis reconstruit ; les tuiles
+    // viennent d'être demandées dans ce même appel et aucune n'est là. La règle
+    // d'avant (« plutôt du procédural qu'un pavé plat qui se lirait comme une
+    // panne ») coûtait un fbm/ridged par sommet — `noise`, 1 407 ms de temps
+    // propre dans le profil de PA — pour des montagnes d'ailleurs, remplacées
+    // quelques centaines de millisecondes plus tard. Depuis que le globe garde
+    // les hauteurs récentes (`_retenirHauteurs`), ce cas ne se présente qu'à
+    // froid ; on pose alors une nappe PLATE à `HAUTEUR_ATTENTE_M`, au-dessus de
+    // la ligne d'eau, que le premier raffinement recouvre. Le repli procédural
+    // explicite (`rebuild(params, { repliProcedural: true })`, réseau tombé)
+    // garde le chemin d'avant.
+    // C'est le crochet (`main.js`, `hauteursDeFlux`) qui pose la nappe d'attente
+    // et le dit (`vide: true`) : lui seul sait que le MNT est en vol, et lui
+    // seul importe `appliquerHauteurs` sans fermer un cycle d'import.
+    if (!r || (!(r.remplis > 0) && !r.vide)) return null
+    if (r.vide) r.teinteDeportee = true // la teinte part au Worker, la nappe est plate
     // les hauteurs EN MÈTRES voyagent avec le compte rendu : `_ecrireRelief` en
     // a besoin pour éteindre le grain sous la ligne d'eau (`landFactor`).
     r.hauteursM = f.hauteursM
@@ -2803,6 +2921,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const res = this.resMaillage(params)
     const depuisFlux = this._remplirDepuisFlux(params, geo, res)
     if (!depuisFlux) return null
+    // la teinte part dans le Worker sur ce chemin-ci — et seulement celui-ci
+    // (Tâche FLU, `_posterTeinte`)
+    depuisFlux.teinteDeportee = true
     const { minH, maxH } = this._ecrireRelief(geo, params, res, null, null, depuisFlux)
     this.sample = this._makeFenetreSampler(this.fenetreBornee)
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
@@ -2881,7 +3002,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return null
   }
 
-  rebuild(params) {
+  rebuild(params, { repliProcedural = false } = {}) {
+    // voir `_remplirDepuisFlux` : le repli procédural ne se demande plus, il se DIT
+    this._repliProcedural = repliProcedural
     const res = this._resAmorce(params)
     // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
     // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
@@ -3424,24 +3547,41 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       return
     }
     const size = 512
-    const rng = mulberry32(params.seed + 777)
-    const s = new Simplex2(rng)
-    const data = new Uint8Array(size * size * 4)
+    // ══════ LES PIXELS SONT MÉMORISÉS PAR RÉGLAGE — Tâche FLU ═══════════════════
+    //
+    // ⛔ **300 À 460 ms DE FIL PRINCIPAL À CHAQUE RECONSTRUCTION, À CPU ×4**
+    // (`.banc/sonde-descente-x4.log`, `terrain.rebuildRoughness`), pour un champ
+    // qui ne dépend QUE de (graine, échelle, rugosité, variation) — six octaves
+    // de simplex sur 262 144 texels, recuites à chaque cran, à chaque plongée,
+    // à chaque curseur d'exagération, pour rendre les mêmes octets. On garde les
+    // deux derniers champs ; les textures, elles, sont refaites (elles sont
+    // disposées plus bas) — une `DataTexture` sur un tampon existant ne coûte
+    // rien avant son téléversement.
     const sc = params.roughnessScale
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const u = x / size
-        const v = y / size
-        const n = fbm(s, u * sc, v * sc, 4, 2.2, 0.55)
-        const n2 = fbm(s, u * sc * 7 + 13, v * sc * 7 - 5, 2, 2.2, 0.5)
-        const rough = THREE.MathUtils.clamp(params.roughness + params.roughnessVariation * n, 0.04, 1)
-        const bump = 0.5 + 0.5 * (n * 0.6 + n2 * 0.4)
-        const i = (y * size + x) * 4
-        data[i] = Math.round(bump * 255) // bump reads red-ish luminance
-        data[i + 1] = Math.round(rough * 255) // roughness reads green
-        data[i + 2] = Math.round(bump * 255)
-        data[i + 3] = 255
+    const cle = `${params.seed}|${sc}|${params.roughness}|${params.roughnessVariation}`
+    const memo = (Terrain._rugositeMemo ||= new Map())
+    let data = memo.get(cle)
+    if (!data) {
+      const rng = mulberry32(params.seed + 777)
+      const s = new Simplex2(rng)
+      data = new Uint8Array(size * size * 4)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const u = x / size
+          const v = y / size
+          const n = fbm(s, u * sc, v * sc, 4, 2.2, 0.55)
+          const n2 = fbm(s, u * sc * 7 + 13, v * sc * 7 - 5, 2, 2.2, 0.5)
+          const rough = THREE.MathUtils.clamp(params.roughness + params.roughnessVariation * n, 0.04, 1)
+          const bump = 0.5 + 0.5 * (n * 0.6 + n2 * 0.4)
+          const i = (y * size + x) * 4
+          data[i] = Math.round(bump * 255) // bump reads red-ish luminance
+          data[i + 1] = Math.round(rough * 255) // roughness reads green
+          data[i + 2] = Math.round(bump * 255)
+          data[i + 3] = 255
+        }
       }
+      memo.set(cle, data)
+      while (memo.size > 2) memo.delete(memo.keys().next().value)
     }
     const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat)
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping

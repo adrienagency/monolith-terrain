@@ -341,6 +341,12 @@ test('④ bis `demanderEmprise` (étape 3) passe par le rechargement sur place :
   const nw = latLonDe(t.z, t.x, t.y), se = latLonDe(t.z, t.x + 1, t.y + 1)
   const emprise = { ouest: nw.lon, est: se.lon, sud: Math.min(nw.lat, se.lat), nord: Math.max(nw.lat, se.lat) }
   const maillages = new Map(dessinees.map((t) => [t.key, t.mesh]))
+  // ⚠️ **Tâche FLU : le globe garde les hauteurs des 24 dernières tuiles
+  // maillées** (`_retenirHauteurs`), donc une tuile qu'on vient de dessiner les
+  // a ENCORE, et le flux n'a rien à recharger — c'est le gain voulu. Ce test-ci
+  // vérifie le chemin du RECHARGEMENT SUR PLACE, celui d'une tuile plus
+  // ancienne : on vieillit donc les dessinées, comme la file l'aurait fait.
+  for (const d of dessinees) d.heights = null
   _resetTileMemo()
   porte = true
   urls.clear()

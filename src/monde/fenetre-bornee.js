@@ -610,7 +610,7 @@ export function construireFenetre ({
  * `construireFenetre` ; ici on n'écrit que des `y`. C'est toute la raison d'être
  * de ce module : c'est ce geste-là qui remplace le cran.
  */
-export function appliquerHauteurs (fenetre) {
+export function appliquerHauteurs (fenetre, { normales = true } = {}) {
   const { geometrie, hauteursM, nbGrille, anneau, iBas, iCentre } = fenetre
   let somme = 0
   let minM = Infinity
@@ -674,7 +674,13 @@ export function appliquerHauteurs (fenetre) {
   // À coins vifs : **0,022°**, l'arrondi Float32 et rien d'autre — c'est
   // pourquoi le branchement de la Tâche 6 ter prend `rayonCoin = 0` et laisse la
   // forme du coin à `plinth.js`, exactement comme aujourd'hui.
-  gridNormals(geometrie, fenetre.n, COTE_MONDE, fenetre.normales)
+  // ⚠️ **`normales: false` — Tâche FLU.** Quand le grain FBM va s'ajouter aux `y`
+  // juste après (`_ecrireRelief`, chemin du flux), celui-ci REFAIT les normales
+  // sur la surface finale : les calculer ici, c'est les calculer deux fois par
+  // raffinement (594 ms de `gridNormals` sur une descente à CPU ×4, pour moitié
+  // jetés). L'appelant qui le sait le dit ; sans rien dire, le comportement est
+  // celui d'avant, au bit près.
+  if (normales) gridNormals(geometrie, fenetre.n, COTE_MONDE, fenetre.normales)
 
   fenetre.moyenneM = moyenneM
   fenetre.minM = minM
@@ -753,7 +759,7 @@ export function recadrerFenetre (fenetre, { emprise, largeurM, exageration, prof
  *   bancs, qui n'ont pas de globe.
  * @returns {void}
  */
-export function majHauteurs (fenetre, fluxTerrain) {
+export function majHauteurs (fenetre, fluxTerrain, { normales = true } = {}) {
   if (!fenetre || !fenetre.hauteursM) {
     throw new TypeError('majHauteurs : il faut une fenêtre de `construireFenetre`')
   }
@@ -771,7 +777,7 @@ export function majHauteurs (fenetre, fluxTerrain) {
     }
     fenetre.remplis = remplis
     fenetre.manquants = cible.length - remplis
-    appliquerHauteurs(fenetre)
+    appliquerHauteurs(fenetre, { normales })
     return
   }
   const { remplis, manquants } = remplirHauteurs(fluxTerrain, {
@@ -781,7 +787,7 @@ export function majHauteurs (fenetre, fluxTerrain) {
   })
   fenetre.remplis = remplis
   fenetre.manquants = manquants
-  appliquerHauteurs(fenetre)
+  appliquerHauteurs(fenetre, { normales })
 }
 
 // ══════════ 5. LE CONTOUR QUE `plinth.js` ATTEND, À L'ARRÊT ═════════════════

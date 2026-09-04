@@ -5,10 +5,22 @@
 // octet pour octet, et contre `detectLakes` cellule pour cellule. Ce fichier
 // n'est que la boîte aux lettres : s'il grossit, c'est que du calcul s'est
 // glissé hors de la portée du test.
-import { computeTerrainJob, computeLakeJob } from './terrain-jobs.js'
+import { computeTerrainJob, computeLakeJob, computeTeinteJob, computeGrainJob } from './terrain-jobs.js'
 
 self.onmessage = (e) => {
   const { id, kind, ...job } = e.data
+  // la teinte par sommet et le grain du bloc — Tâche FLU, voir terrain-jobs.js.
+  // Les tableaux de résultat sont TRANSFÉRÉS : le Worker n'en a plus l'usage.
+  if (kind === 'teinte') {
+    const { colors, transfert } = computeTeinteJob(job)
+    self.postMessage({ id, colors }, transfert)
+    return
+  }
+  if (kind === 'grain') {
+    const { detail, teinte, transfert } = computeGrainJob(job)
+    self.postMessage({ id, detail, teinte }, transfert)
+    return
+  }
   // ⚠️ `kind` est RETIRÉ du travail avant de le passer au calcul : les deux
   // fonctions déstructurent leurs entrées, une clé de routage qui traînerait
   // dedans finirait par s'appeler comme un réglage.

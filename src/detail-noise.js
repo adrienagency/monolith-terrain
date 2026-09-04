@@ -57,6 +57,20 @@ export function detailField(seed, detailScale, res, size) {
     cache.set(cle, memo)
     return memo
   }
+  const champ = cuireDetailField(seed, detailScale, res, size)
+  cache.set(cle, champ)
+  while (cache.size > MAX_ENTREES) cache.delete(cache.keys().next().value)
+  return champ
+}
+
+/**
+ * LA CUISSON SEULE, sans cache — Tâche FLU. C'est ce que le Worker de terrain
+ * exécute (`terrain-jobs.js`, `kind: 'grain'`) : un Worker qui passerait par
+ * `detailField` garderait dans SON cache un tableau qu'il vient de TRANSFÉRER,
+ * c'est-à-dire un tableau détaché. Le fil principal range le résultat avec
+ * `poserDetailField`. Le code est celui de `detailField`, déplacé, pas récrit.
+ */
+export function cuireDetailField(seed, detailScale, res, size) {
   const s = new Simplex2(mulberry32(seed))
   const n = res + 1
   const champ = new Float64Array(n * n * 2)
@@ -71,9 +85,21 @@ export function detailField(seed, detailScale, res, size) {
       champ[k + 1] = fbm(s, x * detailScale * 4.1 + 31, z * detailScale * 4.1 - 17, 2, 2.2, 0.5)
     }
   }
+  return champ
+}
+
+/** Un champ cuit AILLEURS (le Worker) entre dans le cache, sous la même clé et la même éviction. */
+export function poserDetailField(seed, detailScale, res, size, champ) {
+  const cle = `${seed}|${detailScale}|${res}|${size}`
+  if (cache.has(cle)) return false // déjà là (cuit en ligne entre-temps) : on ne remplace pas
   cache.set(cle, champ)
   while (cache.size > MAX_ENTREES) cache.delete(cache.keys().next().value)
-  return champ
+  return true
+}
+
+/** Le champ est-il déjà en cache ? (sans le cuire) */
+export function detailFieldEnCache(seed, detailScale, res, size) {
+  return cache.has(`${seed}|${detailScale}|${res}|${size}`)
 }
 
 /** Vide le cache — tests uniquement. */
@@ -226,6 +252,14 @@ export function tintField(seed, res, size) {
     cacheTeinte.set(cle, memo)
     return memo
   }
+  const champ = cuireTintField(seed, res, size)
+  cacheTeinte.set(cle, champ)
+  while (cacheTeinte.size > MAX_TEINTE) cacheTeinte.delete(cacheTeinte.keys().next().value)
+  return champ
+}
+
+/** La cuisson seule, sans cache — même raison que `cuireDetailField` (Tâche FLU). */
+export function cuireTintField(seed, res, size) {
   const s = new Simplex2(mulberry32(seed))
   const n = res + 1
   const champ = new Float64Array(n * n)
@@ -237,9 +271,20 @@ export function tintField(seed, res, size) {
       champ[iy * n + ix] = fbm(s, Math.fround(ix * seg - half) * 1.7, z * 1.7, 2, 2.2, 0.5)
     }
   }
+  return champ
+}
+
+/** Un champ de teinte cuit ailleurs entre dans le cache — voir `poserDetailField`. */
+export function poserTintField(seed, res, size, champ) {
+  const cle = `${seed}|${res}|${size}`
+  if (cacheTeinte.has(cle)) return false
   cacheTeinte.set(cle, champ)
   while (cacheTeinte.size > MAX_TEINTE) cacheTeinte.delete(cacheTeinte.keys().next().value)
-  return champ
+  return true
+}
+
+export function tintFieldEnCache(seed, res, size) {
+  return cacheTeinte.has(`${seed}|${res}|${size}`)
 }
 
 /** Vide le cache de teinte — tests uniquement. */

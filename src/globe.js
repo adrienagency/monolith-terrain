@@ -871,6 +871,10 @@ const CACHE_MAX = 600 // ready tiles kept before LRU eviction
 // demandé, au prix d'une facture que personne n'a arbitrée. **La production
 // garde donc exactement le budget que la Tâche 4 sexies lui a mesuré.**
 const CACHE_MAX_CONTINU = 1700
+// les hauteurs des N dernières tuiles maillées restent lisibles — Tâche FLU,
+// voir `_retenirHauteurs` : c'est ce qui permet au socle de se poser sur le
+// relief du PARENT à la plongée au lieu de cuire un relief procédural
+export const HAUTEURS_RECENTES_MAX = 24
 
 // ⚠️ LE PLAFOND DE LA **FILE**, ET CE N'EST PAS LE PLAFOND DE REQUÊTES
 // SIMULTANÉES (plan « globe continu », Tâche 4 bis). Celui-là existe déjà et ne
@@ -7809,6 +7813,17 @@ export class Globe {
    */
   _tuileLaPlusFine(lat, lon, candidates = null) {
     const liste = candidates || this.tuilesAvecHauteurs()
+    // ══════ LE `break` — Tâche FLU, poste ③ (réserve 1 de D16-b) ═════════════
+    //
+    // ⚠️ **LE PARCOURS COMPLET COÛTAIT 1 698 ms DE FIL PRINCIPAL À z6** (3,27 µs
+    // par sommet × 519 404 sommets) pour un résultat connu dès la première tuile
+    // qui couvre : `tuilesAvecHauteurs()` trie déjà du plus fin au plus grossier,
+    // et rien après la première ne peut être plus fin. Mais `candidates` est un
+    // paramètre public et `test/crop-parois.test.js` exige que « l'ordre de la
+    // liste ne fasse rien » : le raccourci ne s'applique qu'aux listes que
+    // `tuilesAvecHauteurs()` a ÉTIQUETÉES (`trieeFinAbord`), jamais par
+    // supposition. `test/tuile-la-plus-fine.test.js` mord dans les deux sens.
+    const triee = liste.trieeFinAbord === true
     const mx = mercX(lon)
     const my = mercY(lat)
     let best = null
@@ -7828,15 +7843,21 @@ export class Globe {
       const ty = my * n - t.y
       if (tx < 0 || tx >= 1 || ty < 0 || ty >= 1) continue
       if (!best || t.z > best.t.z) best = { t, tx, ty }
+      if (triee) break // la première qui couvre est la plus fine : le reste est du travail perdu
     }
     return best
   }
 
-  /** Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier. */
+  /**
+   * Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier.
+   * ⚠️ **ÉTIQUETÉE `trieeFinAbord`** : c'est ce qui autorise `_tuileLaPlusFine` à
+   * s'arrêter à la première tuile qui couvre (Tâche FLU).
+   */
   tuilesAvecHauteurs() {
     const out = []
     for (const t of this.tiles.values()) if (t.heights) out.push(t)
     out.sort((a, b) => b.z - a.z)
+    out.trieeFinAbord = true
     return out
   }
 
@@ -9457,7 +9478,38 @@ export class Globe {
     // lève `Cannot read properties of undefined`, et ce test vérifie la
     // précision des sommets à l'échelle planétaire : il ne doit pas payer pour
     // une réservation de hauteurs.
-    if (!this.gardeHauteurs?.has(t.key)) t.heights = null
+    // (même `?.`-prudence que ci-dessus : le `this` emprunté des tests n'a pas de file)
+    if (!this.gardeHauteurs?.has(t.key)) {
+      if (typeof this._retenirHauteurs === 'function') this._retenirHauteurs(t)
+      else t.heights = null
+    }
+  }
+
+  // ══════════ LES HAUTEURS RÉCENTES — Tâche FLU, « afficher le parent » ═══════
+  //
+  // ⛔ **AU MOMENT DE LA PLONGÉE, LE SOCLE NE TROUVAIT AUCUNE HAUTEUR À LIRE, ET
+  // CUISAIT UN RELIEF PROCÉDURAL DE 591 361 SOMMETS QUE PERSONNE NE VERRAIT.**
+  // Mesuré (`.banc/sonde-descente-x4.log`, CPU ×4) : `remplirDepuisFlux → null`
+  // au premier `rebuild` de la plongée, puis `terrain.rebuild` **2 908 ms** dans
+  // une tâche de **4 072 ms** — c'est `noise` à 1 407 ms de temps propre dans le
+  // profil de PA, un fbm/ridged par sommet sur un bloc remplacé quelques
+  // centaines de millisecondes plus tard par les tuiles. Les PARENTS de
+  // l'emprise (z8–z11) venaient pourtant d'être dessinés pendant la descente :
+  // leurs hauteurs avaient été relâchées à la ligne ci-dessus, dès le maillage.
+  //
+  // On garde donc les hauteurs des `HAUTEURS_RECENTES_MAX` dernières tuiles
+  // maillées — une file bornée, **24 × 1 Mo au pire** (512² × 4 octets), contre
+  // 435 Mo si on gardait tout (commentaire ci-dessus). À la plongée, ce sont
+  // exactement les tuiles qu'on vient de traverser : `remplirHauteurs` les
+  // trouve, le socle se pose sur le relief du parent, et le fin l'affine.
+  // `gardeHauteurs` prime : une tuile réservée par le flux n'est jamais vidée ici.
+  _retenirHauteurs(t) {
+    const file = (this._hauteursRecentes ||= [])
+    file.push(t)
+    while (file.length > HAUTEURS_RECENTES_MAX) {
+      const v = file.shift()
+      if (v !== t && !this.gardeHauteurs?.has(v.key)) v.heights = null
+    }
   }
 
   // --------------------------------------------------------------- per-frame

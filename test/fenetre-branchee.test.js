@@ -996,7 +996,8 @@ test('⑩h `main.js` BRANCHE LE CROCHET, ET IL PASSE PAR R3 ET PAR `majHauteurs`
   assert.equal(appels.length, 2, `deux appelants attendus, ${appels.length} trouvés`)
   for (const a of appels) assert.ok(/aussi: empriseZoomMer\(\)/.test(a), `appel sans \`aussi\` : ${a}`)
   assert.equal(/remplirBorne\(/.test(code), false, '`remplirBorne` est revenu sur le chemin du socle : relire la mesure avant de le remettre')
-  assert.ok(/majHauteurs\(fenetre, flux\)/.test(code), '`majHauteurs` n\'est plus appelé en production')
+  // (Tâche FLU : l'appel porte une option `{ normales }` — c'est toujours lui)
+  assert.ok(/majHauteurs\(fenetre, flux[,)]/.test(code), '`majHauteurs` n\'est plus appelé en production')
   // ⚠️ et le recadrage passe AVANT le remplissage, sinon le socle reste collé
   // au premier lieu chargé (mesuré à l'écran sur quatre lieux).
   const iRecadre = code.indexOf('recadrerFenetre(fenetre')
