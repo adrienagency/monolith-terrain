@@ -7038,7 +7038,36 @@ modes = new Modes({
     // loi du mode plat hérité — où viser un point EST le produit. Le terme
     // `terreUniqueBranchee` est donc la moitié de la question, pas une prudence.
     // `?terre=deux` rend le dépôt d'avant, au bit près.
-    horsDuCrop: () => terreUniqueBranchee && !veilleCrop?.pose,
+    //
+    // ⚡ **D21 — `auBloc`, PAS `pose`, ET C'EST LA DÉCISION LA PLUS LOURDE DE
+    // CETTE TÂCHE. Elle protège D19, que D21 dit expressément ne pas abroger.**
+    //
+    // Ce prédicat ne décide pas seulement du pivot : il décide du **RÉGIME DE
+    // GESTES** (`regimeGeste` → `regimeTerreActif` → `appliqueBoutonsSouris`,
+    // `gesteDuBouton`). Le « régime de la Terre » — le vocabulaire de Google
+    // Earth de D19/GE2/GE3, glissé = on attrape la Terre, clic droit = zoom,
+    // milieu = inclinaison et cap — vit exactement là où `horsDuCrop` est vrai.
+    //
+    // ⛔ **Sur `pose`, D21 ③ l'amputerait de 600 km à 32 km — une bande de
+    // 568 km** où les trois gestes de D19 repasseraient d'un coup à
+    // OrbitControls (`gestes-terre.js:139` : `if (regime === REGIME.CROP) return
+    // GESTE.INERTE`). Personne ne l'a demandé, et deux conséquences en
+    // découlent : le clic droit y redeviendrait un PAN — donc **la deuxième
+    // sortie de D21 ① n'existerait plus comme geste** —, et le pivot passerait à
+    // l'axe du bloc en vue continentale, contre R27 (« il change uniquement
+    // quand on passe en mode bloc croppé »).
+    //
+    // ➡️ **La géométrie du crop naît à z7 ; le RÉGIME de gestes, lui, reste au
+    // bloc.** Ce sont deux questions, et D21 n'en déplace qu'une. Sur `auBloc`,
+    // le pivot bascule à 32 274,3 m — exactement où il basculait avant D21.
+    horsDuCrop: () => terreUniqueBranchee && !veilleCrop?.auBloc,
+    // ⚡ **D21 ① — LE CROCHET DU PINCEMENT.** `modes.js` fabrique un faux
+    // événement de molette pour le pincement et le donne à `_zoomGesture` sans
+    // passer par le DOM : l'écouteur `wheel` de ce fichier ne le voit pas. Ce
+    // crochet est le seul chemin par lequel un pincement d'écartement peut armer
+    // la sortie du crop. ⚠️ **Même fonction que les trois autres gestes** — une
+    // seconde écriture du sens du dézoom serait une loi de plus à tenir.
+    intentionZoom: (deltaY) => intentionZoom(deltaY),
     // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
     // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
     // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à
@@ -14192,6 +14221,13 @@ function appliquerGestesTerre(dt) {
     const pas = Math.sign(c.restant) * Math.min(Math.abs(c.restant), c.parImage)
     c.restant -= pas
     gestesTerre.dLogGlisse += pas
+    // ⚡ **D21 ① — LE DOUBLE-CLIC EST UN ZOOM, DONC UNE INTENTION.** Le
+    // double-clic DROIT dézoome (`zoomDuDoubleClic`, `gestes-terre.js`) : il
+    // passe par la même porte que le clic droit maintenu, et il doit armer la
+    // sortie par le même chemin. ⚠️ `pas` est du LOG de distance et non un
+    // `deltaY` — mais `intentionZoom` ne lit que son SIGNE, et les deux ont la
+    // même convention (positif = on s'éloigne).
+    intentionZoom(pas)
     if (Math.abs(c.restant) < 1e-12) gestesTerre.courseDoubleClic = null
   }
   if (gestesTerre.dLogGlisse && dt > 1e-4 && !(modes.busy || modes._diveTween || modes.travel || modes._fonduPose)) {

@@ -44,6 +44,7 @@ import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
 import { creerVeilleRepos } from '../src/monde/veille-repos.js'
 import { creerVeilleSocle } from '../src/monde/veille-socle.js'
 import { DIVE_TIERS } from '../src/modes.js'
+import { gesteDuBouton, GESTE, REGIME } from '../src/monde/gestes-terre.js'
 
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 const BARS = readFileSync(new URL('../src/ui/bars.js', import.meta.url), 'utf8')
@@ -257,6 +258,46 @@ test('② quinquies ⛔ LES BOUTONS DE CAMÉRA NE SORTENT PAS DU CROP', () => {
   const corps = MAIN.slice(j, MAIN.indexOf('\n}', j))
   assert.ok(!/armerSortie|intentionZoom/.test(corps),
     'un bouton de caméra arme la sortie du crop — D21 ② tombe')
+})
+
+test('② sexies LE DOUBLE-CLIC ET LE PINCEMENT ARMENT AUSSI — les deux portes dérobées', () => {
+  // ⛔ **DEUX CHEMINS DE ZOOM NE PASSENT PAR AUCUN `wheel` DU DOM.**
+  //   · le double-clic droit verse son cran dans `dLogGlisse` image par image
+  //     (`courseDoubleClic`), pas dans `surPointerMoveGeste` ;
+  //   · le pincement FABRIQUE un faux événement de molette et le donne à
+  //     `_zoomGesture` directement (`modes.js`) — le DOM ne le voit jamais.
+  // Sans ces deux-là, un double-clic droit et un pincement d'écartement ne
+  // pourraient plus sortir du crop.
+  assert.match(MAIN, /intentionZoom\(pas\)/)
+  const MODES = readFileSync(new URL('../src/modes.js', import.meta.url), 'utf8')
+  assert.match(MODES, /this\.hooks\.intentionZoom\?\.\(m\.deltaY\)/)
+  assert.match(MAIN, /intentionZoom:\s*\(deltaY\)\s*=>\s*intentionZoom\(deltaY\)/)
+  // ⚠️ et le crochet est posé AVANT `_zoomGesture`, qui sort tôt sur six gardes
+  assert.ok(
+    MODES.indexOf('this.hooks.intentionZoom?.(m.deltaY)') < MODES.indexOf('this._zoomGesture({ deltaY: m.deltaY'),
+    'le crochet est posé après la porte du zoom — il se perdrait sur ses gardes'
+  )
+})
+
+test('② septies ⛔ D19 GARDE SON DOMAINE — le régime de la Terre reste au BLOC', () => {
+  // ⛔ **LA RÉGRESSION LA PLUS LOURDE QUE D21 ③ POUVAIT CAUSER, ET ELLE EST
+  // FERMÉE ICI.** `horsDuCrop` décide du RÉGIME DE GESTES (`regimeGeste` →
+  // `regimeTerreActif` → `appliqueBoutonsSouris`, `gesteDuBouton`). Sur `pose`,
+  // le vocabulaire Google Earth de D19/GE2/GE3 serait rendu à OrbitControls de
+  // 600 km à 32 km — une bande de 568 km — et avec lui la DEUXIÈME SORTIE de
+  // D21 ① (le clic droit y redeviendrait un PAN). D21 dit expressément qu'elle
+  // n'abroge pas D19.
+  assert.match(MAIN, /horsDuCrop:\s*\(\)\s*=>\s*terreUniqueBranchee\s*&&\s*!veilleCrop\?\.auBloc/)
+  assert.ok(!/horsDuCrop:\s*\(\)\s*=>\s*terreUniqueBranchee\s*&&\s*!veilleCrop\?\.pose/.test(MAIN))
+  // et le prédicat pur confirme que le clic droit N'EST un zoom que hors du crop
+  assert.equal(gesteDuBouton({ bouton: 2, regime: REGIME.SURFACE }), GESTE.ZOOM)
+  assert.equal(gesteDuBouton({ bouton: 2, regime: REGIME.CROP }), GESTE.INERTE)
+  // ⚠️ **DONC, ENTRE 600 km ET 32 km, LE CLIC DROIT ZOOME ET ARME LA SORTIE ;
+  // SOUS 32 km IL EST RENDU À OrbitControls (R13/GE2, mesuré).** Là, les sorties
+  // restent la molette et le bouton monde — les deux qui ne dépendent pas du
+  // régime de gestes. C'est écrit dans le rapport, pas déduit ici.
+  assert.equal(auBloc({ altitudeEllipsoideM: 500_000, auBlocAvant: false }), false)
+  assert.equal(auBloc({ altitudeEllipsoideM: 20_000, auBlocAvant: false }), true)
 })
 
 // ══════════ ③ LA NAISSANCE À z7 ════════════════════════════════════════════
