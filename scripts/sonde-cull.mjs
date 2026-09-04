@@ -362,6 +362,8 @@ async function lancer() {
   page.on('console', (m) => { if (m.type() === 'error') erreurs.push(m.text().slice(0, 200)) })
 
   const journal = { etiquette: ETIQ, port: PORT, cpu: CPU, lieu: LIEU, latlon: LIEUX[LIEU], departM: DEPART_M, arriveeM: ARRIVEE_M, viewport: [LARGEUR, HAUTEUR], date: new Date().toISOString() }
+  const SEUIL = Number(opt('--seuil', '0'))
+  if (SEUIL > 0) await page.evaluateOnNewDocument((v) => { globalThis.__SEUIL_NAISSANCE_M = v }, SEUIL)
   await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForFunction('!!(window.__exp && window.__exp.globe)', { timeout: 120000 })
 

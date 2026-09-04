@@ -872,6 +872,10 @@ const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
 // `ZOOM_SOCLE − 1` (`test/crop-parois.test.js`, `P14_ZOOM = 12`) : la tolérance
 // le contient, et c'est délibéré — son banc est le domaine à préserver.
 const TOLERANCE_BLOC = 1.5
+// ⚠️ **CULL ⑤ — LA MARGE DU PLAFOND D'ÉCRAN, EN NIVEAUX.** Voir `_zoomCropEcran`
+// : le critère est pris au centre du crop, la vue d'arrivée est oblique, et sans
+// marge l'arrivée perdait un niveau (z12 au lieu de z13).
+const MARGE_CROP = 1
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 // ══════════ LE RAFFINEMENT PARTIEL ET LA PRÉLECTURE — R37 ═══════════════════
 //
@@ -4696,6 +4700,20 @@ export class Globe {
         oublierAncres(this._echelleContinue)
       }
     }
+    // ⚠️ **LE DOMAINE DE L'EFFACEMENT LATÉRAL PEUT BASCULER ICI, ET LES JUPES
+    // SONT TAILLÉES UNE FOIS POUR TOUTES À LA CONSTRUCTION — CULL ④.** Sans
+    // cette repasse, une tuile bâtie au bloc (effacement actif) gardait sa jupe
+    // effacée en vue continentale : mesuré, il restait **35 px** de trou à
+    // 1,2 Mm là où le levier `jupeLaterale = false` rendait 0.
+    // ⚠️ **LE DOMAINE DE L'EFFACEMENT LATÉRAL PEUT BASCULER ICI, ET LES JUPES
+    // SONT TAILLÉES UNE FOIS POUR TOUTES À LA CONSTRUCTION — CULL ④.** Sans
+    // cette repasse, une tuile bâtie au bloc (effacement actif) garde sa jupe
+    // effacée en vue continentale.
+    // ⚠️ **ET LA REPASSE EST ICI, PAS DANS `update` — MESURÉ.** Surveillée à
+    // chaque image, la bascule retaille les jupes en plein vol et les trous
+    // AUGMENTENT (31 · 57 · 30 px contre 0 · 33 · 17 sur les trois lieux). Une
+    // repasse par pose de crop suffit et ne traverse aucune image.
+    const effacaitAvant = Globe.prototype._effacementLateralActif.call(this)
     this._crop = rep
     // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
     // QUI L'A EXIGÉ — Tâche R3, correction C1.** La première version de
@@ -4722,6 +4740,7 @@ export class Globe {
     u.uCropOn.value = 1
     // la couverture douce du bord ne veut rien dire sans mélange — Tâche B
     this._melangeCrop(true)
+    if (Globe.prototype._effacementLateralActif.call(this) !== effacaitAvant) this._retaillerJupes()
     return rep
   }
 
@@ -4878,7 +4897,14 @@ export class Globe {
       if (chord / dist <= SPLIT_RATIO) break
       z++
     }
-    return z
+    // ⚠️ **UN NIVEAU DE MARGE, ET IL EST PAYÉ PAR UNE MESURE.** Le critère est
+    // évalué au CENTRE du crop ; or la vue d'arrivée est de trois quarts, et le
+    // bord PROCHE du bloc est sensiblement plus près que son centre. Sans cette
+    // marge, le tirage `D2` d'arrivée se posait à **z12** là où le dépôt rendait
+    // z13 : une image franchement plus grossière, que personne n'a demandée.
+    // Avec elle, l'arrivée rend **z13** — le dépôt au bit près — et la vue
+    // continentale reste à z8/z9 au lieu de z13, ce qui est tout le sujet.
+    return Math.min(z + MARGE_CROP, ZOOM_SOCLE)
   }
 
   _contrePression() {
