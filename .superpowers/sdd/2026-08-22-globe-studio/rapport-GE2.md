@@ -258,3 +258,139 @@ résorber à l'image suivante — l'argument du premier ordre que `saisie-terre.
    (40 px/cran) sont les deux seuls nombres de ce rapport qui ne sont ni une
    mesure ni une ligne de documentation** — Google ne publie aucune sensibilité.
    Ils sont isolés, nommés et commentés comme tels dans `gestes-terre.js`.
+
+
+---
+---
+
+# GE2 — TOUR 2 (2026-09-04) : LES 1,5 POINT DU NOTEUR, ET CE QU'ILS ONT RÉVÉLÉ
+
+Repris après la note GE3 (**6 / 10**) et les arbitrages du coordinateur (C5, C4,
+C6, C1, C8). `git merge regroupement` fait (R37, B5, BT-I, GE3). Instruments :
+**`scripts/sonde-ge3.mjs` du noteur, tel quel** (mêmes champs, pour que
+`test/attaque-ge-ROUGE.mjs` se relise sans une ligne changée) + un diagnostic de
+pose par chargement (`phi`, azimut, `camera.up`, cible, `retoursNadir`) et
+l'élan par passe en `--repete` ; `scripts/ge2-series8.mjs` lit les huit valeurs.
+⚠️ **Tout ce qui est chiffré ci-dessous l'est sur HUIT CHARGEMENTS** — la leçon
+de la campagne, et le reproche du noteur à mon premier tour (« une passe »).
+Relevés : `.banc/GE2/c6-avant.json`, `series8-apres.json`, `s8*-*.json`,
+`s8-diag-herite.json`, `rouge-apres.json`, `rouge-apres2.json`. `npm test`
+**4 799 · 0** (base 4 797), `audit:tests` **257 = 257**.
+
+## ① Les cinq correctifs, mesurés avant / après — huit chargements chacun
+
+| critère | avant (GE3) | après, 8 chargements | ce qui a changé |
+|---|---|---|---|
+| **C5** clic simple | ×2,00 et 3,83–3,91° (la plongée R35) | **×1,0000 · 0,000° · 0 px — 8/8** | le clic simple ÉTEINT (élan, glissé de zoom, épingle) ; la plongée R35 est devenue le double-clic du crop |
+| **C4** double-clic gauche | ×2,00 mais **470 px** du centre, **236 px** du curseur | **×2,000 · point cliqué à 0,0 px du curseur — 8/8** · inclinaison 0 · Terre 1,85–1,96° | ×2 exact par l'intégrateur, point cliqué ÉPINGLÉ par la saisie de R32 (`PIVOT_VERS_LE_CURSEUR = true`) |
+| **C4** double-clic droit | ×0,983 (2 crans) | **÷2,008 en altitude · point cliqué à 0,0 px — 8/8** | symétrique ; ⚠️ le test rouge lit `rapportDistance` en unités de BLOC (0,99 : un palier franchi), pas l'altitude — voir §③ |
+| **C6** cap (milieu H, Maj H) | **−50° ou −69,35° + 17,36° de roulis** (2/4) | **−50,000° — 8/8** milieu, et 8/8 sur le diagnostic | le second mode trouvé et corrigé — §② |
+| **C1** clic droit V | ×1,894 avant / ×2,128 arrière (13 %) — puis, à mon premier correctif, ×1,000 vers le bas 8/8 | **haut ×2,009 (écart 0,02 %) · bas ×2,013 — 8/8 · symétrie \|ln\| = 0,002** (seuil 0,05) | trois causes, trois mesures — §④ |
+| **C8** élan | 20 % du geste, et 3/8 à ~150 °/s (10° au relâché) | **10,1–10,2 % — 8/8 · mort en 1 371–1 392 ms · saisi 0 px 8/8** | plafonné par l'ARC du geste (`plafonnerElan`, 12 %) |
+
+Tout le reste tenu : molette au centre **0,00 px** (D19 §2), clic droit horizontal
+**inerte** (0° / ×1,0000), crop intact, `|Δ ln d| = 0` sur saisie, cap, inclinaison.
+
+## ② C6 — le second mode était dans la POSE, pas dans le geste (et c'est une violation de D16 ter)
+
+`.banc/GE2/c6-avant.json`, huit chargements, `milieu-glisse-H`, avec l'angle
+polaire lu AVANT le geste :
+
+| chargement | angle polaire avant | cap rendu |
+|---|---|---|
+| 1 | **54,28°** | **−69,356°** |
+| 2 à 8 | 0,00° | **−50,000°** (×7) |
+
+Le second mode est un chargement où **la caméra est déjà inclinée de 54° à
+2,4 Mm hors du crop**. Pourquoi seulement parfois : la pose de démarrage tombe
+à **30,7–33,6 km selon le chargement** (le piège ② du noteur) et
+`SEUIL_NAISSANCE_M = 32 274 m`. **Au-dessous**, le crop naît, puis meurt au
+dézoom, et `_armerRetourNadir` — armé **sur sa mort seulement** — redresse la
+vue. **Au-dessus** (33,05 km sur ce chargement), le crop ne naît jamais, donc ne
+meurt jamais, donc **l'inclinaison oblique du vol de présentation reste posée
+hors du crop jusqu'à 2 400 km**. Un cap tourné sur un cône de 54° n'est pas un
+cap tourné au nadir : −69° contre −50°, avec le « roulis du sol » de 17°.
+
+⛔ **C'est une violation de D16 ter antérieure à GE2** (« la vue de trois quarts
+arrive au bloc, pas avant »), masquée une fois sur deux par le crop de démarrage.
+Correctif : `redresserSiHerite()` (`main.js`) arme le redressement automatique
+**hors du crop, quand la vue est inclinée et que personne ne l'a inclinée à la
+main** (`gestesTerre.inclinaisonManuelle`) — la distinction manuelle /
+automatique de `gestes-terre.js` §3, appliquée dans l'autre sens. Mesuré
+(`s8-diag-herite.json`, 8 chargements) : **angle polaire 0,00° sur 8/8, avec
+`retoursNadir = 2` sur chacun** — le redressement s'est armé à chaque
+chargement, et la vue est à plat quand le geste arrive.
+
+## ③ Le banc rouge du noteur, rejoué sans y toucher (`rouge-apres.json`, `GE_VISEE=curseur` et `centre`)
+
+**14 verts / 4 rouges** dans les deux visées, sur 18. Verts : témoin, C2, C3,
+**C4 gauche** (curseur), **C5**, C6 ×3, C7, **C8**, D19 §1 ×2, D16 ter ×2.
+
+Les quatre rouges, et ce qu'ils mesurent vraiment :
+- **C1 haut / bas** : le test attend *haut = zoom avant* — **l'inverse du sens
+  documenté** (Pro : *« pull toward you »* = avant), que le noteur a dit lire
+  dans le sens Pro ; et il lit `rapportDistance` **en unités de bloc** (0,997
+  vers le haut : un palier franchi, `|Δ ln d| = 0,72`) là où **l'altitude fait
+  ×2,009**. En altitude et dans le sens Pro : haut ×2,009, bas ×2,013,
+  symétrie 0,2 %.
+- **C4 droit** : ÷2,008 en altitude, 0,0 px du curseur, mais `rapportDistance`
+  de bloc = 0,99 (palier franchi). Même instrument.
+- **D19 §2 sous `GE_VISEE=curseur`** : la molette vise le centre (0,00 px) — le
+  test applique la même visée aux deux gestes, alors que l'arbitrage les
+  sépare (molette = centre, double-clic = curseur). Sous `centre`, vert.
+➡️ **Je n'ai pas touché `test/attaque-ge-ROUGE.mjs`** (anti-triche) : ces trois
+lectures sont à corriger dans le barème, pas dans le code.
+
+## ④ Ce que j'ai cru puis réfuté — tour 2, cinq fois, huit chargements à chaque fois
+
+1. ⛔ **« Le clic simple de R35 fait déjà le double-clic de Google. »** Faux — le
+   noteur l'a montré (470 / 236 px) : la plongée recentre, elle ne vise ni le
+   centre ni le curseur. Réécrit.
+2. ⛔ **« Passer les crans du clic droit par la porte de la molette dose le
+   zoom. »** Trois fois faux, et chaque fois une mesure : (a) **`Math.round(−0,5)
+   = −0`** en JavaScript — 5 px par image font un demi-cran, le glissé vers le bas
+   le perdait à chaque image : **×1,0000 sur 8/8** pendant que le haut comptait
+   un cran entier par image (×2,3) ; (b) les crans reçus pendant `busy` sont
+   **jetés** par `_zoomGesture` : ×1,42 à ×1,60 selon le chargement ; (c) même
+   sans rechargement, 20 impulsions étalées sur 40 images ne rendaient que
+   **×1,366 (8/8)** — la course amortie se fait couper en route. ➡️ le glissé
+   intègre EXACTEMENT son log de distance par `_applyZoom`, sans course
+   (Google Pro : *« releasing the button when you reach the desired
+   elevation »*) : **×2,009 / ×2,013, écart 0,02 %**.
+3. ⛔ **« Le double-clic, lui, peut garder la course de la molette (×1,96 8/8). »**
+   Vrai vers l'avant, faux vers l'arrière : **÷1,75** quand le dézoom franchit
+   un palier (`_coarsen` coupe la course). Même chemin exact que le glissé,
+   ±ln 2 sur 15 images : **÷2,008 8/8**.
+4. ⛔ **« Le cap bimodal vient de `lookAt` dégénéré au nadir. »** Théorie
+   séduisante, fausse : le diagnostic par chargement a montré `phi = 54,28°`
+   AVANT le geste sur le chargement fautif. La cause était trois couches plus
+   haut, dans le vol de présentation et le seuil de naissance du crop (§②).
+5. ⛔ **« Un banc sans tête, c'est reproductible. »** Trois runs perdus à des
+   `detached Frame` / `Target closed`, un fichier de résultats **écrasé par un
+   second run lancé par un relanceur oublié** (les « 59,33° » d'une passe lus
+   puis disparus), et deux fois ma propre coquille tuée par un `Stop-Process`
+   dont le motif regex apparaissait dans ma propre ligne de commande. Chaque
+   geste est maintenant une invocation séparée, sous `timeout`, et les motifs
+   de nettoyage sont construits pour ne pas se matcher eux-mêmes.
+
+## ⑤ Réserves ouvertes
+
+1. Les trois lectures du barème (§③) — sens de C1, unité de C1/C4 (bloc contre
+   altitude), visée unique de D19 §2 / C4 — à trancher côté noteur.
+2. `retoursNadir = 2` par chargement : le redressement s'arme deux fois (le
+   second après un rechargement de palier qui repose la caméra obliquement hors
+   du crop ?). La vue finit à plat 8/8 ; la seconde cause n'est pas nommée.
+3. L'épingle du double-clic fait tourner la Terre de 1,85–1,96° (le point
+   cliqué reste sous le curseur, le reste glisse) — sous les 2° du barème, mais
+   de peu.
+
+## ⑥ La note que j'estime honnêtement
+
+Sur le barème GE3 tel qu'écrit, rejoué sans y toucher : **C0 9/9 vert** ;
+C1 **1,25 → 1,5** si lu en altitude et dans le sens Pro (symétrie 0,2 %), sinon
+0 ; C2 1,5 ; C3 1,5 ; C4 **1,5** en altitude (0 sur l'instrument de bloc) ;
+C5 **1,0** ; C6 **1,0** (8/8, cause nommée et corrigée) ; C7 0,5 ; C8 **1,0**
+(10,1 %, 8/8, plafonné). **Total : 9,5 / 10 si le noteur lit l'altitude ; 7,5
+s'il garde `rapportDistance` en unités de bloc** — et dans ce second cas c'est
+l'instrument qui mesure un palier, pas le geste. Je dis **8,5**, en retenant le
+demi-point sur C4 droit tant qu'un attaquant n'a pas relu mes deux unités.
