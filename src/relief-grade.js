@@ -3,6 +3,19 @@
 // ombrage des pentes) à partir du relief RÉELLEMENT chargé. Module PUR : ni
 // DOM ni three.js, testable en node (test/relief-grade.test.js).
 //
+// ⛔ **AMENDÉ LE 2026-09-04 — Tâche RAMP.** La phrase « à partir du relief
+// RÉELLEMENT chargé » ci-dessus reste vraie de CE MODULE, qui n'a pas changé
+// d'une ligne, mais elle n'est PLUS vraie de son appelant : `main.js` ne lui
+// passe plus les extrema du MNT entier, il lui passe ceux d'un **carré au sol
+// de 40 km centré sur la carte** (`src/rampe-fixe.js`). ⚠️ **Pourquoi : le MNT
+// chargé rétrécit avec le zoom** — 40 770 m au zoom d'arrivée, 2 548 m neuf
+// crans plus bas — donc grader dessus faisait bouger la couleur d'une altitude
+// donnée de **168 niveaux sur 255** au fil d'une descente (Alpes suisses,
+// `.banc/RAMP-AVANT`). Ce que ce fichier calcule ne change pas ; ce qu'on lui
+// donne à lire, si. Les quatre réglages qu'il rend sont désormais exprimés dans
+// le **domaine de référence**, et `appliqueRampeFixe` les transpose au dernier
+// moment vers celui du nuanceur.
+//
 // CONTRAINTE DE DÉPART (le shader, terrain.js) — le fragment lit :
 //     hNorm = (y − minH) / (maxH − minH)            ← normalisé sur TOUT le DEM
 //     rampT = clamp(0.5 + (hNorm − pivot) × contraste, 0, 1)

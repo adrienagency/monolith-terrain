@@ -49,6 +49,7 @@ import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
+import { COTE_REF_M, fenetreRef, statsFenetre, transpose } from './rampe-fixe.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage, exigerPose } from './camera-poses.js'
 import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
@@ -421,6 +422,18 @@ const params = {
   // la main à l'auto. Les valeurs ci-dessous ne servent plus que de repli
   // (terrain procédural, DEM illisible).
   shadeAuto: true,
+  // ══════ LA RE-NORMALISATION DE LA TEINTE — OPTION, ÉTEINTE PAR DÉFAUT ═════
+  //
+  // > **Adrien, 2026-09-04 :** « On peut créer une option activer / désactiver ?
+  // > Par défaut on désactive. »
+  //
+  // ⚡ **PAR DÉFAUT `false` : LA RAMPE EST FIXE**, une couleur = une altitude à
+  // toutes les échelles (`src/rampe-fixe.js`). Cochée, elle rend le
+  // comportement d'avant **au bit près** — la rampe se re-normalise sur le MNT
+  // chargé à chaque cran. ⛔ Ce n'est PAS le curseur « Teinte hypsométrique » :
+  // celui-là (`mapTint`) reste, et à 0 il éteint toute la couleur d'altitude.
+  // Ici on n'éteint que la RE-NORMALISATION, pas la couleur.
+  rampeRenormalise: false,
   mapTint: 1.0,
   heightContrast: 5.1,
   heightPivot: 0.53,
@@ -6503,8 +6516,13 @@ function contexteCrop() {
       // socle normalise (`uHeightRange`). Prendre la fenêtre du bloc ici
       // convertirait le geste dans un domaine où il n'a pas été fait — la
       // classe de défaut n° 1 du chantier, prise par l'autre bout.
-      pivotAutoSocle: shadeGrade?.heightPivot ?? null,
-      contrasteAutoSocle: shadeGrade?.heightContrast ?? null,
+      // ⚠️ **DANS LE DOMAINE VIVANT, PAS DANS CELUI DE LA RÉFÉRENCE** — Tâche
+      // RAMP. `pivotSocle` ci-dessus est l'UNIFORME, donc transposé ; comparer
+      // les deux dans deux domaines différents rendrait un « geste d'Adrien »
+      // fantôme de plusieurs centaines de mètres. `shadeGradeVivant` fait la
+      // même transposition, avec les mêmes domaines.
+      pivotAutoSocle: shadeGradeVivant()?.heightPivot ?? null,
+      contrasteAutoSocle: shadeGradeVivant()?.heightContrast ?? null,
       socleBasM: Number.isFinite(dem?.minM) ? dem.minM : null,
       socleAmpM: Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null,
       hazeAmt: terrain.mapUniforms.uHazeAmt.value,
@@ -7582,11 +7600,110 @@ function syncHazeColor() {
   blockGrid?.restyle(params)
 }
 
+// ══════════ LA RAMPE FIXE — Tâche RAMP ═════════════════════════════════════
+//
+// ⚠️ **`params.heightPivot` ET `params.heightContrast` SONT EXPRIMÉS DANS LE
+// DOMAINE DE RÉFÉRENCE, PAS DANS CELUI DU MNT CHARGÉ.** C'est ce qui garde leur
+// sens aux curseurs et aux gabarits pendant que le MNT, lui, change d'amplitude
+// à chaque cran. La conversion vers le domaine vivant du nuanceur est faite ici
+// et NULLE PART AILLEURS — le §« la référence » de `src/rampe-fixe.js` porte la
+// dérivation et ses chiffres.
+let rampeRef = null
+
+// le domaine du MNT chargé, celui que `uHeightRange` porte
+function domaineVivant() {
+  if (params.source !== 'real' || !dem) return null
+  if (!Number.isFinite(dem.minM) || !(dem.maxM > dem.minM)) return null
+  return { basM: dem.minM, ampM: dem.maxM - dem.minM }
+}
+
+// ⛔ **L'OPTION COCHÉE REND `null`, DONC L'IDENTITÉ** : `transpose` rend alors
+// le réglage TEL QUEL, le même nombre, et le dépôt d'avant est retrouvé au bit.
+function domaineRef() {
+  return params.rampeRenormalise ? null : rampeRef
+}
+
+/**
+ * Pose (ou actualise) le domaine de référence à partir du MNT chargé, et rend
+ * ses statistiques — ou `null` s'il n'y a rien à refaire.
+ *
+ * ⚠️ **ON NE POSE UNE RÉFÉRENCE QUE SI LE CARRÉ DE 40 km TIENT DANS LE MNT.**
+ * Plus fin, il n'y a plus de quoi mesurer le lieu, seulement le bout de lieu
+ * qu'on regarde : on garde alors la référence, et c'est exactement cela, « la
+ * rampe cesse de se re-normaliser ». La seule exception est la toute première
+ * arrivée (`!rampeRef`), où il vaut mieux une référence étroite que pas de
+ * couleur du tout — c'est la dernière dépendance au chemin qui reste, et elle
+ * est chiffrée dans `rapport-RAMP.md`.
+ *
+ * ⚠️ **MÉMOÏSÉ SUR L'OBJET `dem`**, comme `dem._elevHist` juste en dessous :
+ * `applyAutoShade` et `currentReliefGrade` le demandent tous les deux, et le
+ * balayage coûte une passe sur ~2,3 millions de texels.
+ */
+function majRampeRef() {
+  if (params.source !== 'real' || !dem?.data?.length) return null
+  if (dem._refStats !== undefined) {
+    if (dem._refStats) rampeRef = dem._refDomaine
+    return dem._refStats
+  }
+  const n = Math.round(Math.sqrt(dem.data.length))
+  const fen = fenetreRef(n, dem.extentMeters)
+  if (!fen.couvre && rampeRef) { dem._refStats = null; return null }
+  const st = statsFenetre(dem.data, n, fen)
+  if (!st || !(st.maxM > st.minM)) { dem._refStats = null; return null }
+  dem._refStats = st
+  dem._refDomaine = {
+    basM: st.minM,
+    ampM: st.maxM - st.minM,
+    // le rapport de relief de `gradeForDem` se lit sur la MÊME emprise que
+    // l'amplitude, sinon `mapTint` et `slopeTint` sauteraient d'un cran à l'autre
+    extentM: Math.min(dem.extentMeters, COTE_REF_M),
+  }
+  rampeRef = dem._refDomaine
+  return st
+}
+
+// pousse les deux uniformes de rampe depuis les réglages de RÉFÉRENCE
+//
+// ⚠️ **APPELÉE PAR `terrain.js` À CHAQUE POSE D'AMPLITUDE** (`_surAmplitude`,
+// quatre sites), donc potentiellement PAR IMAGE en mode continu. D'où le test
+// d'égalité : sans lui, `diffuseDuCentre` repasserait sur 24 dalles à chaque
+// image pour n'y rien changer.
+function appliqueRampeFixe() {
+  if (!_colorReady) return
+  const t = transpose(
+    { heightPivot: params.heightPivot, heightContrast: params.heightContrast },
+    domaineRef(),
+    domaineVivant()
+  )
+  // ⛔ **PAS D'ALIAS `const mu = terrain.mapUniforms`** : la propriété ① de
+  // `test/damier-uniformes.test.js` le lit comme une CESSION EN BLOC de la
+  // poignée des uniformes du bloc central, et elle a raison — un alias échappe
+  // au péage qui vérifie qu'on prévient bien les dalles voisines. Il a rougi ici.
+  if (terrain.mapUniforms.uHeightContrast.value === t.heightContrast
+    && terrain.mapUniforms.uHeightPivot.value === t.heightPivot) return
+  terrain.mapUniforms.uHeightContrast.value = t.heightContrast
+  terrain.mapUniforms.uHeightPivot.value = t.heightPivot
+  // ⚠️ **ET LES DALLES VOISINES** — le péage de `test/damier-uniformes.test.js`,
+  // et il a mordu ici avant que je l'écrive. Cette fonction tourne à CHAQUE
+  // chargement de relief, y compris quand il n'y a rien à regrader : sans la
+  // diffusion, le damier gardait la transposition du MNT précédent et la couture
+  // se voyait pile sur la jointure. 8,0 µs pour 24 dalles, mesuré (voir
+  // `applyGridContour`).
+  blockGrid?.diffuseDuCentre()
+}
+
+// le grade auto, redit dans le domaine VIVANT — c'est celui-là que le bloc du
+// globe compare au curseur (`gradeBlocEffectif`, `pivotAutoSocle`), et les deux
+// doivent vivre dans le MÊME domaine, sinon on réinvente le désaccord de R31 §⑥.
+function shadeGradeVivant() {
+  if (!shadeGrade) return null
+  return transpose(shadeGrade, domaineRef(), domaineVivant())
+}
+
 function applyStyle(s) {
   Object.assign(params, s)
   terrain.mapUniforms.uTint.value = s.mapTint
-  terrain.mapUniforms.uHeightContrast.value = s.heightContrast
-  terrain.mapUniforms.uHeightPivot.value = s.heightPivot
+  appliqueRampeFixe()
   terrain.mapUniforms.uSlopeTint.value = s.slopeTint
   // ⚠️ ET LES DALLES VOISINES — sournois, celui-là : `applyAutoShade` (juste en
   // dessous) recalcule ces quatre valeurs à CHAQUE chargement de relief, donc
@@ -7610,23 +7727,66 @@ let shadeGrade = null
 
 function currentReliefGrade() {
   if (params.source !== 'real' || !dem) return null
-  // l'histogramme coûte une passe sur ~590 k pixels : calculé UNE fois par DEM
-  if (!dem._elevHist) dem._elevHist = elevationHistogram(dem.data, dem.minM, dem.maxM)
-  return gradeForDem({ minM: dem.minM, maxM: dem.maxM, meanM: dem.meanM, histogram: dem._elevHist, extentM: dem.extentMeters })
+  // ⛔ **L'OPTION COCHÉE : LE CHEMIN DU DÉPÔT, LIGNE POUR LIGNE.** Le grade se
+  // relit sur le MNT CHARGÉ, donc il se re-normalise à chaque cran — c'est
+  // précisément le comportement qu'Adrien a voulu garder derrière une case.
+  if (params.rampeRenormalise) {
+    // l'histogramme coûte une passe sur ~590 k pixels : calculé UNE fois par DEM
+    if (!dem._elevHist) dem._elevHist = elevationHistogram(dem.data, dem.minM, dem.maxM)
+    return gradeForDem({ minM: dem.minM, maxM: dem.maxM, meanM: dem.meanM, histogram: dem._elevHist, extentM: dem.extentMeters })
+  }
+  // ⚡ **SINON ON GRADE SUR LA FENÊTRE DE RÉFÉRENCE**, le carré de 40 km centré
+  // sur la carte : le MÊME sol à tous les crans, donc le même grade.
+  const st = majRampeRef()
+  if (!st) return null
+  return gradeForDem({
+    minM: st.minM, maxM: st.maxM, meanM: st.meanM,
+    histogram: st.histogram, extentM: rampeRef.extentM,
+  })
 }
 
 // `force` : le toggle qu'on rallume — tout redevient auto, y compris les
 // curseurs que l'utilisateur avait figés.
 function applyAutoShade({ force = false } = {}) {
   if (force) for (const k of SHADE_KEYS) shadeDirty[k] = false
-  if (!params.shadeAuto) return null
-  const g = currentReliefGrade()
-  if (!g) return null
+  // ⚠️ **LA RÉFÉRENCE SE POSE MÊME QUAND L'AUTO EST ÉTEINT.** Sans cette ligne,
+  // une carte ouverte en « Ombrage manuel » n'aurait aucun domaine de référence,
+  // `transpose` rendrait l'identité, et la rampe se re-normaliserait comme
+  // avant — l'option par défaut serait morte pour ces cartes-là.
+  if (!params.rampeRenormalise) majRampeRef()
+  const g = params.shadeAuto ? currentReliefGrade() : null
+  if (!g) {
+    // ⚡ **ET LES UNIFORMES SE REPOSENT QUAND MÊME.** Le réglage n'a pas bougé,
+    // mais le DOMAINE VIVANT, lui, vient de changer : sans cette repose, la loi
+    // en mètres suivrait le nouveau MNT — c'est-à-dire le défaut, réinventé un
+    // étage plus bas. C'est le cas de tous les crans plus fins que 40 km.
+    appliqueRampeFixe()
+    return null
+  }
   shadeGrade = g
   const next = {}
   for (const k of SHADE_KEYS) next[k] = shadeDirty[k] ? params[k] : g[k]
   applyStyle(next)
   return g
+}
+
+// l'option, depuis le panneau : on rebascule le domaine et on repose tout
+function setRampeRenormalise(v) {
+  params.rampeRenormalise = !!v
+  // ⚠️ Le grade auto a été calculé dans l'AUTRE domaine : il est périmé, et le
+  // garder ferait sauter la teinte au moment du clic. On le refait.
+  if (dem) { dem._refStats = undefined; dem._elevHist = null }
+  // ⛔ **ON NE JETTE PAS `rampeRef` EN COCHANT LA CASE, ET C'EST UN DÉFAUT QUE
+  // LA SONDE A TROUVÉ.** Je l'avais écrit `rampeRef = null` — logique en
+  // apparence : l'option cochée n'en a pas besoin. Mais la référence ne se
+  // repose QUE sur un MNT d'au moins 40 km : décocher la case six crans plus bas
+  // ne la retrouvait plus, et la rampe redevenait libre en silence. Mesuré sur
+  // `.banc/RAMP-GABARITS-C6` : cinq gabarits sur six rendaient « avant » et
+  // « après » IDENTIQUES — c'est-à-dire le correctif éteint sans le dire.
+  // `domaineRef()` suffit à ignorer la référence tant que la case est cochée.
+  applyAutoShade()
+  appliqueRampeFixe()
+  refreshAll()
 }
 
 // un curseur d'Ombrage bougé à la main gèle CE réglage-là (les trois autres
@@ -8335,6 +8495,11 @@ const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainT
 // à partir d'ici terrain ET blockGrid existent : la couleur de brume peut être
 // poussée (voir syncHazeColor et le drapeau _colorReady)
 _colorReady = true
+// ⚡ **LE RENDEZ-VOUS DE LA RAMPE AVEC L'AMPLITUDE** — Tâche RAMP. `terrain.js`
+// pose `uHeightRange` en quatre endroits ; à chacun, le réglage de rampe doit
+// être re-transposé DANS LE MÊME TOUR, sinon l'image porte la loi de
+// l'amplitude précédente. C'est le second défaut du brief, celui des ~300 ms.
+terrain._surAmplitude = appliqueRampeFixe
 syncHazeColor()
 
 // ═══════ UNE SEULE MER, UNE SEULE JUPE, POUR TOUT LE CARRÉ DU DAMIER ════════
@@ -12569,6 +12734,12 @@ const panelCtx = {
   markShadeDirty, // un curseur repris à la main → ce réglage ne suivra plus
   setShadeAuto: (v) => { params.shadeAuto = v; if (v) applyAutoShade({ force: true }) },
   shadeFrozenCount: () => SHADE_KEYS.filter((k) => shadeDirty[k]).length,
+  // --- LA RAMPE FIXE (Tâche RAMP) : le curseur écrit dans le domaine de
+  // RÉFÉRENCE, le nuanceur reçoit la transposition. ⚠️ Sans ce détour, les deux
+  // curseurs de rampe court-circuiteraient `appliqueRampeFixe` (le panneau
+  // écrit `u()[uni].value` EN DIRECT) et retomberaient dans le domaine vivant.
+  poseRampeReglage: (key, v) => { params[key] = v; appliqueRampeFixe() },
+  setRampeRenormalise,
   applyGridContour,
   applyMonochrome,
   resetLook,
@@ -13843,6 +14014,10 @@ const saisieTerre = {
   residuDeg: 0, // le résidu de la dernière itération (sonde)
 }
 window.__exp.saisieTerre = saisieTerre
+// Tâche RAMP — les sondes ont besoin du domaine de référence et du bouton
+window.__exp.appliqueRampeFixe = appliqueRampeFixe
+window.__exp.setRampeRenormalise = setRampeRenormalise
+Object.defineProperty(window.__exp, 'rampeRef', { get: () => rampeRef })
 
 // La caméra qui REND, en espace globe : `camGlobe` sous la frontière de rendu ;
 // en orbite, la caméra principale (les deux espaces y coïncident). Sans

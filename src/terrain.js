@@ -2045,6 +2045,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.sample = sample
     const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // ⚠️ **LE DOMAINE VIENT DE BOUGER : LE RÉGLAGE DE RAMPE DOIT SUIVRE DANS LE
+    // MÊME TOUR** — Tâche RAMP. `params.heightPivot` est exprimé dans un domaine
+    // de RÉFÉRENCE (`src/rampe-fixe.js`) ; sans ce rendez-vous, l'image suivante
+    // porterait la transposition de l'AMPLITUDE PRÉCÉDENTE. Mesuré avant de le
+    // poser (`.banc/RAMP-FLASH`) : **sept** changements d'amplitude sur une
+    // descente de six crans pour seulement **deux** reposes du réglage — cinq
+    // images à la mauvaise loi, et c'est le voile de ~300 ms que SUR a filmé.
+    this._surAmplitude?.()
     this._pousseFenetre()
     // ⚠️ L'ANCIENNE GÉOMÉTRIE EST LIBÉRÉE, et ce n'est pas facultatif ici. À la
     // différence de `rebuild()`, qu'on appelle une fois par zone, celle-ci part
@@ -2603,6 +2611,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.sample = sample
     const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // ⚠️ **LE DOMAINE VIENT DE BOUGER : LE RÉGLAGE DE RAMPE DOIT SUIVRE DANS LE
+    // MÊME TOUR** — Tâche RAMP. `params.heightPivot` est exprimé dans un domaine
+    // de RÉFÉRENCE (`src/rampe-fixe.js`) ; sans ce rendez-vous, l'image suivante
+    // porterait la transposition de l'AMPLITUDE PRÉCÉDENTE. Mesuré avant de le
+    // poser (`.banc/RAMP-FLASH`) : **sept** changements d'amplitude sur une
+    // descente de six crans pour seulement **deux** reposes du réglage — cinq
+    // images à la mauvaise loi, et c'est le voile de ~300 ms que SUR a filmé.
+    this._surAmplitude?.()
     // le masque côtier doit défiler AVEC le relief qu'il classe terre ou mer
     this._pousseFenetre()
     // ⚠️ Pas de `geo.computeBoundingSphere()` : la sphère englobante ne sert
@@ -2790,6 +2806,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const { minH, maxH } = this._ecrireRelief(geo, params, res, null, null, depuisFlux)
     this.sample = this._makeFenetreSampler(this.fenetreBornee)
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // ⚠️ **LE DOMAINE VIENT DE BOUGER : LE RÉGLAGE DE RAMPE DOIT SUIVRE DANS LE
+    // MÊME TOUR** — Tâche RAMP. `params.heightPivot` est exprimé dans un domaine
+    // de RÉFÉRENCE (`src/rampe-fixe.js`) ; sans ce rendez-vous, l'image suivante
+    // porterait la transposition de l'AMPLITUDE PRÉCÉDENTE. Mesuré avant de le
+    // poser (`.banc/RAMP-FLASH`) : **sept** changements d'amplitude sur une
+    // descente de six crans pour seulement **deux** reposes du réglage — cinq
+    // images à la mauvaise loi, et c'est le voile de ~300 ms que SUR a filmé.
+    this._surAmplitude?.()
     return depuisFlux
   }
 
@@ -2906,6 +2930,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (depuisFlux) this.sample = this._makeFenetreSampler(this.fenetreBornee)
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // ⚠️ **LE DOMAINE VIENT DE BOUGER : LE RÉGLAGE DE RAMPE DOIT SUIVRE DANS LE
+    // MÊME TOUR** — Tâche RAMP. `params.heightPivot` est exprimé dans un domaine
+    // de RÉFÉRENCE (`src/rampe-fixe.js`) ; sans ce rendez-vous, l'image suivante
+    // porterait la transposition de l'AMPLITUDE PRÉCÉDENTE. Mesuré avant de le
+    // poser (`.banc/RAMP-FLASH`) : **sept** changements d'amplitude sur une
+    // descente de six crans pour seulement **deux** reposes du réglage — cinq
+    // images à la mauvaise loi, et c'est le voile de ~300 ms que SUR a filmé.
+    this._surAmplitude?.()
     this._pousseFenetre()
 
     // georeferenced sea level (elevation 0) — ALWAYS active in real mode so every
