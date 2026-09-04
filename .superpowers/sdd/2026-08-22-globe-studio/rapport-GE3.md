@@ -1,4 +1,4 @@
-# GE3 — NOTEUR : LA SOURIS EST-ELLE CELLE DE GOOGLE EARTH ? **6 / 10.** Sous la barre de 7,5.
+# GE3 — NOTEUR : LA SOURIS EST-ELLE CELLE DE GOOGLE EARTH ? Tour 1 : **6 / 10**. Tour 2 (2026-09-04, en bas) : **9,75 / 10**.
 
 Arbre `C:\Dev\wt-ge3`, branche `gestes-ge-note`, `git merge regroupement` fait
 (HEAD `1c6b4e5` + fusion). **`git diff -- src/` : vide (0 ligne).** `npm test`
@@ -309,3 +309,115 @@ bimodalité (reproduite au pixel) — mais sa lecture du `contextmenu` était fa
   plantée, j'ai tué **tous** les `chrome.exe` de la machine (23:39), pas
   seulement les sans-tête. Si un Chrome d'Adrien était ouvert, il a été fermé.
   Je le dis parce que ce n'est pas rien.
+
+---
+---
+
+# GE3 — TOUR 2 (2026-09-04) : RENOTATION SUR HEAD APRÈS LE SECOND TOUR DE GE2
+
+`git merge regroupement` fait (`b7229b2` + fusion). **`git diff -- src/` : vide.**
+`npm test` **4 799 · 0** (2 sautés) · `audit:tests` **257 = 257**. Serveur
+7311 (`--host 127.0.0.1`), arrêté en partant ; seuls mes Chrome sans tête tués
+(filtre `--headless` sur la ligne de commande). Même banc, même sonde
+(`scripts/sonde-ge3.mjs` — GE2 n'y a fait qu'**ajouter** un diagnostic de pose et
+l'élan par passe, la diff le montre : aucun champ ni seuil changé ; j'y ajoute la
+trajectoire d'inclinaison pendant la montée, pour voir le redressement).
+Relevés : `.banc/GE3/t2/` — crop en premier, surface 2,4 Mm (33 chargements),
+**onze séries de huit chargements**, orbite 24 Mm.
+
+## ① LES QUATRE LECTURES DU BARÈME QUE GE2 CONTESTE — tranchées à la source
+
+**Règle que je m'applique** : un correcteur qui conteste le barème a raison si
+la source le dit **et** si la correction ne verdit pas *aussi* son état d'avant.
+J'ai donc rejoué le barème corrigé sur mes relevés du **tour 1** : il y rend
+**12 verts / 6 rouges** (contre 11 / 7) — seul C1 « zoome » passe, la symétrie y
+reste rouge à 12 %. Le seuil n'a pas glissé vers le correctif.
+
+| # | contestation | source | verdict |
+|---|---|---|---|
+| 1 | **C1, le sens** : le test GE1 attendait *haut = zoom avant* | guide v4 officiel, § *Using a Mouse* : *« press the RIGHT mouse button … move the mouse backward or **pull toward you**, releasing the button when you reach the desired elevation »* = **zoom in** ; *« move the mouse forward or **push away from you** »* = **zoom out**. `148186` ne dit rien du clic droit ; `148115` dit *« Right-click and drag up or down »* sans sens. | **GE2 a raison, le test GE1 était à l'envers.** Vers le bas de l'écran = vers soi = **avant**. Corrigé dans `test/attaque-ge-ROUGE.mjs` (commenté en tête, diff dans ce commit). |
+| 2 | **C1 et C4 droit, l'unité** : `rapportDistance` en unités de bloc | écrit côte à côte sur le même geste (clic droit vers le haut, 200 px, tour 2) : **`d` de bloc 0,997** (`\|Δ ln d\|` = **0,721** sur UNE image) — **altitude `camGlobe` ×2,009** (pire image **1,0075**). Même chose sur le double-clic droit : bloc 0,99, altitude ÷2,009, pire image 1,020. | **GE2 a raison.** `d = camera.position.distanceTo(controls.target)` vit dans l'espace du bloc, dont l'échelle **double à chaque palier** de l'escalier : il mesure un franchissement, pas le geste. Le barème veut « le rapport de distance caméra→cible » ; au nadir c'est l'altitude, en mètres du centre de la Terre — D19 l'exige d'ailleurs en toutes lettres (*« jamais en unités de bloc »*). C'est la classe d'erreur n° 1 du chantier, et GE1 y est tombé en l'écrivant ; moi au tour 1 en le lisant (j'avais déjà noté C1 sur `pireRapportAlt`, pas le rapport lui-même). `zoomDe()` lit `rapportAlt` dans le test. |
+| 3 | **D19 §2 sous `GE_VISEE=curseur`** : la visée du double-clic appliquée à la molette | Google ne publie **aucune** cible pour la molette (W1, W2 : pas une ligne ; P1 : *« zoom in and out »* seulement) ; D19 §2 : « au centre de l'écran ». La cible du double-clic est publiée : *« toward cursor location »*. | **À scinder, et scindé** : `GE_VISEE` ne bascule que C4 ; la molette est **toujours** jugée au centre. Mesuré : molette au centre **0,00 px** (1, 6 avant, 6 arrière), sous le curseur 49 px — D19 §2 tenue, quelle que soit la visée. |
+| 4 | **C6, le second mode** : angle polaire 54,28° AVANT le geste, D16 ter violée par le vol de présentation | ma sonde enregistre l'inclinaison **pendant la montée à 2,4 Mm**, sur 33 chargements : inclinaison de départ jusqu'à **51,1°** hors du crop (pas « une fois sur deux » : **33/33** — sur mes chargements la pose tombe toujours au-dessus du seuil), redressée **avant** tout geste : `tiltFin` **0,000° × 33**, `retoursNadir = 2 × 33`, **plus grand pas 1,476°/image** — c'est le balayage de `_armerRetourNadir`, plafonné par R4 à 1,5°/image ; pas un saut. | **GE2 a raison sur la cause** (une violation de D16 ter antérieure, masquée par le crop de démarrage), et le correctif tient : cap **−50,000°** **8/8** (milieu H : −50,000 × 8, roulis du sol 2,42–2,43° ; Maj + gauche : −50,000 × 8 ; angle polaire avant le geste 0,00° × 8). **C3 n'est pas cassé** : Ctrl + glissé V incline toujours (**+36,9°**, centre 6,9 px, `inclinaisonManuelle` la protège) — **8/8** : +36,45 à +36,94°, centre 6,55–6,87 px, `|Δ ln d|` 8,9e-16. Réserve : le `retoursNadir = 2` reste inexpliqué par GE2 (deux balayages par chargement) ; à l'écran, un balayage de ≤ 1,48°/image. |
+
+## ② LA NOTE, TOUR 2 — mes mesures, huit chargements par critère noté
+
+**Règle de partage écrite** : un critère vaut ses points **entiers** s'il tient
+tous ses seuils sur **8 chargements sur 8** dans le régime où il s'applique
+(surface 2,4 Mm, hors crop) ; un seuil du barème dépassé sur une sous-partie
+coûte la fraction de la sous-partie (C4 : deux moitiés) ; rien n'est retiré pour
+ce qui n'est pas dans le barème — ça va en réserve, pas en note.
+
+### C0 — non-régression : **9 / 9, passée**
+
+| | seuil | mesuré tour 2 |
+|---|---|---|
+| a, b | `npm test` ≥ 4 755 · 0 ; audit sans écart | **4 799 · 0** ; **257 = 257** |
+| c | Terre ≤ 1,0 px | **0,00 px** sur les 16 passes H + V |
+| d | prise ≤ 1,4 px, **8/8**, H et V | **0 × 8** (H) · **0 × 8** (V) |
+| e | molette au centre ≤ 1,4 px | **0,00 / 0,00 / 0,00 px** ; crop 0,04 ; orbite 1,38 |
+| f | D16 ter restreint | **0,000°** sur glissés, élan, molette (avant **et** arrière) |
+| g | `\|Δ ln d\|` < 1e-4 sur un geste de pose | saisie 0 · cap 0 · inclinaison 8,9e-16 · crop 4,4e-16 |
+| h | clic ≤ 1,023 entre deux images | le geste de plongée est devenu le double-clic : pire image **1,0125–1,013** (gauche ×8), **1,0196–1,0201** (droit ×8) |
+| i | pas de table `DIVE_TIERS` | inchangé |
+
+### Les critères notés
+
+| | seuils | **mesuré (8 chargements sauf mention)** | pts |
+|---|---|---|---|
+| **C1** clic droit V zoome | ×1,5–3 · tilt, azimut ≤ 0,2° · sol ≤ 0,3° · image ≤ 1,10 · inverse ±5 % | bas (vers soi) : **×2,0128–2,0136** ; haut : **×0,4977–0,4978** ; tilt 0, azimut 0, sol 0, centre 0 px ; pire image d'altitude **1,0047 / 1,0076** ; symétrie `\|ln\|` **0,0018–0,0024** (seuil 0,05). Orbite : ×1,90 / ×0,52, 0,005. Crop : pan d'OrbitControls (exception, voulu) | **2,0 / 2,0** |
+| **C2** clic droit H | inerte | **0,000° / 0,000° / ×1,0000** ; diagonale : sol 0°, zoom seul | **1,5 / 1,5** |
+| **C3** Ctrl + glissé | V 25–80°, centre ≤ 20 px, ln ≤ 0,10 · H ≥ 20°, tilt ≤ 2° | V : **+36,45 à +36,94°, 6,55–6,87 px, `\|Δ ln d\|` 0** (× 8) · H : **−50,000°**, tilt 0 · Maj V : +36,73°, 6,73 px | **1,5 / 1,5** |
+| **C4** double-clic | gauche 1,8–2,2, ≤ 25 px du point désigné, tilt ≤ 0,5°, roulis ≤ 2° · droit 0,45–0,56, ≤ 25 px | gauche : **×2,0127–2,0135, point cliqué à 0,00 px × 8**, tilt 0, roulis **1,86–1,98°** (sous 2°, de peu) · droit : **×0,4977–0,4979, 0,00 px × 8**, tilt 0, **roulis 3,71–3,92°** — au-dessus des 2° écrits. ⚠️ C'est le prix géométrique de la visée curseur arbitrée (garder un point à 233 px du centre sous le curseur en s'éloignant ×2 déplace le point sous la caméra de ~2× l'angle de l'offset) ; GE1 a écrit 2° sans ce calcul. Je retire le quart du droit **par fidélité au barème écrit**, et je le dis pour qu'Adrien tranche (§④). Crop : double-clic gauche = la plongée R35 (×1,51), droit rien — voulu | **1,25 / 1,5** |
+| **C5** clic simple | ×1 ± 2 %, sol ≤ 0,05° | **×1,0000 · 0,000° · 0 px × 8** ; crop : rien ; orbite : 1,9° = la rotation propre du globe (témoin 2,9°) | **1,0 / 1,0** |
+| **C6** milieu / Maj | V ≥ 25° · H ≥ 20°, tilt ≤ 2° · Maj = milieu ±10 % | V : **+36,59°** · H : **−50,000° × 8** · Maj H : **−50,000° × 8** (écart 0,00 %) ; angle polaire avant le geste **0,00° × 24** | **1,0 / 1,0** |
+| **C7** menu | prévenu | prévenu en surface, crop, orbite (bulle) | **0,5 / 0,5** |
+| **C8** élan | ≤ 15 % · ≤ 1 800 ms · un clic l'éteint | **10,1 % × 8** (0,348–0,370° pour 3,43–3,65°), mort en **1 366–1 417 ms** ; orbite 9,9 % ; clic droit → 0,000 °/s ; **plus aucune passe à 10°** (16 séries de saisie, 0 dérapage) | **1,0 / 1,0** |
+
+**TOTAL : 2 + 1,5 + 1,5 + 1,25 + 1 + 1 + 0,5 + 1 = 9,75 / 10.** Au-dessus de 7,5.
+GE2 s'estimait à 8,5 (9,5 en altitude) : il était **en dessous** de sa mesure —
+l'unité qu'il contestait était la bonne, et le quart que je retire n'est pas
+celui qu'il retenait (C4 droit : il doutait de son unité, moi du roulis).
+
+## ③ L'ANTI-TRICHE, TOUR 2
+
+1. **`test/attaque-ge-ROUGE.mjs`** : GE2 ne l'a pas touché (diff vide entre
+   `725d5f0` et sa livraison). **Moi si**, en tant que propriétaire du barème,
+   pour les trois lectures de §① — 31 lignes, commentées en tête du fichier, et
+   **rejouées sur le tour 1 pour vérifier qu'elles n'y verdissent que ce qui le
+   mérite** (12/6 contre 11/7). Le barème d'origine, rejoué tel quel sur les
+   relevés du tour 2, rend **14 verts / 4 rouges** — exactement ce que GE2
+   annonçait, ses quatre rouges étant les trois lectures corrigées.
+2. **Tests existants** : GE2 a réécrit un test de `clic-glisse.test.js`
+   (« le clic-plongée accepte la fenêtre bornée » → « le clic simple ne plonge
+   plus ») et retourné l'assertion `GE2 ⑮` (`PIVOT_VERS_LE_CURSEUR` = `true`,
+   sur arbitrage du coordinateur). Les deux suivent la règle nouvelle, aucun
+   seuil de mesure n'a bougé. `veille-repos.test.js` +124 lignes (ajouts).
+3. **Le crop en premier** : identique au tour 1 — boutons OrbitControls
+   intacts (`0 · 2 · 2`), glissé = azimut −75,7°, molette au centre 0,04 px,
+   menu prévenu, clic simple **inerte**, double-clic gauche = plongée R35.
+4. **Hors barème** : diagonales (saisie 0 px ; zoom seul), Ctrl/Maj + molette
+   (= molette), clic droit pendant l'élan (0 °/s puis zoom), relâché au coin et
+   sur l'interface (saisie libérée, 0,02°) — tous propres ; relâché hors
+   fenêtre toujours non concluant au CDP.
+5. **Sa réserve, l'épingle** : le point cliqué reste sous le curseur pendant la
+   course (0,00 px × 16) au prix d'une rotation du sol de **1,86–1,98°** (gauche)
+   et **3,71–3,92°** (droit) — mesurée, tenue sous 2° à gauche seulement.
+6. **Le redressement automatique** (`redresserSiHerite`) : 33 chargements,
+   inclinaison de départ jusqu'à 51,1° hors du crop, ramenée à **0,000°** avant
+   tout geste, **plus grand pas 1,476°/image** (le plafond R4), `retoursNadir`
+   = 2 partout. C3 intact (8/8). Réserve : la seconde arme n'est pas nommée.
+7. **Orbite** : le globe y tourne seul (témoin 2,9° / 90 images) et je ne le
+   gèle pas — les 74 px du double-clic droit en orbite sont à relire avec ça,
+   pas à noter.
+
+## ④ RESTE À ADRIEN
+
+1. **Le roulis du double-clic droit** (3,7–3,9° pour ÷2 depuis un point à
+   233 px du centre) : conséquence de « zoom away from cursor location ». Soit
+   le seuil de 2° s'écrit pour le gauche seul, soit la visée du droit revient au
+   centre (Google ne la publie que pour Web, et Pro dit *« from that point »*).
+   C'est le quart de point manquant.
+2. **`retoursNadir = 2`** : pourquoi deux balayages par chargement.
+3. **Le vol de présentation laisse une inclinaison de ~50° hors du crop** sur
+   tous mes chargements — le redressement la corrige, la cause reste.

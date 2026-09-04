@@ -58,6 +58,22 @@ if (!process.env.GE_MESURES || !fs.existsSync(CHEMIN)) {
 }
 const M = JSON.parse(fs.readFileSync(CHEMIN, 'utf8')).gestes
 const g = (nom) => { assert.ok(M[nom], `geste absent du relevé : ${nom}`); return M[nom] }
+// ══════════ GE3, TOUR 2 — TROIS LECTURES DU BARÈME CORRIGÉES PAR LE NOTEUR ═══
+// (le correcteur GE2 les a contestées, le noteur les a relues à la source)
+//  ① L'UNITÉ : `rapportDistance` lisait `camera.position.distanceTo(controls.target)`
+//     en UNITÉS DE BLOC — une grandeur qui DOUBLE quand l'escalier change de
+//     palier (|Δ ln d| = 0,70 sur une image où l'altitude bouge de 0,8 %). Le
+//     barème veut « le rapport de distance caméra→cible » — au nadir, c'est
+//     l'ALTITUDE (le rayon de camGlobe). `zoomDe()` lit `rapportAlt`
+//     (altDebut / altFin, > 1 = zoom avant) quand la sonde le fournit.
+//  ② LE SENS : guide Google Earth v4 § Using a Mouse — « press the RIGHT mouse
+//     button … move the mouse backward or pull toward you » = ZOOM IN ; « move
+//     the mouse forward or push away from you » = ZOOM OUT. Vers le BAS de
+//     l'écran = vers soi = AVANT. Le test de GE1 attendait l'inverse.
+//  ③ LA VISÉE : `GE_VISEE` ne bascule que le DOUBLE-CLIC (C4, Google : « toward
+//     cursor location ») ; la MOLETTE vise TOUJOURS le centre (D19 §2 — Google ne
+//     publie aucune cible pour la molette).
+const zoomDe = (d) => (typeof d.rapportAlt === 'number' ? d.rapportAlt : d.rapportDistance)
 
 // ══════════ LE TÉMOIN — sans lui, rien de ce qui suit ne prouve quoi que ce soit
 test('témoin : sans geste, la caméra ne bouge pas (le globe ne tourne PAS seul)', () => {
@@ -72,20 +88,21 @@ test('témoin : sans geste, la caméra ne bouge pas (le globe ne tourne PAS seul
 //   https://developers.google.com/maps/documentation/earth/discover-places-change-view
 // ROUGE : chez nous il DÉPLACE la caméra (rapport de distance 1,000, et le
 // point sous la caméra glisse de 2,85°).
-test('C1 · clic droit glissé vers le HAUT zoome (rapport ≥ 1,5), sans incliner ni tourner', () => {
-  const d = g('droit-glisse-V-haut')
-  assert.ok(d.rapportDistance >= 1.5, `rapport de distance : ${d.rapportDistance} (attendu ≥ 1,5)`)
-  assert.ok(d.rapportDistance <= 3.0, `rapport de distance : ${d.rapportDistance} (attendu ≤ 3,0)`)
+test('C1 · clic droit glissé vers le BAS (vers soi, sens Pro) zoome (rapport ≥ 1,5), sans incliner ni tourner', () => {
+  const d = g('droit-glisse-V-bas')
+  assert.ok(zoomDe(d) >= 1.5, `rapport d'altitude : ${zoomDe(d)} (attendu ≥ 1,5)`)
+  assert.ok(zoomDe(d) <= 3.0, `rapport d'altitude : ${zoomDe(d)} (attendu ≤ 3,0)`)
   assert.ok(Math.abs(d.dTiltDeg) <= 0.2, `inclinaison parasite : ${d.dTiltDeg}° (attendu ≤ 0,2°)`)
   assert.ok(Math.abs(d.dAzimutDeg) <= 0.2, `azimut parasite : ${d.dAzimutDeg}° (attendu ≤ 0,2°)`)
   assert.ok(d.rotationDeg <= 0.3, `c'est un déplacement, pas un zoom : ${d.rotationDeg}° de rotation (attendu ≤ 0,3°)`)
-  assert.ok(d.pireRapportImage <= 1.10, `saut entre deux images : ×${d.pireRapportImage} (attendu ≤ 1,10)`)
+  const pire = typeof d.pireRapportAlt === 'number' ? d.pireRapportAlt : d.pireRapportImage
+  assert.ok(pire <= 1.10, `saut d'altitude entre deux images : ×${pire} (attendu ≤ 1,10)`)
 })
-test('C1 · clic droit glissé vers le BAS dézoome, symétrique à ±5 %', () => {
+test('C1 · clic droit glissé vers le HAUT (push away) dézoome, symétrique à ±5 %', () => {
   const h = g('droit-glisse-V-haut'), b = g('droit-glisse-V-bas')
-  assert.ok(b.rapportDistance < 1, `le glissé vers le bas doit dézoomer : ${b.rapportDistance}`)
-  const ecart = Math.abs(Math.log(h.rapportDistance * b.rapportDistance))
-  assert.ok(ecart <= 0.05, `haut et bas ne sont pas symétriques : ×${h.rapportDistance} contre ×${b.rapportDistance}`)
+  assert.ok(zoomDe(h) < 1, `le glissé vers le haut doit dézoomer : ${zoomDe(h)}`)
+  const ecart = Math.abs(Math.log(zoomDe(h) * zoomDe(b)))
+  assert.ok(ecart <= 0.05, `haut et bas ne sont pas symétriques : ×${zoomDe(h)} contre ×${zoomDe(b)}`)
 })
 
 // ══════════ C2 — LE CLIC DROIT GLISSÉ HORIZONTALEMENT ══════════════════════
@@ -129,14 +146,14 @@ test('C3 · Ctrl + glissé vertical incline d’au moins 25°, autour de ce qu�
 const VISEE = process.env.GE_VISEE === 'curseur' ? 'curseur0DerivePx' : 'centre0DerivePx'
 test('C4 · double-clic GAUCHE : ×2 de distance, vers le point désigné', () => {
   const d = g('double-clic-gauche')
-  assert.ok(d.rapportDistance >= 1.8 && d.rapportDistance <= 2.2, `rapport de distance : ${d.rapportDistance} (attendu 1,8–2,2)`)
+  assert.ok(zoomDe(d) >= 1.8 && zoomDe(d) <= 2.2, `rapport d'altitude : ${zoomDe(d)} (attendu 1,8–2,2)`)
   assert.ok(d[VISEE] !== null && d[VISEE] <= 25, `le point visé (${VISEE}) dérive de ${d[VISEE]} px (attendu ≤ 25 px)`)
   assert.ok(Math.abs(d.dTiltDeg) <= 0.5, `inclinaison parasite : ${d.dTiltDeg}° (attendu ≤ 0,5°)`)
   assert.ok(d.rotationDeg <= 2, `la Terre ne doit pas rouler sous le double-clic : ${d.rotationDeg}°`)
 })
 test('C4 · double-clic DROIT : ÷2 de distance, depuis le point désigné', () => {
   const d = g('double-clic-droit')
-  assert.ok(d.rapportDistance >= 0.45 && d.rapportDistance <= 0.56, `rapport de distance : ${d.rapportDistance} (attendu 0,45–0,56)`)
+  assert.ok(zoomDe(d) >= 0.45 && zoomDe(d) <= 0.56, `rapport d'altitude : ${zoomDe(d)} (attendu 0,45–0,56)`)
   assert.ok(d[VISEE] !== null && d[VISEE] <= 25, `le point visé (${VISEE}) dérive de ${d[VISEE]} px (attendu ≤ 25 px)`)
 })
 
@@ -147,7 +164,7 @@ test('C4 · double-clic DROIT : ÷2 de distance, depuis le point désigné', () 
 // 3,88°.
 test('C5 · le clic simple sur le globe ne fait rien', () => {
   const d = g('clic-simple')
-  assert.ok(Math.abs(Math.log(d.rapportDistance)) <= 0.02, `le clic simple zoome de ×${d.rapportDistance} (attendu ×1,00 ± 2 %)`)
+  assert.ok(Math.abs(Math.log(zoomDe(d))) <= 0.02, `le clic simple zoome de ×${zoomDe(d)} (attendu ×1,00 ± 2 %)`)
   assert.ok(d.rotationDeg <= 0.05, `le clic simple fait rouler la Terre de ${d.rotationDeg}° (attendu ≤ 0,05°)`)
 })
 
@@ -227,7 +244,8 @@ test('D19 §2 · la molette vise le point au CENTRE de l’écran (≤ 1,4 px)',
   // `curseur0DerivePx` qu'il faut lire, et ce test devient ROUGE (49,25 px).
   for (const nom of ['molette-avant-6crans', 'molette-arriere-6crans', 'molette-1cran']) {
     const d = g(nom)
-    assert.ok(d[VISEE] !== null && d[VISEE] <= 1.4, `${nom} : ${VISEE} = ${d[VISEE]} px`)
+    // ③ (GE3 tour 2) : la molette vise TOUJOURS le centre, quelle que soit GE_VISEE
+    assert.ok(d.centre0DerivePx !== null && d.centre0DerivePx <= 1.4, `${nom} : centre0DerivePx = ${d.centre0DerivePx} px`)
   }
 })
 test('D16 ter · le glissé gauche et la molette avant n’inclinent pas (acquis, VERT)', () => {

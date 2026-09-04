@@ -449,6 +449,9 @@ async function porterA(altM) {
     const e = window.__exp; const g = e.camGlobe ?? e.camera
     return { alt: (g.position.length() - 100) * 63710, busy: !!e.modes.busy }
   })
+  // GE3 tour 2 : on enregistre la trajectoire d'inclinaison PENDANT la montee,
+  // pour voir le redressement automatique (retoursNadir) et son plus grand pas.
+  await on()
   for (let i = 0; i < 400; i++) {
     const s = await lire1()
     if (Math.abs(Math.log(s.alt / altM)) < 0.12) break
@@ -456,6 +459,11 @@ async function porterA(altM) {
     await wait(3)
   }
   await reposer()
+  const fr = await lire(); await off()
+  let maxTilt = 0, maxPas = 0
+  for (let i = 0; i < fr.length; i++) { maxTilt = Math.max(maxTilt, fr[i].tilt); if (i) maxPas = Math.max(maxPas, Math.abs(fr[i].tilt - fr[i - 1].tilt)) }
+  R.redressements = R.redressements || []
+  R.redressements.push({ images: fr.length, tiltDebutDeg: +(fr[0]?.tilt ?? 0).toFixed(3), tiltMaxDeg: +maxTilt.toFixed(3), plusGrandPasDeg: +maxPas.toFixed(3), tiltFinDeg: +(fr[fr.length - 1]?.tilt ?? 0).toFixed(3), retoursNadir: await page.evaluate(() => window.__exp.gestesTerre?.retoursNadir ?? null) })
   return (await lire1()).alt
 }
 
@@ -481,7 +489,7 @@ const ELAN = (f, s) => {
   }
 }
 const ALT_M = Number(opt('--alt', '2000000'))
-const R = { pose: null, altViseeM: ALT_M, gestes: {} }
+var R = { pose: null, altViseeM: ALT_M, gestes: {} }
 for (const [nom, faire] of Object.entries(GESTES)) {
   if (SEUL && nom !== SEUL) continue
   if (SEULS.length && !SEULS.includes(nom)) continue
