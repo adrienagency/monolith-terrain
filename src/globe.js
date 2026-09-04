@@ -16,7 +16,7 @@ import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
-import { overzoomTile, fuseBathymetry } from './bathy.js'
+import { bandeBruitAdmise, fuseBathymetry, overzoomTile, resolutionBathyM } from './bathy.js'
 // ⚠️ `dem.js` N'IMPORTE PAS `globe.js` (il s'en garde explicitement, voir
 // l'encart de `memo-tuiles-mnt.js`) : le sens unique est acquis, pas espéré.
 import { peindreBathyTuile, indexBathy } from './dem.js'
@@ -3602,7 +3602,23 @@ async function fondMarinTuile(z, x, y, heights, px) {
   let peint = await peindreBathyTuile(arg)
   if (peint < 0 && terrariumMuetEnMer(heights)) peint = await peindreBathyTuile({ ...arg, plancher: index.zmin })
   if (peint < 0) return null
-  const fondu = fuseBathymetry(heights, sea, opts)
+  // 🔴 PLAT — LA BANDE DE BRUIT NE VAUT QU'À ÉCHELLE COMPARABLE, ET C'EST ICI
+  // QUE ÇA SE JOUE POUR LE CROP. La fenêtre continue ne relit pas le terrarium :
+  // elle échantillonne CES tuiles-ci, DÉJÀ FUSIONNÉES. Mesuré en Camargue
+  // (`.banc/PLAT/`) : la tuile z15 BRUTE descend à −0,27 m, 0,6 % sous zéro ; la
+  // MÊME tuile sortie d'ici descend à −8,26 m, 19 à 49 % sous zéro. La bande de
+  // B5 y rendait à la mer un marais IGN à +0,13 m, sur le seul avis d'EMODnet
+  // z10 — 111,8 m de maille contre 1,73 m de pixel de tuile, rapport 64. À
+  // l'écran : des rectangles à angles droits de la taille d'une tuile du
+  // quadtree, et une tuile restée émergée au milieu. Les carrés plats et le
+  // carré blanc. Voir `bandeBruitAdmise` (src/bathy.js) et son tableau de lieux.
+  // ⚠️ `opts` peut être `undefined` : on ne le remplace QUE si la règle mord,
+  // sinon l'appel reste celui d'avant AU BIT (nappe et bande de fondu comprises).
+  const bandePlat = bandeBruitAdmise(
+    resolutionBathyM(peint, c.lat),
+    ((156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / 2 ** z) * (256 / px)
+  )
+  const fondu = fuseBathymetry(heights, sea, bandePlat === 0 ? { ...(opts ?? {}), noiseBand: 0 } : opts)
   return fondu === heights ? null : fondu
 }
 

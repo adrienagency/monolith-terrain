@@ -154,6 +154,71 @@ export const NOISE_BAND = 0.6
 // mer que la source fine donne à −5…−80 m dès la première cellule.
 export const NOISE_MIN_DEPTH = 2
 
+// ══════════ 🔴 PLAT — UNE SOURCE NE REDESSINE UN RIVAGE QU'À SON ÉCHELLE ═════
+//
+// LE PROBLÈME DE FOND, celui qu'Adrien voit revenir. La bande de bruit ci-dessus
+// est la SEULE règle du module qui prenne une TERRE FRANCHE ET POSITIVE et la
+// rende à la mer. Elle le fait sur le seul avis de « la source fine ». Or
+// « fine » est une propriété RELATIVE, et personne ne la vérifiait :
+//
+//   Camargue, 43,45 / 4,60, bloc z17 → **0,433 m par pixel**.
+//   La source bathymétrique qui y répond est EMODnet z10 → **111,8 m de maille**.
+//   Rapport : **258**. Une cellule de la « source fine » couvre 256 pixels du
+//   bloc — un carré de 256 × 256 px à angles droits.
+//
+// Mesuré (scripts/plat-champs.mjs, `.banc/PLAT/avant/`) : **728 813 pixels de
+// terre franche** (31 % du bloc, terrarium à +0,1 … +0,6 m, texturé, aucune
+// valeur constante) rendus à la mer par cette seule règle, en blocs rectangulaires
+// alignés sur la grille EMODnet — **les carrés plats d'Adrien** — et une cellule
+// restée émergée au milieu : **le carré blanc dans l'eau**. La profondeur
+// réclamée par EMODnet y est de −2,00 à −2,26 m : elle passe le garde
+// `NOISE_MIN_DEPTH` d'un cheveu, et emporte la décision sur un relief IGN à 1 m.
+//
+// ⛔ LE GARDE N'EST PAS UNE PROFONDEUR DE PLUS. Le même relevé sur cinq lieux
+// montre que la variable qui sépare le bon du mauvais n'est ni la profondeur ni
+// le zoom, c'est la MAILLE de la source fine, ramenée au pixel du bloc :
+//
+//   lieu / zoom          maille source   px du bloc   rapport   verdict
+//   Porquerolles z13     EMODnet 111,8      6,99 m       16     B5 nécessaire ✅
+//   Camargue z13         EMODnet 111,8      6,94 m       16     correct ✅
+//   Bretagne z15         EMODnet 111,8      1,58 m       64     10 px basculés
+//   Camargue z17         EMODnet 111,8      0,433 m     258     728 813 px ⛔
+//   Porquerolles z17     EMODnet 111,8      0,434 m     258      16 029 px ⛔
+//   fjord Bergen z15     GEBCO   611        1,18 m      518       9 889 px ⛔
+//
+// La règle : au-delà de `CELLULE_MAX_PX` pixels de bloc par cellule de source,
+// la source fine n'est plus fine ICI — elle ne sait plus où est le rivage à
+// mieux qu'un gros carré — et elle perd le droit de RECLASSER de la terre. Elle
+// garde tout le reste : elle creuse la mer comme avant, au bit près, partout où
+// le terrarium est muet ou immergé. **Seule la reclassification terre → mer est
+// suspendue.** C'est ce qui rend le correctif sûr pour « le relief des tuiles
+// déjà correctes ».
+export const CELLULE_MAX_PX = 32
+
+/**
+ * La bande de bruit est-elle admissible à cette échelle ?
+ *
+ * @param {number} resolutionSourceM - maille au sol de la tuile bathy peinte (m)
+ * @param {number} metersPerPixel - pas au sol d'un pixel du champ fusionné (m)
+ * @returns {number} la valeur à passer en `noiseBand` — `NOISE_BAND`, ou 0 pour
+ *   éteindre la règle. ⚠️ Une entrée non finie rend `NOISE_BAND` : un appelant
+ *   qui ne sait pas mesurer son échelle garde le comportement d'avant, AU BIT.
+ */
+export function bandeBruitAdmise(resolutionSourceM, metersPerPixel) {
+  if (!Number.isFinite(resolutionSourceM) || !Number.isFinite(metersPerPixel) || metersPerPixel <= 0) return NOISE_BAND
+  return resolutionSourceM > CELLULE_MAX_PX * metersPerPixel ? 0 : NOISE_BAND
+}
+
+/**
+ * Maille au sol, en mètres, d'un pixel d'une tuile bathy de 256 px au zoom `z`.
+ * @param {number} z
+ * @param {number} lat - latitude en degrés
+ */
+export function resolutionBathyM(z, lat) {
+  if (!Number.isFinite(z) || z < 0) return NaN
+  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** z
+}
+
 /**
  * Le champ porte-t-il, autour du niveau, un REMPLISSAGE BRUITÉ ?
  * @param {Float32Array} land
@@ -166,6 +231,11 @@ export function detectNoiseFill(land, sea, opts = {}) {
   const level = opts.seaLevel ?? 0
   const part = opts.fillShare ?? FILL_SHARE
   const bande = opts.noiseBand ?? NOISE_BAND
+  // 🔴 PLAT — `noiseBand: 0` ÉTEINT LA RÈGLE, il ne la rétrécit pas à zéro. Sans
+  // ce test, une bande nulle laisserait passer `d >= -0 && d <= 0`, c'est-à-dire
+  // le zéro EXACT — que `NODATA_EPS` traite déjà, mais qui suffirait à faire
+  // rendre `true` sur une dalle de remplissage et à rallumer toute la règle.
+  if (!(bande > 0)) return false
   let sondes = 0
   let dedans = 0
   const seuilMer = level - (opts.noiseMinDepth ?? NOISE_MIN_DEPTH)
