@@ -276,6 +276,11 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'contrasteAutoSocle',
   'socleBasM',
   'socleAmpM',
+  // Tâche BLA — le domaine de référence du Naturel (le carré de 40 km). Il ne
+  // change qu'au premier MNT assez large et sous l'option de re-normalisation,
+  // mais un champ absent d'ici n'est jamais comparé, donc jamais reposé.
+  'refBasM',
+  'refAmpM',
   'hazeAmt',
   'hazeAlt',
   'hazeDist',

@@ -733,6 +733,13 @@ function globeStub(crop = REPERE) {
       uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),
       uHazeColor: val(couleurStub(NATUREL_MONDE.hazeColor)),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE BLA** : `_majGradeBloc` écrit la conversion
+      // vers le domaine de référence du Naturel, `poserHabillage` la borne du
+      // voile en mètres — aux valeurs du constructeur (l'identité), pour que
+      // ⑨h voie un `retirerHabillage` qui oublierait de les rendre.
+      uHNormRefA: val(1),
+      uHNormRefB: val(0),
+      uFdFacteur: val(1),
       // ══════ L'ÉCLAIRAGE ET LA COUCHE APPARENCE — Tâche P3 ═══════════════
       //
       // ⚠️ **AUX MÊMES VALEURS QUE LE CONSTRUCTEUR**, pour la raison écrite

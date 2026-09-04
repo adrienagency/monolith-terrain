@@ -127,7 +127,7 @@ const NUANCEUR = new Function(
   'STEP',
   'SMOOTHSTEP',
   `${JS_NATUREL}
-   return { natPlancherPivot, natRampT, natHumiditeY, natEcartPeigne, natSoftLight, natPeigne, natVoile, natBrume }`
+   return { natPlancherPivot, natRampT, natHumiditeY, natEcartPeigne, natSoftLight, natPeigne, natVoile, natBrume, natHNormRef }`
 )(CLAMP, MIX, STEP, SMOOTHSTEP)
 
 /** Un balayage reproductible — pas de hasard, donc pas de test qui clignote. */
@@ -275,11 +275,12 @@ test('①h la brume DÉSATURE avant de virer, et le rehaussement est indissociab
 
 // ══════════ ② LE TEXTE GLSL, TRADUIT PUIS EXÉCUTÉ ══════════════════════════
 
-test('②a le traducteur a bien produit les huit fonctions — sinon ② ne prouve rien', () => {
+test('②a le traducteur a bien produit les neuf fonctions — sinon ② ne prouve rien', () => {
   // ⚠️ **UN TRADUCTEUR QUI RATE SA CIBLE REND UN TEST VERT ET VIDE.** C'est la
   // neuvième façon de mentir du §0 : un banc qui ne rend rien ressemble à un
   // banc qui rend juste. On exige donc les fonctions AVANT de les comparer.
-  for (const nom of ['natPlancherPivot', 'natRampT', 'natHumiditeY', 'natEcartPeigne', 'natSoftLight', 'natPeigne', 'natVoile', 'natBrume']) {
+  // ⚠️ `natHNormRef` — Tâche BLA, la conversion vers le domaine de référence
+  for (const nom of ['natPlancherPivot', 'natRampT', 'natHumiditeY', 'natEcartPeigne', 'natSoftLight', 'natPeigne', 'natVoile', 'natBrume', 'natHNormRef']) {
     assert.equal(typeof NUANCEUR[nom], 'function', `${nom} n'a pas été traduite`)
   }
   // et le texte traduit ne doit plus porter un seul type GLSL
@@ -597,8 +598,12 @@ test('⑤c la distance du voile est length(qCrop) — la MÊME grandeur que cell
   // ⚠️ **CE N'EST PAS UNE APPROXIMATION** : `terrain.js` divise par `uSlabHalf`
   // (28) une distance en unités de scène, et l'en-tête de `habillage-crop.js`
   // DÉMONTRE `x = 28 · u`. Le quotient EST `qCrop`, terme à terme.
-  assert.match(FRAG_GLOBE, /float fd = clamp\(length\(qCrop\), 0\.0, 1\.0\);/)
-  assert.match(TERRAIN_SRC, /float fd = clamp\(length\(vWorldPos\.xz - uBlockOffset\) \/ max\(uSlabHalf, 1e-3\), 0\.0, 1\.0\);/)
+  // ⚠️ **ET EN MÈTRES — Tâche BLA.** Le quotient reste le même des deux côtés ;
+  // il est MULTIPLIÉ par `uFdFacteur` (demi-largeur au sol / 80 km, 1 par
+  // défaut) pour que la brume ait une échelle. `test/voile-fixe.test.js` porte
+  // la loi du facteur ; ici on garde que la grandeur d'origine n'a pas bougé.
+  assert.match(FRAG_GLOBE, /float fd = clamp\(length\(qCrop\) \* uFdFacteur, 0\.0, 1\.0\);/)
+  assert.match(TERRAIN_SRC, /float fd = clamp\(length\(vWorldPos\.xz - uBlockOffset\) \/ max\(uSlabHalf, 1e-3\) \* uFdFacteur, 0\.0, 1\.0\);/)
 })
 
 test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l’échelle DU SOCLE', () => {
@@ -647,10 +652,16 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
   // et un pivot d'utilisateur plus haut que le plancher gagne — c'est un réglage
   assert.equal(Math.max(0.65, plancherPivot(hSocle(0))), 0.65)
   assert.equal(plancherPivot(0), MARGE_PIVOT)
-  // les trois lecteurs de l'échelle du socle emploient hNormRelief, aucun hNorm
-  for (const appel of ['natRampT(hNormRelief,', 'natHumiditeY(anl.b, anl.a, hNormRelief,', 'natVoile(hNormRelief,']) {
+  // les trois lecteurs de l'échelle du socle emploient hNormRelief, aucun hNorm.
+  // ⚠️ **DEUX D'ENTRE EUX PASSENT PAR `natHNormRef` — Tâche BLA** : la limite
+  // des arbres et le voile lisent l'échelle du socle RAMENÉE au domaine de
+  // référence (l'entrée reste `hNormRelief`, jamais `hNorm`) ; le pivot, lui,
+  // est déjà transposé par le grade du bloc (GRA) et lit `hNormRelief` nu.
+  for (const appel of ['natRampT(hNormRelief,', 'float hNormNat = natHNormRef(hNormRelief, uHNormRefA, uHNormRefB);', 'natHumiditeY(anl.b, anl.a, hNormNat,', 'natVoile(natHNormRef(hNormRelief, uHNormRefA, uHNormRefB),']) {
     assert.ok(FRAG_GLOBE.includes(appel), `${appel} : un lecteur est resté sur l’échelle de la Tâche D`)
   }
+  assert.ok(!FRAG_GLOBE.includes('natHumiditeY(anl.b, anl.a, hNormRelief,'), 'la limite des arbres lit encore le domaine vivant')
+  assert.ok(!FRAG_GLOBE.includes('natVoile(hNormRelief,'), 'le voile lit encore le domaine vivant')
 })
 
 test('⑤d bis SUR UN CROP SANS MER, `-uOceanDepth` N’EST PAS LE MINIMUM DU RELIEF — Tâche P11', () => {
@@ -748,6 +759,9 @@ function globeStub() {
       uHazeAmt: val(NATUREL_MONDE.hazeAmt), uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),
       uHazeColor: val({ hex: NATUREL_MONDE.hazeColor, set(v) { this.hex = v } }),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE BLA** : `_majGradeBloc` écrit la conversion
+      // vers le domaine de référence, `poserHabillage` la borne du voile.
+      uHNormRefA: val(1), uHNormRefB: val(0), uFdFacteur: val(1),
       // ══════ L'ÉCLAIRAGE ET LA COUCHE APPARENCE — Tâche P3 ═══════════════
       // Ce stub n'exerce que ④ : il lui suffit de PORTER les uniformes que
       // `poserHabillage` écrit. Leur aller-retour bit à bit est vérifié par

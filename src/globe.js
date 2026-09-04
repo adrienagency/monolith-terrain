@@ -169,6 +169,9 @@ import { hauteursTerrarium } from './monde/decodeur-terrarium.js'
 // qu'une seule écriture du peigné, de l'humidité, du pivot et du voile aérien.
 // `test/crop-naturel.test.js` interdit qu'une de ces formules soit réécrite ici.
 import { GLSL_NATUREL, NATUREL_MONDE, GAIN_PEIGNE_MONDE, GAIN_OMBRE_MONDE } from './monde/naturel-crop.js'
+// Tâche BLA — la conversion vers le domaine de référence du mode Naturel, et
+// la distance du voile en mètres. Deux fonctions PURES, vérifiables sous node.
+import { facteursHNormRef, facteurDistanceVoile } from './rampe-fixe.js'
 // ══════ LA COUCHE APPARENCE — Tâche P3 ══════════════════════════════
 // `FX_GLSL` était déjà partagé entre `terrain.js` et les vignettes du panneau ;
 // le crop en est le troisième lecteur. `GLSL_MELANGE` ferme une dette plus
@@ -1524,6 +1527,20 @@ uniform float uHazeAmt;        // perspective aerienne (Imhof) — force globale
 uniform float uHazeAlt;
 uniform float uHazeDist;
 uniform vec3 uHazeColor;
+// ══════ LE DOMAINE DE REFERENCE DU MODE NATUREL — Tache BLA ══════════════
+// hNormRelief est normalise sur [uReliefBas ; uLandMax], le domaine VIVANT du
+// crop, qui s'effondre au zoom fin (z9 : 3 772 m d'amplitude, z13 : 1 085 m,
+// meme lieu). uTreeLine et uHazeAlt sont des reglages du domaine de REFERENCE
+// (le carre de 40 km de la rampe fixe, cote socle) : sans conversion, le voile
+// d'altitude repeignait tout le fond de vallee en gris-blanc a chaque cran.
+// a = ampVivant / ampRef, b = (basVivant - basRef) / ampRef (rampe-fixe.js) ;
+// (1, 0) est l'identite au bit, et c'est la valeur de repos.
+uniform float uHNormRefA;
+uniform float uHNormRefB;
+// la distance du voile en METRES : length(qCrop) x uCropDemiM / 80 000 m
+// (DISTANCE_VOILE_M, mesure dans rampe-fixe.js). 1 = la grandeur d'avant
+// (demi-cotes de crop), le depot au bit.
+uniform float uFdFacteur;
 
 // ══════ LA PHOTO AERIENNE — Tache R9 ═══════════════════════════════════════
 //
@@ -2260,7 +2277,11 @@ void main() {
     float rampTMonde = natRampTMonde(h);
     rampT = mix(rampT, rampTMonde, uRecollage);
     rampT = mix(rampTMonde, rampT, dedansCrop);
-    float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
+    // ⛔ hNorm DE REFERENCE POUR LA LIMITE DES ARBRES — Tache BLA. hNormRelief
+    // reste l'echelle du socle (⑤d) ; natHNormRef la ramene au domaine dans
+    // lequel uTreeLine a ete pose. Voir la declaration de uHNormRefA.
+    float hNormNat = natHNormRef(hNormRelief, uHNormRefA, uHNormRefB);
+    float wetY = natHumiditeY(anl.b, anl.a, hNormNat, uWetK, uExpoK, uHemi, uTreeLine);
     col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
   }
 
@@ -2299,8 +2320,13 @@ void main() {
   // de l'« aplat vert olive uniforme, sans relief » de la capture 2.
   float hazeIci = uHazeAmt * dedansCrop;
   if (uRampCropOn > 0.5 && uHazeAmt > 0.001 && !sousEau) {
-    float fd = clamp(length(qCrop), 0.0, 1.0);
-    float veil = natVoile(hNormRelief, fd, hazeIci, uHazeAlt, uHazeDist);
+    // ⚠️ EN METRES — Tache BLA : length(qCrop) est en demi-cotes de crop,
+    // uFdFacteur = uCropDemiM / DISTANCE_VOILE_M (80 km) le ramene a une
+    // distance au sol. Espace du CROP (uCropDemiM = largeurCropM / 2), pas
+    // celui du globe (R_GLOBE = 100) ni celui de la camera d'effets.
+    float fd = clamp(length(qCrop) * uFdFacteur, 0.0, 1.0);
+    // et l'altitude du voile lit le domaine de REFERENCE (Tache BLA)
+    float veil = natVoile(natHNormRef(hNormRelief, uHNormRefA, uHNormRefB), fd, hazeIci, uHazeAlt, uHazeDist);
     col = natBrume(col, natLuminance(col), veil, uHazeColor, hazeIci);
   }
 
@@ -4581,6 +4607,12 @@ export class Globe {
       uHazeAlt: { value: NATUREL_MONDE.hazeAlt },
       uHazeDist: { value: NATUREL_MONDE.hazeDist },
       uHazeColor: { value: new THREE.Color(NATUREL_MONDE.hazeColor) },
+      // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+      // (1, 0) et 1 : l'identité au bit. `_majGradeBloc` les écrit sous
+      // habillage, `retirerHabillage` les rend. Voir la déclaration GLSL.
+      uHNormRefA: { value: 1 },
+      uHNormRefB: { value: 0 },
+      uFdFacteur: { value: 1 },
       // ══════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═══════════════════════════════
       //
       // ⚠️ **LES DÉFAUTS SONT CEUX DU MODULE, PAS DES NOMBRES RECOPIÉS ICI** —
@@ -5663,6 +5695,12 @@ export class Globe {
     // celui dans lequel son curseur est exprime.
     socleBasM = null,
     socleAmpM = null,
+    // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+    // le carré de 40 km de la rampe fixe (`main.js`, `domaineRef()`), EN
+    // MÈTRES : c'est le domaine dans lequel `treeLine` et `hazeAlt` sont posés.
+    // Absents (option de re-normalisation cochée, banc, test) → identité.
+    refBasM = null,
+    refAmpM = null,
     hazeAmt = NATUREL_MONDE.hazeAmt,
     hazeAlt = NATUREL_MONDE.hazeAlt,
     hazeDist = NATUREL_MONDE.hazeDist,
@@ -5835,6 +5873,11 @@ export class Globe {
       span: gridSpanBloc,
     })
     u.uCropDemiM.value = demiSolM
+    // ══════ LA DISTANCE DU VOILE, EN MÈTRES — Tâche BLA ═════════════════════
+    // Le même nombre que la ligne d'au-dessus, rapporté à DISTANCE_VOILE_M
+    // (80 km = la demi-emprise la plus large, z9) : la vue large garde le voile
+    // d'aujourd'hui, les vues fines en ont moins. Sans crop, `demiSolM = 0` → 1.
+    u.uFdFacteur.value = facteurDistanceVoile(demiSolM)
     u.uGridStepM.value = pasGrilleM ?? HABILLAGE_MONDE.gridPasM
     u.uGridOpacity.value = pasGrilleM ? (Number(gridOpacite) || 0) : HABILLAGE_MONDE.gridOpacite
     u.uGridColor.value.set(gridCouleur ?? HABILLAGE_MONDE.gridCouleur)
@@ -5948,6 +5991,11 @@ export class Globe {
       contrasteAutoSocle: contrasteAutoSocle ?? null,
       socleBasM,
       socleAmpM,
+      // Tâche BLA — le domaine de référence suit le même écrivain unique :
+      // `_majGradeBloc` le confronte au domaine vivant, ici ET à chaque
+      // glissement de `[uReliefBas ; uLandMax]`.
+      refBasM: Number.isFinite(refBasM) ? refBasM : null,
+      refAmpM: Number.isFinite(refAmpM) ? refAmpM : null,
     }
     this._majGradeBloc()
     u.uHazeAmt.value = hazeAmt
@@ -6296,6 +6344,12 @@ export class Globe {
     u.uHazeAlt.value = NATUREL_MONDE.hazeAlt
     u.uHazeDist.value = NATUREL_MONDE.hazeDist
     u.uHazeColor.value.set(NATUREL_MONDE.hazeColor)
+    // Tâche BLA — le domaine de référence part avec le crop : identité au bit.
+    // `_gradeSocle` est lâché quelques lignes plus haut, donc `_majGradeBloc`
+    // ne les réécrira pas ; c'est le repos du constructeur, pas un second jeu.
+    u.uHNormRefA.value = 1
+    u.uHNormRefB.value = 0
+    u.uFdFacteur.value = 1
     // ══════ L'ÉCLAIRAGE ET LA PAROI — Tâche P3 ═══════════════════════════════
     //
     // ⚠️ **RENDUS AUSSI, POUR LA RAISON QUE CE BLOC PORTE DÉJÀ POUR LES DIX
@@ -6574,6 +6628,17 @@ export class Globe {
     })
     u.uHeightPivot.value = g.heightPivot
     u.uHeightContrast.value = g.heightContrast
+    // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════════
+    // Même écrivain, même cadence, même raison que les deux lignes au-dessus :
+    // la conversion dépend du domaine VIVANT, qui glisse par image. Le facteur
+    // `a` vaut ampVivant / ampRef — mesuré 2,58 à z9 et 0,74 à z13 au lieu de la
+    // vidéo d'Adrien (rampe-fixe.js). Sans référence : (1, 0), l'identité.
+    const f = facteursHNormRef(
+      Number.isFinite(s.refBasM) && Number.isFinite(s.refAmpM) ? { basM: s.refBasM, ampM: s.refAmpM } : null,
+      { basM: u.uReliefBas.value, ampM: u.uLandMax.value - u.uReliefBas.value }
+    )
+    u.uHNormRefA.value = f.a
+    u.uHNormRefB.value = f.b
   }
 
   /**

@@ -223,7 +223,9 @@ test('④a le voile aérien ne sort plus de la découpe — sa distance n’a pa
   // écart moyen de **20,54/255**, et l'écart-type de luminance MONTAIT de 32,66 à
   // 35,21 : le voile ne teintait pas, il APLATISSAIT.
   assert.match(FRAG_NU, /float hazeIci = uHazeAmt \* dedansCrop;/)
-  assert.match(FRAG_NU, /natVoile\(hNormRelief, fd, hazeIci, uHazeAlt, uHazeDist\)/)
+  // ⚠️ Tâche BLA : l'altitude du voile passe par `natHNormRef` (le domaine de
+  // référence) — l'entrée reste `hNormRelief`, la force reste `hazeIci`.
+  assert.match(FRAG_NU, /natVoile\(natHNormRef\(hNormRelief, uHNormRefA, uHNormRefB\), fd, hazeIci, uHazeAlt, uHazeDist\)/)
   assert.match(FRAG_NU, /natBrume\(col, natLuminance\(col\), veil, uHazeColor, hazeIci\)/)
   // ⚠️ **LES DEUX ENTRÉES, PAS UNE** : `natBrume` relève le contraste par
   // `hazeAmt` INDÉPENDAMMENT du voile (`lift = (1 − veil) · hazeAmt · 0,35`).
