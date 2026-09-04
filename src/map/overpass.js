@@ -1,6 +1,39 @@
 // Full-detail OSM lines via the Overpass API — raw geometry, NO simplification.
 // Endpoint is a const so a self-hosted instance can replace the public one.
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
+// ══════ LES MIROIRS OVERPASS, MESURÉS DEPUIS CETTE MACHINE — RIV-C ══════════
+//
+// `curl` POST, même requête (`way["waterway"]` sur une bbox de Lyon, 0,15° de
+// côté), quatre tours, 2026-09-04 :
+//
+//   | point d'accès                     | 200 | temps        | corps      |
+//   |-----------------------------------|-----|--------------|------------|
+//   | **overpass-api.de** (celui d'ici) | 0/4 | expire       | —          |
+//   | overpass.kumi.systems             | 1/4 | 5,7 s        | 363 328 o  |
+//   | **overpass.osm.ch**               | 4/4 | 0,13–0,33 s  | **272 o**  |
+//   | maps.mail.ru/osm/tools/overpass   | 4/4 | 1,1–4,0 s    | 363 867 o  |
+//
+// ⛔ **overpass.osm.ch EST UN PIÈGE, PAS UN MIROIR.** Il répond 200 en 130 ms
+// avec `"elements": []` : c'est un extrait SUISSE. Sur Lyon — et sur les 99 %
+// du monde hors de sa couverture — il rend un SUCCÈS VIDE. Or un succès vide
+// n'emprunte pas le chemin `null → Natural Earth` : `if (feats)` est vrai pour
+// un tableau vide, donc il EFFACERAIT les rivières de repli au lieu de les
+// laisser. Le basculer serait remplacer une lenteur par une perte de données
+// silencieuse. **Ne pas l'utiliser.**
+//
+// ⚠️ Et `overpass.kumi.systems`, donné pour « 200 en 4,5 s », n'a répondu qu'une
+// fois sur quatre pour moi, en 5,7 s — sous les 6 s du budget, mais de peu.
+//
+// ➡️ **ON NE BASCULE PAS, ET LE RISQUE EST ÉCRIT.** Les trois miroirs sont des
+// services publics gratuits qui limitent par IP du VISITEUR (voir le § damier
+// de water-layer.js) ; `maps.mail.ru` ajoute une juridiction et une pérennité
+// qu'on ne maîtrise pas, pour un enrichissement facultatif. Depuis RIV-C le
+// repli local peint en premier : un point d'accès mort ne coûte plus qu'un
+// enrichissement manqué, plus une attente. Changer de serveur n'achèterait donc
+// plus de latence — seulement de la donnée fine, contre une dépendance de plus.
+// Le jour où l'eau fine doit vraiment arriver, la réponse écrite dans ce dépôt
+// reste la même : des tuiles vectorielles auto-hébergées, ou une instance à
+// nous. Un miroir peut tomber demain ; `public/data/map/rivers.json`, non.
 // PLUS de `roads` ici. Le calque Routes a quitté le site (Adrien : « très
 // lourd, très mauvais ») et avec lui son prédicat `roadHighwayFilter()` et le
 // cran de « détail » qui lui servait de variante de cache. L'eau est le seul
@@ -133,6 +166,24 @@ export function assertSaneSize(response, limit = OVERPASS_MAXSIZE) {
 // requête, elle, continue dans le cache et servira au prochain rebuild.
 export const OVERPASS_ATTENTE_MS = 6000
 
+// ③ LE BUDGET DE LA **SONDE** — après un échec d'accès franc, on ne repaie pas
+// six secondes pour réapprendre ce qu'on sait déjà.
+//
+// ⚠️ MESURÉ (`scripts/sonde-riv-c.mjs`, contexte neuf) : les DEUX premières
+// reconstructions payaient un budget PLEIN — 6 010 ms puis 6 200 à 10 000 ms —
+// avant que le disjoncteur ne serve à quoi que ce soit. Le repos de 60 s
+// (OVERPASS_PANNE_MS) protège les zones SUIVANTES, mais rien ne protégeait la
+// deuxième tentative, ni la première d'après le repos.
+//
+// 1,5 s, et le chiffre n'est pas pris au hasard non plus : la mesure de
+// référence du module donne 927 ms pour une requête saine, donc une sonde à
+// 1,5 s laisse encore passer un point d'accès qui répond normalement, tout en
+// divisant par quatre le prix d'un point d'accès mort. Un point d'accès sain
+// mais lent perd son enrichissement sur CETTE arrivée seulement : la requête
+// n'est pas annulée, elle continue de remplir le cache, et la reconstruction
+// suivante sur la même emprise la trouve — et remet le compteur à zéro.
+export const OVERPASS_ATTENTE_SONDE_MS = 1500
+
 // ② Le repos après une panne d'accès. Sans lui, sur une machine qui n'atteint
 // pas Overpass, CHAQUE changement de zone repaie les 6 s. Avec lui, seul le
 // premier les paie. Une minute : assez long pour ne pas re-sonder un réseau
@@ -140,9 +191,19 @@ export const OVERPASS_ATTENTE_MS = 6000
 export const OVERPASS_PANNE_MS = 60_000
 
 let _panneJusqua = 0
+// Le nombre d'échecs d'ACCÈS d'affilée. Zéro = on n'a aucune raison de douter
+// du point d'accès, il a droit au budget plein. Au-delà, la prochaine requête
+// neuve est une SONDE (voir OVERPASS_ATTENTE_SONDE_MS). Toute réponse lue
+// remet le compteur à zéro : le réseau est revenu, on lui rend sa confiance.
+let _pannesDAffilee = 0
 export function overpassEnPanne(maintenant = Date.now()) { return maintenant < _panneJusqua }
-export function noterPanneOverpass(maintenant = Date.now()) { _panneJusqua = maintenant + OVERPASS_PANNE_MS }
-export function oublierPanneOverpass() { _panneJusqua = 0 } // tests, et retour manuel
+export function noterPanneOverpass(maintenant = Date.now()) { _panneJusqua = maintenant + OVERPASS_PANNE_MS; _pannesDAffilee++ }
+export function oublierPanneOverpass() { _panneJusqua = 0; _pannesDAffilee = 0 } // tests, et retour manuel
+export function overpassSondeSeulement() { return _pannesDAffilee > 0 }
+// Le budget qu'on accorde à une requête NEUVE, sachant ce qu'on sait du point
+// d'accès. `Math.min` et pas un remplacement : un appelant qui demande déjà
+// moins que la sonde (les tests le font) garde sa valeur.
+function _budget(attenteMs) { return _pannesDAffilee > 0 ? Math.min(attenteMs, OVERPASS_ATTENTE_SONDE_MS) : attenteMs }
 
 // Une erreur de REQUÊTE (statut HTTP, charge refusée) — par opposition à une
 // panne d'ACCÈS. La distinction commande le disjoncteur : un 400 sur une bbox
@@ -175,6 +236,31 @@ export function attendreOuAbandonner(job, ms) {
 
 // cache by zone+kind, dedupe in-flight, min gap between network hits, null on fail
 const _cache = new Map()
+// ② L'ÉCHÉANCE, UNE PAR REQUÊTE ET PARTAGÉE — RIV-C.
+//
+// ⛔ **CHAQUE RECONSTRUCTION ROUVRAIT SON PROPRE BUDGET DE 6 s SUR UNE REQUÊTE
+// DÉJÀ EN VOL.** Le cache dédoublonne bien la REQUÊTE — une seule part sur le
+// réseau — mais `_attendre` posait un minuteur NEUF à chaque appel. Deux
+// reconstructions sur la même emprise (c'est le cas courant : le vol en
+// déclenche plusieurs) attendaient donc 6 s, puis encore 6 s, sur la MÊME
+// connexion morte.
+//
+// MESURÉ avant, contexte neuf, Rhône z13 : 6 008,6 ms puis **9 988,2 ms** —
+// la deuxième attente est même plus longue que le budget, parce qu'elle
+// démarre son minuteur après le sien.
+//
+// Une échéance par clé, posée par le PREMIER qui attend. Les suivants héritent
+// de ce qui reste ; ils ne redémarrent pas le compteur.
+//
+// ⚠️ **`Math.max(1, reste)` ET PAS `Math.max(0, reste)`.** À zéro,
+// `attendreOuAbandonner` rend le job NU (`if (!(ms > 0)) return job`) : sur une
+// requête qui ne répond jamais, l'attente redeviendrait infinie — exactement le
+// défaut de 42 s que ce module a été écrit pour supprimer. Et 1 ms suffit à ne
+// jamais jeter une réponse déjà arrivée : une promesse réglée gagne toujours la
+// course contre un `setTimeout`, qui est une macrotâche. Le cache reste donc
+// lisible même échéance dépassée, comme le veut la règle « le cache passe avant
+// le disjoncteur ».
+const _echeances = new Map()
 let _lastAt = 0
 
 // Le `fetch` du navigateur par défaut ; injectable pour les tests (ce module
@@ -189,6 +275,9 @@ function _memoriser(key, job, maintenant) {
   _cache.set(key, job)
   job.catch((err) => {
     _cache.delete(key)
+    // L'échéance meurt avec l'entrée : une reconstruction ultérieure ouvre une
+    // requête NEUVE, elle a droit à un budget neuf.
+    _echeances.delete(key)
     if (!(err instanceof ErreurRequeteOverpass)) noterPanneOverpass(maintenant())
   })
   return job
@@ -197,7 +286,10 @@ function _memoriser(key, job, maintenant) {
 async function _lire(r, kind, lecteur) {
   if (!r.ok) throw new ErreurRequeteOverpass(`overpass ${r.status}`)
   try { assertSaneSize(r) } catch (err) { throw new ErreurRequeteOverpass(err.message) }
-  return lecteur(await r.json(), kind)
+  const v = lecteur(await r.json(), kind)
+  // Le point d'accès a RÉPONDU : il a de nouveau droit au budget plein.
+  _pannesDAffilee = 0
+  return v
 }
 
 // L'attente commune aux deux points d'entrée. Un abandon OUVRE le disjoncteur :
@@ -208,8 +300,12 @@ async function _lire(r, kind, lecteur) {
 // entier. Se tromper coûte au pire Natural Earth au lieu d'Overpass pendant une
 // minute, et la requête abandonnée continue de remplir le cache.
 async function _attendre(key, attenteMs, maintenant) {
+  // L'échéance est posée UNE FOIS par le premier attendeur (voir _echeances).
+  let echeance = _echeances.get(key)
+  if (echeance === undefined) { echeance = maintenant() + attenteMs; _echeances.set(key, echeance) }
+  const reste = echeance - maintenant()
   try {
-    const r = await attendreOuAbandonner(_cache.get(key), attenteMs)
+    const r = await attendreOuAbandonner(_cache.get(key), Math.max(1, reste))
     if (r === ABANDON) { noterPanneOverpass(maintenant()); return null }
     return r
   } catch { return null }
@@ -234,7 +330,7 @@ export async function fetchOverpassLines(bbox, kind, { url = OVERPASS_URL, minIn
       return _lire(r, kind, parseOverpass)
     })(), now)
   }
-  return _attendre(key, attenteMs, now)
+  return _attendre(key, _budget(attenteMs), now)
 }
 
 function areaBboxKey(bbox) {
@@ -260,5 +356,5 @@ export async function fetchOverpassAreas(bbox, { url = OVERPASS_URL, minInterval
       return _lire(r, null, parseOverpassAreas)
     })(), now)
   }
-  return _attendre(key, attenteMs, now)
+  return _attendre(key, _budget(attenteMs), now)
 }
