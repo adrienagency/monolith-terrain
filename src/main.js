@@ -13989,16 +13989,45 @@ renderer.domElement.addEventListener('wheel', (e) => intentionZoom(e.deltaY), { 
 // dépôt (§0 du plan) ; une confirmation écrite ici ne serait gardée par rien.
 const confirmationSortie = creerConfirmationSortie()
 /** ⚠️ La marge sur `SEUIL_MORT_M` paie les crans clippés du plancher du crop
- *  (0,4 nat mesuré) ; elle est SANS effet sur le résultat, puisque la poussée
- *  est arrêtée à la mort du crop — elle évite seulement une course trop courte. */
+ *  (0,4 nat mesuré). ⛔ **ET ELLE N'EST PLUS UNE VISÉE — c'est la correction
+ *  PORTE.** SORTIE l'écrivait « sans effet, puisque la poussée est arrêtée à la
+ *  mort du crop » ; huit chargements disent le contraire
+ *  (`.banc/PORTE/avant-retour-8.json`) : le crop mourait entre **41 119 et
+ *  58 160 m** et la caméra finissait à **45 555 – 63 890 m**, c'est-à-dire à
+ *  `1,6 × SEUIL_MORT_M` = **64 549 m**, la visée elle-même. Le budget est en
+ *  log-DISTANCE et les franchissements CONSERVENT l'altitude : il ne peut donc
+ *  pas s'arrêter à la bonne altitude, il ne sait pas où il en est.
+ *  ➡️ Le budget reste large — c'est lui qui donne la sortie en 8-9 crans — et
+ *  c'est `ARRET_SORTIE` ci-dessous, lu à chaque image, qui termine la course. */
 const MARGE_SORTIE = 1.6
+/** ⚡ **LE TERMINUS DE LA POUSSÉE, EN ALTITUDE.** Juste au-dessus de
+ *  `SEUIL_MORT_M`, pas 60 % au-dessus : il faut franchir le seuil (sinon D21 ①
+ *  ne prononce pas la mort et la sortie ne se fait pas), et il ne faut pas le
+ *  franchir de plus, parce que chaque mètre au-dessus est un cran que
+ *  l'utilisateur repaiera au retour. ⚠️ **2 %, mesuré et non choisi** : au taux
+ *  de la poussée une image vaut +10,5 % d'altitude, donc l'arrêt lu AVANT le pas
+ *  laisse au plus une image de dépassement ; 2 % couvre la lecture, l'élan de la
+ *  molette fait le reste et le crop meurt 8/8. */
+const ARRET_SORTIE = 1.02
+/** Ce qui MANQUE, en log-altitude, pour que D21 ① prononce la mort du crop.
+ *  ⚠️ **Un reste, pas un booléen** : la poussée écrête son pas dessus, donc la
+ *  dernière marche vaut exactement ce qu'il faut et pas une image de plus. */
+function resteSortieLog() {
+  const alt = altitudeCadrageM()
+  if (!(Number.isFinite(alt) && alt > 0)) return 0
+  return Math.log((SEUIL_MORT_M * ARRET_SORTIE) / alt)
+}
 function confirmerSortieMolette(deltaY) {
   const dansLeCrop = !!(terreUniqueBranchee && veilleCrop?.pose && modes && modes.mode === 'surface')
   if (!confirmationSortie.cran(deltaY, performance.now(), dansLeCrop)) return
   const alt = altitudeCadrageM()
   if (!(Number.isFinite(alt) && alt > 0)) return
   const budget = Math.log((SEUIL_MORT_M * MARGE_SORTIE) / alt)
-  if (budget > 0) modes.armerPousseeSortie?.(budget)
+  // ⚠️ **L'ARRÊT EST UNE FERMETURE, PAS UN NOMBRE** : l'altitude est relue à
+  // chaque image de la course, jamais celle du cran qui l'a armée. Elle rend ce
+  // qui MANQUE, pas un booléen, pour que la poussée puisse écrêter son dernier
+  // pas dessus au lieu de sauter par-dessus le seuil.
+  if (budget > 0) modes.armerPousseeSortie?.(budget, resteSortieLog)
 }
 // La poussée est arrêtée par la MORT du crop, et par elle seule — c'est le seul
 // endroit qui la connaisse (`surBascule`, à la naissance comme à la mort).

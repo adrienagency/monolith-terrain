@@ -340,6 +340,50 @@ export const TAUX_SORTIE_LOG_S = 6
  *  une course qui tient la caméra sans fin serait pire que le défaut. */
 export const DUREE_SORTIE_MAX_S = 6
 
+// ══════════ PORTE — LA SORTIE NE DOIT PAS ÊTRE UNE ÉJECTION ═════════════════
+//
+// ⚡ **MESURÉ, 8 chargements** (`.banc/PORTE/avant-retour-8.json`, un cran par
+// lecture, aller PUIS retour) : la molette **sort en 8 à 10 crans** — c'est le
+// gain de SORTIE, et il tient — mais elle **rentre en 21 à 32 crans**, deux fois
+// et demie à trois fois et demie plus cher. ⛔ **La porte n'est pas à sens unique
+// (le crop renaît 8/8), elle est à PENTE.**
+//
+// **La cause n'est ni la renaissance ni son seuil** — c'est le SURVOL de la
+// sortie. Le crop meurt entre **41 119 et 58 160 m**, puis la caméra continue
+// jusqu'à **45 555 – 63 890 m** au repos, c'est-à-dire jusqu'à **deux fois le
+// seuil de naissance** (32 274 m). Chacun de ces mètres, l'utilisateur les
+// repaie au retour : `ln(63 890 / 32 274) / 0,0347` = **19,7 crans** rien que
+// pour effacer un survol qu'il n'a pas demandé.
+//
+// ⛔ **ET LE SURVOL EST ÉCRIT EN TOUTES LETTRES : c'était `MARGE_SORTIE = 1,6`
+// de `main.js`.** La poussée VISAIT `1,6 × SEUIL_MORT_M` = **64 549 m** — très
+// exactement le 63 890 m relevé. SORTIE la croyait « sans effet, puisque la
+// poussée est arrêtée à la mort du crop » ; la mesure dit le contraire, parce
+// que le budget est en **log-DISTANCE** et que les franchissements CONSERVENT
+// l'altitude : le budget ne sait pas où il en est en altitude, il ne peut donc
+// pas s'arrêter au bon endroit.
+//
+// **Et la seconde moitié du survol est une image de trop.** L'application tourne
+// ici à ~16 images/s pendant la course (`dt ≈ 0,06 s`) : un pas vaut
+// `6 × 0,06 = 0,36` nat, c'est-à-dire **×1,43 d'altitude EN UNE IMAGE**. Le
+// dernier pas passait donc le seuil de 43 % d'un coup. C'est ce qui explique
+// l'étalement des morts relevées (41 119 → 58 160 m) : ce n'est pas du bruit,
+// c'est la taille de la dernière marche.
+//
+// ➡️ **LA POUSSÉE S'ARRÊTE DÉSORMAIS SUR L'ALTITUDE, PAS SUR SON BUDGET — et
+// elle RÉGLE SON DERNIER PAS DESSUS.** `armerPousseeSortie` prend un `reste()`,
+// lu à chaque image, qui rend **ce qui manque en log-altitude** pour que le crop
+// meure. Zéro ou moins : la course s'arrête. Sinon le pas de l'image est
+// **écrêté à ce reste**, ce qui supprime la dernière marche sans toucher au taux.
+//
+// ⚠️ **ET C'EST POURQUOI CE N'EST PAS UN PLAFOND DE PAS FIXE.** Un
+// `PAS_SORTIE_MAX_LOG = 0,12` a été écrit, mesuré, puis **retiré** : il borne
+// bien le survol (mort à 40 366 – 41 654 m, 8/8) mais il divise le taux par
+// trois quand `dt` vaut 0,06 s, et la sortie passe de 8-9 crans à **15-40**.
+// ⛔ C'est la moitié du critère perdue pour racheter l'autre. Écrêter au RESTE
+// donne les deux : pleine vitesse tant qu'il reste du chemin, pas d'à-coup au
+// bout.
+
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
 // as a fixed DIRECTION so the new far-standoff arrival (_arrivalPose()
@@ -1768,11 +1812,21 @@ export class Modes {
   //
   // @param {number} budgetLog log-distance à dépenser (l'appelant le dérive de
   //   l'altitude à atteindre : `ln(cible / courante)`, plus sa marge).
-  armerPousseeSortie(budgetLog) {
+  // @param {() => number} [reste] ⚡ **PORTE — LE VRAI TERMINUS.** Lu à CHAQUE
+  //   image ; il rend **ce qui manque en log-altitude** pour que le crop meure.
+  //   `≤ 0` arrête la course ; sinon le pas de l'image y est écrêté. C'est lui
+  //   qui borne le survol, pas le budget : le budget est en log-DISTANCE et les
+  //   franchissements CONSERVENT l'altitude, donc il ne sait pas où il en est en
+  //   altitude. Sans `reste`, le comportement est celui de SORTIE — la course va
+  //   au bout de son budget, et c'est ce qui coûtait 21 à 32 crans au retour.
+  armerPousseeSortie(budgetLog, reste) {
     if (this.mode !== 'surface' || !this._continu()) return false
     if (!(Number.isFinite(budgetLog) && budgetLog > 0)) return false
     if (this._sortieCourse) return false // déjà en route : on ne la relance pas
-    this._sortieCourse = { restant: budgetLog, t: 0, depart: this.controls.getDistance() }
+    this._sortieCourse = {
+      restant: budgetLog, t: 0, depart: this.controls.getDistance(),
+      reste: typeof reste === 'function' ? reste : null,
+    }
     return true
   }
 
@@ -1801,8 +1855,18 @@ export class Modes {
     if (!s) return
     s.t += dt
     if (s.t > DUREE_SORTIE_MAX_S || s.restant <= 0) { this.annulerPousseeSortie(); return }
+    // ⚡ **PORTE — LE RESTE SE LIT AVANT LE PAS, ET IL L'ÉCRÊTE.** Le lire après
+    // dépenserait toujours une image de trop — et une image vaut ici +43 %
+    // d'altitude (`dt ≈ 0,06 s`) : c'est elle qui portait la mort du crop de
+    // 40 343 à 58 160 m, puis l'utilisateur qui la repayait au retour.
+    let plafond = Infinity
+    if (s.reste) {
+      const r = s.reste()
+      if (!(Number.isFinite(r) && r > 0)) { this.annulerPousseeSortie(); return }
+      plafond = r
+    }
     const c = this.controls
-    const pas = Math.min(s.restant, TAUX_SORTIE_LOG_S * dt)
+    const pas = Math.min(s.restant, TAUX_SORTIE_LOG_S * dt, plafond)
     s.restant -= pas
     const dist = c.getDistance()
     const newDist = THREE.MathUtils.clamp(dist * Math.exp(pas), c.minDistance, c.maxDistance)
