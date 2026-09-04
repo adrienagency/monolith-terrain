@@ -307,6 +307,22 @@ test('④ bis `main.js` donne `arriveeBloc` à `arriveeSurLeBloc`, pas `repos`',
   assert.ok(!/arriveeSurLeBloc:\s*\(\)\s*=>\s*!!veilleCrop\?\.repos/.test(MAIN))
 })
 
+test('④ quater LE MIROIR — le RETOUR AU NADIR part au bloc, pas à 750 km', () => {
+  // ⚡ **LA MOITIÉ SYMÉTRIQUE DU DÉPARTAGE.** D16 ter écrit « NADIR, inchangé —
+  // aucune bascule pendant la descente » de l'orbite jusqu'au bloc. Si la
+  // bascule ARRIVE au bloc mais que son retour ne PART qu'à `SEUIL_MORT_M`
+  // (750 km), l'inclinaison héritée reste posée entre 750 km et 32 km : D16 ter
+  // tombe par l'autre bout. Les deux prédicats doivent lire le MÊME automate.
+  assert.match(MAIN, /surLeBloc:\s*\(\)\s*=>\s*!!veilleCrop\?\.auBloc/)
+  assert.ok(!/surLeBloc:\s*\(\)\s*=>\s*!!veilleCrop\?\.pose/.test(MAIN))
+  // et le redressement de l'inclinaison HÉRITÉE (GE2 tour 2) lit le même
+  const i = MAIN.indexOf('function redresserSiHerite(')
+  assert.ok(i > 0)
+  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))
+  assert.match(corps, /veilleCrop\?\.auBloc/)
+  assert.ok(!/veilleCrop\?\.pose/.test(corps))
+})
+
 test('④ ter les seuils du BLOC valent ceux d’AVANT D21, au bit près', () => {
   assert.ok(Math.abs(SEUIL_BLOC_M - 32274.3) < 0.1)
   assert.ok(Math.abs(SEUIL_BLOC_MORT_M - 40342.8) < 0.1)

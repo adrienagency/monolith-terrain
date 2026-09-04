@@ -7016,10 +7016,19 @@ modes = new Modes({
     // `SEUIL_BLOC_M` / `SEUIL_BLOC_MORT_M`, les deux seuils d'avant D21 au bit
     // près. La bascule tombe donc exactement où elle tombait hier.
     arriveeSurLeBloc: () => !!veilleCrop?.arriveeBloc,
-    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** `veilleCrop.pose` seul — un
-    // signal de LIEU. Son front descendant rend la vue au nadir, pour que la
-    // sortie d'orbite n'ait plus rien à faire claquer. Voir `_armerRetourNadir`.
-    surLeBloc: () => !!veilleCrop?.pose,
+    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** Son front DESCENDANT rend la vue
+    // au nadir, pour que la sortie d'orbite n'ait plus rien à faire claquer.
+    // Voir `_armerRetourNadir`.
+    //
+    // ⚡ **D21 ② — `auBloc`, PAS `pose`, ET C'EST LA MOITIÉ SYMÉTRIQUE DU
+    // DÉPARTAGE.** La bascule de trois quarts arrive à `arriveeBloc` ; son
+    // retour doit partir au MÊME endroit, sinon D16 ter tombe par l'autre bout.
+    // Sur `pose`, le retour au nadir ne s'armerait plus qu'à **750 km**
+    // (`SEUIL_MORT_M`) : entre 750 km et 32 km la caméra garderait l'inclinaison
+    // héritée, alors que D16 ter écrit « NADIR, inchangé — aucune bascule
+    // pendant la descente » sur tout ce segment. Sur `auBloc`, le retour part à
+    // **40 342,8 m** — exactement où il partait avant D21.
+    surLeBloc: () => !!veilleCrop?.auBloc,
     // ⚡ **ET LE PRÉDICAT DU PIVOT — R27.** *« Il doit toujours viser le centre
     // de la Terre. Il change uniquement quand on passe en mode bloc croppé. »*
     //
@@ -14149,7 +14158,12 @@ const SEUIL_HERITE_DEG = 1
 function redresserSiHerite(regime) {
   if (regime !== REGIME.SURFACE || gestesTerre.inclinaisonManuelle) return
   if (!modes || modes.busy || modes.travel || modes._fonduPose || modes._diveTween || (tween && tween.active)) return
-  if (veilleCrop?.pose) return
+  // ⚡ **D21 ② — `auBloc`, PAS `pose`.** Ce redressement est celui de D16 ter
+  // (« la vue de trois quarts arrive au bloc, pas avant ») : sa condition est
+  // « je ne suis PAS au bloc », pas « le crop n'existe pas ». Sur `pose`, il se
+  // tairait dès 600 km et l'inclinaison héritée du vol de présentation resterait
+  // posée sur toute la descente — le défaut bimodal que GE2 tour 2 a payé.
+  if (veilleCrop?.auBloc) return
   if (THREE.MathUtils.radToDeg(controls.getPolarAngle()) <= SEUIL_HERITE_DEG) return
   // « toute porte qui confie la caméra rend D'ABORD ce que le cadrage a emprunté »
   // (test/damier-cadre.test.js) : le balayage est un pilote, il rend avant.
