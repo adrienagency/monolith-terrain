@@ -448,11 +448,22 @@ export function contributeTerrainSections(ctx) {
   const sMap = matPanel.addSection(section('Ombrage'))
   const u = () => ctx.terrain.mapUniforms
   // un curseur d'Ombrage : pousse l'uniforme ET signale la reprise en main
+  // ⚠️ **LES DEUX CURSEURS DE RAMPE PASSENT PAR `poseRampeReglage`** — Tâche
+  // RAMP. `heightPivot` et `heightContrast` sont exprimés dans le domaine de
+  // RÉFÉRENCE (`src/rampe-fixe.js`), pas dans celui du MNT chargé : les écrire
+  // en direct dans l'uniforme remettrait la rampe à se re-normaliser dès qu'on
+  // touche le curseur. Les deux autres (`mapTint`, `slopeTint`) ne traversent
+  // aucun domaine et gardent le chemin court.
+  const RAMPE_KEYS = new Set(['heightPivot', 'heightContrast'])
   const shadeSlider = (label, key, uni, min, max, step) =>
     slider({
       label, min, max, step,
       get: () => params[key],
-      set: (v) => { params[key] = v; u()[uni].value = v; ctx.markShadeDirty?.(key) },
+      set: (v) => {
+        if (RAMPE_KEYS.has(key) && ctx.poseRampeReglage) ctx.poseRampeReglage(key, v)
+        else { params[key] = v; u()[uni].value = v }
+        ctx.markShadeDirty?.(key)
+      },
     })
   const autoToggle = toggle({
     label: 'Ombrage auto',
@@ -460,6 +471,18 @@ export function contributeTerrainSections(ctx) {
     set: (v) => { params.shadeAuto = v; ctx.setShadeAuto?.(v); refreshAll() },
   })
   autoToggle.setAttribute('data-tip', 'Calcule les réglages d’après l’altitude réelle de la carte affichée. Bouger un curseur le fige ; rallumer rend la main.')
+  // ══════ LA RE-NORMALISATION DE LA TEINTE — Tâche RAMP ════════════════════
+  //
+  // ⚡ **ÉTEINTE PAR DÉFAUT** (décision d'Adrien du 2026-09-04) : la rampe est
+  // FIXE, une couleur = une altitude à toutes les échelles. Allumée, elle rend
+  // le comportement d'avant, où la rampe se ré-étalait sur le relief du bloc à
+  // chaque cran — la « carte plus colorée » qui recouvrait la carte nette.
+  const renormToggle = toggle({
+    label: 'Re-normaliser la teinte',
+    get: () => params.rampeRenormalise === true,
+    set: (v) => { ctx.setRampeRenormalise?.(v); refreshAll() },
+  })
+  renormToggle.setAttribute('data-tip', 'Éteint : une couleur = une altitude, à toutes les échelles. Allumé : la rampe se ré-étale sur le relief visible à chaque changement d’échelle — les couleurs saturent en zoomant.')
 
   // --- COLORISATION : le choix EN TÊTE de la section, parce qu'il commande
   // tout le reste. « Classique » = la rampe d'altitude historique, une couleur
@@ -534,6 +557,7 @@ export function contributeTerrainSections(ctx) {
   sMap.body.append(
     colorPick,
     autoToggle,
+    renormToggle,
     shadeSlider('Teinte hypsométrique', 'mapTint', 'uTint', 0, 1, 0.02),
     shadeSlider('Contraste d’altitude', 'heightContrast', 'uHeightContrast', 0.5, 20, 0.1),
     shadeSlider('Pivot d’altitude', 'heightPivot', 'uHeightPivot', 0, 1, 0.01),
