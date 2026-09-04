@@ -4,7 +4,7 @@ Arbre `C:\Dev\wt-gx2`, branche `gpx-correctif`. **Le tracé est dessiné**, au r
 comme pendant la lecture, sur les trois tracés. Le calque passe de **0 pixel** à
 **~1 250 pixels** posés au repos sur le Mont-Blanc au cadrage de référence
 (témoin `?terre=deux` : 1 283), et à **0 image sans tracé sur 20 relevés de
-lecture, avec un plancher de bruit de 0 pixel**.
+lecture — sur les TROIS tracés, avec un plancher de bruit de 0 pixel**.
 
 ⚡ **Et le défaut avait DEUX moitiés, pas une.** GX1 en avait mesuré la première
 (la scène). La seconde — **`vue.socle`, borné à faux sous `terre unique`,
@@ -132,19 +132,24 @@ ils précèdent le correctif de zone du banc — voir §⑤ ③.)
 Caméra **figée avant le clic** (suivi coupé), tracé entier dans le champ, 20
 relevés consécutifs, deux mesures par image :
 
+| tracé | médiane sur 20 relevés | **images sans tracé** | bruit médian |
+|---|---|---|---|
+| **Mont-Blanc 90 km** | **863 px** | **0 / 20** | **0 px** |
+| **Camargue 5 km, plat** | **916 px** | **0 / 20** | **0 px** |
+| **Chamonix 4 km, montagne** | **979 px** | **0 / 20** | **0 px** |
+
+⚡ **Et le compte CROÎT de façon monotone avec `headT`, sur les trois** — c'est
+le dévoilement qui avance, image par image :
+
 ```
-Mont-Blanc 90 km
-  image  1  headT=0.011  tracé=2562 px  bruit=0
-  image  8  headT=0.039  tracé= 676 px  bruit=0
-  image 12  headT=0.054  tracé= 786 px  bruit=0
-  image 15  headT=0.066  tracé= 835 px  bruit=0
-  image 19  headT=0.082  tracé= 893 px  bruit=0
-  → médiane 863 px · IMAGES SANS TRACÉ : 0/20 · bruit médian : 0 px
+Mont-Blanc  676 · 742 · 748 · 769 · 778 · 786 · 814 · 823 · 835 · 854 · 863 · 879 · 893
+Camargue    840 · 863 · 890 · 916 · 937 · 955 · 978 · 993 · 1038 · 1052
+Chamonix    729 · 784 · 836 · 883 · 932 · 979 · 1023 · 1076 · 1120 · 1172
 ```
 
-⚡ **Le compte CROÎT de façon monotone avec `headT`** (676 → 742 → 748 → 769 →
-778 → 786 → 814 → 823 → 835 → 854 → 863 → 879 → 893) : c'est le dévoilement qui
-avance, image par image, exactement ce que le barème demande de vérifier.
+⛔ **Rappel du barème : « 0 image sous 30 px » ET « le nombre de pixels croît de
+façon monotone avec `headT` ». Les deux sont tenus, sur les trois tracés, avec un
+plancher de bruit de 0 pixel.**
 
 ### Les captures pour Adrien — `.banc/GX2/`
 
