@@ -3778,6 +3778,45 @@ function liftFineZoomToRegion() {
   if (cible > userFineZoom) userFineZoom = cible
 }
 
+// ══════════ LE CROP NET — CE QUE LE GLOBE A BESOIN DE SAVOIR (CN2) ══════════
+//
+// Le crop choisit sa finesse sur la grandeur d'Adrien — **combien de pixels
+// d'écran couvre un texel servi** — et cette grandeur a deux entrées que le
+// module `globe.js` ne peut pas deviner tout seul :
+//
+//   ① **la hauteur du tampon de dessin, en pixels RÉELS.** « Pixels par texel »
+//      n'a aucun sens sans elle, et ce n'est pas un détail : sur un écran
+//      Retina le mètre par pixel est deux fois plus petit et **tous les
+//      rapports doublent** (CN1, §1). On lit donc le tampon, pas le CSS.
+//   ② **le plafond de la RÉGION.** Mapterhorn sert du z17 en Suisse, du z16 en
+//      France, z15 ailleurs. Au-delà, la source rend un ancêtre surzoomé : le
+//      crop n'y gagnerait pas un texel et paierait quatre fois plus de tuiles.
+//      ⚠️ **Quand la région n'a pas mieux, la netteté s'arrête là**, et c'est
+//      `zoomCropMax` qui le dit au moteur — pas une constante.
+//
+// ⚠️ **PAR IMAGE, ET C'EST VOULU** : le tampon change au redimensionnement, et
+// `getDemMaxZoom()` ne vaut sa région qu'après le premier MNT chargé. Les deux
+// écritures sont des affectations de nombre ; le calcul, lui, vit dans
+// `_zoomCropFin`.
+const _tampon = new THREE.Vector2()
+function majFinesseCrop() {
+  if (!globe) return
+  // ⛔ **LA TAILLE CSS, PAS LE TAMPON DE DESSIN — ET C'EST UNE MESURE QUI L'A
+  // TRANCHÉ.** Premier jet : `getDrawingBufferSize`. Relevé dans l'application
+  // (Majorque, 900 m, sonde CN1) : **2,47 px par texel**, z14 servi là où le
+  // barème demande z15. La cause n'est pas la loi, c'est son entrée — la
+  // machine du banc tombe sur un palier à échelle de rendu réduite, le tampon
+  // fait moins de 720 lignes, et le crop se règle sur une image que personne ne
+  // regarde. Adrien juge l'image AFFICHÉE : c'est elle qui porte le « un texel
+  // couvre 15 pixels », et c'est elle que le barème mesure (1280 × 720, DPR 1).
+  // ⚠️ Corollaire assumé : sur un écran Retina le crop ne réclame PAS quatre
+  // fois plus de tuiles pour un niveau que le barème n'exige pas.
+  renderer.getSize(_tampon)
+  if (_tampon.y > 0) globe.hauteurPx = _tampon.y
+  const max = getDemMaxZoom()
+  if (max) globe.zoomCropMax = max
+}
+
 // --- per-zoom vertical exaggeration ------------------------------------------
 // ONE elevation model shared by every look (templates never touch it). Each zoom
 // tier carries its own exaggeration that you tune with the slider and it PERSISTS
@@ -12571,6 +12610,13 @@ const panelCtx = {
   // mais la donnée est surzoomée : c'est ce qu'il faut dire à l'écran
   // (« zoom maximum atteint »), pas interdire.
   getDemMaxZoom,
+  // ⚠️ **CN2 — LE NIVEAU RÉELLEMENT DESSINÉ DANS LE CROP, ET C'EST UNE AUTRE
+  // GRANDEUR QUE `demZoom`.** Le cartouche annonçait `Z${params.demZoom}` — le
+  // cran d'EMPRISE du bloc — pendant que la surface dessinait du z13 : **deux
+  // niveaux de sur-promesse**, mesurés par CN1 (§2.6). Les deux chiffres étaient
+  // justes ; ils ne répondaient pas à la même question. Celui-ci répond à celle
+  // qu'on posait.
+  getZoomCropServi: () => globe?._zCropServi || 0,
   getDemSource: () => ({ ...activeDemSource(), fallback: isFallbackActive() }),
   applyBackground, // solid / gradient scene background
   autoBgColours, // derive gradient stops from the map palette
@@ -14715,6 +14761,7 @@ function tick() {
   majCartoucheGlobe() // D16-c : le cartouche suit la même similitude que la caméra
   majNuagesGlobe() // R20 : le ciel suit la MÊME similitude que le cartouche
   majLoiTextureMonde()
+  majFinesseCrop() // CN2 : la loi « pixels par texel » a besoin de l'écran et de la source
   if (frontiereActive && modes.mode === 'surface') {
     // ⚠️ **LE GLOBE STREAME MAINTENANT EN MODE SURFACE, ET C'EST UN COÛT
     // RÉEL, PAS UN EFFET DE BORD GRATUIT.** Il est le fond : sans cet appel il

@@ -707,9 +707,19 @@ export function contributeTerrainSections(ctx) {
     const max = ctx.getDemMaxZoom?.()
     const lab = zoomSel.querySelector?.('.ce-label')
     if (!lab) return
+    // ⚠️ **CN2 — ON ANNONCE CE QUI EST DESSINÉ, PAS CE QU'ON ESPÈRE.** Le
+    // sélecteur choisit l'EMPRISE du bloc (`demZoom`) ; la NETTETÉ, elle, est
+    // décidée par l'écran et bornée par la source. Les avoir affichés tous deux
+    // sous le même « Z » a coûté deux niveaux de sur-promesse (CN1, §2.6) : le
+    // cartouche disait Z15 pendant que la surface dessinait du z13 — deux
+    // chiffres justes qui ne répondaient pas à la même question. Et quand la
+    // région n'a rien de plus fin, c'est ÉCRIT : la donnée s'arrête, ce n'est
+    // pas un défaut de rendu.
+    const servi = ctx.getZoomCropServi?.() || 0
+    const net = servi ? (max && servi >= max ? ` — net à z${servi}, plafond de la donnée ici` : ` — net à z${servi}`) : ''
     lab.textContent = max && params.demZoom >= max
-      ? `Détail (zoom) — maximum atteint pour cette zone (z${max})`
-      : 'Détail (zoom)'
+      ? `Détail (zoom) — maximum atteint pour cette zone (z${max})${net}`
+      : `Détail (zoom)${net}`
   }, zoomSel)
   const fineDetail = slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } })
   const detailScale = slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
