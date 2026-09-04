@@ -31,6 +31,11 @@ const NUIT_FROIDE = new THREE.Color('#0e1a2b')
 // LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
 // three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
 import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
+// ⚠️ **`ZOOM_SOCLE` EST PRIS, PAS RECOPIÉ — CULL.** `crop-sphere.js` le tire
+// déjà de `seuil-socle.js` pour le défaut de `zoomCropPrescrit` ; ce fichier en
+// a besoin pour le PLAFOND de `_zoomCropEcran`, et une seconde écriture
+// divergerait (§1 de `/threejs-optimisation`, question ②).
+import { ZOOM_SOCLE } from './monde/seuil-socle.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, jupesEffacees } from './monde/parois-crop.js'
@@ -914,6 +919,20 @@ export const PLAFOND_FILE = 256
 const PLANCHER_DIST_M = 1
 const PLANCHER_DIST = PLANCHER_DIST_M * (R_GLOBE / EARTH_RADIUS_M)
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
+// ⚠️ **CULL ④ — DE COMBIEN DE NIVEAUX L'EMPRISE PEUT DÉPASSER LE SOCLE et rester
+// « le bloc ».** L'effacement latéral des jupes (P14) a été mesuré sur le socle
+// (3 tuiles à `ZOOM_SOCLE`) ; sa bande vaut une FRACTION du demi-côté, donc elle
+// grandit avec l'emprise. À 1,5 niveau, l'emprise vaut au plus 2,8 fois le socle
+// et la bande reste de l'ordre du chanfrein mesuré ; au-delà (z9 = 181 km, z8 =
+// 363 km, z4 = 6 376 km) c'est une fenêtre continentale, et la bande efface des
+// jupes que plus aucun mur ne couvre. Le repère de P14 lui-même est à
+// `ZOOM_SOCLE − 1` (`test/crop-parois.test.js`, `P14_ZOOM = 12`) : la tolérance
+// le contient, et c'est délibéré — son banc est le domaine à préserver.
+const TOLERANCE_BLOC = 1.5
+// ⚠️ **CULL ⑤ — LA MARGE DU PLAFOND D'ÉCRAN, EN NIVEAUX.** Voir `_zoomCropEcran`
+// : le critère est pris au centre du crop, la vue d'arrivée est oblique, et sans
+// marge l'arrivée perdait un niveau (z12 au lieu de z13).
+const MARGE_CROP = 1
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 // ══════════ LE RAFFINEMENT PARTIEL ET LA PRÉLECTURE — R37 ═══════════════════
 //
@@ -4044,6 +4063,21 @@ export class Globe {
     // Écrit par `poserCrop`, lu par `_traverse` (le raffinement uniforme) ; la
     // découpe elle-même se fait au fragment, par les uniformes `uCrop*`.
     this._crop = null
+    // LE PLAFOND DU CROP SUIT L'ÉCRAN — CULL, défaut ⑤. Levier débrayable, pour
+    // qu'un banc puisse comparer les deux régimes DANS LA MÊME SESSION (la leçon
+    // de R37 et de PF2 : des tirages entrelacés, pas deux branches).
+    // ⚠️ `false` rend exactement le dépôt d'avant : `_zCropEcran` reste à 0 et
+    // `zoomCropPrescrit` retombe sur `ZOOM_SOCLE`.
+    this.cropZoomEcran = true
+    // L'ÉCRÊTAGE DES JUPES SUR LE FOND DU BLOC — levier de banc (CULL ④).
+    this.jupeEcretee = true
+    this.jupeLaterale = true
+    this.jupeDilatation = true
+    this.jupeBandeInterne = true
+    this.jupeDomaine = true
+    // Le niveau prescrit à cette image (0 = pas calculé). Écrit par `update`,
+    // lu par `_traverse`.
+    this._zCropEcran = 0
     // LE FOND DU BLOC — Tâche P4 pour le rideau d'eau, Tâche P7 pour la jupe des
     // tuiles. Déclaré ici pour la raison écrite trois lignes plus haut : qu'il ne
     // naisse pas `undefined` au détour d'une lecture. Écrit par `poserParoisCrop`,
@@ -4759,6 +4793,20 @@ export class Globe {
         oublierAncres(this._echelleContinue)
       }
     }
+    // ⚠️ **LE DOMAINE DE L'EFFACEMENT LATÉRAL PEUT BASCULER ICI, ET LES JUPES
+    // SONT TAILLÉES UNE FOIS POUR TOUTES À LA CONSTRUCTION — CULL ④.** Sans
+    // cette repasse, une tuile bâtie au bloc (effacement actif) gardait sa jupe
+    // effacée en vue continentale : mesuré, il restait **35 px** de trou à
+    // 1,2 Mm là où le levier `jupeLaterale = false` rendait 0.
+    // ⚠️ **LE DOMAINE DE L'EFFACEMENT LATÉRAL PEUT BASCULER ICI, ET LES JUPES
+    // SONT TAILLÉES UNE FOIS POUR TOUTES À LA CONSTRUCTION — CULL ④.** Sans
+    // cette repasse, une tuile bâtie au bloc (effacement actif) garde sa jupe
+    // effacée en vue continentale.
+    // ⚠️ **ET LA REPASSE EST ICI, PAS DANS `update` — MESURÉ.** Surveillée à
+    // chaque image, la bascule retaille les jupes en plein vol et les trous
+    // AUGMENTENT (31 · 57 · 30 px contre 0 · 33 · 17 sur les trois lieux). Une
+    // repasse par pose de crop suffit et ne traverse aucune image.
+    const effacaitAvant = Globe.prototype._effacementLateralActif.call(this)
     this._crop = rep
     // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
     // QUI L'A EXIGÉ — Tâche R3, correction C1.** La première version de
@@ -4785,6 +4833,7 @@ export class Globe {
     u.uCropOn.value = 1
     // la couverture douce du bord ne veut rien dire sans mélange — Tâche B
     this._melangeCrop(true)
+    if (Globe.prototype._effacementLateralActif.call(this) !== effacaitAvant) this._retaillerJupes()
     return rep
   }
 
@@ -4899,6 +4948,56 @@ export class Globe {
    */
   _retenueAvantCrop() {
     return this._cropAttendu && !this._cropDejaPose
+  }
+
+  /**
+   * **LE ZOOM QUE L'ÉCRAN DEMANDE AU CENTRE DU CROP** — une seule valeur pour
+   * toute l'emprise, plafonnée par `ZOOM_SOCLE`. CULL, défaut ⑤.
+   *
+   * ⚠️ **LE CRITÈRE EST EXACTEMENT CELUI DE `_traverse`** — `chord / dist`
+   * contre `SPLIT_RATIO`, avec le même plancher de distance — mais évalué UNE
+   * fois, sur la tuile qui porte le centre du crop. Deux écritures du même
+   * critère divergeraient ; celle-ci est la même, appliquée à un seul point.
+   *
+   * ⚠️ **ET LA CORDE EST CELLE DE `_ensureTile`, AU BIT PRÈS** : la diagonale
+   * coin nord-ouest → coin sud-est de la tuile, sur la sphère nue. Pas une
+   * approximation en `2πR / 2^z`, qui aurait ignoré la latitude et rendu un
+   * niveau de trop près de l'équateur.
+   *
+   * ⛔ **PAS DE CRÉATION DE TUILE ICI.** La fonction ne consulte pas
+   * `this.tiles` et n'y écrit rien : elle calcule sur les coordonnées. Une
+   * version qui aurait appelé `_ensureTile` aurait fait naître douze entrées de
+   * cache par image pour répondre à une question de géométrie.
+   *
+   * @returns {number} le niveau prescrit, entre `ROOT_Z` et `ZOOM_SOCLE`
+   */
+  _zoomCropEcran(camPos) {
+    const rep = this._crop
+    if (!rep) return 0
+    // le centre du crop, en lat/lon : l'inverse de `mercX` / `mercY`
+    const lon = rep.cx * 360 - 180
+    const plancher = this.continu ? PLANCHER_DIST : 1
+    let z = ROOT_Z
+    while (z < ZOOM_SOCLE) {
+      const n = 2 ** z
+      const tx = Math.min(n - 1, Math.max(0, Math.floor(((lon + 180) / 360) * n)))
+      const ty = Math.min(n - 1, Math.max(0, Math.floor(rep.cy * n)))
+      const nw = tileToLatLon(tx, ty, z)
+      const se = tileToLatLon(tx + 1, ty + 1, z)
+      const centre = latLonToSphere((nw.lat + se.lat) / 2, (nw.lon + se.lon) / 2)
+      const chord = latLonToSphere(nw.lat, nw.lon).distanceTo(latLonToSphere(se.lat, se.lon))
+      const dist = Math.max(camPos.distanceTo(centre) - chord * 0.5, plancher)
+      if (chord / dist <= SPLIT_RATIO) break
+      z++
+    }
+    // ⚠️ **UN NIVEAU DE MARGE, ET IL EST PAYÉ PAR UNE MESURE.** Le critère est
+    // évalué au CENTRE du crop ; or la vue d'arrivée est de trois quarts, et le
+    // bord PROCHE du bloc est sensiblement plus près que son centre. Sans cette
+    // marge, le tirage `D2` d'arrivée se posait à **z12** là où le dépôt rendait
+    // z13 : une image franchement plus grossière, que personne n'a demandée.
+    // Avec elle, l'arrivée rend **z13** — le dépôt au bit près — et la vue
+    // continentale reste à z8/z9 au lieu de z13, ce qui est tout le sujet.
+    return Math.min(z + MARGE_CROP, ZOOM_SOCLE)
   }
 
   _contrePression() {
@@ -7729,6 +7828,11 @@ export class Globe {
   }
 
   _rayonPlancherCrop(t) {
+    // ⚠️ **LEVIER DE BANC, PAS UN RÉGLAGE DE PRODUIT — CULL, défaut ④.**
+    // `false` rend aux jupes leur pleine longueur : c'est l'expérience qui
+    // ATTRIBUE les trous des coutures à l'écrêtage sur le fond du bloc, au lieu
+    // de le supposer. La production le laisse à `true`.
+    if (this.jupeEcretee === false) return 0
     if (!this._parois || !this._crop || !Number.isFinite(this._baseYCrop)) return 0
     if (!tuileDansCrop(t.z, t.x, t.y, this._crop)) return 0
     // ⚠️ **LE SOMMET DU CONGÉ, PAS LE FOND — Tâche P13.** Sous lui, la
@@ -7761,6 +7865,29 @@ export class Globe {
    *
    * @returns {boolean} vrai si une jupe a été retaillée
    */
+  /**
+   * L'effacement latéral des jupes (P14) est-il dans son domaine ? — CULL ④.
+   *
+   * ⚠️ **VRAI QUAND L'EMPRISE DU CROP EST CELLE DU BLOC**, faux quand c'est une
+   * fenêtre continentale. Un crop sans `zoom` (les globes de papier des tests,
+   * un repère bâti à la main) est traité comme le bloc : le dépôt d'avant, au
+   * bit près. Le raisonnement et les mesures sont dans `_retaillerJupe`.
+   */
+  // ⚠️ **APPELÉE PAR LE PROTOTYPE DEPUIS `_retaillerJupe`, ET C'EST OBLIGATOIRE.**
+  // Les globes de PAPIER des tests (`test/crop-parois.test.js`) empruntent
+  // `_retaillerJupe` par `Globe.prototype…call(faux)` et ne portent que les
+  // membres qu'ils exercent : un `this._effacementLateralActif()` y aurait levé
+  // un TypeError. Vingt et un tests l'ont dit avant qu'on le sache.
+  _effacementLateralActif() {
+    const rep = this._crop
+    if (!rep) return false
+    // ⚠️ `jupeDomaine = false` : levier de BANC (CULL ④) qui rejoue le dépôt —
+    // l'effacement partout, quelle que soit la largeur de l'emprise.
+    if (this.jupeDomaine === false) return true
+    if (!Number.isFinite(rep.zoom)) return true
+    return rep.zoom >= ZOOM_SOCLE - TOLERANCE_BLOC
+  }
+
   _retaillerJupe(t) {
     const mesh = t?.mesh
     const d = mesh?.geometry?.userData?.jupe
@@ -7771,7 +7898,50 @@ export class Globe {
     // à l'autre bout du monde n'a pas de mur pour couvrir sa jupe. Sans cette
     // garde, les ancêtres grossiers (z2, z3) — dont la BOÎTE contient l'emprise
     // du crop, donc dont `tuileDansCrop` est vrai — perdraient leur jupe.
-    const retrait = rPlancher > 0 && Number.isFinite(this._retraitJupeCrop) ? this._retraitJupeCrop : 0
+    // ══════ L'EFFACEMENT LATÉRAL NE VAUT QU'AU BLOC — CULL, défaut ④ ════════
+    //
+    // > **Adrien, 2026-09-04 (④) :** *« On a des trous entre les blocs au niveau
+    // > des coutures terrains. »*
+    //
+    // ⚡ **NOMMÉ PAR UNE EXPÉRIENCE, PAS PAR UNE LECTURE.** La sonde
+    // `scripts/sonde-cull.mjs` compte les pixels de fond **ENCLAVÉS** par le
+    // terrain (rendu du seul groupe du globe sur un fond magenta, remplissage
+    // depuis le bord de l'image : ce qui survit est du ciel vu à travers la
+    // planète). Majorque, CPU ×4, descente 900 → 20 km, ~50 images par tirage,
+    // un seul levier changé à la fois :
+    //
+    //   | tirage | ce qui change | trous max | moyenne | composantes |
+    //   |---|---|---|---|---|
+    //   | A1 | le dépôt | **66 px** | 13,0 | 31 |
+    //   | A2 | raffinement partiel de R37 débrayé | 36 px | 6,6 | 30 |
+    //   | A5 | bornage en hauteur levé (`rabattementBorne`) | 58 px | 13,2 | 26 |
+    //   | A7 | dilatation d'un cran retirée | 75 px | 12,9 | 34 |
+    //   | A8 | bande d'effacement réduite à l'extérieur | 63 px | 16,5 | 38 |
+    //   | **A6** | **effacement latéral débrayé** | **0 px** | **0** | **0** |
+    //   | A4 | jupes rendues pleines (bornage + latéral) | 0 px | 0 | 0 |
+    //
+    // ➡️ **Ce n'est ni le raffinement partiel (il double le défaut, il ne le
+    // crée pas), ni le bornage en hauteur, ni la dilatation : c'est
+    // l'effacement latéral de la Tâche P14.**
+    //
+    // ⛔ **ET P14 N'AVAIT PAS TORT — ELLE ÉTAIT APPLIQUÉE HORS DE SON DOMAINE.**
+    // Elle a mesuré ses traînées de jupe **au bloc** (La Réunion, socle de 3
+    // tuiles z13, ~10 km), là où le mur rentré de `chanfrein` laisse dépasser
+    // des langues. Or `_crop` n'a la largeur du socle QU'À L'ARRIVÉE : en vue
+    // continentale il vaut la largeur du bloc courant — **jusqu'à 6 376 km**
+    // (voir la table de `_traverse`). Le `chanfrein` étant une FRACTION du
+    // demi-côté, la bande effacée mesure alors des dizaines de kilomètres et
+    // traverse l'écran : la couture s'ouvre là où aucun mur ne la couvre. Les
+    // trous relevés disparaissent d'eux-mêmes **sous 177 km**, quand l'emprise
+    // redevient petite — la signature exacte de cette lecture.
+    //
+    // ➡️ On garde donc l'effacement **là où P14 l'a mesuré** — quand l'emprise
+    // du crop EST celle du socle — et nulle part ailleurs. Au bloc, rien ne
+    // change ; au-dessus, la jupe reprend son service anti-fente.
+    //
+    // ⚠️ `jupeLaterale` reste un levier de BANC (c'est lui qui a rendu le A6),
+    // et la production le laisse vrai.
+    const retrait = this.jupeLaterale !== false && Globe.prototype._effacementLateralActif.call(this) && rPlancher > 0 && Number.isFinite(this._retraitJupeCrop) ? this._retraitJupeCrop : 0
     const attr = mesh.geometry.attributes.position
     const a = attr.array
     const o = mesh.position
@@ -7785,7 +7955,7 @@ export class Globe {
         const src = d.bord[bi]
         locaux[bi] = localDeAbsolu(a[src * 3] + o.x, a[src * 3 + 1] + o.y, a[src * 3 + 2] + o.z, this._crop)
       }
-      efface = jupesEffacees(locaux, retrait)
+      efface = jupesEffacees(locaux, retrait, this.jupeDilatation !== false, this.jupeBandeInterne === false ? 0 : retrait)
     }
     for (let bi = 0; bi < d.bord.length; bi++) {
       const src = d.bord[bi]
@@ -9081,6 +9251,10 @@ export class Globe {
     }
     this._credit = this.cacheMax - this.tiles.size + marge
 
+    // ══════ LE ZOOM PRESCRIT PAR LE CROP SUIT L'ÉCRAN — CULL, défaut ⑤ ══════
+    // Une seule valeur par image, pour toute l'emprise : voir `_zoomCropEcran`.
+    this._zCropEcran = this._crop && this.cropZoomEcran ? this._zoomCropEcran(camPos) : 0
+
     this._enParcours = true
     for (const root of this.roots) this._traverse(root, camPos, camDir)
 
@@ -9320,7 +9494,39 @@ export class Globe {
     // rééchantillonné aujourd'hui (`ZOOM_SOCLE = 13`), donc l'image ne perd rien
     // de ce que le produit montre — mais le globe, lui, savait faire plus fin.
     // Le coût est mesuré au compte rendu de la tâche, pas supposé.
-    const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop) : 0
+    // ══════ ⚠️ LE PLAFOND EST BORNÉ PAR L'ÉCRAN — CULL, défaut ⑤ ═══════════
+    //
+    // ⛔ **`ZOOM_SOCLE` SEUL PRESCRIVAIT z13 SUR TOUTE L'EMPRISE, À TOUTE
+    // ALTITUDE, ET L'EMPRISE N'EST PAS CELLE QU'ON CROIT.** `demi` vaut la
+    // demi-largeur du BLOC COURANT (`assietteCrop` : `zoom = log2(360·3/large)`),
+    // et le bloc suit `params.demZoom`, pas la caméra. Mesuré sur ce banc
+    // (Majorque, descente au bouton) :
+    //
+    //   | altitude | demZoom | largeur du crop |
+    //   |---|---|---|
+    //   | 389 km |  4 | **6 376 km** |
+    //   | 139 km |  6 | **1 464 km** |
+    //   |  66 km |  7 |   720 km |
+    //   |  30 km |  8 |   363 km |
+    //   |  15 km |  9 |   181 km |
+    //
+    // Prescrire z13 sur 6 376 km, c'est réclamer **plus de 25 000 tuiles** dont
+    // l'écran n'en montre que quelques dizaines. Le cache (`CACHE_MAX_CONTINU`
+    // = 1 700) sature, `_credit` tombe à 3, la file bute sur `PLAFOND_FILE`
+    // (256), et le crop met une éternité à devenir net — le défaut ⑤ d'Adrien,
+    // mot pour mot : « on voit quasiment tout le terrain affiché (…) l'ordi
+    // calcule des choses qui ne doivent pas être visibles à l'écran ».
+    //
+    // ⚠️ **ET LE CORRECTIF NE TOUCHE PAS À L'UNIFORMITÉ, QUI EST L'INVARIANT**
+    // (l'affiche : un bord proche à z15 et un bord lointain à z13 se
+    // raccorderaient visiblement). Le zoom prescrit reste **une seule valeur
+    // pour toute l'emprise** ; il est simplement borné par ce que l'écran
+    // demande au CENTRE du crop (`_zoomCropEcran`), et plafonné par
+    // `ZOOM_SOCLE` comme avant. À l'arrivée sur le bloc, où le crop remplit
+    // l'écran, la borne vaut 13 : **le régime d'arrivée est inchangé au bit
+    // près**, et c'est le §5 de `/threejs-optimisation` (« réduis d'abord ce
+    // qui entre ; souvent le second correctif devient inutile »).
+    const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop, this._zCropEcran || ZOOM_SOCLE) : 0
     let wantSplit = zCrop
       ? t.z < zCrop
       : t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)

@@ -375,6 +375,13 @@ export function occlusionContact(y, baseY, bande, force = FORCE_AO) {
  */
 export function rabattementBorne(rabattement, rayonSommet, rayonPlancher) {
   if (!(rayonPlancher > 0) || !(rayonSommet > 0)) return rabattement
+  // ⚠️ **CRU PUIS RÉFUTÉ — CULL, défaut ④.** J'ai cru que le `Math.max(0, …)`
+  // (jupe repliée à zéro pour un sommet DÉJÀ sous le plancher — le cas
+  // majoritaire, « 168 tuiles sur 168 » dit l'encart ci-dessus) était la cause
+  // des trous de couture. Levée, la borne ne change RIEN : 58 px de trou au
+  // pire contre 66 avant, 13,2 de moyenne contre 13,0 — dans le bruit. La cause
+  // est ailleurs (`jupesEffacees`, l'effacement LATÉRAL de P14 : le débrayer
+  // rend **0 px sur 51 images**). La ligne reste donc telle que P7 l'a écrite.
   return Math.min(rabattement, Math.max(0, rayonSommet - rayonPlancher))
 }
 
@@ -452,10 +459,10 @@ export function localDeAbsolu(x, y, z, repere) {
  *   la monnaie de `_retraitBaseCrop` et de `mer-sphere.js`
  * @returns {boolean} vrai si la jupe de ce sommet doit être supprimée
  */
-export function jupeHorsDuMur(u, v, retrait) {
+export function jupeHorsDuMur(u, v, retrait, retraitInterne = retrait) {
   if (!(retrait > 0) || !Number.isFinite(u) || !Number.isFinite(v)) return false
   const q = Math.max(Math.abs(u), Math.abs(v))
-  return q >= 1 - retrait && q <= 1 + retrait
+  return q >= 1 - retraitInterne && q <= 1 + retrait
 }
 
 /**
@@ -497,7 +504,7 @@ export function jupeHorsDuMur(u, v, retrait) {
  * @param {number} retrait en fraction du demi-côté
  * @returns {Uint8Array} 1 = jupe à effacer
  */
-export function jupesEffacees(locaux, retrait) {
+export function jupesEffacees(locaux, retrait, dilater = true, retraitInterne = retrait) {
   const n = locaux ? locaux.length : 0
   const brut = new Uint8Array(n)
   // ⚠️ **PAS DE GARDE `retrait > 0` ICI, ET C'EST UNE SURVIVANTE QUI L'A DIT.**
@@ -509,9 +516,9 @@ export function jupesEffacees(locaux, retrait) {
   let aucun = true
   for (let i = 0; i < n; i++) {
     const l = locaux[i]
-    if (l && jupeHorsDuMur(l.u, l.v, retrait)) { brut[i] = 1; aucun = false }
+    if (l && jupeHorsDuMur(l.u, l.v, retrait, retraitInterne)) { brut[i] = 1; aucun = false }
   }
-  if (aucun) return brut
+  if (aucun || !dilater) return brut
   const dilate = new Uint8Array(n)
   for (let i = 0; i < n; i++) {
     if (brut[i] || brut[(i + 1) % n] || brut[(i - 1 + n) % n]) dilate[i] = 1
