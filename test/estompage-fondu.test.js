@@ -36,6 +36,7 @@ import {
 } from '../src/monde/estompage-terre.js'
 import { IMAGES_CALME } from '../src/monde/veille-repos.js'
 import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
+import { SEUIL_NAISSANCE_M } from '../src/monde/seuil-socle.js'
 
 const SRC_MAIN = fileURLToPath(new URL('../src/main.js', import.meta.url))
 const SRC_BRANCHE = fileURLToPath(new URL('../src/monde/branchement-crop.js', import.meta.url))
@@ -45,6 +46,23 @@ const SRC_BRANCHE = fileURLToPath(new URL('../src/monde/branchement-crop.js', im
 const ALT_HAUTE = ALT_ESTOMPAGE_DEBUT_M * 4
 // une altitude SOUS la bande : la loi y vaut 1, la porte n'a rien à fondre.
 const ALT_BASSE = ALT_ESTOMPAGE_FIN_M / 2
+
+// ⚠️ **PAS `ALT_HAUTE` ICI, ET C'EST MESURÉ, PAS UN GOÛT (2026-09-04).**
+// Le test ④ a besoin d'un crop VIVANT — `poserCropSeul` ne parle qu'à un
+// globe déjà posé — alors qu'`ALT_HAUTE` ne sert dans ①-③ qu'à la loi PURE de
+// l'estompage, où aucun crop n'existe. Depuis que la naissance du crop est
+// revenue à z10 (D23, `SEUIL_NAISSANCE_M = SEUIL_BLOC_M`), l'ordre des seuils
+// est FIN(19 364,6) < NAISSANCE/BLOC(32 274,3) < DÉBUT DU FONDU(40 342,8) : la
+// bande d'estompage est TOUJOURS au-dessus de l'altitude de naissance. Aucune
+// altitude n'est donc à la fois « au-dessus de la bande » et « le crop peut
+// naître » — chiffres : `ALT_HAUTE` = 161 371,3 m contre
+// `SEUIL_NAISSANCE_M` = 32 274,3 m, un facteur cinq au-dessus. Ce que ④ vérifie
+// (l'ordre des appels à `poserCropSeul` autour du fondu du repos) ne dépend en
+// rien de la valeur de la loi `estompageTerre` à cette altitude — seulement de
+// ce que le crop existe et reste posé (`sortieArmee` reste faux tout du long,
+// donc `socleVisible` ne le referme pas). Une altitude sous le seuil de
+// naissance suffit et n'a pas besoin d'être hors bande.
+const ALT_CROP_NE = SEUIL_NAISSANCE_M * 0.9
 
 // ══════════ ① LA DURÉE DU FONDU N'EST PAS POSÉE, ELLE EST LUE ══════════════
 
@@ -177,23 +195,23 @@ test('④ `poserCropSeul(true)` n’est POSÉ qu’une fois le fondu achevé', (
     repos,
   })
   // le crop naît, la vue est au repos : premier relais franc, coupe immédiate
-  v.maj(ALT_HAUTE, 100)
+  v.maj(ALT_CROP_NE, 100)
   assert.deepEqual(journal, [true], 'le premier repos doit couper tout de suite')
   // le geste commence
   journal.length = 0
   repos.auRepos = false
-  v.maj(ALT_HAUTE, 200)
+  v.maj(ALT_CROP_NE, 200)
   assert.deepEqual(journal, [false], 'le dehors doit se redessiner dès la première image du geste')
   // le geste dure : le fondu descend jusqu'au bout
-  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_HAUTE, 200) }
+  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_CROP_NE, 200) }
   assert.deepEqual(journal, [false], 'le parcours a rebasculé pendant le geste')
   // la vue se stabilise : le fondu part, mais le parcours NE DOIT PAS couper
   journal.length = 0
   repos.auRepos = true
-  v.maj(ALT_HAUTE, 200)
+  v.maj(ALT_CROP_NE, 200)
   assert.deepEqual(journal, [], 'le parcours a coupé pendant que le fondu courait encore')
   // le fondu court
-  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_HAUTE, 200) }
+  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_CROP_NE, 200) }
   assert.deepEqual(journal, [true], 'le parcours n’a jamais coupé, ou il a coupé plus d’une fois')
 })
 
