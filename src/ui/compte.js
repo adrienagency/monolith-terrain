@@ -281,7 +281,6 @@ function voilePlein(cls, { onClose } = {}) {
 // ouverte finit par se lire comme un mur. La réponse ne persiste pas d'une
 // visite à l'autre — on n'écrit rien sur la machine de quelqu'un pour ça.
 let porteRepondue = false
-export const reinitialisePorte = () => { porteRepondue = false } // pour les bancs d'essai
 
 export function porteExport(compte, { onSuite, onEnregistrerGabarit, onConnexion } = {}) {
   // déjà connecté, ou déjà répondu : il n'y a rien à demander, l'export part

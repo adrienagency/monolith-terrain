@@ -150,9 +150,6 @@ const TARGET_TEXTURE_PX = 4096
 // precedent. Order in PROVIDERS = priority; the GLOBAL NASA fallback is last
 // and covers everything, including the sea ("couverture maritime").
 
-export const IGN_ATTRIBUTION = 'Orthophotos © IGN'
-export const SWISSTOPO_ATTRIBUTION = '© swisstopo'
-
 // Standard ray casting. Exported for tests.
 export function pointInPolygon(lon, lat, ring) {
   let inside = false

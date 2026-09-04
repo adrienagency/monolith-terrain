@@ -48,9 +48,14 @@
 // URL, même plafond, même attribution. Elle est DUPLIQUÉE ICI EXPRÈS : `globe.js`
 // n'importe pas `map/aerial-layer.js` (qui tire `geo.js` + `tile-index.js` pour
 // des mosaïques dont le globe n'a que faire), et une constante dupliquée diverge
-// en silence — d'où le test qui compare les deux chaînes caractère par caractère.
+// en silence.
+//
+// ⚠️ 2026-09-04 — `ATTRIBUTION_MONDE` a été retirée : elle recopiait le libellé
+// 'NASA GIBS Blue Marble' de l'entrée `nasa` de PROVIDERS (aerial-layer.js:375)
+// et PERSONNE ne la lisait — pas même le « test qui compare les deux chaînes »
+// que cette ligne annonçait, et qui n'existe pas. Le crédit affiché passe par
+// PROVIDERS. Ce qui reste dupliqué ici (l'URL et `Z_MAX_MONDE`), lui, est lu.
 export const Z_MAX_MONDE = 8
-export const ATTRIBUTION_MONDE = 'NASA GIBS Blue Marble'
 export function urlPhotoMonde(z, x, y) {
   return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/${z}/${y}/${x}.jpeg`
 }

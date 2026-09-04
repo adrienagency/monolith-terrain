@@ -96,11 +96,8 @@ export function primaryDir(spec) {
 //   total height, ground to top of beam                  = 2.5
 const OLD_ARCH_UNIT = 0.5
 const OLD_ARCH_POST_THICK = OLD_ARCH_UNIT
-const OLD_ARCH_HEIGHT = OLD_ARCH_UNIT * 4
-const OLD_ARCH_BEAM_THICK = OLD_ARCH_UNIT
 const OLD_ARCH_SPAN = OLD_ARCH_UNIT * 5
 export const OLD_ARCH_WIDTH = OLD_ARCH_SPAN + OLD_ARCH_POST_THICK // 3.0 — full straddle width
-export const OLD_ARCH_TOTAL_HEIGHT = OLD_ARCH_HEIGHT + OLD_ARCH_BEAM_THICK // 2.5 — ground to beam top
 
 // New target: the GLB is normalized so its OWN measured straddle width
 // lands here — exactly one fifth of the old gate's straddle width (task 25

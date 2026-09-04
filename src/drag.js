@@ -1,14 +1,19 @@
-// Draggable, magnetically-snapping, collapsible FUI panels.
+// Draggable, magnetically-snapping FUI panels.
 //
 // - makeDraggable: grab a panel by its handle; first drag converts it to
 //   explicit fixed left/top. While dragging, edges snap to the viewport and to
 //   other panels (left-edge align + top-to-bottom stacking) so panels tuck
 //   neatly under one another.
-// - makeCollapsible: a caret in the handle folds the panel down to its bar.
-// - setUiHidden / collapseAll: global controls for the fixed toggle button.
+//
+// ⚠️ 2026-09-04 — LES PANNEAUX PLIANTS SONT PARTIS D'ICI. `makeCollapsible`,
+// `collapseAll` et `setUiHidden` — l'accordéon de l'ère « fenêtres flottantes »
+// — n'étaient plus appelés par personne depuis que le shell tient l'accordéon
+// lui-même (`ui/shell.js:87`, « exclusive column accordion »). Zéro référence
+// dans src/, test/, scripts/, netlify/ ni index.html : seules leur propre
+// déclaration et ces deux lignes de sommaire les nommaient encore. Le
+// glissement des panneaux, lui, est bien vivant.
 
 const registry = new Set() // all draggable panels
-const collapsibles = [] // { el, setCollapsed }
 
 const SNAP = 11 // px — how close an edge must come to grab
 
@@ -98,50 +103,4 @@ export function makeDraggable(el, handle = el) {
   }
   handle.addEventListener('pointerup', end)
   handle.addEventListener('pointercancel', end)
-}
-
-// Fold a panel to just its handle. `body` selects the content to hide; a caret
-// button injected at the end of the handle toggles it. Pass `group` to make a
-// set of panels behave as an accordion: expanding one folds its group-mates.
-const groups = new Map() // groupId → [{ setCollapsed }]
-
-export function makeCollapsible(el, handle, bodySelector, group = null) {
-  const caret = document.createElement('button')
-  caret.className = 'panel-caret'
-  caret.title = 'collapse / expand'
-  caret.textContent = '▾'
-  handle.appendChild(caret)
-  const bodies = () => [...el.children].filter((c) => c !== handle && (!bodySelector || c.matches(bodySelector)))
-
-  let collapsed = false
-  const setCollapsed = (v) => {
-    collapsed = v
-    caret.textContent = v ? '▸' : '▾'
-    el.classList.toggle('collapsed', v)
-    bodies().forEach((b) => (b.style.display = v ? 'none' : ''))
-  }
-  const entry = { el, setCollapsed, group }
-  caret.addEventListener('click', (e) => {
-    e.stopPropagation()
-    const opening = collapsed
-    setCollapsed(!collapsed)
-    // accordion: opening one panel folds the others in its group
-    if (opening && group) {
-      for (const g of groups.get(group) || []) if (g !== entry && g.el.isConnected) g.setCollapsed(true)
-    }
-  })
-  collapsibles.push(entry)
-  if (group) {
-    if (!groups.has(group)) groups.set(group, [])
-    groups.get(group).push(entry)
-  }
-  return setCollapsed
-}
-
-export function collapseAll(v) {
-  for (const c of collapsibles) if (c.el.isConnected) c.setCollapsed(v)
-}
-
-export function setUiHidden(v) {
-  document.body.classList.toggle('ui-hidden', v)
 }

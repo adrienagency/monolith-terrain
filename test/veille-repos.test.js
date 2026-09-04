@@ -142,6 +142,30 @@ test('② il faut EXACTEMENT `IMAGES_CALME` images calmes pour se rendormir', ()
   assert.equal(v.bascules, 2, 'un aller-retour doit compter DEUX bascules')
 })
 
+test('② le DÉFAUT vaut LITTÉRALEMENT 30 images, et l’automate l’applique', () => {
+  // ⚠️ LA GARDE MANQUANTE. Les tests ci-dessus pilotent leur boucle avec
+  // `IMAGES_CALME` ET l'affirment avec `IMAGES_CALME` : les deux côtés bougent
+  // ensemble, si bien que passer la constante de 30 à 45 les laissait tous
+  // verts. Le test ③ voisin ne couvre pas le trou non plus : il compare des
+  // nombres entre eux, pas au comportement. Ici le nombre est écrit EN CLAIR,
+  // et il est exercé SANS passer `imagesCalme` en argument — c'est le seul
+  // endroit du dépôt où le défaut du module est réellement mis à l'épreuve.
+  //
+  // Les 30 images sont une mesure, pas un goût : veille-repos.js:164-176
+  // raconte les gestes qu'elles couvrent et ceux qu'elles ne couvrent pas.
+  // Changer la valeur doit être un geste conscient, qui rougit ici.
+  assert.equal(IMAGES_CALME, 30, 'le défaut mesuré est 30 images (veille-repos.js:164-176)')
+  const v = creerVeilleRepos() // AUCUN imagesCalme : c'est le défaut qu'on exerce
+  v.maj(ALT_BLOC)
+  const alt = ALT_BLOC * Math.exp(SEUIL_BOUGE_LOG * 2)
+  v.maj(alt)
+  assert.equal(v.auRepos, false)
+  for (let i = 1; i < 30; i++) {
+    assert.equal(v.maj(alt), false, `rendormi à la ${i}ᵉ image calme : le défaut n’est plus 30`)
+  }
+  assert.equal(v.maj(alt), true, 'pas rendormi à la 30ᵉ image calme : le défaut n’est plus 30')
+})
+
 test('② une image agitée au milieu du calme REMET le compteur à zéro', () => {
   const v = creerVeilleRepos()
   v.maj(ALT_BLOC)

@@ -301,14 +301,6 @@ export function _resetTileCaches() {
 let lastMaxZoom = null
 export const getDemMaxZoom = () => lastMaxZoom
 
-/**
- * Zoom max connu pour une zone, SANS requête (lecture de la mémoire).
- * `undefined` = pas encore sondé, `null` = zone non couverte par la source.
- */
-export function knownMaxZoomAt(zoom, tileX, tileY) {
-  return peekRegionMaxZoom(regionKey(activeDemSource().id, zoom, tileX, tileY))
-}
-
 // `originTile` (optionnel) : origine-tuile EXPLICITE {x, y} du coin haut-gauche
 // — le damier (block-grid.js) charge les blocs voisins alignés sur la grille de
 // tuiles du bloc central (originTileX ± tilesAcross) : zéro couture entre blocs.

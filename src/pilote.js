@@ -542,13 +542,6 @@ export function portesDuBloc(g, { plafond = 0.45, separation = 5 } = {}) {
   return out
 }
 
-// Un point est-il SUR le bord du bloc (à une cellule près) ? C'est le critère de
-// la sortie prouvée : un couloir qui s'arrête au milieu du bloc n'a pas de sortie.
-export function surLeBord(g, p, marge = 1.5) {
-  const lim = g.half - g.cell * marge
-  return Math.abs(p.x) >= lim || Math.abs(p.z) >= lim
-}
-
 // ============================================== vérification avant engagement
 //
 // ⚠️ C'EST LA FONCTION QUI EMPÊCHE LE CRASH. « On ne s'engage jamais dans un
