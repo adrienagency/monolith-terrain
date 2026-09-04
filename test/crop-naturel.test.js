@@ -62,6 +62,8 @@ import { PENTE_MONDE_NULLE } from '../src/monde/lumiere-sphere.js'
 // R25 — l etat de repos de la matiere du relief, une seule ecriture (contrat ⑨i)
 import { MATIERE_MONDE_ETEINTE } from '../src/monde/matiere-crop.js'
 import { Globe } from '../src/globe.js'
+// ⚠️ TÂCHE GRA — le repos du monde, pour que le stub porte un domaine réel
+import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
 const TERRAIN_SRC = readFileSync(new URL('../src/terrain.js', import.meta.url), 'utf8')
@@ -710,6 +712,12 @@ const couleurStub = () => ({ set() {}, setStyle() {} })
 function globeStub() {
   return {
     _crop: null,
+    // ⚠️ **AJOUTÉ PAR LA TÂCHE GRA** : `poserHabillage` ne pose plus
+    // `uHeightPivot` / `uHeightContrast` lui-même — il mémorise l'entrée du
+    // socle et RAPPELLE `_majGradeBloc`, l'écrivain unique. Un stub qui ne le
+    // porte pas fait lever la méthode empruntée au vrai prototype. **La table
+    // factice suit l'écrivain, elle ne le contourne pas.**
+    _majGradeBloc: Globe.prototype._majGradeBloc,
     uniforms: {
       uHabOn: val(0), uCoastMask: val(null), uCoastMaskOn: val(0), uMargeCoteM: val(0),
       uSol: val(null), uSolLut: val(null), uSolOn: val(0), uSolOpacite: val(1),
@@ -730,6 +738,13 @@ function globeStub() {
       uTreeLine: val(NATUREL_MONDE.treeLine),
       uRampCrop: val(null), uRampCropOn: val(0),
       uHeightContrast: val(NATUREL_MONDE.heightContrast), uHeightPivot: val(NATUREL_MONDE.heightPivot),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE GRA** : `_majGradeBloc` convertit le grade dans
+      // le domaine VIVANT du nuanceur, donc il LIT ces deux-là. Le §⓪ de ce
+      // fichier exige déjà que la table factice couvre tout ce que
+      // `poserHabillage` écrit — elle doit aussi porter ce qu'il LIT.
+      uReliefBas: val(RAMPE_MONDE.terreBas - RAMPE_MONDE.creux),
+      uLandMax: val(RAMPE_MONDE.terreHaut),
+      uPlancherRampeM: val(RAMPE_MONDE.plancherM),
       uHazeAmt: val(NATUREL_MONDE.hazeAmt), uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),
       uHazeColor: val({ hex: NATUREL_MONDE.hazeColor, set(v) { this.hex = v } }),
