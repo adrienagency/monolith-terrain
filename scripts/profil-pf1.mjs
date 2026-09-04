@@ -99,6 +99,14 @@ const CATALOGUE_POSTES = {
   // le témoin : le MÊME cadrage, un cran plus haut, où le crop ne naît pas
   // encore (620 km > 600 km). L'écart des deux cellules EST le coût de D21 ③.
   temoinz7: { alt: 700000, zoom: 7 },
+  // ⚡ **LE POSTE DE D23 — LE CROP À SA NAISSANCE REVENUE À z10.** D21 ② est
+  // abrogé : le crop naît de nouveau à `SEUIL_BLOC_M` = 32 274,3 m. C'est ICI
+  // qu'il faut refaire les deux mesures que C1 avait prises à 600 km
+  // (495 → 1 700 tuiles, 19,9 → 129,9 ms à CPU ×4) ; les prendre ailleurs, ce
+  // serait comparer deux altitudes et ne rien dire.
+  // ⚠️ **32 000 m, PAS 32 274** : la cellule est refusée si l'altitude obtenue
+  // s'écarte de plus de 5 % du visé, et on veut être SOUS le seuil à coup sûr.
+  cropnaissance: { alt: 32000, zoom: 11 },
 }
 
 // -------------------------------------------------------------------- Chrome
@@ -589,7 +597,7 @@ for (const nomMachine of MACHINES) {
     const litReseau = () => ({ ...reseau })
 
     const t0 = Date.now()
-    await page.goto(`http://localhost:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
+    await page.goto(`http://127.0.0.1:${PORT}/${URL_SUFFIXE}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
     await page.waitForFunction(() => !!(window.__exp && window.__exp.globe && window.__exp.modes), { timeout: 180000, polling: 100 })
     await page.waitForFunction(() => !!document.getElementById('loading')?.classList.contains('hidden'), { timeout: 180000, polling: 200 }).catch(() => {})
     await page.evaluate(() => document.querySelector('.ce-hubclose')?.click())

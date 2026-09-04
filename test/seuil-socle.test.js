@@ -49,6 +49,12 @@ import {
   empriseSocle,
 } from '../src/monde/seuil-socle.js'
 
+// ⚡ **L'ESPACE DE NOMS ENTIER, EN PLUS DES NOMS.** Un import nommé d'une
+// constante supprimée ne rend pas `undefined` : il fait ÉCHOUER LE MODULE au
+// chargement, avec une erreur de syntaxe qui ne dit rien de D23. La garde
+// « les quatre constantes restent séparées » a besoin de LIRE l'objet.
+import * as seuilSocle from '../src/monde/seuil-socle.js'
+
 import { blockExtentMeters, BLOCK_TILES } from '../src/landmarks.js'
 import { latLonToTile, tileToLatLon, metersPerPixel } from '../src/geo.js'
 
@@ -171,20 +177,48 @@ test('les deux seuils DU BLOC SE RECALCULENT depuis la largeur du socle et le ch
   assert.ok(Math.abs(SEUIL_BLOC_MORT_M - attenduBlocMort) < 1e-6)
 })
 
-test('D21 ③ — la NAISSANCE du crop est le palier z7 de `DIVE_TIERS`, pas une fraction d’écran', async () => {
-  // ⚠️ **LE CHIFFRE EST RECOPIÉ DANS UN MODULE PUR : ON LE REJOUE CONTRE SA
+test('D23 — la NAISSANCE du crop est REVENUE à la paire z10, et le palier z7 ne la porte plus', async () => {
+  // ⛔ **D21 ② EST ABROGÉ** (D23, mesure de C1 : 495 → 1 700 tuiles, 19,9 →
+  // 129,9 ms à CPU ×4). La naissance du crop est de nouveau la fraction d'écran.
+  assert.equal(SEUIL_NAISSANCE_M, SEUIL_BLOC_M)
+  assert.equal(SEUIL_MORT_M, SEUIL_BLOC_MORT_M)
+  assert.ok(Math.abs(SEUIL_NAISSANCE_M - 32274.3) < 0.1)
+  assert.ok(Math.abs(SEUIL_MORT_M - 40342.8) < 0.1)
+  // la mort garde l'HYSTÉRÉSIS — le rapport est intact des deux côtés
+  assert.ok(Math.abs(SEUIL_MORT_M - SEUIL_NAISSANCE_M / RAPPORT_HYSTERESIS) < 1e-9)
+  // ⛔ et le palier z7 ne PORTE plus aucun seuil
+  assert.notEqual(SEUIL_NAISSANCE_M, ALT_PALIER_Z7_M)
+
+  // ⚠️ **LE CHIFFRE RESTE RECOPIÉ DANS UN MODULE PUR : ON LE REJOUE CONTRE SA
   // SOURCE.** `modes.js` tire three.js, donc `seuil-socle.js` ne peut pas
-  // l'importer ; sans ce test, une dérive de `DIVE_TIERS` passerait en silence.
+  // l'importer. La garde SURVIT à l'abrogation : c'est la seule vérification
+  // pure du dépôt contre `DIVE_TIERS`, la retirer avec le seuil serait la perdre.
   const { DIVE_TIERS } = await import('../src/modes.js')
   const z7 = DIVE_TIERS.find((t) => t.zoom === 7)
-  assert.ok(z7, '`DIVE_TIERS` n’a plus de palier z7 — la naissance du crop est à re-sourcer')
+  assert.ok(z7, '`DIVE_TIERS` n’a plus de palier z7')
   assert.equal(ALT_PALIER_Z7_M, z7.altM, 'le palier z7 recopié a dérivé de `DIVE_TIERS`')
-  assert.equal(SEUIL_NAISSANCE_M, ALT_PALIER_Z7_M)
-  assert.equal(SEUIL_NAISSANCE_M, 600_000)
-  // dix-huit fois plus haut que l'arrivée au bloc — le chiffre de D21
-  assert.ok(Math.abs(SEUIL_NAISSANCE_M / SEUIL_BLOC_M - 18.59) < 0.01)
-  // et la mort garde l'HYSTÉRÉSIS, pas la fraction
-  assert.ok(Math.abs(SEUIL_MORT_M - SEUIL_NAISSANCE_M / RAPPORT_HYSTERESIS) < 1e-9)
+  assert.equal(ALT_PALIER_Z7_M, 600_000)
+})
+
+test('D23 — LES QUATRE CONSTANTES RESTENT SÉPARÉES, malgré deux valeurs égales', () => {
+  // ⚡ **LA GARDE CENTRALE DE D23**, et elle est de forme inhabituelle : elle ne
+  // vérifie pas des nombres, elle vérifie que le MODULE EXPORTE ENCORE QUATRE
+  // NOMS. Les deux paires coïncident en valeur depuis le revert — c'est
+  // exactement la situation où quelqu'un « simplifie » en supprimant deux
+  // constantes, et rouvre au premier seuil redéplacé le défaut que C1 a payé :
+  // D19 amputé de 568 km, la deuxième sortie du crop d'Adrien disparue.
+  for (const nom of ['SEUIL_BLOC_M', 'SEUIL_BLOC_MORT_M', 'SEUIL_NAISSANCE_M', 'SEUIL_MORT_M']) {
+    assert.equal(typeof seuilSocle[nom], 'number',
+      `\`${nom}\` a disparu du module — les grandeurs ont été refusionnées`)
+    assert.ok(Number.isFinite(seuilSocle[nom]) && seuilSocle[nom] > 0)
+  }
+  // et les DEUX automates existent toujours, chacun sur SA paire
+  assert.equal(typeof seuilSocle.socleVisible, 'function')
+  assert.equal(typeof seuilSocle.auBloc, 'function')
+  // ⚡ Ce qui les distingue quand les NOMBRES ne les distinguent plus :
+  // `socleVisible` demande une intention (D21 ①), `auBloc` n'en demande jamais.
+  assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: true, sortieArmee: false }), true)
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_MORT_M + 1, auBlocAvant: true }), false)
 })
 
 test('D21 ① — la MORT demande une INTENTION : sans elle, l’altitude ne tue plus le crop', () => {
@@ -204,9 +238,11 @@ test('D21 ① — la MORT demande une INTENTION : sans elle, l’altitude ne tue
   assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: true }), false)
 })
 
-test('D21 ② — `auBloc` est un SECOND automate, sur les seuils d’AVANT D21', () => {
-  // ⚠️ C'est lui qui arme la bascule de trois quarts (D16 ter) depuis que la
-  // naissance du crop est montée à 600 km.
+test('D23 — `auBloc` reste un SECOND automate, sur sa propre paire', () => {
+  // ⚠️ C'est lui qui arme la bascule de trois quarts (D16 ter) et son miroir, le
+  // retour au nadir. Posé pour D21 ② ; **gardé après D23** alors même que sa
+  // paire vaut de nouveau celle du crop — c'est le sens qui diffère, pas le
+  // nombre.
   assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_M + 1, auBlocAvant: false }), false)
   assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_M, auBlocAvant: false }), true)
   assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_MORT_M - 1, auBlocAvant: true }), true)
@@ -214,9 +250,15 @@ test('D21 ② — `auBloc` est un SECOND automate, sur les seuils d’AVANT D21'
   // une altitude non finie conserve l'état — même contrat que `socleVisible`
   assert.equal(auBloc({ altitudeEllipsoideM: NaN, auBlocAvant: true }), true)
   assert.equal(auBloc({}), false)
-  // ⛔ Et à la NAISSANCE du crop (600 km) on n'est PAS au bloc : c'est tout le
-  // départage — sans lui la caméra s'inclinerait en vue continentale.
-  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_NAISSANCE_M, auBlocAvant: false }), false)
+  // ⚠️ **DEPUIS D23 LA NAISSANCE DU CROP EST AUSSI L'ARRIVÉE AU BLOC**, et
+  // l'automate le dit — mais il le dit par SON seuil à lui, pas en lisant celui
+  // du crop. Sous D21 cette ligne rendait `false` (600 km ≠ 32 km) ; c'est la
+  // valeur qui a changé, pas la séparation.
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_NAISSANCE_M, auBlocAvant: false }), true)
+  // ⛔ et la preuve que la séparation tient : `auBloc` ignore `sortieArmee`,
+  // que `socleVisible` honore. Même altitude, deux réponses.
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_MORT_M + 1, auBlocAvant: true }), false)
+  assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: true, sortieArmee: false }), true)
 })
 
 test('à SEUIL_BLOC_M le socle occupe 60 % de la HAUTEUR de l\'image', () => {

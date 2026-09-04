@@ -1,5 +1,21 @@
 # D21 — LE CROP EST UNE PIÈCE, PAS UN SEUIL D'ALTITUDE
 
+> ⛔ **AMENDÉE LE 2026-09-04 — SON ② EST ABROGÉ PAR [D23](regle-D23.md).**
+> Le crop ne naît plus « dès Z7 » : il est **revenu à z10**, `SEUIL_BLOC_M` =
+> 32 274,3 m, mort à 40 342,8 m. Adrien : *« il y a beaucoup trop de bugs, on va
+> laisser un crop à partir de Z10 uniquement. Annule le crop à Z7. »*
+> La mesure qui l'a fait abroger (C1) : **495 → 1 700 tuiles** à la naissance —
+> 1 700 étant exactement `CACHE_MAX_CONTINU`, le cache saturé — et
+> **19,9 → 129,9 ms par image à CPU ×4**, sans que z8 ni z9 rachètent rien.
+>
+> ✅ **Le reste de cette règle tient, et il faut le lire comme tel :**
+> **① reste entière** (la sortie du crop est une intention, pas un effet de bord
+> de l'altitude — les trois sorties, l'inclinaison et le cap qui ne tuent pas) ;
+> **③ reste posé** (les rivières éteintes par défaut) ; et surtout la
+> **séparation des trois grandeurs** que ② a rendue nécessaire est **gardée**,
+> alors même que les deux paires de seuils coïncident de nouveau en valeur —
+> voir D23 et le §6 bis de `src/monde/seuil-socle.js`.
+
 > **Adrien, 2026-09-04 :** *« Je voudrais que lorsqu'on passe en mode crop, on ne
 > puisse plus revenir en mode non crop uniquement par l'altitude (exemples :
 > déplacement de hauteur via l'inclinaison de la caméra, changement de l'angle de
@@ -34,7 +50,11 @@ inclinaison, cap, boutons de caméra, redressement automatique, vol de
 présentation, recalage — peut faire varier l'altitude autant qu'il veut : **le
 crop reste**. La naissance, elle, garde son seuil.
 
-## ② LE CROP NAÎT DÈS Z7
+## ⛔ ② LE CROP NAÎT DÈS Z7 — **ABROGÉ LE 2026-09-04 PAR D23**
+
+*(Conservé pour la trace : c'est le raisonnement qui a produit la séparation des
+trois grandeurs, laquelle survit à l'abrogation. Tout ce qui suit dans ce §
+décrit un état du code qui n'existe plus — le seuil est revenu à 32 274,3 m.)*
 
 Aujourd'hui `SEUIL_NAISSANCE_M = 32 274,3 m`, soit z10–z11. Adrien veut **z7**,
 qui vaut `altM: 600 000` dans `DIVE_TIERS` (`modes.js:107`) — **dix-huit fois

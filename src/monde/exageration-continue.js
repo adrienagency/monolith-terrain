@@ -58,14 +58,27 @@ export const CLE_EXAG = 'monolith.zoomExag'
 /** Le zoom le plus profond que la courbe ancre. `MAX_Z` de `globe.js` vaut 15. */
 export const ZOOM_EXAG_MAX = 15
 
-/** `params.fov` — `main.js:264`, VERTICAL (le champ de three.js). */
+/**
+ * `params.fov` — la ligne `fov: 30` des réglages de `main.js`, VERTICAL (le
+ * champ de three.js). ⚠️ **PAS `main.js:264`** : citation fausse, corrigée le
+ * 2026-09-04 ; cette ligne-là parle du maillage du bloc central, et
+ * `seuil-socle.js` porte le même démenti depuis le 2026-08-21.
+ */
 export const FOV_DEG = 30
 
 /**
  * La fraction de la HAUTEUR de l'image qu'un bloc occupe à l'altitude de
- * référence — `seuil-socle.js`. `SEUIL_NAISSANCE_M` en est dérivé, et c'est ce
- * qui fait que `zoomDepuisAltitude(SEUIL_NAISSANCE_M, 45°)` rend exactement
+ * référence — `seuil-socle.js`. **`SEUIL_BLOC_M` en est dérivé**, et c'est ce
+ * qui fait que `zoomDepuisAltitude(SEUIL_BLOC_M, 45°)` rend exactement
  * `ZOOM_SOCLE`.
+ *
+ * ⚠️ **LE NOM A ÉTÉ CORRIGÉ LE 2026-09-04, ET LE PIÈGE MÉRITE D'ÊTRE DIT.** Ce
+ * commentaire citait `SEUIL_NAISSANCE_M`. C'était vrai jusqu'à D21, **faux
+ * pendant D21 ②** (la naissance valait alors le palier z7, 600 km, qui ne
+ * descend d'aucune fraction d'écran), et redevenu vrai **par coïncidence de
+ * valeur** depuis D23. La grandeur qui porte réellement cette équation est
+ * `SEUIL_BLOC_M` : c'est elle qu'il faut nommer, sans quoi le commentaire
+ * redeviendra faux au prochain déplacement de la naissance du crop.
  */
 export const FRACTION_REFERENCE = 0.6
 
@@ -205,8 +218,10 @@ export function exagerationContinue (zoom, options = null) {
 //     largeur(z, lat) = 156543,03392 · cos(lat) · 768 / 2^z      (landmarks.js:22)
 //     altitude        = largeur / (2 · fraction · tan(fov/2))    (seuil-socle.js:210)
 //
-// ⚠️ **CE CHOIX EST VÉRIFIABLE, ET IL EST VÉRIFIÉ** :
-// `zoomDepuisAltitude(SEUIL_NAISSANCE_M, {lat: 45})` rend exactement
+// ⚠️ **CE CHOIX EST VÉRIFIABLE, ET IL EST VÉRIFIÉ** (⚠️ nom corrigé le
+// 2026-09-04 : `SEUIL_BLOC_M`, pas `SEUIL_NAISSANCE_M` — voir
+// `FRACTION_REFERENCE` plus haut, le test est dans `fenetre-bornee.test.js`) :
+// `zoomDepuisAltitude(SEUIL_BLOC_M, {lat: 45})` rend exactement
 // `ZOOM_SOCLE = 13`. Ce n'est pas une coïncidence — c'est la même équation lue
 // dans l'autre sens, et le test l'exige.
 

@@ -91,37 +91,33 @@ test('les altitudes de cadrage des poses d’arrivée : le socle vit à z11 et p
     4: 3_680_260, 5: 920_060, 6: 575_040, 7: 359_400, 8: 205_370, 9: 102_690,
     10: 51_340, 11: 25_670, 12: 12_840, 13: 6_420, 14: 3_210, 15: 1_600,
   }
-  // ⚡ **D21 ③ — LE SOCLE NAÎT DÉSORMAIS DÈS z7, ET LA MESURE DIT MÊME UN CRAN
-  // PLUS TÔT.** Il était absent jusqu'à z10 inclus ; `SEUIL_NAISSANCE_M` vaut
-  // maintenant 600 000 m. Rejoué contre la table ci-dessus, la ligne de partage
-  // tombe entre **z5 (920 060 m)** et **z6 (575 040 m)** : la pose d'arrivée z6
-  // est déjà 24 960 m SOUS le seuil. Adrien demande « dès z7 » — au plus tard
-  // z7 — et c'est tenu avec un cran de marge, pas raté.
+  // ⚡ **D23 — LE SOCLE NAÎT DE NOUVEAU À z10/z11, D21 ② ABROGÉ.**
+  // `SEUIL_NAISSANCE_M` est revenu à 32 274,3 m. Rejouée contre la table
+  // ci-dessus, la ligne de partage tombe entre **z10 (51 340 m)** et
+  // **z11 (25 670 m)**. Sous D21 ② elle était montée entre z5 et z6, et c'est ce
+  // saut de cinq crans qui coûtait 1 700 tuiles (mesure C1).
   const veilleBas = creerVeilleSocle({ appliquer: () => {}, socleAuDepart: false })
-  for (const z of [4, 5]) {
+  for (const z of [4, 5, 6, 7, 8, 9, 10]) {
     assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), false, `le socle ne devrait pas naître à z${z}`)
   }
-  assert.ok(ALT_ARRIVEE_M[6] < SEUIL_NAISSANCE_M && ALT_ARRIVEE_M[5] > SEUIL_NAISSANCE_M,
-    'la ligne de partage a quitté l’intervalle z5 / z6 — le chiffre de D21 ③ est à refaire')
-  for (const z of [6, 7, 8, 9, 10]) {
-    assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), true, `D21 ③ : le socle doit vivre à z${z}`)
-  }
+  assert.ok(ALT_ARRIVEE_M[11] < SEUIL_NAISSANCE_M && ALT_ARRIVEE_M[10] > SEUIL_NAISSANCE_M,
+    'la ligne de partage a quitté l’intervalle z10 / z11 — le chiffre de D23 est à refaire')
   for (const z of [11, 12, 13, 14, 15]) {
-    assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), true, `le socle devrait vivre à z${z}`)
+    assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), true, `D23 : le socle doit vivre à z${z}`)
   }
-  // ⚡ **ET EN REMONTANT — LES DEUX RÈGLES DE D21 SE CROISENT ICI.**
-  // ① sans intention, AUCUNE pose d'arrivée ne tue le crop, pas même z4 ;
-  // ③ avec l'intention, l'hystérésis (750 000 m) le tue entre z6 et z5.
+  // ⚡ **ET EN REMONTANT — D21 ① SURVIT À D23, ET SE CROISE ICI AVEC LE NOUVEAU
+  // SEUIL.** ① sans intention, AUCUNE pose d'arrivée ne tue le crop, pas même
+  // z4 ; avec l'intention, l'hystérésis (40 342,8 m) le tue entre z11 et z10.
   const veilleHaut = creerVeilleSocle({ appliquer: () => {}, socleAuDepart: true })
   for (const z of [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4]) {
     assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[z]), true,
       `D21 ① : le socle meurt à z${z} sans qu’on l’ait demandé`)
   }
   veilleHaut.armerSortie()
-  for (const z of [15, 14, 13, 12, 11, 10, 9, 8, 7, 6]) {
+  for (const z of [15, 14, 13, 12, 11]) {
     assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[z]), true, `le socle devrait survivre à z${z}`)
   }
-  assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[5]), false, 'intention armée, le socle meurt à z5')
+  assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[10]), false, 'intention armée, le socle meurt à z10')
 })
 
 // ══════════ ② CELUI QUI COMPTE : CENT OSCILLATIONS, UNE BASCULE ═════════════

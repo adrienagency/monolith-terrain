@@ -300,46 +300,63 @@ test('② septies ⛔ D19 GARDE SON DOMAINE — le régime de la Terre reste au 
   assert.equal(auBloc({ altitudeEllipsoideM: 20_000, auBlocAvant: false }), true)
 })
 
-// ══════════ ③ LA NAISSANCE À z7 ════════════════════════════════════════════
+// ══════════ ③ LA NAISSANCE — D23 : RETOUR À z10, D21 ② ABROGÉ ══════════════
 
-test('③ le crop naît au palier z7 de `DIVE_TIERS`, verrouillé contre sa source', () => {
+test('③ le crop naît à la paire z10, et PLUS au palier z7 — D21 ② abrogé', () => {
+  // ⛔ **D23.** La mesure de C1 a tranché : à 600 km le crop coûtait 495 → 1 700
+  // tuiles (1 700 = `CACHE_MAX_CONTINU`, le cache saturé) et 19,9 → 129,9 ms par
+  // image à CPU ×4, sans que z8 ni z9 rachètent quoi que ce soit.
+  assert.equal(SEUIL_NAISSANCE_M, SEUIL_BLOC_M)
+  assert.ok(Math.abs(SEUIL_NAISSANCE_M - 32274.3) < 0.1)
+  // le palier z7 reste dans le module, verrouillé contre sa source, mais il ne
+  // porte plus aucun seuil
   const z7 = DIVE_TIERS.find((t) => t.zoom === 7)
   assert.ok(z7)
   assert.equal(z7.altM, 600_000)
   assert.equal(ALT_PALIER_Z7_M, z7.altM)
-  assert.equal(SEUIL_NAISSANCE_M, 600_000)
-  // dix-huit fois plus haut que l'arrivée au bloc — le chiffre de D21
-  assert.ok(SEUIL_NAISSANCE_M / SEUIL_BLOC_M > 18)
-  // et le crop naît bien à ce palier, chaîne complète posée
+  assert.notEqual(SEUIL_NAISSANCE_M, ALT_PALIER_Z7_M)
+  // et le crop naît bien à ce seuil-ci, chaîne complète posée
   const g = globeFactice()
   const v = creerVeilleCrop({ globe: g, contexte: contexteFactice(), cropAuDepart: false })
-  assert.equal(v.maj(600_001), false, 'né un mètre trop haut')
-  assert.equal(v.maj(600_000), true, 'pas né au palier z7')
+  assert.equal(v.maj(SEUIL_NAISSANCE_M + 1), false, 'né un mètre trop haut')
+  assert.equal(v.maj(SEUIL_NAISSANCE_M), true, 'pas né au seuil z10')
   assert.deepEqual(g.journal.map((e) => e.quoi), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
   return v.enVol()
 })
 
 // ══════════ ④ LE DÉPARTAGE — D16 ter NE SUIT PAS LA NAISSANCE ══════════════
 
-test('④ la BASCULE DE TROIS QUARTS n’arrive pas à 600 km — D16 ter tient', async () => {
-  // ⛔ **SANS CE DÉPARTAGE, LA CAMÉRA S'INCLINERAIT EN VUE CONTINENTALE.**
-  // `arriveeSurLeBloc` lisait `veilleCrop.repos` = « crop posé ET vue au
-  // repos » ; le crop naissant maintenant à 600 km, la bascule y tomberait.
+test('④ D23 — LE DÉPARTAGE MORD ENCORE, et c’est D21 ① qui le prouve maintenant', async () => {
+  // ⚡ **CE TEST A CHANGÉ DE PREUVE, PAS DE SENS.** Sous D21 ②, les deux paires
+  // étaient à 600 km et 32 km : n'importe quelle altitude entre les deux
+  // séparait `pose` de `auBloc`. D23 les ramène à la MÊME valeur — et la
+  // tentation est alors de croire que le départage ne sert plus à rien.
+  //
+  // ⛔ **Il sert toujours, parce que D21 ① reste entière** : sans intention,
+  // le crop SURVIT au-dessus de `SEUIL_MORT_M` (l'inclinaison, le cap, les
+  // boutons de caméra font monter l'altitude). `auBloc`, lui, n'a pas
+  // d'intention et redescend à `false`. **Les deux divergent donc en vol, à la
+  // même altitude, exactement comme avant.** Si `arriveeSurLeBloc` relisait
+  // `repos`, la vue de trois quarts se rallumerait là — à 60 km, en vue
+  // régionale, D16 ter tombe.
   const g = globeFactice()
   const v = creerVeilleCrop({
     globe: g, contexte: contexteFactice(), cropAuDepart: false, repos: creerVeilleRepos(),
   })
-  // à la naissance du crop, une vue parfaitement posée : le repos est relayé…
-  for (let i = 0; i < 200; i++) v.maj(SEUIL_NAISSANCE_M * 0.9, 145.5)
+  // on se pose au bloc : les deux automates disent oui
+  for (let i = 0; i < 200; i++) v.maj(SEUIL_BLOC_M * 0.9, 145.5)
   assert.equal(v.pose, true)
   assert.equal(v.repos, true, 'le montage du test est faux : la vue n’est pas au repos')
-  // …mais on n'est PAS au bloc, donc la bascule ne part pas
-  assert.equal(v.auBloc, false)
-  assert.equal(v.arriveeBloc, false, 'la vue de trois quarts arriverait à 600 km — D16 ter tombe')
-  // on descend jusqu'au bloc : là, et là seulement, elle part
-  for (let i = 0; i < 200; i++) v.maj(SEUIL_BLOC_M * 0.9, 145.5)
   assert.equal(v.auBloc, true)
   assert.equal(v.arriveeBloc, true, 'la vue de trois quarts n’arrive plus au bloc')
+
+  // …puis on INCLINE, sans aucun geste de dézoom : l'altitude monte bien
+  // au-dessus des deux seuils de mort, et les deux automates se séparent.
+  for (let i = 0; i < 200; i++) v.maj(SEUIL_MORT_M * 1.5, 145.5)
+  assert.equal(v.pose, true, 'le crop est mort sans intention — D21 ① tombe')
+  assert.equal(v.auBloc, false, '`auBloc` a suivi le crop — les grandeurs sont refusionnées')
+  assert.equal(v.arriveeBloc, false,
+    'la vue de trois quarts resterait armée hors du bloc — D16 ter tombe')
   await v.enVol()
 })
 

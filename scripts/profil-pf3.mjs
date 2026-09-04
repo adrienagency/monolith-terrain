@@ -387,7 +387,7 @@ async function ouvrirPage(nav, machine) {
   // sur 2 (sur 30 si figé) en orbite au repos. Ce banc pèse le coût d'UNE image
   // composée, passe par passe : il rend donc toutes les images. Le gain de PF4
   // est orthogonal et se mesure chez lui.
-  await page.goto('http://localhost:' + PORT + '/?cadence=pleine', { waitUntil: 'domcontentloaded', timeout: 180000 })
+  await page.goto('http://127.0.0.1:' + PORT + '/?cadence=pleine', { waitUntil: 'domcontentloaded', timeout: 180000 })
   await page.waitForFunction(() => window.__exp?.modes && window.__exp?.globe, { timeout: 180000, polling: 100 })
   await dodo(10000)
   await page.keyboard.press('Escape')
