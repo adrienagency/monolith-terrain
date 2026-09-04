@@ -145,8 +145,8 @@ import { soleilMondeDeLHeure, poseurDuSoleilDuGlobe, plancherNuitMonde } from '.
 import { creerVeilleRepos } from './monde/veille-repos.js'
 import { deltaAzimut, decalagePivot, PIVOT_BLOC_X, PIVOT_BLOC_Z } from './monde/pivot-bloc.js'
 import { deplacementDeSaisie, elanDeSaisie, pointSousLePixel, latLonDe, vecteurDe, enroulerLon, LAT_MAX_DEG } from './monde/saisie-terre.js'
-import { GESTE, REGIME, CRAN, regimeTerreActif, gesteDuBouton, zoomDuGlisseDroit, zoomDuDoubleClic, pasInclinaison, estDoubleClic, plafonnerElan, PIVOT_VERS_LE_CURSEUR } from './monde/gestes-terre.js'
-import { ORB_CRAN_DELTA_Y } from './modes.js'
+import { GESTE, REGIME, CRAN, CRANS_UN_NIVEAU, regimeTerreActif, gesteDuBouton, zoomDuGlisseDroit, zoomDuDoubleClic, pasInclinaison, estDoubleClic, plafonnerElan, PIVOT_VERS_LE_CURSEUR } from './monde/gestes-terre.js'
+import { ORB_CRAN_DELTA_Y, ORB_ZOOM_LOG_PAR_DELTA } from './modes.js'
 import { polaireMaxSol, distanceMinSol, POLAIRE_MAX_DURE } from './monde/butee-sol.js'
 // ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
 // la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
@@ -13859,7 +13859,9 @@ const gestesTerre = {
   epingle: null, // {saisi, pointeur, jusquA} : le point tenu sous un pixel pendant un zoom au double-clic
   dInclinaisonDeg: 0, // le pas d'inclinaison en attente, appliqué à l'image
   dCapDeg: 0,
-  crans: 0, // les `deltaY` de zoom en attente
+  crans: 0, // les `deltaY` de zoom en attente (le double-clic : un cran franc, avec sa course)
+  dLogGlisse: 0, // le glissé de zoom du clic droit : du LOG de distance en attente, intégré tel quel
+  courseDoubleClic: null, // {restant, parImage} : le cran franc du double-clic, versé image par image dans dLogGlisse
   images: 0, // sonde : images où un pas a été appliqué
   refus: 0, // sonde : gestes tombés hors du régime permis
   inclinaisonManuelle: false, // l'utilisateur a incliné lui-même dans ce régime : D16 ter ne redresse pas
@@ -13889,6 +13891,7 @@ function eteindreLeMouvement() {
   // double-clic : « stop motion », c'est tout le mouvement
   if (modes && typeof modes._zoomVel === 'number') modes._zoomVel = 0
   gestesTerre.epingle = null
+  gestesTerre.courseDoubleClic = null
 }
 // Le double-clic, reconnu UNE fois par `pointerup` quel que soit le nombre de
 // gestionnaires qui le demandent (marque sur l'événement).
@@ -13932,6 +13935,8 @@ function surPointerDownGeste(ev) {
   gestesTerre.dInclinaisonDeg = 0
   gestesTerre.dCapDeg = 0
   gestesTerre.crans = 0
+  gestesTerre.dLogGlisse = 0
+  gestesTerre.courseDoubleClic = null
   try { renderer.domElement.setPointerCapture(ev.pointerId) } catch { /* rien */ }
   surPriseDeCamera()
 }
@@ -13946,7 +13951,18 @@ function surPointerMoveGeste(ev) {
     // ⚠️ **SEUL L'AXE VERTICAL COMPTE** — Google ne documente que lui (le guide
     // Pro : « move the mouse backward or pull toward you »). Un clic droit
     // glissé horizontal qui ferait quelque chose serait une invention.
-    gestesTerre.crans += zoomDuGlisseDroit(dy)
+    // ⛔ **EN LOG DE DISTANCE, PAS EN CRANS DE MOLETTE — mesuré, deux fois huit
+    // chargements.** Passés par la porte de la molette, 20 crans étalés sur les
+    // 40 images d'un glissé ne rendaient que ×1,366 (8/8, `s8b-droit-glisse-V-bas`)
+    // au lieu de ×2 — la course amortie de `_applyZoom` (τ = 1,2 s) se fait
+    // couper par tout ce qui remet la vitesse à zéro en route (rechargement,
+    // recentrage, butée), et le montant du zoom dépendait alors de ce qui
+    // s'était passé pendant le geste. Google Earth Pro n'a pas de course sur ce
+    // geste : *« releasing the button when you reach the desired elevation »*.
+    // On intègre donc EXACTEMENT le log de distance des pixels tirés, à
+    // l'image, par `_applyZoom` — l'intégrateur de l'escalier, qui garde ses
+    // paliers (`_franchirSiBesoin`) et sa butée du sol. 200 px = ln 2 = ×2.
+    gestesTerre.dLogGlisse += (zoomDuGlisseDroit(dy) / CRAN) * (Math.LN2 / CRANS_UN_NIVEAU)
   } else if (gestesTerre.actif === GESTE.INCLINAISON) {
     const p = pasInclinaison({ dxPx: dx, dyPx: dy, inclinaisonDeg: inclinaisonCouranteDeg() + gestesTerre.dInclinaisonDeg })
     gestesTerre.dInclinaisonDeg += p.dInclinaisonDeg
@@ -13984,9 +14000,20 @@ function surClicGeste(ev) {
   if (!regime || regime === REGIME.CROP) return
   if (!reconnaitreDoubleClic(ev)) return
   if (ev.button !== 0 && ev.button !== 2) return
-  gestesTerre.crans += zoomDuDoubleClic(ev.button)
+  // ⛔ **PAR L'INTÉGRATEUR EXACT, PAS PAR LA COURSE DE LA MOLETTE — mesuré.**
+  // Vingt crans jetés d'un coup dans `_zoomGesture` rendaient ×1,96 vers l'avant
+  // (8/8) mais seulement ÷1,75 vers l'arrière (`.banc/GE2/rouge-apres.json`,
+  // altitude ×0,570) : le dézoom franchit un palier à 2,4 Mm, et le
+  // rechargement (`_coarsen`) coupe la course amortie en route. Le double-clic
+  // est un CRAN FRANC : ±ln 2 exactement, étalé sur `IMAGES_DOUBLE_CLIC` images
+  // (≈ ×1,05 par image, jamais un saut), et retenu pendant un rechargement
+  // comme le glissé de zoom — même chemin, même garantie.
+  const dLog = (zoomDuDoubleClic(ev.button) / CRAN) * (Math.LN2 / CRANS_UN_NIVEAU)
+  gestesTerre.courseDoubleClic = { restant: dLog, parImage: Math.abs(dLog) / IMAGES_DOUBLE_CLIC }
   epingler(ev.clientX, ev.clientY)
 }
+/** Sur combien d'images le cran franc du double-clic s'étale (15 ≈ un quart de seconde à 60 Hz, ×1,047 par image). */
+const IMAGES_DOUBLE_CLIC = 15
 // L'ÉPINGLE : le point de la sphère que le zoom doit garder sous un pixel de
 // l'écran. Avec `PIVOT_VERS_LE_CURSEUR`, c'est le point sous le curseur (Google :
 // « Zoom toward cursor location ») ; sinon le point du centre (D19), que le
@@ -14090,18 +14117,54 @@ function redresserSiHerite(regime) {
 // Le pas de l'image : le zoom en attente part par la porte de la molette,
 // l'inclinaison se pose. Appelé depuis `appliquerSaisieTerre`, donc AVANT
 // `updateCameraMotion` — le même ordre que R32, pour la même raison.
-function appliquerGestesTerre() {
+function appliquerGestesTerre(dt) {
   const regime = regimeGeste()
   if (regime !== REGIME.SURFACE) gestesTerre.inclinaisonManuelle = false // sur le crop et en orbite, c'est la machine qui pose
   if (!regime || regime === REGIME.CROP) {
     if (gestesTerre.actif !== GESTE.INERTE) relacherGeste(null)
     gestesTerre.crans = 0
+    gestesTerre.dLogGlisse = 0
     gestesTerre.dInclinaisonDeg = 0
     gestesTerre.dCapDeg = 0
     return
   }
   redresserSiHerite(regime)
-  if (gestesTerre.crans) {
+  if (gestesTerre.courseDoubleClic) {
+    const c = gestesTerre.courseDoubleClic
+    const pas = Math.sign(c.restant) * Math.min(Math.abs(c.restant), c.parImage)
+    c.restant -= pas
+    gestesTerre.dLogGlisse += pas
+    if (Math.abs(c.restant) < 1e-12) gestesTerre.courseDoubleClic = null
+  }
+  if (gestesTerre.dLogGlisse && dt > 1e-4 && !(modes.busy || modes._diveTween || modes.travel || modes._fonduPose)) {
+    const dLog = gestesTerre.dLogGlisse
+    gestesTerre.dLogGlisse = 0
+    if (modes.mode === 'orbital') {
+      // en orbite, la porte de la molette est déjà proportionnelle à `deltaY`
+      // (`orbAltTarget × exp(deltaY · k)`, amorti) : on lui donne le même log
+      modes._zoomGesture({ deltaY: dLog / ORB_ZOOM_LOG_PAR_DELTA, clientX: innerWidth / 2, clientY: innerHeight / 2, preventDefault: () => {} })
+    } else {
+      // « toute porte qui confie la caméra rend D'ABORD ce que le cadrage a
+      // emprunté » (test/damier-cadre.test.js) — la molette le fait par
+      // `cadrageWheel`, on le fait ici, avant l'intégrateur
+      quitteCadrageDamier()
+      // `_applyZoom` lit `_zoomVel` (log/s, > 0 = avant) et intègre `exp(−v·dt)` :
+      // on lui donne exactement `dLog` pour cette image, puis on l'éteint —
+      // aucune course ne survit au relâché
+      modes._zoomVel = -dLog / dt
+      modes._applyZoom(dt)
+      modes._zoomVel = 0
+    }
+    gestesTerre.images++
+  }
+  // ⛔ **PENDANT UN CHARGEMENT, LES CRANS ATTENDENT — ils ne tombent pas.**
+  // `_zoomGesture` JETTE tout cran reçu pendant `busy` (le rechargement d'un
+  // palier, ~0,3 à 0,5 s). Un glissé de zoom qui franchit un palier perdait donc
+  // tous ses crans du franchissement : mesuré ×1,42 à ×1,60 pour 200 px selon
+  // le chargement (`.banc/GE2/s8-droit-glisse-V-haut.json`, 8 chargements) au
+  // lieu de ×2 — et c'est aussi l'asymétrie avant/arrière du noteur (C1). On
+  // garde les crans et on les rejoue à l'image où la porte rouvre.
+  if (gestesTerre.crans && !(modes.busy || modes._diveTween || modes.travel)) {
     const dy = gestesTerre.crans
     gestesTerre.crans = 0
     // ⛔ **LE PIVOT EST CELUI DE D19 — LE CENTRE DE L'ÉCRAN — ET LE PRÉDICAT EST
@@ -14121,7 +14184,16 @@ function appliquerGestesTerre() {
     // `deltaY` qui compte (`exp(deltaY · k)`) : on y dose le même niveau
     // (`ORB_CRAN_DELTA_Y`, 20 crans = ×2) pour que le geste vaille pareil des
     // deux côtés de la traversée.
-    const crans = Math.round(dy / CRAN)
+    // ⛔ **PAS `Math.round` — mesuré, huit chargements** (`.banc/GE2/series8-apres.json`) :
+    // 5 px par image valent un DEMI-cran, et `Math.round(-0,5)` rend −0 en
+    // JavaScript quand `Math.round(+0,5)` rend 1. Le glissé vers le bas (zoom
+    // avant) perdait donc son demi-cran À CHAQUE IMAGE — ×1,0000 sur 8/8 —,
+    // pendant que le glissé vers le haut comptait un cran entier par image —
+    // ×2,3 au lieu de ×2. On tronque, et le reste est REPORTÉ à l'image
+    // suivante : 200 px valent 20 crans dans les deux sens, au cran près.
+    const crans = Math.trunc(dy / CRAN)
+    gestesTerre.crans = dy - crans * CRAN
+    if (!crans) return
     if (modes.mode === 'orbital') modes._zoomGesture({ deltaY: crans * ORB_CRAN_DELTA_Y, ...p, preventDefault: () => {} })
     else for (let k = 0; k < Math.abs(crans); k++) modes._zoomGesture({ deltaY: Math.sign(crans) * CRAN, ...p, preventDefault: () => {} })
     gestesTerre.images++
@@ -14311,7 +14383,7 @@ function tick() {
   // RÉELLE pour résoudre sa contrainte (le point saisi sous le pointeur). Posée
   // après, elle résoudrait sur une pose d’avant l’inclinaison — et l’image
   // suivante corrigerait, ce qui se voit à l’œil comme un flottement.
-  appliquerGestesTerre()
+  appliquerGestesTerre(dt)
   appliquerSaisieTerre(dt)
   updateCameraMotion(dt)
   // La fenêtre continue, juste après la caméra : le geste se projette sur les

@@ -461,6 +461,25 @@ async function porterA(altM) {
 
 const DIAG = () => page.evaluate(() => { const e = window.__exp, c = e.controls, k = e.camera; return { phiDeg: c.getPolarAngle() * 180 / Math.PI, azDeg: c.getAzimuthalAngle() * 180 / Math.PI, up: [k.up.x, k.up.y, k.up.z], cible: [c.target.x, c.target.y, c.target.z], pos: [k.position.x, k.position.y, k.position.z], levelZoom: e.modes._levelZoom, zoomVel: e.modes._zoomVel, busy: !!e.modes.busy, damping: c.enableDamping, sph: c._sphericalDelta ? [c._sphericalDelta.theta, c._sphericalDelta.phi] : null } })
 const SERIE = (f) => f.map((x) => [Math.round(x.now), +x.azimut.toFixed(3), +x.tilt.toFixed(3), +x.d.toFixed(4), x.busy ? 1 : 0, x.pointer ? 1 : 0])
+const ELAN = (f, s) => {
+  {
+    let iRel = 0; for (let i = 0; i < f.length; i++) if (f[i].pointer) iRel = i
+    const ap = f.slice(iRel)
+    const rad = Math.PI / 180
+    const gcAp = ap.length > 1 ? Math.acos(Math.max(-1, Math.min(1,
+      Math.sin(ap[0].lat * rad) * Math.sin(ap[ap.length - 1].lat * rad) +
+      Math.cos(ap[0].lat * rad) * Math.cos(ap[ap.length - 1].lat * rad) *
+      Math.cos((ap[ap.length - 1].lon - ap[0].lon) * rad)))) / rad : 0
+    let pas0 = 0, dureeMs = 0
+    for (let i = 1; i < ap.length; i++) {
+      const p = Math.hypot(ap[i].lat - ap[i - 1].lat, ((ap[i].lon - ap[i - 1].lon + 540) % 360) - 180)
+      if (i === 1) pas0 = p
+      if (pas0 > 0 && p > pas0 * 0.02) dureeMs = ap[i].now - ap[0].now
+    }
+    s.elanDeg = +gcAp.toFixed(4)
+    s.elanDureeMs = Math.round(dureeMs)
+  }
+}
 const ALT_M = Number(opt('--alt', '2000000'))
 const R = { pose: null, altViseeM: ALT_M, gestes: {} }
 for (const [nom, faire] of Object.entries(GESTES)) {
@@ -484,23 +503,7 @@ for (const [nom, faire] of Object.entries(GESTES)) {
   }
   if (!f) throw new Error('geste rate trois fois : ' + nom)
   const s = resume(f)
-  if (nom === 'gauche-elan') {
-    let iRel = 0; for (let i = 0; i < f.length; i++) if (f[i].pointer) iRel = i
-    const ap = f.slice(iRel)
-    const rad = Math.PI / 180
-    const gcAp = ap.length > 1 ? Math.acos(Math.max(-1, Math.min(1,
-      Math.sin(ap[0].lat * rad) * Math.sin(ap[ap.length - 1].lat * rad) +
-      Math.cos(ap[0].lat * rad) * Math.cos(ap[ap.length - 1].lat * rad) *
-      Math.cos((ap[ap.length - 1].lon - ap[0].lon) * rad)))) / rad : 0
-    let pas0 = 0, dureeMs = 0
-    for (let i = 1; i < ap.length; i++) {
-      const p = Math.hypot(ap[i].lat - ap[i - 1].lat, ((ap[i].lon - ap[i - 1].lon + 540) % 360) - 180)
-      if (i === 1) pas0 = p
-      if (pas0 > 0 && p > pas0 * 0.02) dureeMs = ap[i].now - ap[0].now
-    }
-    s.elanDeg = +gcAp.toFixed(4)
-    s.elanDureeMs = Math.round(dureeMs)
-  }
+  if (nom === 'gauche-elan') ELAN(f, s)
   if (f.horsToile) s.horsToile = f.horsToile
   if (f.elanArme) s.elanArme = f.elanArme
   if (nom.startsWith('menu-contextuel')) s.menu = await page.evaluate(() => ({ evenements: window.__GE.menu, defaultPrevented: window.__GE.defautBulle, captureAvantCanvas: window.__GE.defaut }))
@@ -514,6 +517,7 @@ for (const [nom, faire] of Object.entries(GESTES)) {
       let f2 = null
       for (let essai = 0; essai < 3 && !f2; essai++) { try { f2 = await faire() } catch (err) { etape(`  geste rate (${err.message.slice(0, 60)})`); f2 = null; await pageNeuve(); try { await neuf(); await porterRegime(ALT_M) } catch {} } }
       const s2 = resume(f2 || [])
+      if (nom === 'gauche-elan') ELAN(f2 || [], s2)
       s2.diagAvant = diagAvant; s2.diagApres = await DIAG(); s2.serie = SERIE(f2 || [])
       R.gestes[nom].push(s2)
       etape(`${nom} #${k + 1} saisi=${s2.saisiVsPointeurPx} px rot=${s2.rotationDeg}deg centre0=${s2.centre0DerivePx} px`)
