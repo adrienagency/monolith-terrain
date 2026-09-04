@@ -483,15 +483,24 @@ export function porteeHorizon(repere, altitudeM, rayonM) {
  * @param {number} [arg.pas] - segments par côté de la grille
  * @param {number} [arg.hauteur] - décalage radial de la surface (unités de
  *   scène) : l'epsilon de coplanarité, converti par l'appelant
+ * @param {number} [arg.emprise] - **jusqu'où va la SURFACE**, en demi-côtés.
+ *   ⚡ **CE N'EST PAS `portee`, ET C'EST TOUTE LA TÂCHE D24.** `portee` reste ce
+ *   sur quoi le CHAMP est cuit (`_cuireChampMer`), ce qui normalise le canal G
+ *   et ce qui ancre le budget du fond — c'est-à-dire **la couleur de la mer**,
+ *   que le rapport MER §4 interdit de déplacer. `emprise` ne dit qu'une chose :
+ *   jusqu'où des SOMMETS existent. Défaut : `portee`, donc la calotte d'avant au
+ *   bit près. ⚠️ **`uv` reste en demi-côtés bruts** : la lecture du champ vaut
+ *   `uv / (2 · portee) + 0,5` chez l'appelant, et elle ne bouge pas.
  * @returns {{positions:Float32Array, indices:Uint32Array, uv:Float32Array,
  *            origine:number[], base:object, flecheMax:number, compte:object}}
  */
-export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas = 128, hauteur = 0 } = {}) {
+export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas = 128, hauteur = 0, emprise = undefined } = {}) {
   if (!repere || !Number.isFinite(repere.demi)) {
     throw new TypeError('construireCalotte : il faut un `repere` (repereCrop)')
   }
   if (!(rayon > 0)) throw new TypeError('construireCalotte : `rayon` doit être fini et > 0')
   if (!(portee > 0)) throw new TypeError('construireCalotte : `portee` doit être > 0')
+  const etendue = Number.isFinite(emprise) && emprise > 0 ? Math.min(emprise, portee) : portee
   const n = Math.max(2, Math.round(pas))
   const { origine: O, est, haut, sud, centre } = repereLocalCrop(repere, rayon)
   const R = rayon + hauteur
@@ -507,9 +516,9 @@ export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas =
   let flecheMax = 0
   let k = 0
   for (let j = 0; j <= n; j++) {
-    const v = (-1 + (2 * j) / n) * portee
+    const v = (-1 + (2 * j) / n) * etendue
     for (let i = 0; i <= n; i++) {
-      const u = (-1 + (2 * i) / n) * portee
+      const u = (-1 + (2 * i) / n) * etendue
       const { lat, lon } = latLonDeLocal(u, v, repere)
       const P = surSphere(lat, lon, R)
       const d = [P[0] - O[0], P[1] - O[1], P[2] - O[2]]
@@ -551,7 +560,7 @@ export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas =
     base: { est, haut, sud },
     centre,
     flecheMax,
-    compte: { sommets: nV, triangles: n * n * 2, pas: n, portee },
+    compte: { sommets: nV, triangles: n * n * 2, pas: n, portee, emprise: etendue },
   }
 }
 
@@ -1057,3 +1066,163 @@ export function bordDeMer() {
   const fin = -RETRAIT_EAU_CROP
   return { debut: fin - RETRAIT_EAU_CROP, fin }
 }
+
+// ══════════ ⑧ LA COUPE PLATE À LA JUPE — D24 ═══════════════════════════════
+//
+// > **Adrien, 2026-09-04** : *« Je pense que l'effet latéral de vagues pose
+// > problème. Il faudrait que le crop se fasse de façon plate, au niveau de la
+// > jupe du socle, ça évitera de calculer cette déformation inutile. »*
+//
+// ⛔ **CE QUE `bordDeMer` NE POUVAIT PAS RÉGLER, ET POURQUOI.** Le fragment
+// mesure sa distance au bord sur `vCrop`, c'est-à-dire sur la coordonnée
+// paramétrique **AU REPOS** ; le sommet, lui, a déjà été poussé de côté par le
+// terme latéral de Gerstner (`q · a · d · cos`). Une crête née à l'intérieur est
+// donc **dessinée dehors** : le `discard` la juge sur l'endroit d'où elle vient,
+// pas sur celui où elle est. C'est la signature de la capture d'Adrien — des
+// **pointes** qui sortent de l'arête, pas une nappe uniformément trop grande.
+//
+// ⚡ **MESURÉ, ET LE TÉMOIN EST `chop = 0`** (`scripts/sonde-mer-jupe.mjs`,
+// l'arête relue dans le tampon d'attributs, projetée, balayage de lignes) :
+// **31 px hors arête** au cadrage oblique de sa capture, contre **0 px** dès que
+// `uMerChop` — le seul pilote du terme LATÉRAL — est mis à zéro.
+//
+// ⚠️ **DEUX MOITIÉS, ET LA SECONDE EST CELLE QU'ON RATE.** Rejeter le fragment
+// après avoir déplacé le sommet répondrait à « la coupe est plate » et pas du
+// tout à « ça évitera de calculer cette déformation ». Les deux lois ci-dessous
+// répondent chacune à une moitié :
+//   ① `bandeHouleBord` éteint le déplacement AVANT le bord — coupe plate ;
+//   ② `EMPRISE_MER_CROP` retire les sommets qui n'ont jamais rien à dessiner —
+//      la déformation hors emprise n'est plus calculée, elle n'existe plus.
+
+/**
+ * **Jusqu'où la SURFACE de la mer existe**, en demi-côtés de crop.
+ *
+ * ⚡ **UN, PARCE QUE LE FRAGMENT N'EN GARDE QUE ÇA DEPUIS `bordDeMer()`.** La
+ * nappe s'éteint à `−RETRAIT_EAU_CROP`, donc **dans** le crop : tout sommet
+ * au-delà de `|u| = 1` ou `|v| = 1` ne peut, par construction, produire que des
+ * fragments rejetés. Ils étaient pourtant **ombrés** — Gerstner sur seize
+ * trains, `shoreSurf`, la lecture du champ — puis leurs triangles rasterisés
+ * pour rien.
+ *
+ * ⛔ **ET CE N'EST SURTOUT PAS `PORTEE_CROP` QU'ON RÉTRÉCIT.** Le rapport MER §4
+ * l'interdit et dit pourquoi : `portee` sert AUSSI à cuire le champ, à
+ * normaliser `champ.unite` et à ancrer `profMaxCropM` — **la couleur du
+ * turquoise d'Adrien**. Ici le champ garde ses 3 demi-côtés au bit près ; seule
+ * la GÉOMÉTRIE se resserre. Les deux grandeurs étaient confondues dans un seul
+ * paramètre ; `construireCalotte` les sépare.
+ *
+ * ⚠️ **LA DENSITÉ DE MAILLE NE BOUGE PAS**, et c'est ce qui rend le crop
+ * identique au bit près : l'appelant divise `pas` dans le même rapport
+ * (`192 × 1/3 = 64`), et les nœuds de la grille resserrée tombent EXACTEMENT sur
+ * un sous-ensemble de ceux de l'ancienne (`(−1 + 2i/64) = (−1 + 2(i+64)/192)·3`).
+ */
+export const EMPRISE_MER_CROP = 1
+
+/**
+ * L'amplitude LATÉRALE maximale de la houle, en unités de scène.
+ *
+ * ⚠️ **C'EST LE TERME `q · a` DE `oceanGerstner`, REJOUÉ SUR LES MÊMES ENTRÉES**
+ * — la borne de Stokes comprise (`q ≤ 1/(k a)`), et avec `fade = 1`, le pire
+ * cas. `|d| = 1` et `|cos| ≤ 1`, donc la somme des `q · a` **majore** le
+ * déplacement horizontal. Ce n'est pas une seconde loi : c'est la borne de la
+ * loi, et le §« deux écritures qui divergent » vaut ici aussi — d'où le test qui
+ * RELIT `src/vendor/ocean-waves/gerstner.glsl.js` pour vérifier que les trois
+ * lignes qu'on majore sont toujours les siennes.
+ *
+ * @param {object} arg avec `a` / `b` (les seize `Vector4` du spectre), `houle`,
+ *   `chop`, `calme`, `unite` (scène par unité de socle) et `lambda`.
+ * @returns {number} en unités de scène, 0 si le spectre est absent ou muet
+ */
+export function amplitudeLateraleHoule({ a, b, houle, chop, calme = 1, unite, lambda } = {}) {
+  if (!Array.isArray(a) || !Array.isArray(b) || !(lambda > 0)) return 0
+  const waveH = houle * calme * unite
+  if (!(waveH > 0) || !(chop >= 0)) return 0
+  let somme = 0
+  const n = Math.min(a.length, b.length, 16)
+  for (let i = 0; i < n; i++) {
+    const k = a[i].z / lambda
+    const amp = a[i].w * lambda * waveH
+    // ⚠️ **LE MÊME SEUIL QUE LE NUANCEUR** (`if (a < 1e-7) continue`) : un train
+    // qu'il saute ne doit pas entrer dans la borne.
+    if (!(amp >= 1e-7) || !(k > 0)) continue
+    const ka = k * amp
+    somme += Math.min((chop * 1.9 * b[i].z) / ka, 1 / ka) * amp
+  }
+  return somme
+}
+
+/**
+ * Le facteur de sécurité de la bande d'extinction de la houle.
+ *
+ * ⚠️ **1,125 EST LA BORNE, PAS UN GOÛT, ET 2 EST LA MARGE.** On veut qu'un
+ * sommet ne franchisse JAMAIS le bord : à la distance `δ` du bord, son
+ * déplacement vaut au plus `A · lissage(δ/B)` et il faut `A · lissage(δ/B) < δ`
+ * pour tout `δ ∈ ]0, B]`. Avec `lissage(t) = 3t² − 2t³`, cela s'écrit
+ * `A · (3t − 2t²) < B`, dont le maximum en `t = 0,75` vaut **1,125 A**. Un `B`
+ * au-dessus de `1,125 A` suffit donc ; `2 A` laisse 78 % de marge, et le test
+ * ⑧c balaie les cent `t` de la bande pour le vérifier plutôt que le croire.
+ */
+export const MARGE_BANDE_HOULE = 2
+
+/**
+ * La largeur de la bande où la houle s'éteint avant le bord, en demi-côtés.
+ *
+ * ⚡ **C'EST LA MOITIÉ « COUPE PLATE » DE D24.** Dedans, l'amplitude descend à
+ * zéro par le même lissage que partout ailleurs dans ce module ; au bord, elle
+ * vaut EXACTEMENT zéro — donc le sommet est là où `aCrop` dit qu'il est, donc le
+ * `discard` du fragment et la géométrie parlent enfin de la même chose. **Le
+ * bord de la nappe coïncide alors avec l'arête du socle par construction**, sans
+ * un pixel à mesurer, exactement comme la superellipse le fait déjà pour la
+ * découpe.
+ *
+ * ⚠️ **ELLE EST AUSSI ÉTROITE QUE LA HOULE LE PERMET.** Elle vaut deux fois le
+ * déplacement latéral maximal, pas une fraction du crop : au relevé de La
+ * Réunion (`amplitude = 3,3·10⁻⁴` unité de scène, demi-côté `0,2126`) elle fait
+ * **0,0031 demi-côté**, soit **21 m au sol** — plus étroit que le retrait de
+ * l'eau lui-même (53,8 m). Une bande large calmerait la mer sur tout le
+ * pourtour ; c'est précisément la régression de qualité qu'Adrien a déjà
+ * signalée une fois.
+ *
+ * @param {number} amplitudeScene la sortie d'`amplitudeLateraleHoule`
+ * @param {number} parDemi unités de scène par demi-côté de crop
+ * @returns {number} la largeur de bande, en demi-côtés, dans ]0 ; 0,5]
+ */
+export function bandeHouleBord(amplitudeScene, parDemi) {
+  if (!(parDemi > 0) || !(amplitudeScene > 0)) return 0
+  // ⚠️ **PLAFONNÉE À UN DEMI-CÔTÉ.** Une houle démesurée (banc, tirette poussée)
+  // ne doit pas calmer la moitié du crop en silence : le plafond est visible, et
+  // c'est la « limite écrite plutôt que cachée » de `PORTEE_DEFAUT`.
+  return Math.min(0.5, (MARGE_BANDE_HOULE * amplitudeScene) / parDemi)
+}
+
+/**
+ * La distance signée au bord du crop — **une seule écriture, deux lecteurs.**
+ *
+ * ⛔ **ELLE VIVAIT DANS `MER_FRAG` SEUL, ET D24 A BESOIN D'ELLE AU SOMMET.** La
+ * recopier dans `MER_VERT` aurait fait deux superellipses à garder d'accord,
+ * c'est-à-dire la faute que ce module raconte cinq fois (`RETRAIT_EAU_CROP`,
+ * `CHAMP_RES`, la rampe nautique, `uSky`, l'échelle de houle). Elle est donc
+ * **extraite**, injectée dans les deux nuanceurs, et `test/mer-sphere.test.js`
+ * ⑧a vérifie qu'aucun des deux ne réécrit `pow(pow(`.
+ *
+ * ⚠️ **AUCUN ACCENT NI APOSTROPHE** : ce texte part tel quel au compilateur GLSL.
+ */
+export const GLSL_BORD_CROP = /* glsl */ `
+// 0 = la frontiere du crop, < 0 = DEDANS, > 0 = dehors. C est la MEME mesure que
+// le discard des tuiles (globe.js, uCropCoin / uCropCoinN) : le terme
+// min(max(q.x, q.y), 0.0) est la distance INTERIEURE de la boite arrondie, sans
+// lequel dBord se fige a -uCropCoin partout dedans (Tache P4).
+float distanceBordCrop(vec2 qCrop, float coin, float expo) {
+  vec2 q = abs(qCrop) - (1.0 - coin);
+  vec2 cq = max(q, 0.0);
+  float pn = pow(pow(cq.x, expo) + pow(cq.y, expo), 1.0 / expo);
+  return pn - coin + min(max(q.x, q.y), 0.0);
+}
+
+// L attenuation de la houle au bord : 1 partout dedans, EXACTEMENT 0 des que le
+// sommet atteint le bord de la nappe. C est le meme lissage que richesseMer, et
+// le meme motif : une sortie ANTICIPEE, pas une multiplication par presque zero.
+float attenuationBordMer(float dBord, float fin, float bande) {
+  return 1.0 - smoothstep(fin - max(bande, 1e-7), fin, dBord);
+}
+`

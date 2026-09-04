@@ -70,6 +70,9 @@ import {
   GLSL_JUPE_MER,
   RETRAIT_EAU_CROP,
   bordDeMer,
+  // ⚡ **D24** : la mesure du bord a quitté `MER_FRAG` pour ce morceau partagé,
+  // parce que le SOMMET en a besoin aussi.
+  GLSL_BORD_CROP,
 } from '../src/monde/mer-sphere.js'
 import { COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
 import { construireSolideCrop } from '../src/monde/parois-crop.js'
@@ -733,10 +736,16 @@ test('⑥b `dBord` est SIGNÉ — sans quoi le retrait ne peut pas exister', () 
   // vaut zéro, `pn` vaut zéro, et `dBord` se fige à `−uCropCoin` — c'est-à-dire
   // à **0** puisque `uCropCoin` vaut 0 dans l'application vivante. La mesure ne
   // portait que le DEHORS, et le fondu ne pouvait structurellement pas rentrer.
+  // ⚡ **DEPUIS D24 CES TROIS LIGNES VIVENT DANS `GLSL_BORD_CROP`**, injecté dans
+  // les DEUX nuanceurs : le sommet doit mesurer la même chose que le fragment,
+  // sinon la coupe plate serait posée sur une seconde superellipse. Le test suit
+  // la loi à sa source et exige que le fragment l'APPELLE.
   const frag = sansCommentaires(blocGlsl(globe(), 'MER_FRAG'))
-  assert.match(frag, /vec2 q = abs\(vCrop\) - \(1\.0 - uCropCoin\);/)
-  assert.match(frag, /vec2 cq = max\(q, 0\.0\);/)
-  assert.match(frag, /float dBord = pn - uCropCoin \+ min\(max\(q\.x, q\.y\), 0\.0\);/)
+  const bordGlsl = sansCommentaires(GLSL_BORD_CROP)
+  assert.match(bordGlsl, /vec2 q = abs\(qCrop\) - \(1\.0 - coin\);/)
+  assert.match(bordGlsl, /vec2 cq = max\(q, 0\.0\);/)
+  assert.match(bordGlsl, /return pn - coin \+ min\(max\(q\.x, q\.y\), 0\.0\);/)
+  assert.match(frag, /float dBord = distanceBordCrop\(vCrop, uCropCoin, uCropCoinN\);/)
   // le jumeau JS de la mesure, exécuté : dedans NÉGATIF, dehors INCHANGÉ
   const dBord = (u, v, coin, n) => {
     const q = [Math.abs(u) - (1 - coin), Math.abs(v) - (1 - coin)]

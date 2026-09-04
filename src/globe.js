@@ -102,6 +102,14 @@ import {
   // les relevés bruts.
   couleursFondDuSocle,
   profondeurMaxDuCrop,
+  // ⚡ **D24 — LA COUPE PLATE À LA JUPE.** `EMPRISE_MER_CROP` borne la
+  // GÉOMÉTRIE (pas `PORTEE_CROP`, qui reste celle du champ et de la couleur) ;
+  // les deux autres éteignent la houle avant le bord ; `GLSL_BORD_CROP` est la
+  // superellipse, désormais lue par les DEUX nuanceurs.
+  EMPRISE_MER_CROP,
+  amplitudeLateraleHoule,
+  bandeHouleBord,
+  GLSL_BORD_CROP,
 } from './monde/mer-sphere.js'
 // ⚠️ **LE FOV CANONIQUE, PAS UNE CONSTANTE RECOPIÉE.** Tour de correction 1 de
 // la Tâche F : le défaut de `poserMer` portait `33`, une valeur qui n'existe
@@ -297,8 +305,18 @@ uniform float uMerUnite;
 // qu ocean.js multiplie son amplitude par uViewCalm avant d appeler Gerstner.
 // C est le MEME uniforme, pas un second : un seul ecrivain, majReglagesMer.
 uniform float uMerCalmeVue;
+// ══════ LA COUPE PLATE A LA JUPE — D24 ═══════════════════════════════════════
+// Les trois uniformes du BORD, au SOMMET. Ils y sont parce que le fragment
+// mesurait vCrop, la coordonnee AU REPOS, pendant que le sommet, lui, avait deja
+// bouge : une crete nee dedans etait dessinee dehors. Mesure 31 px hors arete,
+// temoin chop = 0 a 0 px (scripts/sonde-mer-jupe.mjs).
+uniform vec2 uMerBord;         // (debut, fin) du fondu — bordDeMer()
+uniform float uMerBandeHoule;  // largeur d extinction de la houle — bandeHouleBord()
+uniform float uCropCoin;
+uniform float uCropCoinN;
 __GERSTNER__
 __SHORE_SURF__
+${GLSL_BORD_CROP}
 ${GLSL_ECUME}
 varying vec2 vCrop;
 varying vec2 vLocal;
@@ -359,7 +377,25 @@ void main() {
   float dMer = distance(cameraPosition, monde);
   float richesseMer = 1.0 - smoothstep(log(uMerDebut), log(uMerFin), log(max(dMer, 1e-9)));
   vRichesse = richesseMer;
-  if (richesseMer <= 0.0) {
+
+  // ══════ LE BORD, AU SOMMET — D24, ET C EST LA MOITIE QU ON RATE ═══════════
+  //
+  // Adrien : « il faudrait que le crop se fasse de facon plate, au niveau de la
+  // jupe du socle, ca evitera de calculer cette deformation inutile ».
+  //
+  // ⚠️ DEUX CHOSES D UN SEUL GESTE, ET LA SECONDE EST LA DEMANDE ENTIERE :
+  //   ① au bord, attBord vaut EXACTEMENT zero, donc le sommet reste ou aCrop
+  //      dit qu il est : la coupe est PLATE et tombe sur la jupe, houle
+  //      comprise. Le fragment mesure vCrop, la geometrie ne le contredit plus.
+  //   ② au-dela, on SORT — ni Gerstner, ni shoreSurf, ni les seize trains. Un
+  //      discard apres deplacement n aurait repondu qu a la premiere moitie.
+  //
+  // ⚠️ ET C EST LA MEME SUPERELLIPSE QUE LE FRAGMENT, PAS UNE SECONDE :
+  // distanceBordCrop est injectee dans les deux nuanceurs depuis
+  // monde/mer-sphere.js. (Aucun accent grave dans ce bloc : template literal.)
+  float dBordMer = distanceBordCrop(aCrop, uCropCoin, uCropCoinN);
+  float attBord = attenuationBordMer(dBordMer, uMerBord.y, uMerBandeHoule);
+  if (richesseMer <= 0.0 || attBord <= 0.0) {
     vCrete = 0.0;
     vNormMer = vec3(0.0, 1.0, 0.0);
     vMonde = monde;
@@ -372,7 +408,14 @@ void main() {
   // captures d'Ibiza et de Toulon)
   // ⚠️ SUR LE DECLIN, PAS SUR LE FONDU — ocean.js lit shoreD ici et vFade dans
   // le fragment : deux rampes sur la MEME grandeur, pas l une sur l autre.
-  float fade = fonduHouleMer(declin) * richesseMer;
+  // ⚠️ attBord ENTRE PAR fade, ET CE N EST PAS UN RACCOURCI — D24. Dans
+  // oceanGerstner, l amplitude vaut a = A * lenScale * waveH * fade et la
+  // cambrure q = min(chop*1.9*part*fade/(k a), 1/(k a)) : le produit q*a, qui
+  // EST le deplacement lateral, vaut donc chop*1.9*part*fade/k. Il est LINEAIRE
+  // en fade, et la hauteur a*sin l est aussi. Multiplier fade par attBord eteint
+  // donc les deux d un seul facteur, et le train dont l amplitude tombe sous
+  // 1e-7 est SAUTE par le continue de la boucle : au bord, rien n est calcule.
+  float fade = fonduHouleMer(declin) * richesseMer * attBord;
   vec3 nAcc = vec3(0.0);
   float crete = 0.0;
   // ⚠️ ON PASSE uMerLambda EN lenScale, ET LES COORDONNÉES TELLES QUELLES —
@@ -405,7 +448,12 @@ void main() {
   // deja converti — l asymetrie est ce qui l a rendue invisible.
   vec3 disp = oceanGerstner(vec2(p.x, p.z), uMerTemps, uMerHoule * uMerCalmeVue * uMerUnite, uMerChop, uMerVitesse, uMerLambda, fade, nAcc, crete);
   float creteS = 0.0;
-  vec3 surf = shoreSurf(uvF, uMerChamp, uMerTemps, uMerHoule * uMerUnite, uMerChop, uMerVitesse, uMerLambda, richesseMer, creteS);
+  // ⚠️ ET LA HOULE DE COTE AUSSI, MAIS PAS POUR LA MEME RAISON — et il faut le
+  // dire : elle n ajoute QUE de la hauteur (disp.y += surf.x) et deux pentes,
+  // aucun deplacement lateral. Elle n a donc jamais pu sortir de l arete. On l
+  // eteint quand meme au bord parce que la coupe demandee est PLATE : une lame
+  // qui monte encore la ou la nappe s arrete rendrait un bord ondulant.
+  vec3 surf = shoreSurf(uvF, uMerChamp, uMerTemps, uMerHoule * uMerUnite, uMerChop, uMerVitesse, uMerLambda, richesseMer * attBord, creteS);
   disp.y += surf.x;
   nAcc.x += surf.y;
   nAcc.z += surf.z;
@@ -525,6 +573,7 @@ varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
+${GLSL_BORD_CROP}
 ${GLSL_ECUME}
 ${GLSL_LAME_EAU}
 ${GLSL_JUPE_MER}
@@ -613,10 +662,12 @@ void main() {
   // haute de la paroi. Le terme min(max(q.x, q.y), 0.0) est la distance
   // interieure de la boite arrondie (la forme close usuelle) : il vaut ZERO
   // dehors, donc le dehors reste au bit pres ce qu il etait.
-  vec2 q = abs(vCrop) - (1.0 - uCropCoin);
-  vec2 cq = max(q, 0.0);
-  float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
-  float dBord = pn - uCropCoin + min(max(q.x, q.y), 0.0); // 0 = frontiere, < 0 = DEDANS
+  //
+  // ⚠️ ET CES CINQ LIGNES SONT DEVENUES UN APPEL — D24. Le sommet a besoin de la
+  // MEME mesure (voir MER_VERT) ; la recopier aurait fait deux superellipses a
+  // garder d accord. distanceBordCrop est injectee dans les deux nuanceurs
+  // depuis monde/mer-sphere.js, et le corps n a pas bouge d un caractere.
+  float dBord = distanceBordCrop(vCrop, uCropCoin, uCropCoinN); // 0 = frontiere, < 0 = DEDANS
   float bord = 1.0 - smoothstep(uMerBord.x, uMerBord.y, dBord);
   if (bord <= 0.0) discard;
 
@@ -6329,7 +6380,30 @@ export class Globe {
       champ.texture.dispose()
       return { refus: 'champ', portee: p, couverture: champ.couverture, bathy: champ.bathy }
     }
-    const cal = construireCalotte({ repere: rep, rayon: R_GLOBE, portee: p, pas, hauteur: epsUnites })
+    // ══════ L'EMPRISE DE LA GÉOMÉTRIE — D24, ET CE N'EST PAS LA PORTÉE ═══════
+    //
+    // ⚡ **LE CHAMP GARDE SES TROIS DEMI-CÔTÉS, LA SURFACE N'EN GARDE QU'UN.**
+    // Depuis que `bordDeMer()` éteint la nappe à `−RETRAIT_EAU_CROP`, tout
+    // sommet au-delà de `|u| = 1` ne produit QUE des fragments rejetés — et il
+    // était pourtant ombré (seize trains de Gerstner, `shoreSurf`, la lecture du
+    // champ) puis ses triangles rasterisés pour rien. Relevé : **37 249 sommets
+    // et 73 728 triangles**, dont **4 225 et 8 192** dans le crop, soit **88,7 %
+    // de sommets et 88,9 % de triangles pour zéro pixel.**
+    //
+    // ⛔ **ET CE N'EST SURTOUT PAS `PORTEE_CROP` QU'ON RÉTRÉCIT** : le rapport
+    // MER §4 dit ce que ça coûterait — `p` sert aussi à `_cuireChampMer`, à
+    // `champ.unite` et à `profMaxCropM`, c'est-à-dire à **la couleur**. Ici `p`
+    // ne bouge pas d'un bit ; seule la grille se resserre.
+    //
+    // ⚠️ **LA DENSITÉ DE MAILLE EST CONSERVÉE, ET C'EST CE QUI REND LE CROP
+    // IDENTIQUE AU BIT PRÈS** : `pas` est divisé dans le même rapport, donc les
+    // nœuds de la grille resserrée tombent exactement sur ceux de l'ancienne
+    // (`192 × 1/3 = 64`, et `(−1 + 2i/64) = (−1 + 2(i + 64)/192) × 3`). `maille`
+    // ci-dessous reste donc juste, et le test ⑧e le vérifie sur la géométrie
+    // bâtie plutôt que sur cette phrase.
+    const emprise = Math.min(EMPRISE_MER_CROP, p)
+    const pasGeo = Math.max(2, Math.round((pas * emprise) / p))
+    const cal = construireCalotte({ repere: rep, rayon: R_GLOBE, portee: p, emprise, pas: pasGeo, hauteur: epsUnites })
 
     // ══════ LE RIDEAU D'EAU, CONCATÉNÉ À LA CALOTTE — Tâche P4 ═══════════════
     //
@@ -6518,6 +6592,13 @@ export class Globe {
         // ⚠️ **LE NEUTRE `(0, 1)` RESTE UN NEUTRE, PAS UN ÉTAT** : il vit le
         // temps d'une construction, `_majBordMer` l'écrase avant tout dessin.
         uMerBord: { value: new THREE.Vector2(0, 1) },
+        // ══════ LA BANDE D'EXTINCTION DE LA HOULE — D24 ═════════════════════
+        //
+        // ⚠️ **NAÎT À ZÉRO, ET C'EST LE NEUTRE EXACT** : bande nulle =
+        // `attenuationBordMer` vaut 1 partout dedans et 0 dehors, c'est-à-dire
+        // la coupe franche. `_majBandeHouleMer` l'écrit juste après, puis
+        // `majReglagesMer` par image — un seul écrivain, comme `uMerBord`.
+        uMerBandeHoule: { value: 0 },
         // ══════ LA RÉFRACTION — Tâche R2 ════════════════════════════════════
         //
         // ⚠️ **`uMerScene` NAÎT NUL ET C'EST SANS DANGER** : `onBeforeRender`
@@ -6537,6 +6618,9 @@ export class Globe {
         // `monde/eau-refraction.js`.
         uMerVersMonde: { value: new THREE.Matrix3() },
       },
+      // ⚠️ **`uCropCoin` / `uCropCoinN` SONT DÉJÀ CÉDÉS PLUS HAUT** (les mêmes
+      // objets que les tuiles) : le sommet lit donc la MÊME superellipse que le
+      // fragment et que le `discard` du socle, sans un second uniforme.
       vertexShader: MER_VERT
         .replace('__GERSTNER__', mod.GERSTNER_GLSL)
         .replace('__SHORE_SURF__', mod.SHORE_SURF_GLSL),
@@ -6645,6 +6729,14 @@ export class Globe {
     this._mer = mesh
     this._merEtat = {
       portee: p, pas, lambda, maille, echelleH, bascule, bande, epsUnites,
+      // ⚠️ **`parDemi` EST DANS L'ÉTAT, PAS DANS UN UNIFORME** — D24. Le
+      // nuanceur n'en a pas besoin (`uMerBandeHoule` arrive déjà en demi-côtés)
+      // et un uniforme que le corps n'atteint pas est l'uniforme mort que ce
+      // chantier a déjà trouvé cinq fois. `_majBandeHouleMer` le lit ici.
+      // ⚠️ **HORIZONTAL, DONC SANS EXAGÉRATION** — même règle qu'`echelleHouleM`
+      // et pour la même raison : diviser par 2,8 élargirait la bande d'autant.
+      parDemi: (largeurCropM(rep) / 2) * (R_GLOBE / EARTH_RADIUS_M),
+      emprise, pasGeo,
       flecheMax: cal.flecheMax, compte: cal.compte,
       // ⚠️ **ON DIT SI LE RIDEAU EST LÀ.** Un `false` silencieux serait
       // exactement le genre d'absence que ce chantier met des soirées à lire.
@@ -6653,7 +6745,39 @@ export class Globe {
       bathy: champ.bathy,
     }
     this._majBordMer()
+    this._majBandeHouleMer()
     return this._merEtat
+  }
+
+  /**
+   * Pose la bande où la houle s'éteint avant le bord — **D24, la coupe plate.**
+   *
+   * ⚠️ **PAR IMAGE, ET PAS UNE FOIS POUR TOUTES.** Elle dépend de six grandeurs
+   * que `majReglagesMer` réécrit à chaque image depuis les uniformes VIVANTS du
+   * socle — le spectre lui-même est remplacé par `setSeed`/`reseed` en cours de
+   * session. Une bande calculée à la pose serait fausse dès la première tirette
+   * de houle, et elle le serait **en silence** : trop étroite, la mer ressort de
+   * l'arête ; trop large, elle se calme sur tout le pourtour.
+   *
+   * ⚠️ **ELLE LIT LES UNIFORMES, ELLE NE LES DÉRIVE PAS.** C'est la règle de
+   * `couleursFondDuSocle` : deux écrivains pour une grandeur, dont un muet, est
+   * la faute que D13 §③ nomme. `amplitudeLateraleHoule` reçoit exactement ce que
+   * le nuanceur reçoit.
+   */
+  _majBandeHouleMer() {
+    if (!this._mer) return null
+    const u = this._mer.material.uniforms
+    const amp = amplitudeLateraleHoule({
+      a: u.uWaveA.value,
+      b: u.uWaveB.value,
+      houle: u.uMerHoule.value,
+      chop: u.uMerChop.value,
+      calme: u.uMerCalmeVue.value,
+      unite: u.uMerUnite.value,
+      lambda: u.uMerLambda.value,
+    })
+    u.uMerBandeHoule.value = bandeHouleBord(amp, this._merEtat?.parDemi)
+    return { amplitude: amp, bande: u.uMerBandeHoule.value }
   }
 
   /**
@@ -7136,7 +7260,15 @@ export class Globe {
     const echelleSpectre = Number.isFinite(es) && es > 0 && Number.isFinite(unite) && unite > 0
     if (echelleSpectre) u.uMerLambda.value = es * unite
 
-    return { vue: a.vue, surface: a.surface, givre, etat, fond, eau, couleurs, spectre, echelleSpectre }
+    // ══════ LA BANDE DE LA COUPE PLATE — D24, EN DERNIER ════════════════════
+    //
+    // ⚠️ **APRÈS LES SIX RÉGLAGES, LE SPECTRE ET L'ÉCHELLE, ET C'EST OBLIGÉ** :
+    // elle se calcule SUR eux. Posée plus haut, elle vaudrait ce que la houle
+    // valait à l'image précédente — un décalage d'une image que rien ne dirait,
+    // et exactement le genre d'absence que ce chantier met des soirées à lire.
+    const bandeHoule = this._majBandeHouleMer()
+
+    return { vue: a.vue, surface: a.surface, givre, etat, fond, eau, couleurs, spectre, echelleSpectre, bandeHoule }
   }
 
   /** Retire la mer — le globe redevient une planète sans eau animée. */

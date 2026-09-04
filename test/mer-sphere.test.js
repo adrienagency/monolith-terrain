@@ -62,6 +62,12 @@ import {
   abscisseNautique,
   PORTEE_CROP,
   RETRAIT_EAU_CROP,
+  // ⚡ **D24 — LA COUPE PLATE À LA JUPE.**
+  EMPRISE_MER_CROP,
+  MARGE_BANDE_HOULE,
+  amplitudeLateraleHoule,
+  bandeHouleBord,
+  GLSL_BORD_CROP,
   MARGE_EAU_CROP,
   construireJupeMer,
   bordDeMer,
@@ -763,7 +769,14 @@ test('⑧b le nuanceur SAUTE le travail quand la richesse est nulle', () => {
   const src = readFileSync(SRC_GLOBE, 'utf8')
   const bloc = src.match(/\/\/ ══════ LA MER[\s\S]*?\n\}\n`/)
   assert.ok(bloc, 'le bloc de la mer est absent de globe.js')
-  assert.match(bloc[0], /if\s*\(\s*richesseMer\s*<=\s*0\.0\s*\)/)
+  // ⚡ **DEPUIS D24 LA GARDE PORTE DEUX CONDITIONS, ET C'EST LA MÊME SORTIE.**
+  // La richesse dit « trop loin pour qu'on voie la houle » ; `attBord` dit
+  // « hors de l'emprise du socle ». Les deux mènent au même `return`, et le
+  // test exige toujours une SORTIE ANTICIPÉE, pas une multiplication.
+  assert.match(bloc[0], /if\s*\(\s*richesseMer\s*<=\s*0\.0\s*\|\|\s*attBord\s*<=\s*0\.0\s*\)/)
+  const garde = /if \(richesseMer <= 0\.0 \|\| attBord <= 0\.0\) \{([\s\S]*?)\n  \}/.exec(bloc[0])?.[1]
+  assert.ok(garde && /\breturn;/.test(garde), 'la garde doit RETOURNER, pas multiplier')
+  assert.ok(!/oceanGerstner|shoreSurf/.test(garde), 'rien de la houle ne doit vivre dans la garde')
 })
 
 
@@ -828,7 +841,10 @@ test('⑧d le fondu de rivage du nuanceur GARDE son seuil de 0,10, pas approxima
   // garde sa raison d'être (une mutation du seuil doit rougir) mais suit la
   // valeur à sa source. **Et il exige que le nuanceur appelle la fonction
   // partagée sur le DÉCLIN, pas sur le fondu** : c'était toute la faute de P4.
-  assert.ok(/float fade = fonduHouleMer\(declin\) \* richesseMer;/.test(bloc[0]),
+  // ⚡ **ET DEPUIS D24 IL PORTE `attBord` EN TROISIÈME FACTEUR** : c'est par lui
+  // que la houle s'éteint AVANT le bord, donc que la coupe est plate. Le mettre
+  // ailleurs (sur `disp` après coup) laisserait Gerstner tourner pour rien.
+  assert.ok(/float fade = fonduHouleMer\(declin\) \* richesseMer \* attBord;/.test(bloc[0]),
     'le fondu de rivage est absent ou d une autre forme')
   assert.equal(FONDU_HOULE_FIN, 0.1)
   assert.ok(new RegExp(`smoothstep\\(0\\.0, ${FONDU_HOULE_FIN.toFixed(2)}, declin\\)`).test(GLSL_ECUME),
@@ -1080,6 +1096,11 @@ function globeAvecCrop(overrides = {}) {
     retirerMer: Globe.prototype.retirerMer,
     _cuireChampMer: Globe.prototype._cuireChampMer,
     _majBordMer: Globe.prototype._majBordMer,
+    // ⚡ **D24 — LA VRAIE MÉTHODE, PAS UN BOUCHON.** Même discipline que
+    // `_majBordMer` juste au-dessus : ce que `poserMer` appelle, ce bâtisseur le
+    // porte pour de vrai, sinon les tests ⑧ mesureraient une bande que personne
+    // n'écrit.
+    _majBandeHouleMer: Globe.prototype._majBandeHouleMer,
     _melangeCalottes() {},
     _melangeCrop() {},
     _calottes: [],
@@ -1480,10 +1501,25 @@ test('⑪g le nuanceur de la mer LIT vraiment le bord, et sur la mesure de la D�
   const frag = /const MER_FRAG = \/\* glsl \*\/ `([\s\S]*?)`\n/.exec(src)?.[1]
   assert.ok(frag, 'le fragment de la mer doit être extractible')
   assert.ok(/uniform vec2 uMerBord;/.test(frag), 'le bord doit être déclaré')
-  // la mesure est celle de la découpe : cq / pn / uCropCoinN, comme le nuanceur
-  // des tuiles — pas un max(abs(u), abs(v))
-  assert.ok(/pow\(pow\(cq\.x, uCropCoinN\) \+ pow\(cq\.y, uCropCoinN\), 1\.0 \/ uCropCoinN\)/.test(frag),
+  // la mesure est celle de la découpe : cq / pn / expo, comme le nuanceur des
+  // tuiles — pas un max(abs(u), abs(v))
+  // ⚡ **DEPUIS D24 ELLE EST EXTRAITE, ET C'EST TOUT L'INTÉRÊT** : le SOMMET en
+  // a besoin aussi, et deux superellipses à garder d'accord sont la faute que ce
+  // module raconte cinq fois. On vérifie donc ① que le fragment l'APPELLE sur
+  // `vCrop`, ② que le morceau partagé est bien injecté, ③ que la loi y est
+  // entière, et ④ qu'aucun des deux nuanceurs ne la réécrit.
+  assert.ok(/float dBord = distanceBordCrop\(vCrop, uCropCoin, uCropCoinN\);/.test(frag),
+    'le fragment doit APPELER la mesure partagée, sur vCrop')
+  assert.ok(frag.includes('${GLSL_BORD_CROP}'), 'le morceau partagé doit être injecté dans le fragment')
+  assert.ok(/pow\(pow\(cq\.x, expo\) \+ pow\(cq\.y, expo\), 1\.0 \/ expo\)/.test(GLSL_BORD_CROP),
     'la superellipse de la découpe doit être celle du bord')
+  const vertD24 = /const MER_VERT = \/\* glsl \*\/ `([\s\S]*?)`\n/.exec(src)?.[1]
+  assert.ok(vertD24.includes('${GLSL_BORD_CROP}'), 'le morceau partagé doit être injecté dans le sommet AUSSI')
+  assert.ok(/distanceBordCrop\(aCrop, uCropCoin, uCropCoinN\)/.test(vertD24),
+    'le sommet doit mesurer le bord sur aCrop')
+  for (const [nom, txt] of [['MER_FRAG', frag], ['MER_VERT', vertD24]]) {
+    assert.ok(!/pow\(pow\(cq/.test(txt), `${nom} réécrit la superellipse au lieu de l appeler`)
+  }
   const sorties = frag.match(/gl_FragColor = vec4\([^;]*;/g) || []
   assert.equal(sorties.length, 2, 'le fragment a exactement deux sorties')
   for (const s of sorties) assert.ok(/\bbord \*/.test(s), `sortie sans bord : ${s}`)
@@ -1626,7 +1662,15 @@ test('⑫a `majReglagesMer` pose les DEUX accalmies, le givre et le ciel', () =>
       // ⚠️ **Tâche P6** : sans échelle de spectre à lire, la calotte garde celle
       // que `poserMer` a posée — et le retour le DIT.
       echelleSpectre: false,
+      // ⚡ **D24** : la bande de la coupe plate se recalcule sur les six
+      // réglages, donc APRÈS eux, et le retour le DIT — comme les autres.
+      bandeHoule: pose.bandeHoule,
     })
+    // et elle est VRAIE, pas un champ de complaisance : une amplitude latérale
+    // strictement positive, une bande strictement positive et bornée
+    assert.ok(pose.bandeHoule.amplitude > 0, 'l amplitude latérale doit être mesurée')
+    assert.ok(pose.bandeHoule.bande > 0 && pose.bandeHoule.bande <= 0.5)
+    assert.equal(u.uMerBandeHoule.value, pose.bandeHoule.bande)
   })
 })
 
@@ -2652,5 +2696,242 @@ test('⑮f `poserMer` DONNE ce retrait au bas du rideau — exécuté sur la gé
       }
       assert.equal(pire2, 0, `sans retrait de base, le rideau rentre quand même de ${pire2}`)
     })
+  })
+})
+
+// ══════════ ⑯ D24 — LA COUPE PLATE À LA JUPE ═══════════════════════════════
+//
+// > **Adrien, 2026-09-04** : *« Je pense que l'effet latéral de vagues pose
+// > problème. Il faudrait que le crop se fasse de façon plate, au niveau de la
+// > jupe du socle, ça évitera de calculer cette déformation inutile. »*
+//
+// ⚡ **DEUX MOITIÉS, ET LES TESTS LES SÉPARENT.** ⑯a à ⑯c ferment la coupe
+// plate (le déplacement s'éteint AVANT le bord, et il ne peut pas le franchir) ;
+// ⑯d à ⑯f ferment la seconde moitié, celle qu'on rate — la déformation hors
+// emprise n'est plus CALCULÉE, parce que les sommets n'existent plus.
+//
+// ⚠️ **CE QUE `sonde-mer-jupe.mjs` A MESURÉ À L'ÉCRAN, ET QUE CES TESTS NE
+// PEUVENT PAS MESURER** : 31 à 63 px de mer au-delà de l'arête du socle par
+// image, témoin `chop = 0` à 0 px, sur 17 postes ; 0 px après. Les tests
+// ci-dessous verrouillent les LOIS qui rendent ce zéro structurel.
+
+test('⑯a `amplitudeLateraleHoule` MAJORE le terme latéral de Gerstner — sur SA source, relue', () => {
+  // ⛔ **PAS UNE SECONDE ÉCRITURE : UNE BORNE.** Et une borne qui suivrait une
+  // loi qui a bougé serait pire que rien, donc on RELIT le morceau partagé.
+  const glsl = readFileSync(new URL('../src/vendor/ocean-waves/gerstner.glsl.js', import.meta.url), 'utf8')
+  assert.match(glsl, /float k = uWaveA\[i\]\.z \/ lenScale;/)
+  assert.match(glsl, /float a = uWaveA\[i\]\.w \* lenScale \* waveH \* fade;/)
+  assert.match(glsl, /float q = min\(chop \* 1\.9 \* uWaveB\[i\]\.z \* fade \/ \(k \* a\), 1\.0 \/ \(k \* a\)\);/)
+  assert.match(glsl, /if \(a < 1e-7\) continue;/)
+  assert.match(glsl, /disp\.x \+= q \* a \* d\.x \* C;/)
+
+  // et la borne MAJORE vraiment : on rejoue le nuanceur sur un spectre de bruit,
+  // à toutes les phases, et on vérifie que |disp.xz| ne dépasse jamais la borne
+  const a = [], b = []
+  let graine = 7
+  const alea = () => (graine = (graine * 1103515245 + 12345) % 2147483648) / 2147483648
+  for (let i = 0; i < 16; i++) {
+    const th = alea() * Math.PI * 2
+    a.push({ x: Math.cos(th), y: Math.sin(th), z: 0.02 + alea() * 0.4, w: 0.3 + alea() * 3 })
+    b.push({ x: alea() * 6.28, y: 0.4 + alea(), z: alea(), w: 0 })
+  }
+  const arg = { a, b, houle: 2, chop: 0.7, calme: 0.42, unite: 0.008227, lambda: 0.0032 }
+  const borne = amplitudeLateraleHoule(arg)
+  assert.ok(borne > 0, 'un spectre vivant doit rendre une borne strictement positive')
+  const waveH = arg.houle * arg.calme * arg.unite
+  for (let t = 0; t < 40; t++) {
+    for (const [x, z] of [[0, 0], [12, -5], [-3, 41]]) {
+      let dx = 0, dz = 0
+      for (let i = 0; i < 16; i++) {
+        const k = a[i].z / arg.lambda
+        const amp = a[i].w * arg.lambda * waveH
+        if (amp < 1e-7) continue
+        const f = k * (a[i].x * x + a[i].y * z) - b[i].y * t * 0.25 + b[i].x
+        const q = Math.min((arg.chop * 1.9 * b[i].z) / (k * amp), 1 / (k * amp))
+        dx += q * amp * a[i].x * Math.cos(f)
+        dz += q * amp * a[i].y * Math.cos(f)
+      }
+      assert.ok(Math.hypot(dx, dz) <= borne + 1e-12,
+        `la borne ${borne} est franchie : ${Math.hypot(dx, dz)}`)
+    }
+  }
+  // un spectre absent, une houle nulle, un lambda nul : zéro, pas un NaN
+  for (const mauvais of [{}, { ...arg, a: null }, { ...arg, houle: 0 }, { ...arg, lambda: 0 }, { ...arg, unite: 0 }]) {
+    assert.equal(amplitudeLateraleHoule(mauvais), 0)
+  }
+})
+
+test('⑯b la bande vaut DEUX fois le déplacement, et la marge de 1,125 est celle du lissage', () => {
+  // ⚠️ **LE CHIFFRE N EST PAS UN GOÛT** : il faut `A · lissage(δ/B) < δ` pour
+  // tout `δ` de la bande, et `max(3t − 2t²) = 1,125` en `t = 0,75`. On BALAIE la
+  // bande plutôt que de faire confiance à l algèbre.
+  assert.equal(MARGE_BANDE_HOULE, 2)
+  const parDemi = 0.2126
+  const A = 3.3e-4
+  const B = bandeHouleBord(A, parDemi)
+  assert.ok(Math.abs(B - (2 * A) / parDemi) < 1e-15)
+  const lissage = (t) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c) }
+  const aCrop = A / parDemi // le déplacement, en demi-côtés — la même monnaie
+  for (let i = 1; i <= 100; i++) {
+    const delta = (i / 100) * B // distance au bord, en demi-côtés
+    assert.ok(aCrop * lissage(delta / B) < delta,
+      `à ${delta} du bord, le sommet avance de ${aCrop * lissage(delta / B)} : il franchit`)
+  }
+  // ⛔ **LE TÉMOIN QUI COMPTE** : avec une marge de 1 (la marge « évidente »),
+  // le sommet FRANCHIT le bord — c est la faute que 1,125 nomme.
+  let franchit = 0
+  for (let i = 1; i <= 100; i++) {
+    const delta = (i / 100) * aCrop
+    if (aCrop * lissage(delta / aCrop) >= delta) franchit++
+  }
+  assert.ok(franchit > 0, 'une bande égale au déplacement devrait laisser franchir')
+  // bornes : plafonnée à un demi-côté, nulle quand il n y a rien à éteindre
+  assert.equal(bandeHouleBord(1e9, parDemi), 0.5)
+  for (const m of [[0, parDemi], [A, 0], [A, -1], [NaN, parDemi]]) {
+    assert.equal(bandeHouleBord(m[0], m[1]), 0)
+  }
+})
+
+test('⑯c l ATTÉNUATION vaut 1 dedans et EXACTEMENT 0 au bord — la coupe est plate', () => {
+  // le jumeau JS de `attenuationBordMer`, confronté au texte GLSL
+  assert.match(GLSL_BORD_CROP, /return 1\.0 - smoothstep\(fin - max\(bande, 1e-7\), fin, dBord\);/)
+  const lissage = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
+  const att = (d, fin, bande) => 1 - lissage(fin - Math.max(bande, 1e-7), fin, d)
+  const { fin } = bordDeMer()
+  const bande = 0.0031
+  assert.equal(att(fin, fin, bande), 0, 'au bord, l atténuation doit valoir EXACTEMENT zéro')
+  assert.equal(att(fin + 1, fin, bande), 0, 'au-delà aussi')
+  assert.equal(att(fin - bande, fin, bande), 1, 'au début de la bande, EXACTEMENT un')
+  assert.equal(att(-1, fin, bande), 1, 'au centre du crop, la mer est intacte')
+  // ⚠️ **ET LE « EXACTEMENT » EST LA PROPRIÉTÉ, PAS UN DÉTAIL** — la même que
+  // `richesseMer` : c est lui qui autorise la SORTIE ANTICIPÉE du nuanceur.
+  // Une bande nulle ne doit ni diviser par zéro ni rendre un NaN.
+  assert.equal(att(fin, fin, 0), 0)
+  assert.equal(att(fin - 1e-3, fin, 0), 1)
+})
+
+test('⑯d la GÉOMÉTRIE s arrête à l emprise du socle, et le CHAMP garde sa portée', () => {
+  // ⚡ **LA SECONDE MOITIÉ DE LA DEMANDE.** Un `discard` après déplacement
+  // n aurait rien économisé ; ici les sommets n existent plus.
+  assert.equal(EMPRISE_MER_CROP, 1)
+  const rep = REPERE
+  const large = construireCalotte({ repere: rep, rayon: 100, portee: 3, pas: 192 })
+  const serre = construireCalotte({ repere: rep, rayon: 100, portee: 3, emprise: 1, pas: 64 })
+  assert.equal(large.compte.sommets, 193 * 193)
+  assert.equal(serre.compte.sommets, 65 * 65)
+  assert.equal(serre.compte.portee, 3, 'la PORTÉE ne bouge pas — c est elle qui cuit le champ')
+  assert.equal(serre.compte.emprise, 1)
+  assert.equal(large.compte.emprise, 3, 'sans emprise, la calotte d avant au bit près')
+
+  // ⚡ **ET LES NŒUDS COÏNCIDENT AU BIT PRÈS** — c est ce qui rend le crop
+  // identique : la grille resserrée est un SOUS-ENSEMBLE de l ancienne.
+  for (let j = 0; j <= 64; j++) {
+    for (let i = 0; i <= 64; i++) {
+      const k = j * 65 + i
+      const K = (j + 64) * 193 + (i + 64)
+      assert.equal(serre.uv[k * 2], large.uv[K * 2], `u au noeud ${i},${j}`)
+      assert.equal(serre.uv[k * 2 + 1], large.uv[K * 2 + 1], `v au noeud ${i},${j}`)
+      for (let c = 0; c < 3; c++) {
+        assert.equal(serre.positions[k * 3 + c], large.positions[K * 3 + c], `position ${c} au noeud ${i},${j}`)
+      }
+    }
+  }
+  // et l emprise ne peut pas DÉPASSER la portée : le champ n irait pas si loin
+  const trop = construireCalotte({ repere: rep, rayon: 100, portee: 3, emprise: 9, pas: 64 })
+  assert.equal(trop.compte.emprise, 3)
+})
+
+test('⑯e `poserMer` BÂTIT la calotte resserrée, et le champ reste sur trois demi-côtés', () => {
+  const g = globeAvecCrop()
+  g._baseYCrop = -0.12
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then((etat) => {
+    assert.equal(etat.portee, PORTEE_CROP, 'la portée du CHAMP ne bouge pas — c est la couleur d Adrien')
+    assert.equal(etat.emprise, EMPRISE_MER_CROP)
+    assert.equal(etat.compte.pas, 64, 'la densité de maille est conservée : 192 × 1/3')
+    assert.equal(etat.compte.sommets, 65 * 65)
+    assert.equal(etat.compte.triangles, 64 * 64 * 2)
+    // ⚡ CE QUE ÇA RETIRE, ÉCRIT PLUTÔT QUE SUPPOSÉ
+    assert.equal(193 * 193 - 65 * 65, 33024)
+    assert.equal(192 * 192 * 2 - 64 * 64 * 2, 65536)
+
+    // ⚠️ **LA LECTURE DU CHAMP N EST PAS DÉPLACÉE** : `uvF = aCrop / (2·portee)
+    // + 0,5`, et `uMerPortee` vaut toujours 3. Un `aCrop` normalisé sur
+    // l emprise aurait lu le champ NEUF FOIS trop gros sans que rien ne le dise.
+    assert.equal(g._mer.material.uniforms.uMerPortee.value, PORTEE_CROP)
+    const aCrop = g._mer.geometry.getAttribute('aCrop').array
+    let uMax = 0
+    for (let i = 0; i < 65 * 65; i++) uMax = Math.max(uMax, Math.abs(aCrop[i * 2]), Math.abs(aCrop[i * 2 + 1]))
+    assert.ok(Math.abs(uMax - 1) < 1e-9, `aCrop doit rester en demi-côtés BRUTS : ${uMax}`)
+
+    // le rideau est DEDANS, donc il survit au resserrement
+    const jupe = g._mer.geometry.getAttribute('aJupe').array
+    let nJupe = 0
+    for (let i = 0; i < jupe.length; i++) if (jupe[i] > 0.5) nJupe++
+    assert.ok(nJupe > 0, 'le rideau doit survivre à l emprise resserrée')
+    assert.ok(1 - RETRAIT_EAU_CROP < EMPRISE_MER_CROP, 'le haut du rideau doit tenir dans l emprise')
+
+    // ⚠️ **LA DENSITÉ, ET C EST ELLE QUI DOIT NE PAS BOUGER** — pas le pas
+    // ABSOLU. Le premier jet confrontait le pas relevé sur la géométrie à
+    // `maille` : 0,003354 contre 0,003599, **6,8 % d écart**, au coin comme au
+    // centre. ⚡ **Et ce n est pas ma tâche qui l a créé** : `maille` est un pas
+    // NOMINAL, calculé en unités de Mercator, qui sur-estime la distance au sol
+    // de `1/cos φ` ; il valait déjà cela avant. Le laisser dire « divergé »
+    // aurait été accuser D24 d un écart qu il n a pas fait. Ce qu on verrouille
+    // ici, c est le RAPPORT — la maille de la grille resserrée est celle de
+    // l ancienne, au bit près, et ⑯d le prouve position par position.
+    assert.equal(etat.compte.pas / etat.emprise, etat.pas / etat.portee)
+    assert.equal(etat.pas, 192, 'le `pas` demandé par l appelant est celui d avant')
+  })
+})
+
+test('⑯f `_majBandeHouleMer` LIT les uniformes vivants, et la bande suit la houle', () => {
+  const g = globeAvecCrop()
+  g._baseYCrop = -0.12
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
+    const u = g._mer.material.uniforms
+    assert.ok(Number.isFinite(g._merEtat.parDemi) && g._merEtat.parDemi > 0,
+      'l état doit porter les unités de scène par demi-côté')
+    // ⚠️ **`parDemi` EST LA DEMI-LARGEUR RÉELLE DE LA GÉOMÉTRIE** — pas une
+    // formule qu on croit juste : on la confronte à la calotte bâtie.
+    const pos = g._mer.geometry.getAttribute('position').array
+    const aCrop = g._mer.geometry.getAttribute('aCrop').array
+    let mesure = 0
+    for (let i = 0; i < 65 * 65; i++) {
+      if (Math.abs(aCrop[i * 2] - 1) > 1e-9 || Math.abs(aCrop[i * 2 + 1]) > 1e-9) continue
+      mesure = Math.hypot(pos[i * 3], pos[i * 3 + 2])
+    }
+    assert.ok(mesure > 0, 'le sommet u = 1, v = 0 doit exister')
+    assert.ok(Math.abs(mesure / g._merEtat.parDemi - 1) < 0.01,
+      `parDemi ${g._merEtat.parDemi} contre la géométrie ${mesure}`)
+
+    const b0 = u.uMerBandeHoule.value
+    assert.ok(b0 > 0, 'une mer vivante doit porter une bande strictement positive')
+
+    // ⚡ **ET C EST LA CAMBRURE QUI LA PILOTE, PAS LA HAUTEUR DE HOULE — TROUVÉ
+    // EN ÉCRIVANT CE TEST, PAS EN LE RAISONNANT.** Le déplacement latéral vaut
+    // `q · a = min(chop · 1,9 · part · fade / k ; 1/k)` : l amplitude `a` se
+    // SIMPLIFIE. Doubler `uMerHoule` ne le change donc que par la borne de
+    // Stokes, et le premier jet de ce test — « une houle deux fois plus haute,
+    // une bande deux fois plus large » — était FAUX (0,0811 → 0,0821, +1,2 %).
+    // C est une bonne nouvelle pour D24 : la coupe plate ne s élargit pas quand
+    // Adrien monte sa houle.
+    const houle0 = u.uMerHoule.value
+    u.uMerHoule.value *= 2
+    const bHoule = Globe.prototype._majBandeHouleMer.call(g).bande
+    assert.ok(bHoule / b0 < 1.05, `la bande suit la HAUTEUR de houle : ${b0} → ${bHoule}`)
+    u.uMerHoule.value = houle0
+
+    // la cambrure, elle, la pilote — et linéairement tant que Stokes ne borne pas
+    const chop0 = u.uMerChop.value
+    u.uMerChop.value = chop0 / 2
+    const bChop = Globe.prototype._majBandeHouleMer.call(g).bande
+    assert.ok(bChop < b0 * 0.75, `la bande ne suit pas la cambrure : ${b0} → ${bChop}`)
+    // une mer d huile : plus de déplacement latéral, donc plus de bande du tout
+    u.uMerChop.value = 0
+    assert.equal(Globe.prototype._majBandeHouleMer.call(g).bande, 0)
+    u.uMerChop.value = chop0
+    // ⛔ **ET SANS MER POSÉE, ELLE N ÉCRIT NULLE PART** — même garde que
+    // `_majBordMer` et `majReglagesMer`.
+    assert.equal(Globe.prototype._majBandeHouleMer.call({ _mer: null }), null)
   })
 })
