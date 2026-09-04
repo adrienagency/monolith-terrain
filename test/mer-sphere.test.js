@@ -1771,8 +1771,12 @@ test('⑫h `construireParoisCrop` RETIENT le fond du bloc pour la mer', () => {
   assert.ok(Number.isFinite(solide.baseY) && solide.baseY < 0, `baseY ${solide.baseY}`)
   const src = readFileSync(SRC_GLOBE, 'utf8')
   assert.match(src, /this\._baseYCrop = solide\.baseY/)
-  // et il n'est posé qu'APRÈS le refus : une paroi refusée n'écrit rien
-  const iRefus = src.indexOf('if (solide.refus) return { mesh: null, solide')
+  // et il n'est posé qu'APRÈS le refus : une paroi refusée n'écrit rien —
+  // ⚠️ SOC : sauf par la plaque PROVISOIRE, qui passe par `_poserSolideParois`
+  // comme la définitive et retient SON fond, pour que le rideau d'eau ait un
+  // bas dans la même image que la découpe. La pose vit dans `_poserSolideParois`,
+  // après le refus de `construireParoisCrop`.
+  const iRefus = src.indexOf('if (solide.refus) {')
   const iPose = src.indexOf('this._baseYCrop = solide.baseY')
   assert.ok(iRefus > 0 && iPose > iRefus)
 })
