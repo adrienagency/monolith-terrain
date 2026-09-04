@@ -115,6 +115,7 @@ export function fallbackToAws(reason) {
     // les zooms mémorisés décrivaient la couverture de l'AUTRE source
     regionZooms.clear()
     inFlight.clear()
+    trous.clear() // idem : un trou est un trou DANS la source qu'on vient de quitter
     try {
       console.warn('[dem] source altimétrique repliée sur AWS —', reason?.message ?? reason)
     } catch {}
@@ -128,6 +129,7 @@ export function _resetDemSource(id = DEFAULT_SOURCE_ID) {
   forcedId = null
   regionZooms.clear()
   inFlight.clear()
+  trous.clear() // CIB : la mémoire des 404 est de la couverture, elle se remet à zéro ici
 }
 
 // ------------------------------------------------------------------ zones
@@ -177,6 +179,76 @@ export function rememberRegionMaxZoom(key, value) {
 export function clearRegionMemo() {
   regionZooms.clear()
   inFlight.clear()
+  trous.clear()
+}
+
+// ══════════ LES TROUS DE COUVERTURE, TUILE PAR TUILE — CIB ══════════════════
+//
+// La sonde de zone (`REGION_ZOOM = 8`, ~150 km) dit « cette zone monte à z14 ».
+// Elle ne dit RIEN de la mer À L'INTÉRIEUR de la zone : une z13 au large d'une
+// côte couverte rend 404, et `fetchTile` la rattrape sur AWS — au prix d'un
+// SECOND aller-retour. Mesuré par PF2 (§5) : **679 des 1 704 requêtes d'une
+// descente en dev, soit 40 %**, chacune payée deux fois.
+//
+// ⚠️ **ET CE N'EST PAS UNE PANNE** : l'en-tête de ce module le dit, un 404 est
+// la façon normale dont Mapterhorn dit « je ne couvre pas ici ». On ne bascule
+// donc PAS la source de session (`fallbackToAws`) — on note le TROU, et les
+// DESCENDANTS de la tuile trouée vont droit chez AWS sans réessayer la source
+// fine. La pyramide est monotone dans ce sens-là : si (z, x, y) n'existe pas,
+// aucun de ses descendants n'existe (`probeMaxZoom` s'appuie déjà sur
+// l'implication inverse, « un z16 servi implique z15, z14, … »).
+//
+// ⚠️ **LE PLAFOND N'EST PAS DÉCORATIF.** Une mémoire non bornée alimentée par
+// le parcours est exactement la file non bornée du §2 de `/threejs-optimisation`.
+// Au plafond, on VIDE plutôt que d'évincer au hasard : reperdre la mémoire coûte
+// un aller-retour de plus par tuile, jamais une erreur, et le cas ne se présente
+// que sur une session qui a survolé plus de 4 096 trous distincts.
+const TROUS_MAX = 4096
+const trous = new Set() // `sourceId:z/x/y` — la tuile a rendu 404 sur la source fine
+
+// ⚠️ **LE LEVIER EST UN DRAPEAU D'URL, PAS UNE PROPRIÉTÉ D'OBJET, ET C'EST LE
+// SEUL ENDROIT D'OÙ IL PEUT VENIR.** `planTuile` est une fonction PURE de module
+// (c'est ce qui la rend testable en node) : elle ne voit aucun globe, donc aucun
+// `globe.routerTrous` ne pourrait l'atteindre. `?trous=0` suit exactement le
+// patron de `?dem=aws` juste au-dessus, et il sert à ce que le banc puisse faire
+// l'A/B — sans lui, les deux branches de la campagne portaient TOUTES LES DEUX
+// le correctif, et les 63 quatre-cent-quatre relevés étaient identiques des deux
+// côtés : la mesure ne comparait rien.
+let routageTrous = true
+try {
+  if (typeof location !== 'undefined' && location.search && new URLSearchParams(location.search).get('trous') === '0') routageTrous = false
+} catch {}
+
+/** Note un 404 de couverture sur la source fine, pour cette tuile et ses descendants. */
+export function noterTrouTuile(sourceId, z, x, y) {
+  if (!routageTrous) return
+  if (trous.size >= TROUS_MAX) trous.clear()
+  trous.add(`${sourceId}:${z}/${x}/${y}`)
+}
+
+/** Tests et bancs : (dé)branche le routage des descendants d'un 404. */
+export function _setRoutageTrous(v) {
+  routageTrous = !!v
+  if (!v) trous.clear()
+}
+
+/**
+ * Cette tuile — ou l'un de ses ANCÊTRES jusqu'à `zMin` — a-t-il déjà rendu 404 ?
+ * ⚠️ La remontée s'arrête au plancher de couverture de la source : au-dessous,
+ * `planTuile` ne consulte même pas la source fine.
+ */
+export function trouConnu(sourceId, z, x, y, zMin = 0) {
+  for (let zz = z, xx = x, yy = y; zz >= zMin; zz--, xx >>= 1, yy >>= 1) {
+    if (trous.has(`${sourceId}:${zz}/${xx}/${yy}`)) return true
+  }
+  return false
+}
+
+export function clearTrous() {
+  trous.clear()
+}
+export function nombreDeTrous() {
+  return trous.size
 }
 
 /**
