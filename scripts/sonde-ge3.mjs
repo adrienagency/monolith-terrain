@@ -275,6 +275,52 @@ const GESTES = {
     await dodo(5000)
     const f = await lire(); await off(); return f
   },
+  // ══════════ LES GESTES DE D21 / C1 ═══════════════════════════════════════
+  // Les trois SORTIES autorisées, et les chemins qui ne doivent PAS sortir.
+  'c1-bouton-monde': async () => {
+    await on(); await wait(2)
+    await page.evaluate(() => document.querySelector('.ce-globebtn')?.click())
+    await dodo(4000)
+    const f = await lire(); await off(); return f
+  },
+  'c1-boutons-camera': async () => {
+    await on(); await wait(2)
+    await page.evaluate(() => { window.__exp.applyIsoView?.(4) })
+    await dodo(2500)
+    await page.evaluate(() => { window.__exp.applyIsoView?.(6) })
+    await dodo(4000)
+    const f = await lire(); await off(); return f
+  },
+  'c1-inclinaison-forte': () => glisse({ button: 'middle', dy: -340, pas: 4, apresMs: 2500 }),
+  // ⚠️ **DANS LE CROP, LE BOUTON DU MILIEU EST INERTE** (`inclinaisonPermise`
+  // n'autorise que REGIME.SURFACE) : l'inclinaison y passe par OrbitControls sur
+  // le bouton GAUCHE, autour de l'axe du bloc (D13). C'est CE geste qu'Adrien
+  // décrit — « déplacement de hauteur via l'inclinaison de la caméra ».
+  // ⚠️ Vers le NADIR (dy > 0) : à distance constante, redresser MONTE l'altitude
+  // (alt = d·cos φ), et c'est le seul sens qui puisse franchir SEUIL_MORT_M.
+  'c1-inclinaison-gauche-nadir': () => glisse({ dy: 300, pas: 4, apresMs: 2500 }),
+  'c1-inclinaison-gauche-rase': () => glisse({ dy: -300, pas: 4, apresMs: 2500 }),
+  'c1-cap-fort': () => glisse({ button: 'middle', dx: 340, pas: 4, apresMs: 2500 }),
+  'c1-molette-dezoom-1cran': async () => {
+    await on(); await wait(2)
+    await cran(100, CX, CY)
+    await reposer(); await dodo(1500)
+    const f = await lire(); await off(); return f
+  },
+  'c1-molette-dezoom-6crans': async () => {
+    await on(); await wait(2)
+    for (let k = 0; k < 6; k++) { await cran(100, CX, CY); await wait(5) }
+    await reposer(); await dodo(1500)
+    const f = await lire(); await off(); return f
+  },
+  'c1-molette-zoom-avant-6crans': async () => {
+    await on(); await wait(2)
+    for (let k = 0; k < 6; k++) { await cran(-100, CX, CY); await wait(5) }
+    await reposer(); await dodo(1500)
+    const f = await lire(); await off(); return f
+  },
+  'c1-droit-dezoom': () => glisse({ button: 'right', dy: -300, pas: 4, apresMs: 2500 }),
+  'c1-droit-zoom-avant': () => glisse({ button: 'right', dy: 300, pas: 4, apresMs: 2500 }),
   'gauche-glisse-H-50px': () => glisse({ dx: 50 }),
   'gauche-glisse-H-100px': () => glisse({ dx: 100 }),
   'gauche-glisse-H': () => glisse({ dx: 200 }),

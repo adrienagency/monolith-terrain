@@ -7008,7 +7008,14 @@ modes = new Modes({
     // le seuil du socle et l'estompage. **Aucun nombre nouveau n'entre dans le
     // dépôt** : le seuil de repos et son hystérésis sont ceux de la Tâche N,
     // mesurés, et la naissance du crop est celle du seuil.
-    arriveeSurLeBloc: () => !!veilleCrop?.repos,
+    // ⚡ **D21 ② — `arriveeBloc`, PAS `repos`.** `repos` vaut « crop posé ET vue
+    // au repos » ; depuis D21 le crop naît au palier z7 (600 km), dix-huit fois
+    // plus haut que le bloc. Lire `repos` inclinerait la caméra en vue
+    // CONTINENTALE — la violation exacte que D16 ter nomme (« pas avant »).
+    // `arriveeBloc` ajoute le SEUL automate d'altitude qui n'a pas bougé :
+    // `SEUIL_BLOC_M` / `SEUIL_BLOC_MORT_M`, les deux seuils d'avant D21 au bit
+    // près. La bascule tombe donc exactement où elle tombait hier.
+    arriveeSurLeBloc: () => !!veilleCrop?.arriveeBloc,
     // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** `veilleCrop.pose` seul — un
     // signal de LIEU. Son front descendant rend la vue au nadir, pour que la
     // sortie d'orbite n'ait plus rien à faire claquer. Voir `_armerRetourNadir`.
@@ -13821,6 +13828,37 @@ renderer.domElement.addEventListener('pointercancel', annulerSaisie)
 // scrolle vers le point visé au centre », et le centre ne doit pas glisser.
 renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0; gestesTerre.epingle = null }, { passive: true })
 
+// ══════════ D21 ① — LA SORTIE DU CROP EST UNE INTENTION ═══════════════════
+//
+// > **Adrien, 2026-09-04 :** *« Les seuls moyens de sortir du mode crop
+// > seraient : de cliquer sur la map monde ; de zoomer dézoomer à l'aide du clic
+// > droit gardé enfoncé ; de déscroller via le bouton de scroll central. »*
+//
+// ⚠️ **RÉSERVE, ÉCRITE ICI PARCE QUE C'EST ICI QU'ELLE SE TRANCHE.** « le bouton
+// de scroll central » est lu comme **la molette, en dézoom** : `déscroller` est
+// du vocabulaire de molette, et le bouton du MILIEU vient d'être attribué à
+// l'inclinaison et au cap par D19 (`boutons-camera.js:76`, GE2/GE3). Lui donner
+// aussi la sortie du crop serait contradictoire — un même bouton inclinerait ET
+// sortirait. **Si Adrien voulait dire le bouton du milieu enfoncé, c'est UNE
+// ligne à changer** : appeler `armerSortie()` depuis `GESTE.INCLINAISON` au lieu
+// d'ici.
+//
+// ⚠️ **ARMÉ AU NIVEAU DU DOM, PAS DANS `modes._zoomGesture`, ET C'EST VOULU.**
+// L'intention est un fait du GESTE (« l'utilisateur a demandé à s'éloigner »),
+// pas de ce que le zoom a réussi à faire : `_zoomGesture` sort tôt sur six
+// gardes (`locked`, `busy`, `_diveTween`, les crochets de suivi et de cadrage),
+// et l'intention se perdrait sur chacune. Ici elle ne se perd jamais.
+//
+// ⚠️ **ET LE ZOOM AVANT DÉSARME** — la ligne « dans le crop, zoom avant → le
+// crop vit » du critère de C1. Sans ça, un aller-retour molette laisserait une
+// mine amorcée sous le crop.
+function intentionZoom(deltaY) {
+  if (!(Number.isFinite(deltaY) && deltaY !== 0)) return
+  if (deltaY > 0) { veilleCrop?.armerSortie?.(); veilleSocle?.armerSortie?.() }
+  else { veilleCrop?.desarmerSortie?.(); veilleSocle?.desarmerSortie?.() }
+}
+renderer.domElement.addEventListener('wheel', (e) => intentionZoom(e.deltaY), { passive: true })
+
 // ══════════ LE RESTE DU VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ════════════
 //
 // > **Adrien, 2026-09-03 :** *« Attribue à notre programme exactement les mêmes
@@ -13963,6 +14001,12 @@ function surPointerMoveGeste(ev) {
     // l'image, par `_applyZoom` — l'intégrateur de l'escalier, qui garde ses
     // paliers (`_franchirSiBesoin`) et sa butée du sol. 200 px = ln 2 = ×2.
     gestesTerre.dLogGlisse += (zoomDuGlisseDroit(dy) / CRAN) * (Math.LN2 / CRANS_UN_NIVEAU)
+    // ⚡ **D21 ① — LA DEUXIÈME SORTIE.** Le clic droit maintenu EST le geste de
+    // zoom de D19 ; tiré dans le sens du dézoom, il arme la sortie du crop.
+    // ⚠️ **SUR LE PAS DE CETTE IMAGE, PAS SUR LE CUMUL** : `dLogGlisse` est
+    // consommé et remis à zéro à chaque image par `appliquerGestesTerre`, donc
+    // le lire ne dirait rien du sens du geste en cours.
+    intentionZoom(zoomDuGlisseDroit(dy))
   } else if (gestesTerre.actif === GESTE.INCLINAISON) {
     const p = pasInclinaison({ dxPx: dx, dyPx: dy, inclinaisonDeg: inclinaisonCouranteDeg() + gestesTerre.dInclinaisonDeg })
     gestesTerre.dInclinaisonDeg += p.dInclinaisonDeg

@@ -75,7 +75,7 @@
 //   · **il n'anime pas la mer** — `animerMer(dt)` est une cadence, donc une
 //     affaire de boucle d'image.
 
-import { socleVisible } from './seuil-socle.js'
+import { socleVisible, auBloc as auBlocSeuil } from './seuil-socle.js'
 
 /**
  * Les maillons de la chaîne, dans l'ordre où ils doivent être posés.
@@ -658,6 +658,29 @@ export function creerVeilleCrop({
 
   let pose = !!cropAuDepart
   let modeSurface = !!modeSurfaceAuDepart
+  // ══════════ D21 ① — L'INTENTION DE SORTIE ════════════════════════════════
+  //
+  // > **Adrien, 2026-09-04 :** *« Je voudrais que lorsqu'on passe en mode crop,
+  // > on ne puisse plus revenir en mode non crop uniquement par l'altitude. »*
+  //
+  // ⚠️ **C'EST UN VERROU, PAS UN SEUIL.** Tant qu'il est faux, `socleVisible`
+  // ne peut PAS retirer le crop, quelle que soit l'altitude : l'inclinaison, le
+  // cap, les boutons de caméra, le redressement automatique de D16 ter, le vol
+  // de présentation et le recalage peuvent tous faire monter `camera.position.y`
+  // au-dessus de `SEUIL_MORT_M` sans conséquence.
+  //
+  // ⚠️ **IL EST ARMÉ PAR UN GESTE, ET DÉSARMÉ PAR TROIS ÉVÉNEMENTS** :
+  //   · un dézoom (molette ou clic droit maintenu) l'arme (`armerSortie`) ;
+  //   · un zoom AVANT le désarme (`desarmerSortie`) — sinon un aller-retour
+  //     molette laisserait une mine amorcée sous le crop ;
+  //   · la mort du crop le désarme (l'intention est consommée) ;
+  //   · la naissance du crop le désarme (on vient d'entrer : rien n'est armé).
+  //
+  // ⛔ **LE BOUTON MONDE N'A PAS BESOIN DE LUI** : il appelle `enterOrbit`, donc
+  // `poserMode(false)`, qui retire le crop par le chemin du MODE — un chemin qui
+  // n'a jamais dépendu de l'altitude. C'est la troisième sortie de D21, et elle
+  // était déjà une intention.
+  let sortieArmee = false
   let signature = null
   let refus = []
   let bascules = 0
@@ -697,6 +720,17 @@ export function creerVeilleCrop({
   // règle lui-même — il ne sait pas s'il y a une découpe.
   let auRepos = false
   let reposApplique = false
+  // ══════════ D21 ② / D16 ter — L'ARRIVÉE AU BLOC, SÉPARÉE DE LA NAISSANCE ══
+  //
+  // ⚠️ **MESURÉ, ET C'EST LE DÉPARTAGE QUE LE BRIEF C1 DEMANDE.** `repos` (donc
+  // `arriveeSurLeBloc` de `main.js`, donc `modes.js:1996`, donc la bascule de
+  // trois quarts) valait « crop posé ET vue au repos ». Depuis que le crop naît
+  // à 600 km, ce seul ET inclinerait la caméra en vue CONTINENTALE — ce que
+  // D16 ter interdit mot pour mot (« pas avant »). On ajoute donc un second
+  // automate, sur `SEUIL_BLOC_M` / `SEUIL_BLOC_MORT_M`, c'est-à-dire sur les
+  // DEUX SEUILS D'AVANT D21, au bit près : la bascule tombe exactement là où
+  // elle tombait hier.
+  let auBloc = false
   let basculesRepos = 0
 
   function appliquerRepos(g) {
@@ -836,6 +870,9 @@ export function creerVeilleCrop({
     pose = false
     signature = null
     refus = []
+    // ⚠️ **L'INTENTION EST CONSOMMÉE.** La laisser armée ferait mourir le crop
+    // suivant sur son premier soubresaut d'altitude, sans nouveau geste.
+    sortieArmee = false
     // ⛔ **IL Y AVAIT ICI UN `habillagePose = null`, ET C'ÉTAIT DU CODE MORT —
     // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
     // raisonnement écrit à côté était plausible (« `retirerCrop` appelle
@@ -867,6 +904,10 @@ export function creerVeilleCrop({
       // elle redevient le sujet.
       estompage?.maj(altitudeEllipsoideM)
       if (!modeSurface) return pose
+      // ⚠️ **APRÈS LA GARDE DE MODE, COMME LE SOCLE.** En orbite
+      // `altitudeCadrageM()` rend un résidu (`veille-socle.js` §2) : le laisser
+      // décider ferait basculer la vue de trois quarts sur du bruit.
+      auBloc = auBlocSeuil({ altitudeEllipsoideM, auBlocAvant: auBloc })
       // ⚠️ **LA VEILLE DU REPOS NE REÇOIT PAS L'ALTITUDE, ELLE REÇOIT LA
       // DISTANCE — Tâche R1, ET C'EST MESURÉ.** Elle a reçu l'altitude jusqu'au
       // 2026-08-23, et un simple cliquer-glisser d'inclinaison la faisait
@@ -894,7 +935,10 @@ export function creerVeilleCrop({
       if (!socleMasque) { socleMasque = true; masquerSocle?.() }
       const g = lireGlobe()
       if (!g) return pose
-      const voulu = socleVisible({ altitudeEllipsoideM, visibleAvant: pose })
+      // ⚡ **D21 ① — LA MORT DEMANDE UNE INTENTION.** Sans `sortieArmee`, la
+      // branche `!voulu` ci-dessous est INATTEIGNABLE depuis un crop posé :
+      // c'est toute la règle, en un argument.
+      const voulu = socleVisible({ altitudeEllipsoideM, visibleAvant: pose, sortieArmee })
       if (!voulu) {
         if (pose) retirer(g)
         return false
@@ -908,6 +952,8 @@ export function creerVeilleCrop({
         // bascules sert à mesurer le clignotement, pas les déplacements.
         const naissance = !pose
         if (naissance) bascules++
+        // on vient d'entrer : aucune intention de sortie ne traîne
+        if (naissance) sortieArmee = false
         pose = true
         signature = s
         poserTout(g, ctx)
@@ -985,6 +1031,30 @@ export function creerVeilleCrop({
     get pose() { return pose },
     /** Le repos est-il RELAYÉ (donc : crop posé, en surface) — Tâche N. */
     get repos() { return reposApplique },
+    /**
+     * ⚡ **L'ARRIVÉE AU BLOC — D16 ter, et SEULEMENT elle.** Crop posé, vue au
+     * repos, **et le socle occupe encore 60 % de la hauteur de l'image**. C'est
+     * ce que `main.js` doit donner à `arriveeSurLeBloc`, pas `repos` tout seul :
+     * depuis D21 le crop naît dix-huit fois plus haut que le bloc.
+     */
+    get arriveeBloc() { return reposApplique && auBloc },
+    /** L'automate d'altitude de l'arrivée au bloc, seul — pour les sondes. */
+    get auBloc() { return auBloc },
+    /** D21 ① — l'intention de sortie est-elle armée ? */
+    get sortieArmee() { return sortieArmee },
+    /**
+     * ⚡ **D21 ① — ARMER LA SORTIE.** Le seul moyen, avec le bouton monde, de
+     * faire mourir le crop. Appelé sur un **dézoom à la molette** et sur un
+     * **dézoom au clic droit maintenu** (`main.js`). ⚠️ N'a aucun effet sur la
+     * naissance : D21 dit « la naissance garde son seuil ».
+     */
+    armerSortie() { sortieArmee = true; return sortieArmee },
+    /**
+     * ⚡ **ET LE DÉSARMEMENT, SUR UN ZOOM AVANT.** Le critère de C1 l'exige
+     * ligne par ligne : « dans le crop, zoom avant (molette ou clic droit) → le
+     * crop vit ». Sans ça, un aller-retour molette laisserait une mine amorcée.
+     */
+    desarmerSortie() { sortieArmee = false; return sortieArmee },
     /** Combien de fois le repos relayé a basculé : le compteur de battement. */
     get basculesRepos() { return basculesRepos },
     /** Les maillons qui ont refusé et que la reprise redemande. */

@@ -75,7 +75,11 @@ test('① `surBascule` : une fois à la naissance, une fois à la mort — jamai
   // l'hystérésis : entre naissance et mort, rien non plus
   veille.maj(SEUIL_NAISSANCE_M * 1.05)
   assert.equal(appels.length, 1)
-  // la mort
+  // ⚡ D21 ① : sans intention, franchir le seuil de mort ne bascule rien
+  veille.maj(SEUIL_MORT_M * 1.01)
+  assert.equal(appels.length, 1, 'une altitude seule ne tue plus le crop — D21 ①')
+  // la mort, armée par un dézoom explicite
+  veille.armerSortie()
   veille.maj(SEUIL_MORT_M * 1.01)
   assert.equal(appels.length, 2)
   assert.equal(appels[1].pose, false)

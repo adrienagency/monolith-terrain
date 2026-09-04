@@ -32,6 +32,10 @@ import { fileURLToPath } from 'node:url'
 import {
   SEUIL_NAISSANCE_M,
   SEUIL_MORT_M,
+  SEUIL_BLOC_M,
+  SEUIL_BLOC_MORT_M,
+  ALT_PALIER_Z7_M,
+  auBloc,
   ZOOM_SOCLE,
   LARGEUR_SOCLE_M,
   LAT_REFERENCE,
@@ -156,18 +160,69 @@ test('le champ de vision est celui de `main.js`, pas une recopie qui dérive', (
   assert.equal(FOV_DEG, 30)
 })
 
-test('les deux seuils SE RECALCULENT depuis la largeur du socle et le champ de vision', () => {
-  const attenduNaissance = LARGEUR_SOCLE_M / (2 * FRACTION_NAISSANCE * Math.tan((FOV_DEG * Math.PI) / 360))
-  assert.ok(Math.abs(SEUIL_NAISSANCE_M - attenduNaissance) < 1e-6)
-  const attenduMort =
+test('les deux seuils DU BLOC SE RECALCULENT depuis la largeur du socle et le champ de vision', () => {
+  // ⚠️ **D21 A SÉPARÉ DEUX GRANDEURS QUE CE TEST CONFONDAIT.** Ce sont les
+  // seuils de l'ARRIVÉE AU BLOC (une fraction d'écran) qui se dérivent ainsi ;
+  // la naissance du crop, elle, est désormais un PALIER — test suivant.
+  const attenduBloc = LARGEUR_SOCLE_M / (2 * FRACTION_NAISSANCE * Math.tan((FOV_DEG * Math.PI) / 360))
+  assert.ok(Math.abs(SEUIL_BLOC_M - attenduBloc) < 1e-6)
+  const attenduBlocMort =
     LARGEUR_SOCLE_M / (2 * FRACTION_NAISSANCE * RAPPORT_HYSTERESIS * Math.tan((FOV_DEG * Math.PI) / 360))
-  assert.ok(Math.abs(SEUIL_MORT_M - attenduMort) < 1e-6)
+  assert.ok(Math.abs(SEUIL_BLOC_MORT_M - attenduBlocMort) < 1e-6)
 })
 
-test('à SEUIL_NAISSANCE_M le socle occupe 60 % de la HAUTEUR de l\'image', () => {
-  const f = fractionEcran({ largeurM: LARGEUR_SOCLE_M, altitudeM: SEUIL_NAISSANCE_M })
+test('D21 ③ — la NAISSANCE du crop est le palier z7 de `DIVE_TIERS`, pas une fraction d’écran', async () => {
+  // ⚠️ **LE CHIFFRE EST RECOPIÉ DANS UN MODULE PUR : ON LE REJOUE CONTRE SA
+  // SOURCE.** `modes.js` tire three.js, donc `seuil-socle.js` ne peut pas
+  // l'importer ; sans ce test, une dérive de `DIVE_TIERS` passerait en silence.
+  const { DIVE_TIERS } = await import('../src/modes.js')
+  const z7 = DIVE_TIERS.find((t) => t.zoom === 7)
+  assert.ok(z7, '`DIVE_TIERS` n’a plus de palier z7 — la naissance du crop est à re-sourcer')
+  assert.equal(ALT_PALIER_Z7_M, z7.altM, 'le palier z7 recopié a dérivé de `DIVE_TIERS`')
+  assert.equal(SEUIL_NAISSANCE_M, ALT_PALIER_Z7_M)
+  assert.equal(SEUIL_NAISSANCE_M, 600_000)
+  // dix-huit fois plus haut que l'arrivée au bloc — le chiffre de D21
+  assert.ok(Math.abs(SEUIL_NAISSANCE_M / SEUIL_BLOC_M - 18.59) < 0.01)
+  // et la mort garde l'HYSTÉRÉSIS, pas la fraction
+  assert.ok(Math.abs(SEUIL_MORT_M - SEUIL_NAISSANCE_M / RAPPORT_HYSTERESIS) < 1e-9)
+})
+
+test('D21 ① — la MORT demande une INTENTION : sans elle, l’altitude ne tue plus le crop', () => {
+  // ⛔ Le défaut qu'Adrien nomme : incliner fait monter l'altitude, et le crop
+  // mourait « sans que personne ne l'ait demandé ».
+  for (const alt of [SEUIL_MORT_M + 1, SEUIL_MORT_M * 2, 4_000_000, 60_000_000]) {
+    assert.equal(
+      socleVisible({ altitudeEllipsoideM: alt, visibleAvant: true, sortieArmee: false }), true,
+      `le crop meurt à ${alt} m sans intention — D21 ① tombe`
+    )
+    assert.equal(socleVisible({ altitudeEllipsoideM: alt, visibleAvant: true, sortieArmee: true }), false)
+  }
+  // ⚠️ L'INTENTION NE PORTE QUE SUR LA MORT : elle ne fait naître personne.
+  assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: false, sortieArmee: false }), false)
+  assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: false, sortieArmee: true }), false)
+  // ⚠️ ET LE DÉFAUT RESTE LA LOI D'ALTITUDE NUE — l'automate de la Tâche 3.
+  assert.equal(socleVisible({ altitudeEllipsoideM: SEUIL_MORT_M + 1, visibleAvant: true }), false)
+})
+
+test('D21 ② — `auBloc` est un SECOND automate, sur les seuils d’AVANT D21', () => {
+  // ⚠️ C'est lui qui arme la bascule de trois quarts (D16 ter) depuis que la
+  // naissance du crop est montée à 600 km.
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_M + 1, auBlocAvant: false }), false)
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_M, auBlocAvant: false }), true)
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_MORT_M - 1, auBlocAvant: true }), true)
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_BLOC_MORT_M, auBlocAvant: true }), false)
+  // une altitude non finie conserve l'état — même contrat que `socleVisible`
+  assert.equal(auBloc({ altitudeEllipsoideM: NaN, auBlocAvant: true }), true)
+  assert.equal(auBloc({}), false)
+  // ⛔ Et à la NAISSANCE du crop (600 km) on n'est PAS au bloc : c'est tout le
+  // départage — sans lui la caméra s'inclinerait en vue continentale.
+  assert.equal(auBloc({ altitudeEllipsoideM: SEUIL_NAISSANCE_M, auBlocAvant: false }), false)
+})
+
+test('à SEUIL_BLOC_M le socle occupe 60 % de la HAUTEUR de l\'image', () => {
+  const f = fractionEcran({ largeurM: LARGEUR_SOCLE_M, altitudeM: SEUIL_BLOC_M })
   assert.ok(Math.abs(f - 0.6) < 1e-9, `fraction ${f} au lieu de 0,60`)
-  const fMort = fractionEcran({ largeurM: LARGEUR_SOCLE_M, altitudeM: SEUIL_MORT_M })
+  const fMort = fractionEcran({ largeurM: LARGEUR_SOCLE_M, altitudeM: SEUIL_BLOC_MORT_M })
   assert.ok(Math.abs(fMort - 0.48) < 1e-9, `fraction ${fMort} au lieu de 0,48`)
   // aller-retour : `altitudePourFraction` est bien l'inverse de `fractionEcran`
   const a = altitudePourFraction({ largeurM: LARGEUR_SOCLE_M, fraction: 0.37 })

@@ -50,7 +50,7 @@ import {
 import { creerVeilleEstompage, estompageTerre } from '../src/monde/estompage-terre.js'
 import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
 import { ALT_ESTOMPAGE_FIN_M } from '../src/monde/estompage-terre.js'
-import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
+import { SEUIL_BLOC_M, SEUIL_BLOC_MORT_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
 
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 
@@ -59,7 +59,7 @@ const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 // (32 274 m), et l'estompage n'est strictement entre 0 et 1 qu'AU-DESSUS de
 // `ALT_ESTOMPAGE_FIN_M` (19 365 m). C'est l'intersection des deux qui montre le
 // défaut : un crop posé, et des alentours dessinés AUTOUR, au repos.
-const ALT_BLOC = (ALT_ESTOMPAGE_FIN_M + SEUIL_NAISSANCE_M) / 2
+const ALT_BLOC = (ALT_ESTOMPAGE_FIN_M + SEUIL_BLOC_M) / 2
 
 // ══════════════════════════════════════════════════════════════════ ① la loi
 
@@ -302,6 +302,7 @@ test('⑤ LA LOI N’EST PAS TOUCHÉE — `estompageTerre` rend ce qu’elle ren
   // CHARGES DE LA TÂCHE N** : « tu changes QUAND il s'applique, jamais sa loi ».
   // La loi est une fonction PURE de l'altitude : elle ne peut pas connaître le
   // repos, et ce test le dit en toutes lettres.
+  assert.equal(estompageTerre({ altitudeEllipsoideM: SEUIL_BLOC_MORT_M }), 0)
   assert.equal(estompageTerre({ altitudeEllipsoideM: SEUIL_MORT_M }), 0)
   assert.equal(estompageTerre({ altitudeEllipsoideM: SEUIL_MORT_M * 2 }), 0)
   const dedans = estompageTerre({ altitudeEllipsoideM: ALT_BLOC })

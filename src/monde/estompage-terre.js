@@ -55,9 +55,19 @@
 //
 // ══════════ 2. OÙ LE FONDU COMMENCE, OÙ IL FINIT ═══════════════════════════
 //
-// **Il commence à `SEUIL_MORT_M`** — l'altitude la plus HAUTE à laquelle le
-// socle puisse encore exister (`seuil-socle.js`, §6 : l'hystérésis). Au-dessus,
-// il n'y a aucun socle à détacher : estomper la planète n'aurait rien à servir.
+// **Il commence à `SEUIL_BLOC_MORT_M`** — l'hystérésis de l'ARRIVÉE AU BLOC
+// (`seuil-socle.js`, §6 bis), c'est-à-dire l'altitude la plus HAUTE à laquelle
+// le socle occupe encore une part importante de l'image. Au-dessus, il n'y a
+// rien à détacher : estomper la planète n'aurait rien à servir.
+//
+// ⚠️ **DEPUIS D21, CE N'EST PLUS `SEUIL_MORT_M`, ET LE CHIFFRE NE BOUGE PAS.**
+// D21 fait naître le crop au palier z7 (600 km) ; `SEUIL_MORT_M` vaut donc
+// 750 km. Y accrocher le fondu effacerait la planète depuis 750 km : **à 100 km
+// d'altitude il rendrait 0,576 au lieu de 0** — la Terre à moitié gommée en vue
+// régionale, sur un seuil qu'Adrien n'a pas demandé de bouger. Le fondu suit la
+// GRANDEUR DU SOCLE À L'IMAGE, pas la naissance de sa géométrie : il reste donc
+// accroché à `SEUIL_BLOC_MORT_M`, **40 342,8 m, la valeur d'avant D21 au bit
+// près.**
 //
 // **Il finit à l'altitude où le socle occupe TOUTE la hauteur de l'image** —
 // `fraction = 1`, la même trigonométrie que les deux seuils, prise à la même
@@ -67,11 +77,11 @@
 // Leurs valeurs d'aujourd'hui, pour mémoire et pour la relecture — elles se
 // recalculent, elles ne sont pas écrites :
 //
-//   ALT_ESTOMPAGE_DEBUT_M = 40 342,8 m  (= SEUIL_MORT_M, 48 % de la hauteur)
-//   SEUIL_NAISSANCE_M     = 32 274,3 m  (60 % — pour situer, il est ENTRE)
+//   ALT_ESTOMPAGE_DEBUT_M = 40 342,8 m  (= SEUIL_BLOC_MORT_M, 48 % de la hauteur)
+//   SEUIL_BLOC_M          = 32 274,3 m  (60 % — pour situer, il est ENTRE)
 //   ALT_ESTOMPAGE_FIN_M   = 19 364,6 m  (100 % de la hauteur)
 //
-// ⚠️ **L'ORDRE EST LA PROPRIÉTÉ, PAS LES CHIFFRES.** `FIN < NAISSANCE < DÉBUT` :
+// ⚠️ **L'ORDRE EST LA PROPRIÉTÉ, PAS LES CHIFFRES.** `FIN < BLOC < DÉBUT` :
 // le fondu est déjà entamé quand le socle naît (à **22 %**, rejoué) et il
 // s'achève après. C'est ce qui rend le mot « progressivement » vrai — le bloc se
 // détache PENDANT qu'on descend, il n'apparaît pas dans un écran déjà vide.
@@ -99,7 +109,7 @@
 
 import {
   LARGEUR_SOCLE_M,
-  SEUIL_MORT_M,
+  SEUIL_BLOC_MORT_M,
   altitudePourFraction,
 } from './seuil-socle.js'
 
@@ -111,8 +121,9 @@ import {
 // dans le cadre que par les coins. Voir le §2.
 export const FRACTION_ESTOMPAGE_PLEINE = 1
 
-// Le haut de la bande. ⚠️ **C'EST LE SEUIL DE MORT DU SOCLE, PAS UN VOISIN.**
-export const ALT_ESTOMPAGE_DEBUT_M = SEUIL_MORT_M
+// Le haut de la bande. ⚠️ **C'EST L'HYSTÉRÉSIS DE L'ARRIVÉE AU BLOC, PAS UN
+// VOISIN — et depuis D21 ce n'est plus `SEUIL_MORT_M`. Voir le §2.**
+export const ALT_ESTOMPAGE_DEBUT_M = SEUIL_BLOC_MORT_M
 
 // Le bas de la bande — dérivé, comme les deux seuils, jamais posé.
 export const ALT_ESTOMPAGE_FIN_M = altitudePourFraction({

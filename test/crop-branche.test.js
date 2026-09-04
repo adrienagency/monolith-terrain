@@ -214,16 +214,20 @@ test('② de l’orbite au sol : rien au-dessus du seuil, la chaîne entière en
   const g = globeFactice()
   const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice() })
 
-  for (const z of [4, 5, 6, 7, 8, 9, 10]) {
+  // ⚡ **D21 ③ — LA CHAÎNE ENTIÈRE DESCEND DE z11 À z6.** `SEUIL_NAISSANCE_M`
+  // vaut 600 000 m : la pose d'arrivée z6 (575 040 m) est déjà dessous, celle
+  // de z5 (920 060 m) encore au-dessus. Adrien demande « dès z7 » — c'est tenu
+  // avec un cran de marge.
+  for (const z of [4, 5]) {
     assert.equal(veille.maj(ALT_ARRIVEE_M[z]), false, `pas de crop à z${z}`)
   }
-  assert.deepEqual(quoi(g), [], 'de z4 à z10 on regarde la planète : rien ne doit être posé')
+  assert.deepEqual(quoi(g), [], 'à z4 et z5 on regarde la planète : rien ne doit être posé')
 
-  assert.equal(veille.maj(ALT_ARRIVEE_M[11]), true, 'le crop doit naître à z11')
+  assert.equal(veille.maj(ALT_ARRIVEE_M[6]), true, 'D21 ③ : le crop doit naître dès z6/z7')
   assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
 
   // et il ne se repose pas à chaque palier plus fin
-  for (const z of [12, 13, 14, 15]) assert.equal(veille.maj(ALT_ARRIVEE_M[z]), true)
+  for (const z of [7, 8, 9, 10, 11, 12, 13, 14, 15]) assert.equal(veille.maj(ALT_ARRIVEE_M[z]), true)
   assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'],
     'la chaîne ne doit pas être rejouée tant que le lieu ne bouge pas')
   assert.equal(veille.bascules, 1)
@@ -238,7 +242,13 @@ test('② bis la remontée retire le crop, et à L’AUTRE seuil — l’hystér
   // entre les deux seuils, en MONTANT : le crop survit
   assert.equal(veille.maj(SEUIL_NAISSANCE_M * 1.05), true, 'il ne meurt pas au seuil de NAISSANCE')
   assert.ok(SEUIL_NAISSANCE_M * 1.05 < SEUIL_MORT_M)
-  assert.equal(veille.maj(SEUIL_MORT_M * 1.01), false, 'il meurt au seuil de MORT')
+  // ⚡ **D21 ① — AU-DESSUS DU SEUIL DE MORT, MAIS SANS INTENTION : IL VIT.**
+  assert.equal(veille.maj(SEUIL_MORT_M * 1.01), true, 'il meurt sans intention — D21 ① tombe')
+  assert.equal(veille.pose, true)
+  assert.notEqual(g.journal.at(-1).quoi, 'retirer')
+  // l'intention armée (un dézoom explicite), et là il meurt
+  veille.armerSortie()
+  assert.equal(veille.maj(SEUIL_MORT_M * 1.01), false, 'il meurt au seuil de MORT, intention armée')
   assert.equal(g.journal.at(-1).quoi, 'retirer')
   assert.equal(g._crop, null)
   await veille.enVol()

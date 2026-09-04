@@ -87,6 +87,14 @@ const CATALOGUE_POSTES = {
   surface: { alt: 130000, zoom: 9 },
   crop: { alt: 5000, zoom: 13 },
   orbite: { alt: 2000000, orbite: true },
+  // ⚡ **LE POSTE DE D21 ③ — LE CROP À SA NOUVELLE NAISSANCE.** `DIVE_TIERS`
+  // pose le palier z7 à 600 km ; depuis D21 le crop y naît. C'est le poste que
+  // le brief C1 demande de chiffrer (tuiles, maillage, temps d'image à ×4/×6),
+  // et il n'existait pas : `surface` s'arrêtait à 130 km, sans crop.
+  crop7: { alt: 600000, zoom: 7 },
+  // le témoin : le MÊME cadrage, un cran plus haut, où le crop ne naît pas
+  // encore (620 km > 600 km). L'écart des deux cellules EST le coût de D21 ③.
+  temoinz7: { alt: 700000, zoom: 7 },
 }
 
 // -------------------------------------------------------------------- Chrome
