@@ -2515,6 +2515,12 @@ export class GpxLayer {
   setFenetre(x, z) {
     this._fen.x = x
     this._fen.z = z
+    // ⚠️ **CE DÉCALAGE EST EN UNITÉS DE BLOC ET LE GROUPE PEUT VIVRE DANS LA
+    // SCÈNE DU GLOBE** (Tâche GX2). Les deux ne se rencontrent pas aujourd'hui :
+    // le mode continu 3×3 est éteint sous `terre unique`, et hors de lui `x` et
+    // `z` valent 0. Le jour où les deux s'allumeront ensemble, ce `-x` déplacera
+    // le tracé de dizaines de milliers de kilomètres sur la sphère — il faudra
+    // le passer par `k` (voir `_majSimilitude`), pas le laisser tel quel.
     this.group.position.set(-x, 0, -z)
     this._ecreteFenetre()
   }

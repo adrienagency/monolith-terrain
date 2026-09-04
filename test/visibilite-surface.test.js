@@ -232,10 +232,24 @@ test('③ LE COMPTE DES LECTEURS — la garde de CLASSE, pas de cas particulier'
   //     `cotes.total = 14` et `groupeVisible = false` AUX CINQ.
   // ⚡ **ET CETTE GARDE A FAIT SON TRAVAIL UNE FOIS DE PLUS** : R24 a rebranche
   // le lecteur, et ce compte a rougi avant que rien ne soit ecrit ici.
-  assert.equal(compte('socle'), 7,
-    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 7 -- un calque du bloc plat a change de grandeur`)
-  assert.equal(compte('reperes'), 1,
-    `${compte('reperes')} lecteur de \`vue.reperes\` au lieu de 1 (labels seul -- les sommets sont du DOM, pas un calque de cette fonction)`)
+  // ⚡ **SIX, ET NON SEPT : UNE CINQUIEME REDISTRIBUTION VOULUE — Tache GX2.**
+  //   · GX2 : `gpxLayer` (LE TRACE GPX) passe de `vue.socle` a `vue.reperes`,
+  //     pour la MEME raison que les quatre ci-dessus — le groupe a quitte la
+  //     scene du bloc plat, `sceneGlobe` l'adopte et il est pose sur la sphere
+  //     par la meme similitude que la carto (`monde/sol-globe.js`).
+  //     Mesure : le trace etait dessine AU REPOS puis retombait a **0 pixel des
+  //     que cette fonction etait rappelee** (changement de vue, clic Lecture,
+  //     vol de poursuite) — vingt releves consecutifs a 0 pixel AVEC UN TEMOIN
+  //     DE BRUIT A 0, c'est-a-dire un calque ETEINT, pas un calque mal place.
+  //     C'est la seconde moitie du defaut d'Adrien, et celle qui explique son
+  //     « le trace ne s'affiche plus LORSQU'ON LANCE LA LECTURE ».
+  // ⚡ **ET CETTE GARDE A FAIT SON TRAVAIL UNE TROISIEME FOIS** : GX2 a
+  // rebranche le lecteur, et ce compte a rougi (6 au lieu de 7) avant qu'une
+  // seule ligne ne soit ecrite ici.
+  assert.equal(compte('socle'), 6,
+    `${compte('socle')} lecteurs de \`vue.socle\` au lieu de 6 -- un calque du bloc plat a change de grandeur`)
+  assert.equal(compte('reperes'), 2,
+    `${compte('reperes')} lecteurs de \`vue.reperes\` au lieu de 2 (labels + le trace GPX -- les sommets sont du DOM, pas un calque de cette fonction)`)
   assert.equal(compte('nuages'), 1,
     `${compte('nuages')} lecteur de \`vue.nuages\` au lieu de 1 (clouds seul)`)
   assert.equal(compte('cartouche'), 1,

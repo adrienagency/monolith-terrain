@@ -5678,9 +5678,27 @@ function poserVisibiliteSocle(v) {
   // maillage plat.
   labels.visible = vue.reperes && params.labels
   hud3.group.visible = vue.socle
-  // GPX sprites draw with depthTest:false — hidden with the surface or
-  // they'd float on top of the planet
-  gpxLayer.setVisible(vue.socle && params.gpxVisible)
+  // ══════ LE TRACÉ GPX — Tâche GX2, et c'est le §5 UNE CINQUIÈME FOIS ══════
+  //
+  // ⛔ **`vue.socle` EST BORNÉ À FAUX SOUS `terre unique`, ET IL ÉTEIGNAIT LE
+  // TRACÉ À TOUTES LES ALTITUDES.** Exactement les nuages de R20, les cotes de
+  // R24, la cartographie de D16-b et les repères de R18 — la cinquième
+  // occurrence du même partage. Mesuré au banc : le tracé était dessiné au
+  // repos, puis **disparaissait dès que quelque chose rappelait cette
+  // fonction** (un changement de vue, le clic Lecture, le vol de poursuite) —
+  // vingt relevés de lecture à **0 pixel avec un témoin de bruit à 0**, c'est-à-
+  // dire un calque éteint, pas un calque mal placé. **C'est la seconde moitié du
+  // défaut d'Adrien, et c'est elle qui explique son « lorsqu'on LANCE LA
+  // LECTURE ».**
+  //
+  // ⚡ **SA QUESTION EST CELLE DES REPÈRES, PAS CELLE DU MAILLAGE.** Depuis la
+  // ligne d'adoption plus haut, le tracé ne dessine plus dans l'espace du bloc
+  // plat : il est posé sur la sphère, dans la scène du globe, par la même
+  // similitude que la carto. « Sommes-nous en vue de surface, devant un bloc ? »
+  // — oui, c'est un crop. Le commentaire d'origine (« les sprites GPX dessinent
+  // en `depthTest:false`, on les cache avec la surface ou ils flotteraient sur
+  // la planète ») reste satisfait : hors vue de surface, `reperes` est faux.
+  gpxLayer.setVisible(vue.reperes && params.gpxVisible)
   // ⚡ **`vue.nuages` ET PLUS `vue.socle` — Tâche R20**, et c'est le §5 de
   // `visibilite-surface.js` une QUATRIÈME fois. `socle` est borné à faux sous
   // le drapeau : accroché à lui, le ciel était éteint à toutes les altitudes et

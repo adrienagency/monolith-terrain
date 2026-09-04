@@ -64,15 +64,36 @@ await page.evaluate(async () => {
   window.__c = () => e.gpxLayer.layers?.[0]?.gpx || null
   window.__lire = async (u) => { const im = await createImageBitmap(await (await fetch(u)).blob()); const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; c.getContext('2d').drawImage(im, 0, 0); return { c, d: c.getContext('2d').getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height } }
   // ① la différence, et RIEN d'autre. Rend aussi l'image surlignée.
+  // ⛔ **LA ZONE UTILE EXCLUT LE HUD — ET C'EST UN FAUX CONSTAT PAYÉ ICI.** À
+  // mi-lecture, un relevé annonçait 2 526 « pixels de tracé » sur une image où
+  // la vue 3D ne montrait QUE LE CIEL : le profil, la barre de progression et
+  // les chiffres « restants » avancent entre deux captures, et éteindre le
+  // calque cache aussi son bandeau de profil. On ne compte donc QUE dans le
+  // rendu 3D, bandeau de course et panneaux exclus.
+  window.__zone = () => {
+    const z = { x0: 0, y0: 0, x1: innerWidth, y1: innerHeight }
+    const bas = document.querySelector('.course-bar, .cb-root, .gpx-profile')
+    if (bas) { const r = bas.getBoundingClientRect(); if (r.height > 0) z.y1 = Math.min(z.y1, r.top) }
+    for (const s of ['.studio', '.panel-left', '.gpx-panel']) {
+      const el = document.querySelector(s); if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (r.width > 200 && r.left < 40) z.x0 = Math.max(z.x0, r.right)
+    }
+    return z
+  }
   window.__diff = async (aUrl, bUrl, surligne = false) => {
     const a = await window.__lire(aUrl), b = await window.__lire(bUrl)
+    const z = window.__zone()
     let n = 0, x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9
     const ctx = a.c.getContext('2d')
     const img = ctx.getImageData(0, 0, a.w, a.h)
+    // le rapport pixels du tampon / pixels CSS (viewport 1440×1024 ici, donc 1)
+    const s = a.w / innerWidth
     for (let i = 0; i < a.d.length; i += 4) {
+      const p = i / 4, x = p % a.w, y = (p / a.w) | 0
+      if (x < z.x0 * s || x >= z.x1 * s || y < z.y0 * s || y >= z.y1 * s) continue
       const k = Math.max(Math.abs(a.d[i] - b.d[i]), Math.abs(a.d[i + 1] - b.d[i + 1]), Math.abs(a.d[i + 2] - b.d[i + 2]))
       if (k > 12) {
-        const p = i / 4, x = p % a.w, y = (p / a.w) | 0
         n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
         if (surligne) { img.data[i] = 0; img.data[i + 1] = 255; img.data[i + 2] = 90; img.data[i + 3] = 255 }
       }
@@ -88,7 +109,16 @@ await page.evaluate(async () => {
     return { info: info ? { calls: info.render.calls, triangles: info.render.triangles, geometries: info.memory.geometries, textures: info.memory.textures } : null, r: !!r }
   }
 })
-const tourner = (n) => page.evaluate((k) => window.__h.tourner(k), n)
+// ⚠️ **UN TOUR NE DOIT JAMAIS POUVOIR PENDRE.** La file de rAF ne se vide que si
+// l'application en redemande ; un onglet sans tête qui cesse de composer laisse
+// la promesse en suspens et le banc s'arrête pour toujours au premier cran, sans
+// rien dire. On borne, et on continue : mieux vaut un relevé bruyant qu'un banc
+// qui ne rend jamais la main.
+const tourner = (n) => Promise.race([
+  page.evaluate((k) => window.__h.tourner(k), n),
+  new Promise((r) => setTimeout(() => r('délai'), 20000)),
+])
+const seulementLecture = A.includes('--lecture-seule')
 const snap = async () => 'data:image/png;base64,' + await page.screenshot({ encoding: 'base64' })
 const ecris = (nom, dataUrl) => fs.writeFileSync(path.join(SORTIE, `${ETIQ}-${nom}.png`), Buffer.from(dataUrl.split(',')[1], 'base64'))
 
@@ -140,7 +170,7 @@ async function releve(nom, { image = false } = {}) {
 }
 
 // ── ⓵ QUATRE ÉCHELLES : le tracé tient-il du cadrage large au cadrage serré ──
-for (let k = 0; k < 4; k++) {
+for (let k = 0; k < (seulementLecture ? 0 : 4); k++) {
   const r = await releve(`z${k}`, { image: true })
   const trois = []
   for (let j = 0; j < 3; j++) trois.push((await releve(`z${k}-bis`)).pixels)
@@ -153,14 +183,58 @@ for (let k = 0; k < 4; k++) {
 }
 
 // ── ⓶ LA LECTURE : 20 relevés consécutifs, caméra figée ─────────────────────
+// ⚠️ **LE SUIVI SE COUPE AVANT LE CLIC, PAS APRÈS** — voir le pavé ci-dessous.
+await page.evaluate(() => {
+  const e = window.__exp
+  e.params.gpxFollow = false
+  if (e.drone) e.drone.active = false
+})
 const bouton = await page.evaluate(() => {
   const b = document.querySelector('.cb-play'); if (!b) return false
   const r = b.getBoundingClientRect()
   b.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }))
   return true
 })
-await tourner(30)
-await page.evaluate(() => { window.__exp.params.gpxFollow = false; window.__exp.drone.active = false })
+// ⛔ **ON NE FIGE PLUS LA CAMÉRA À LA MAIN — DEUX FAUX ZÉROS PAYÉS POUR ÇA.**
+// Couper `gpxFollow` et `drone.active` en plein vol de poursuite arrête la
+// caméra où elle est, le nez dans le ciel ou face au versant d'à côté : vingt
+// relevés sur vingt sortaient alors à **0 pixel de tracé AVEC UN TÉMOIN DE
+// BRUIT À 0** — c'est-à-dire vingt captures rigoureusement identiques pendant
+// que `headT` avançait de 0,145 à 0,286. Une scène qui change et une image qui
+// ne change pas, ce n'est pas un tracé absent : c'est une caméra qui regarde
+// ailleurs. (Vérifié à l'œil : `chamonix-apres-lecture.png` montre le tracé,
+// large et net, à la fin de la même lecture.)
+//
+// ⚡ **LA LECTURE SE MESURE DONC EN PAUSE.** On laisse jouer avec la poursuite —
+// le régime réel d'Adrien, qui garde le tracé dans le champ — puis on met en
+// PAUSE avant chaque relevé : la caméra et le dévoilement sont alors immobiles,
+// le plancher de bruit retombe à 0, et ce qu'on compte est bien le tracé.
+const jouer = async (tours) => {
+  await page.evaluate(() => window.__exp.gpxLayer.play())
+  await tourner(tours)
+  await page.evaluate(() => window.__exp.gpxLayer.pause())
+  await tourner(3)
+}
+
+// ⛔ **ON NE VOLE PAS PENDANT QU'ON MESURE — ET C'EST LE TROISIÈME FAUX ZÉRO.**
+// Deux tentatives ont figé la caméra APRÈS le décollage de la poursuite : la
+// première le nez dans le ciel, la seconde dans une vallée où les 4 km déjà
+// dévoilés n'entraient pas dans le champ (`mb-lecture-lect10.png`, capture
+// gardée). Les deux annonçaient « 0 pixel » AVEC UN TÉMOIN DE BRUIT À 0 —
+// c'est-à-dire vingt captures rigoureusement identiques : une caméra qui regarde
+// ailleurs, pas un tracé absent.
+//
+// ⚡ **LE SUIVI EST DONC COUPÉ AVANT LE CLIC.** La caméra ne quitte plus le
+// cadrage d'arrivée, le tracé ENTIER reste dans le champ, et les vingt relevés
+// ne mesurent qu'UNE chose : le dévoilement avance-t-il en restant dessiné ?
+// C'est mot pour mot la question du barème — « 0 image sans tracé, caméra
+// figée, tracé dans le champ » — et la seule façon de la poser sans bruit.
+await page.evaluate(() => {
+  const e = window.__exp
+  e.params.gpxFollow = false
+  if (e.drone) e.drone.active = false
+})
+await tourner(10)
 console.log(`\n  lecture lancée : ${bouton}`)
 for (let i = 0; i < 20; i++) {
   // ⚠️ **DEUX RELEVÉS PAR IMAGE, ET UNE IMAGE N'EST DÉCLARÉE VIDE QUE SI LES
@@ -174,7 +248,7 @@ for (let i = 0; i < 20; i++) {
   r.confirme = r2.pixels
   R.lecture.push(r)
   console.log(`  image ${String(i).padStart(2)}  headT=${r.headT.toFixed(3)}  tracé=${r.pixels} px (bis ${r2.pixels})  bruit=${r.bruit}`)
-  await tourner(12)
+  await jouer(20) // on relance, on avance le dévoilement, on remet en pause
 }
 
 const vides = R.lecture.filter((r) => r.pixels < 30 && r.confirme < 30).length
