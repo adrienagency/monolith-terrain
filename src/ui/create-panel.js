@@ -703,7 +703,22 @@ export function contributeTerrainSections(ctx) {
   // le chargeur retombe sur l'ancêtre — d'où la mention du maximum réellement
   // disponible dans l'étiquette, plutôt qu'un choix qui ne donnerait rien.
   const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v) } })
-  onRefresh(() => {
+  // ⛔ **CN4 — LE CARTOUCHE SUIVAIT LE SÉLECTEUR, PAS LA SURFACE, ET IL MENTAIT
+  // À L'ÉCRAN.** CN2 a écrit ce libellé dans un `onRefresh`, qui ne se rejoue
+  // qu'au prochain `refreshAll()` — c'est-à-dire quand Adrien TOUCHE un
+  // contrôle. Or `getZoomCropServi()` change plusieurs fois par descente, sans
+  // qu'aucun contrôle ne bouge. Relevé par le noteur (CN3 §8), Majorque : la
+  // surface dessinait du **z16** pendant que le cartouche affichait
+  // **« net à z13 »** — trois niveaux de SOUS-promesse, l'exact symétrique des
+  // deux niveaux de SUR-promesse que CN2 devait supprimer.
+  //
+  // ⚠️ **UNE LIGNE DE RÉACTIVITÉ NE SUFFISAIT PAS, ET C'EST MESURÉ.** Rebrancher
+  // le libellé sur `refreshAll()` ne change rien : rien n'appelle `refreshAll()`
+  // pendant un vol. Il faut une source de rythme, et la seule qui suive la
+  // surface est l'image. D'où la boucle ci-dessous — **qui n'écrit dans le DOM
+  // que lorsque le texte change** (une comparaison de chaîne par image, zéro
+  // reflow tant que la finesse est stable).
+  const majLibelleZoom = () => {
     const max = ctx.getDemMaxZoom?.()
     const lab = zoomSel.querySelector?.('.ce-label')
     if (!lab) return
@@ -715,12 +730,39 @@ export function contributeTerrainSections(ctx) {
     // chiffres justes qui ne répondaient pas à la même question. Et quand la
     // région n'a rien de plus fin, c'est ÉCRIT : la donnée s'arrête, ce n'est
     // pas un défaut de rendu.
-    const servi = ctx.getZoomCropServi?.() || 0
-    const net = servi ? (max && servi >= max ? ` — net à z${servi}, plafond de la donnée ici` : ` — net à z${servi}`) : ''
-    lab.textContent = max && params.demZoom >= max
+    //
+    // ⛔ **ET LA FAUTE SYMÉTRIQUE, TROUVÉE PAR LA MESURE — CN4.** Le niveau
+    // PRESCRIT n'est pas toujours le niveau de la DONNÉE. Relevé à l'écran par
+    // `scripts/sonde-cn4-cartouche.mjs` au centre de l'Australie (−23,70 /
+    // 133,88) : `getDemMaxZoom()` rend **12** tandis que `_zCropServi` vaut
+    // **13** — le plancher `ZOOM_SOCLE`, que le palier ne descend pas. La source
+    // sert alors un ancêtre surzoomé : le texel affiché est du z12, et annoncer
+    // « net à z13 » serait exactement la sur-promesse que CN1 avait mesurée,
+    // remise à un niveau. On borne donc l'annonce par ce que la région sait
+    // faire — c'est la SEULE valeur qui décrive le texel réellement dessiné.
+    const prescrit = ctx.getZoomCropServi?.() || 0
+    const servi = prescrit && max ? Math.min(prescrit, max) : prescrit
+    const net = servi ? (max && prescrit >= max ? ` — net à z${servi}, plafond de la donnée ici` : ` — net à z${servi}`) : ''
+    const texte = max && params.demZoom >= max
       ? `Détail (zoom) — maximum atteint pour cette zone (z${max})${net}`
       : `Détail (zoom)${net}`
-  }, zoomSel)
+    if (lab.textContent !== texte) lab.textContent = texte
+  }
+  onRefresh(majLibelleZoom, zoomSel)
+  // La boucle d'image du cartouche. ⚠️ **Elle s'arrête d'elle-même** quand le
+  // sélecteur quitte le document (panneau reconstruit) — même règle de purge que
+  // `refreshAll` dans `ui/kit.js` : on n'abandonne qu'un élément qui a été monté
+  // puis détaché, jamais un élément pas encore inséré.
+  if (typeof requestAnimationFrame === 'function') {
+    let monte = false
+    const battre = () => {
+      if (zoomSel.isConnected) monte = true
+      else if (monte) return
+      majLibelleZoom()
+      requestAnimationFrame(battre)
+    }
+    requestAnimationFrame(battre)
+  }
   const fineDetail = slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } })
   const detailScale = slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
   sQual.body.append(zoomSel, fineDetail, detailScale)
