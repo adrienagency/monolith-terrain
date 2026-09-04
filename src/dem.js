@@ -17,6 +17,7 @@ import {
   bandeBruitAdmise,
   decodeTerrarium,
   fuseBathymetry,
+  lisseAbysse,
   overzoomTile,
   resampleCatmullRom,
   resolutionBathyM,
@@ -206,7 +207,27 @@ function grilleBathy(img) {
   return { w, h, m: decodeTerrarium(ctx.getImageData(0, 0, w, h).data) }
 }
 
-function loadBathyTile(url) {
+// 🟣 LISS — LE LISSAGE DE L'ABYSSE EST POSÉ ICI, ET C'EST TOUT LE CÂBLAGE.
+//
+// ⚠️ **ICI, ET NULLE PART AILLEURS.** Les TROIS sites de fusion (`loadDem`
+// ci-dessous, `globe.js:fondMarinTuile`, `monde/flux-terrain.js`) passent tous
+// par `peindreBathyTuile`, donc par `loadBathyTile`. PLAT, VETO et B6 ont dû
+// câbler les trois à la main ; ici il n'y a qu'un point de pose, parce qu'on
+// agit sur la DONNÉE SOURCE et non sur le résultat de la fusion.
+//
+// ⚡ ET C'EST GRATUIT, parce que c'est mémoïsé. La tuile est lissée UNE FOIS au
+// décodage, puis servie 2 070 fois (le chiffre de l'encart de
+// `peindreBathyTuile`). Le lissage au site de fusion aurait coûté 84 ms PAR
+// BLOC — c'est le chiffre pour lequel `smoothSeaFloor` a été retiré de `loadDem`
+// (voir l'encart correspondant plus bas).
+//
+// ⚠️ LA MAILLE SE LIT SUR LA TUILE, PAS SUR LE BLOC. C'est `z/x/y` de la tuile
+// SOURCE qui donne la maille au sol, et c'est elle qui décide si le rayon vaut
+// 5 px (z8), 1 px (z6) ou 0 px (z4, la règle s'éteint). Voir l'encart 🟣 LISS
+// de src/bathy.js.
+const y2latBathy = (y, z) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z))) * 180) / Math.PI
+
+function loadBathyTile(url, z, x, y) {
   const memo = bathyHits.get(url)
   if (memo) {
     bathyHits.delete(url)
@@ -216,7 +237,13 @@ function loadBathyTile(url) {
   const p = (async () => {
     const r = await fetch(url)
     if (!r.ok) throw new Error('miss')
-    return grilleBathy(await createImageBitmap(await r.blob()))
+    const g = grilleBathy(await createImageBitmap(await r.blob()))
+    // ⚠️ `mailleM` NON FINIE (appelant qui ne passe pas z/x/y) ⇒ rayon 0 ⇒
+    // `lisseAbysse` rend la grille AU BIT. Le lissage ne s'invite jamais.
+    if (g.w === g.h && Number.isFinite(z)) {
+      lisseAbysse(g.m, g.w, { mailleM: resolutionBathyM(z, y2latBathy(y + 0.5, z)) * (BATHY_TILE_PX / g.w) })
+    }
+    return g
   })()
   bathyHits.set(url, p)
   // une absence n'a rien à faire ici : c'est bathyMisses qui la retient
@@ -263,7 +290,7 @@ export async function peindreBathyTuile({ zoom, tx, ty, index, dst, dstStride, d
       // TROUVÉE ⇒ MÉMORISÉE (`loadBathyTile`). Les 9 cases d'un damier lisent le
       // même ancêtre z8, et les 25 dalles du damier de blocs aussi : sans cette
       // mémoire, une seule tuile partait 2 070 fois.
-      const g = await loadBathyTile(url)
+      const g = await loadBathyTile(url, t.z, t.x, t.y)
       // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — elle se
       // mesure sur la tuile BATHY (256 px), la case de destination sur la tuile
       // d'altitude (256 ou 512 px). La sous-fenêtre borne ce qu'on AGRANDIT, pas
