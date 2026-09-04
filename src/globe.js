@@ -259,6 +259,15 @@ import {
 // d'`eau-refraction.js` porte la mesure du repère de normale — **le facteur 16,4
 // sur le Fresnel** — et l'ordre de composite qui manquait.
 import { GLSL_REFRACTION, REFRACTION_NEUTRE } from './monde/eau-refraction.js'
+// ══════════ LA LUMIÈRE DE LA MER — Tâche EAU ═══════════════════════════════
+//
+// > **Adrien, 2026-09-05 :** « redonner un vrai effet "eau" à la mer […]
+// > base-toi sur ce qui fait qu'une mer ressemble vraiment à une mer ».
+//
+// Même patron : la loi vit une seule fois dans un module PUR, `MER_FRAG`
+// injecte le texte. L'en-tête d'`eau-lumiere.js` porte les quatre mécanismes et
+// leurs sources (Schlick, Cox & Munk, Tessendorf, Sea of Thieves / Atlas).
+import { GLSL_EAU_LUMIERE, ventDeHoule } from './monde/eau-lumiere.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -346,10 +355,16 @@ varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
+// LA HAUTEUR DE HOULE NORMALISEE — Tache EAU. 0 au creux et sur l eau plate, 1 a
+// une crete d amplitude nominale. C est le « wave peak mask » de Sea of Thieves
+// (Ang 2018) : la lueur sous-surface vit dans les cretes, la ou la lumiere
+// traverse le moins d eau. (Aucun accent grave dans ce bloc : template literal.)
+varying float vHouleH;
 
 void main() {
   vec3 p = position;
   vJupe = aJupe;
+  vHouleH = 0.0;
   // le BAS du rideau tient au fond du bloc et ne suit aucune vague : c est lui
   // qui soude la nappe a la levre de la paroi, laquelle plonge au fond marin.
   bool basDuRideau = aJupe > 0.5;
@@ -482,6 +497,13 @@ void main() {
     p.z += disp.z;
     p.y += dy;
   }
+  // la hauteur, rapportee a la somme des amplitudes du spectre dans la MEME
+  // monnaie que disp (uWaveA[i].w * lenScale * waveH, voir oceanGerstner) ; les
+  // seize trains ne sont jamais tous en phase, d ou la demi-somme.
+  float ampMax = 0.0;
+  for (int i = 0; i < 16; i++) ampMax += uWaveA[i].w;
+  ampMax *= uMerLambda * uMerHoule * uMerCalmeVue * uMerUnite * fade;
+  vHouleH = clamp(dy / max(0.5 * ampMax, 1e-9), 0.0, 1.0);
 
   vCrete = crete;
   vNormMer = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
@@ -570,6 +592,16 @@ uniform float uMerRefract;
 // ciel sur toute la nappe au lieu de 1,07. uMerVersMonde est la rotation du
 // crop, posee depuis la matrice monde de la mer.
 uniform mat3 uMerVersMonde;
+// ══════ LA LUMIERE DE LA MER — Tache EAU ═════════════════════════════════
+// uMerVraieEau : 1 = la loi de cette tache, 0 = l image d AVANT au bit pres.
+// Le zero existe pour l A/B dans la MEME image (captures, cout GPU) et pour
+// rien d autre : aucun reglage d interface ne le touche.
+// uMerVent : la direction dominante de la houle (unites locales xz), lue sur
+// le spectre par majReglagesMer — les cascades de clapot defilent avec elle.
+// uMerVentMs : le vent (m/s) derive de la houle — la variance de Cox & Munk.
+uniform float uMerVraieEau;
+uniform vec2 uMerVent;
+uniform float uMerVentMs;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
@@ -580,11 +612,13 @@ varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
+varying float vHouleH;
 ${GLSL_BORD_CROP}
 ${GLSL_ECUME}
 ${GLSL_LAME_EAU}
 ${GLSL_JUPE_MER}
 ${GLSL_REFRACTION}
+${GLSL_EAU_LUMIERE}
 
 float bruitMer(vec2 q) {
   vec2 i = floor(q);
@@ -706,6 +740,21 @@ void main() {
   vec2 rp = vLocal / max(uMerUnite, 1e-9) * ${CLAPOT_NORMALE.freq.toFixed(1)};
   float r1 = bruitMer(rp + vec2(uMerTemps * 0.9, 0.0));
   float r2 = bruitMer(rp * 1.9 - vec2(0.0, uMerTemps * 1.2));
+  bool vraieEau = uMerVraieEau > 0.5;
+  if (vraieEau) {
+    // ══════ LA TROISIEME ET LA QUATRIEME CASCADE DE CLAPOT — Tache EAU ═════
+    // Finch (GPU Gems 1, ch. 1) : la geometrie porte quelques trains, la
+    // « texture fine » porte le realisme. Sea of Thieves : trois cascades de
+    // normales, de la grosse a la capillaire. Les facteurs 4.7 et 7.3 n ont
+    // aucun diviseur commun avec 1.0 et 1.9 (Ryan 2025 : « if a common factor
+    // for any two values of L exists, then the tiling will be visible »), et
+    // les deux defilent AVEC le vent, pas sur des axes fixes.
+    vec2 vent = normalize(uMerVent + vec2(1e-6, 0.0));
+    float r3 = bruitMer(rp * 4.7 + vent * (uMerTemps * 2.3));
+    float r4 = bruitMer(rp * 7.3 - vec2(-vent.y, vent.x) * (uMerTemps * 1.7) + vent * (uMerTemps * 0.6));
+    r1 = mix(r1, r3, 0.35);
+    r2 = mix(r2, r4, 0.35);
+  }
   // ══════ DEUX REPERES, DEUX USAGES — Tache R2 ════════════════════════════
   // nLocal : le repere de la NAPPE. Sa paire horizontale xz est EXACTEMENT ce
   // que le socle appelle N.xz — chez lui le haut du monde EST celui de la mer.
@@ -721,7 +770,15 @@ void main() {
   // la mer du crop ne venait donc pas du soleil. uSoleilDir est le meme soleil
   // que celui des tuiles depuis P3 — pas un second, LE meme uniforme.
   vec3 L = normalize(uEclairageOn > 0.5 ? uSoleilDir : uSunDir);
-  float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
+  float nDotV = max(dot(N, V), 0.0);
+  // ══════ LE FRESNEL — Tache EAU ═══════════════════════════════════════════
+  // AVANT : min((1 - N.V)^5, 0.5), puis mix(col, uSky, fres * 0.35) — 0 au
+  // nadir, 0,175 au rasant : la mer n etait jamais un miroir. APRES : Schlick
+  // avec F0 = 0,02 (n = 1,333), 0,02 au nadir et 1 au rasant, la loi de
+  // Tessendorf (2001, fig. 21). L opacite garde son plancher fres * 0.5 : avec
+  // Schlick il monte au rasant, ce qui est le bon sens (on ne voit plus le fond
+  // sous une mer qui reflete le ciel).
+  float fres = vraieEau ? schlickEau(nDotV) : min(pow(1.0 - nDotV, 5.0), 0.5);
   // ⚠️ APRES fres, COMME DANS ocean.js : le plancher de Fresnel en fait partie.
   float opac = opaciteEau(dLagon, uMerTransp, fres);
   // ══════ LE COMPOSITE REFRACTE — Tache R2, ET C EST L ORDRE QUI COMPTE ════
@@ -741,10 +798,34 @@ void main() {
   vec2 refOff = decalageRefraction(nLocal.xz, uMerRefract, fonduRive);
   vec3 travers = texture2D(uMerScene, uvRefractee(uvEcran, refOff)).rgb;
   col = composeLameEau(travers, col, opac);
-  col = mix(col, uSky, fres * 0.35);
   vec3 H = normalize(L + V);
-  // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
-  col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
+  if (vraieEau) {
+    // ══════ LE REFLET DU CIEL, LE MIROITEMENT, LA LUEUR — Tache EAU ════════
+    // ① le ciel reflechi est un DEGRADE horizon -> zenith, indexe sur
+    //    l elevation du rayon reflechi dans le repere du bloc (uMerVersMonde
+    //    porte le haut local) ; la mer vue au rasant reflete l horizon clair,
+    //    vue a 45 degres le ciel haut. Pondere par Schlick — pas par 0,35.
+    vec3 hautMonde = normalize(uMerVersMonde * vec3(0.0, 1.0, 0.0));
+    vec3 R = reflect(-V, N);
+    vec3 ciel = cielReflechi(uSky, dot(R, hautMonde)) * mix(0.25, 1.0, uMerJour);
+    col = mix(col, ciel, fres);
+    // ② le miroitement du soleil : Beckmann sur la variance de Cox & Munk
+    //    (1954), F(V.H) * D / (4 N.V). La trainee s allonge vers l observateur
+    //    par la geometrie de H, sans terme ad hoc ; uMerSoleilFx est la tirette
+    //    « soleil sur l eau » du socle, uMerBrillance n est plus lue ici.
+    float sigma2 = varianceCoxMunk(uMerVentMs);
+    float glitter = glitterSoleil(dot(N, H), max(dot(V, H), 0.0), nDotV, sigma2) * max(dot(L, hautMonde), 0.0);
+    col += uSunColor * glitter * uMerSoleilFx * vRichesse * mix(0.05, 1.0, uMerJour);
+    // ③ la lueur sous-surface des cretes a contre-jour (Sea of Thieves 2018,
+    //    Atlas 2019) : turquoise du glacis, dans les cretes, quand on regarde
+    //    vers le soleil. Ce qui est reflechi (fres) n entre pas dans l eau.
+    float lueur = lueurSousSurface(vHouleH, vCrete, dot(L, -V), fres) * max(dot(L, hautMonde), 0.0);
+    col += uMerPeu * uSunColor * lueur * vRichesse * uMerJour;
+  } else {
+    col = mix(col, uSky, fres * 0.35);
+    // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
+    col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
+  }
 
   // ══════ L'ÉCUME — ET ELLE NE COÛTE RIEN AU-DELÀ DE LA BANDE ═══════════════
   if (vRichesse > 0.0) {
@@ -775,7 +856,11 @@ void main() {
     // atteint zero et fait sortir le vertex), la ou uMerCalmeVue/Surf sont les
     // deux echelles de LOOK d ocean.js. Deux echelles, deux roles, toutes deux
     // presentes — c est exactement ce qui manquait.
-    float ecume = clamp(ecumeMer(vCrete, fonduRive, n1, n2, tavelure, uMerTemps,
+    // ⚠️ LA CRETE REMISE A L ECHELLE — Tache EAU : seule la part la plus cambree
+    // moutonne (Monahan 1980 : ~1 % de la surface a 10 m/s). Le ressac et le
+    // lisere lisent fonduRive, pas la crete : ils ne bougent pas.
+    float creteEcume = vraieEau ? creteMoutonnante(vCrete) : vCrete;
+    float ecume = clamp(ecumeMer(creteEcume, fonduRive, n1, n2, tavelure, uMerTemps,
       uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf) * vRichesse, 0.0, 1.0);
     // ⚠️ blanchirEcume PORTE LA NUIT — Tache P6. La ligne d avant ecrivait
     // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
@@ -7016,6 +7101,16 @@ export class Globe {
         // différents — voir la mesure dans `MER_FRAG` et dans
         // `monde/eau-refraction.js`.
         uMerVersMonde: { value: new THREE.Matrix3() },
+        // ══════ LA LUMIÈRE DE LA MER — Tâche EAU ════════════════════════════
+        //
+        // ⚠️ **POSÉ À 1, ET C'EST LA LIVRAISON, PAS UN RÉGLAGE** — même règle
+        // que `uMerParFragment` : le zéro rend l'image d'avant AU BIT PRÈS dans
+        // la même page, pour l'A/B des captures et du coût. Le vent et sa
+        // direction naissent au neutre (est, brise de `ventDeHoule(houle)`) et
+        // sont posés par image par `majReglagesMer`, lus sur le spectre vivant.
+        uMerVraieEau: { value: 1 },
+        uMerVent: { value: new THREE.Vector2(1, 0) },
+        uMerVentMs: { value: ventDeHoule(houle) },
       },
       // ⚠️ **`uCropCoin` / `uCropCoinN` SONT DÉJÀ CÉDÉS PLUS HAUT** (les mêmes
       // objets que les tuiles) : le sommet lit donc la MÊME superellipse que le
@@ -7641,6 +7736,26 @@ export class Globe {
       u.uWaveA.value = sp.a
       u.uWaveB.value = sp.b
     }
+    // ══════ LE VENT DE LA MER — Tâche EAU ═══════════════════════════════════
+    //
+    // ⚠️ **LU, PAS CHOISI.** La direction dominante est la somme des directions
+    // des seize trains pondérée par leur part d'énergie (`b[i].z`, le poids de
+    // cambrure du spectre) ; le vent en m/s vient de la houle du socle par
+    // `ventDeHoule` (en-tête d'`eau-lumiere.js`). Sans spectre, la direction
+    // reste celle de la naissance.
+    const A = u.uWaveA?.value, B = u.uWaveB?.value
+    if (Array.isArray(A) && Array.isArray(B) && A.length && B.length) {
+      let vx = 0, vz = 0
+      const n = Math.min(A.length, B.length, 16)
+      for (let i = 0; i < n; i++) {
+        const w = Number.isFinite(B[i]?.z) ? B[i].z : 0
+        vx += (A[i]?.x ?? 0) * w
+        vz += (A[i]?.y ?? 0) * w
+      }
+      const l = Math.hypot(vx, vz)
+      if (l > 1e-9) u.uMerVent.value.set(vx / l, vz / l)
+    }
+    u.uMerVentMs.value = ventDeHoule(etat.houle)
 
     // ══════ L'ÉCHELLE DE LONGUEUR DE HOULE — Tâche P6, réserve n° 3 de P5 ═══
     //

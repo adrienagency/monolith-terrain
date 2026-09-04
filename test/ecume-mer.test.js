@@ -403,7 +403,11 @@ test('③b les deux fichiers INJECTENT le texte partagé, ils ne le recopient pa
   // lui-même au lieu de recevoir un varying interpolé depuis les sommets, ce que
   // le fragment d'`ocean.js` fait depuis toujours. `test/trait-cote-mer.test.js`
   // garde ce changement-là, et l'en-tête de `MER_FRAG` porte sa mesure.
-  assert.match(g, /ecumeMer\(vCrete, fonduRive, n1, n2, tavelure, uMerTemps,\s*\n\s*uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf\)/)
+  // ⚠️ **`creteEcume` DEPUIS LA TÂCHE EAU** : la crête est REMISE À L'ÉCHELLE
+  // avant d'entrer (`creteMoutonnante`, `monde/eau-lumiere.js`) — la fonction
+  // appelée est toujours la même, injectée, et c'est ce que cette ligne garde.
+  assert.match(g, /float creteEcume = vraieEau \? creteMoutonnante\(vCrete\) : vCrete;/)
+  assert.match(g, /ecumeMer\(creteEcume, fonduRive, n1, n2, tavelure, uMerTemps,\s*\n\s*uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf\)/)
 })
 
 test('③c le module est PUR : aucune importation, donc chargeable sous node', () => {
