@@ -12,7 +12,7 @@
 // borne `SEUIL_SOURCE_FINE`.
 
 import * as THREE from 'three'
-import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere } from './geo.js'
+import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, tileToLatLon, latLonToSphere } from './geo.js'
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
@@ -263,6 +263,7 @@ import {
   DEM_SOURCES,
   DemSourceError,
   activeDemSource,
+  demTilePx,
   fallbackToAws,
   noterTrouTuile,
   peekRegionMaxZoom,
@@ -933,6 +934,57 @@ const TOLERANCE_BLOC = 1.5
 // : le critère est pris au centre du crop, la vue d'arrivée est oblique, et sans
 // marge l'arrivée perdait un niveau (z12 au lieu de z13).
 const MARGE_CROP = 1
+// ══════════ CN2 — LE CROP NET : LE PLAFOND, ET LE PALIER ATOMIQUE ═══════════
+//
+// **Adrien, 2026-09-04 :** « Quand je zoome dans le socle, l'image ne gagne pas
+// en détail : elle grossit. » Mesuré par CN1 sur quatre lieux : le niveau servi
+// dans l'emprise vaut **13 à 20 000 m comme à 600 m** — un point fixe, pas une
+// loi (§2 de `/threejs-optimisation`).
+//
+// ⛔ **ET LE CORRECTIF D'INSTINCT — LEVER LE PLAFOND — A ÉTÉ MESURÉ, ET IL
+// CASSE L'EXIGENCE NON NÉGOCIABLE.** CN1, §5 : plafond levé, la finesse monte
+// (①②④ verts) **et deux résolutions apparaissent dans le même cadre**
+// (`[11, 16]` à 5 000 m). La cause n'est pas le plafond : c'est que refendre
+// plus profond allonge le raffinement, et que le raffinement partiel (R37)
+// dessine alors un parent sous ses enfants prêts — un raccord VISIBLE au milieu
+// d'une affiche imprimable.
+//
+// Le crop tient donc DEUX niveaux, et c'est tout le correctif :
+//   · `_zCropCible` — ce que l'écran demande, jusqu'à `zoomCropMax` ;
+//   · `_zCropServi` — ce qui est DESSINÉ, une seule valeur pour toute l'emprise.
+// `_zCropServi` ne bouge d'un cran que lorsque le niveau suivant couvre
+// **toute** l'emprise (`_cropCouvert`). Entre deux paliers, l'image reste
+// exactement celle d'avant : une seule finesse, et zéro clignotement.
+//
+// ⚠️ **LE PLAFOND, ET CE QU'IL DEVIENT QUAND LA DONNÉE S'ARRÊTE.** 16 est le
+// `dem.maxZoom` mesuré par CN1 en France et à Majorque (17 en Suisse) ;
+// `main.js` remonte `zoomCropMax` à ce que la RÉGION sert vraiment
+// (`getDemMaxZoom`). Au-delà, la source rend un ancêtre surzoomé : on n'y gagne
+// plus un texel, on ne fait que payer des tuiles. Le crop s'arrête donc là, et
+// l'indicateur dit « plafond de la donnée » plutôt que de promettre du fin.
+const ZOOM_CROP_MAX = 16
+// ⚠️ **PLAFOND DUR DE LA SOURCE LA MIEUX SERVIE** (Suisse, swissALTI3D z17).
+// `main.js` ne peut pas monter `zoomCropMax` au-dessus.
+const ZOOM_CROP_MAX_DUR = 17
+// ⛔ **LE GARDE-FOU DE COÛT, ET IL EST DEVANT LE BUDGET, PAS DERRIÈRE** (§5 de
+// la compétence : « réduis d'abord ce qui entre »). Un palier ne se prend que
+// si l'emprise y tient en moins de tuiles que ça. L'emprise du bloc à z15 vaut
+// 2 400 à 2 830 m : elle demande 36 tuiles à z16 et 144 à z17. 256 laisse les
+// deux passer et interdit qu'une emprise CONTINENTALE (`demZoom` bas, 6 376 km
+// à z4) réclame les 25 000 tuiles que CULL a mesurées.
+const TUILES_CROP_MAX = 256
+// ⚡ **LE SEUIL DU BARÈME (CN1, B4) : au plus UN niveau de détail manquant.**
+// Exiger 1,0 serait le texel-pour-pixel exact, que même une source parfaite ne
+// tient pas en vue oblique.
+const PX_PAR_TEXEL_CROP = 2.0
+// La circonférence ÉQUATORIALE de la projection Web Mercator — celle des tuiles,
+// pas celle de la sphère de rendu. C'est le chiffre du barème.
+const CIRCONFERENCE_EQUATEUR_M = 40075016.686
+// ⚠️ **AU-DESSUS DE TOUTE LA PLAGE DE LA CLÉ D'ÉCRAN** (0 à 1 000, plus 1,3 de
+// départage par niveau) : le bonus ORDONNE, il ne se mélange pas au classement
+// d'écran. `_distanceEcran` et la barrière de CIB, elles, ne le voient pas —
+// elles se comparent à un rayon en NDC, pas à une clé.
+const PRIORITE_CROP = 2000
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 // ══════════ LE RAFFINEMENT PARTIEL ET LA PRÉLECTURE — R37 ═══════════════════
 //
@@ -4087,6 +4139,22 @@ export class Globe {
     // Le niveau prescrit à cette image (0 = pas calculé). Écrit par `update`,
     // lu par `_traverse`.
     this._zCropEcran = 0
+    // ══════ CN2 — LES DEUX NIVEAUX DU CROP ═══════════════════════════════════
+    // `_zCropCible` : ce que l'écran demande (≥ `_zCropEcran`, jusqu'à
+    // `zoomCropMax`). `_zCropServi` : ce qui est réellement DESSINÉ — une seule
+    // valeur pour toute l'emprise, qui ne monte d'un cran que quand le niveau
+    // suivant couvre l'emprise ENTIÈRE. 0 = pas encore de crop.
+    this._zCropCible = 0
+    this._zCropServi = 0
+    // Le plafond de finesse du crop. Écrit par `main.js` d'après
+    // `getDemMaxZoom()` : la netteté s'arrête où la donnée s'arrête.
+    this.zoomCropMax = ZOOM_CROP_MAX
+    // ⚠️ **LA HAUTEUR DE L'ÉCRAN EN PIXELS, ET ELLE FAIT PARTIE DE LA LOI.**
+    // « Pixels par texel » n'a pas de sens sans elle : sur un écran Retina le
+    // mètre par pixel est deux fois plus petit et **tous les rapports doublent**
+    // (CN1, §1). Écrite par `main.js` d'après le tampon de dessin ; 720 est la
+    // valeur du banc, pour qu'un test sous node mesure quelque chose.
+    this.hauteurPx = 720
     // LE FOND DU BLOC — Tâche P4 pour le rideau d'eau, Tâche P7 pour la jupe des
     // tuiles. Déclaré ici pour la raison écrite trois lignes plus haut : qu'il ne
     // naisse pas `undefined` au détour d'une lecture. Écrit par `poserParoisCrop`,
@@ -4817,6 +4885,14 @@ export class Globe {
     // repasse par pose de crop suffit et ne traverse aucune image.
     const effacaitAvant = Globe.prototype._effacementLateralActif.call(this)
     this._crop = rep
+    // ⚠️ **CN2 — UNE POSE NEUVE REPART DU RÉGIME D'ARRIVÉE.** Le palier
+    // (`_zCropServi`) est une propriété de l'EMPRISE : garder un z16 gagné sur
+    // l'emprise précédente ferait prescrire du fin sur une emprise non couverte,
+    // donc refendre au fil de l'eau — le mélange que tout ce correctif évite.
+    // On retombe donc au plus à `ZOOM_SOCLE`, exactement le dépôt d'avant, et le
+    // palier se regagne image par image.
+    this._zCropServi = 0
+    this._zCropCible = 0
     // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
     // QUI L'A EXIGÉ — Tâche R3, correction C1.** La première version de
     // `cropAttendu` était un booléen à vie ; or `retirerCrop` remet `_crop` à
@@ -5009,6 +5085,256 @@ export class Globe {
     return Math.min(z + MARGE_CROP, ZOOM_SOCLE)
   }
 
+  /**
+   * **LE POINT DU SOL AU CENTRE DU CROP, RELIEF COMPRIS.** L'origine RTC du
+   * maillage le plus fin qui contient ce centre — c'est-à-dire la surface que le
+   * GPU dessine, pas la sphère nue.
+   *
+   * ⛔ **AUCUNE TUILE N'EST CRÉÉE, ET AUCUNE MAP N'EST BALAYÉE** : on descend la
+   * clé du centre niveau par niveau, seize consultations au plus.
+   */
+  _pointSurfaceCrop(rep, lat, lon) {
+    let best = null
+    for (let z = ROOT_Z; z <= this._plafondCrop(); z++) {
+      const n = 2 ** z
+      const t = this.tiles.get(tileKey(z, Math.min(n - 1, Math.floor(rep.cx * n)), Math.min(n - 1, Math.floor(rep.cy * n))))
+      if (t?.mesh) best = t.mesh.position
+    }
+    if (!best) return null
+    // ⛔ **ON GARDE L'ALTITUDE, PAS LA POSITION — ET L'ÉCART SE MESURE.**
+    // L'origine RTC est au centre de SA tuile, qui peut être à 1,9 km du centre
+    // du crop à z13. Aux Alpes, 1,9 km de décalage horizontal, c'est plusieurs
+    // centaines de mètres d'altitude, exagérés 2,8 fois : mesuré, le crop y
+    // restait à z13 à 2 000 m (3,09 px par texel) alors que le niveau requis
+    // était z14. On reporte donc le RAYON déplacé sur la direction exacte du
+    // centre du crop — l'erreur horizontale disparaît, le terme de relief reste.
+    return latLonToSphere(lat, lon, best.length())
+  }
+
+  /** Le plafond de finesse du crop, borné par la meilleure source connue. */
+  _plafondCrop() {
+    return Math.max(ZOOM_SOCLE, Math.min(this.zoomCropMax | 0, ZOOM_CROP_MAX_DUR))
+  }
+
+  /**
+   * **CE QUE L'ÉCRAN DEMANDE AU-DELÀ DE `ZOOM_SOCLE` — CN2, ET C'EST LE BARÈME
+   * LUI-MÊME, PAS UN PROXY.**
+   *
+   * ⛔ **PREMIÈRE ÉCRITURE JETÉE, ET LA MESURE EST DANS LE RAPPORT.** J'avais
+   * prolongé le `chord / dist` de `_zoomCropEcran` jusqu'au nouveau plafond :
+   * c'était la même ligne, donc « la même loi ». Mesuré au banc, cette loi
+   * réclame **z15 à 5 000 m** — l'altitude où CN1 a mesuré 0,90 px par texel,
+   * c'est-à-dire **là où le crop est DÉJÀ juste**. Elle sur-raffine d'un à deux
+   * niveaux sur toute la plage, et B5 (« à 5 000 m, ne dégrade pas ») tombe. Un
+   * seuil de silhouette (`SPLIT_RATIO = 0,38`) répond à « la tuile est-elle
+   * grosse à l'écran », pas à « combien de pixels couvre un texel » : ce n'est
+   * pas la grandeur du barème.
+   *
+   * On écrit donc la grandeur d'Adrien, telle quelle :
+   *   `m par pixel = 2 · distance · tan(fov/2) / hauteurPx`
+   *   `m par texel(z) = circonférence · cos(lat) / (2^z · tuilePx)`
+   *   `z = ⌈log₂( circonférence · cos lat / (tuilePx · SEUIL · mppEcran) )⌉`
+   *
+   * ⚠️ **`tuilePx` EST LU SUR LA SOURCE, PAS ÉCRIT EN CONSTANTE** : Mapterhorn
+   * sert du 512, le repli AWS du 256, et à niveau égal le second porte **un
+   * texel deux fois plus gros**. Une constante ici rendrait la même prescription
+   * pour deux données différentes — et le banc de node, qui force AWS, mesurerait
+   * autre chose que la production sans que rien ne le dise.
+   *
+   * ⛔ **ET `_zoomCropEcran` N'EST PAS TOUCHÉ, AU BIT PRÈS.** Il borne le crop
+   * par le HAUT quand le bloc est continental (CULL ⑤ : prescrire z13 sur
+   * 6 376 km, c'est 25 000 tuiles), et `test/crop-plafond-altitude.test.js` ③
+   * verrouille sa valeur exacte à 4,4 km.
+   */
+  _zoomCropFin(camPos, camera) {
+    const rep = this._crop
+    if (!rep) return 0
+    const plafond = this._plafondCrop()
+    const fov = camera?.isPerspectiveCamera ? camera.fov : 0
+    const hauteur = this.hauteurPx > 0 ? this.hauteurPx : 0
+    if (!fov || !hauteur) return ZOOM_SOCLE
+    // le centre du crop en lat/lon — `cy` vit en MERCATOR NORMALISÉ, et `n = 1`
+    // à z0 fait de `tileToLatLon` l'inverse exact du mercator (CN1 §7 point 7 :
+    // c'est la onzième fois que les espaces mordent quelqu'un ici).
+    const c = tileToLatLon(rep.cx, rep.cy, 0)
+    // ⛔ **LE RELIEF EST DANS LA DISTANCE, ET L'OUBLIER A COÛTÉ LE CAS DUR.**
+    // Première mesure dans l'application avec le centre pris sur la SPHÈRE NUE :
+    // Majorque et la Bretagne passaient, et les **Alpes ne bougeaient pas d'un
+    // bit** — 19,28 px par texel à 900 m, exactement le chiffre d'avant. La
+    // cause n'est pas la loi : c'est que le sol y est à 1 500 m, **exagéré 2,8
+    // fois**, donc la surface qu'on regarde est des kilomètres plus près de la
+    // caméra que le point de sphère de même latitude. CN1 l'avait mesuré sans le
+    // nommer ainsi : à altitude de cadrage égale, le mètre par pixel vaut 1,44
+    // en plaine et **0,345 aux Alpes** — « la cause de l'écart n'est pas la
+    // donnée, c'est la caméra » (§2.2).
+    //
+    // On prend donc le point que le GPU dessine vraiment : l'origine RTC du
+    // maillage de la tuile la plus fine du centre du crop, que `_buildMesh` pose
+    // **sur la surface DÉPLACÉE** (« `t.center` ferait presque l'affaire, mais
+    // il ignore le relief »). Repli sur la sphère nue tant que rien n'est maillé.
+    //
+    // ⚠️ **ET SEULEMENT SI LA CAMÉRA EST AU-DESSUS DE CETTE SURFACE — DEUX
+    // BANCS L'ONT EXIGÉ.** Le maillage porte l'EXAGÉRATION du moment (2,8 au
+    // bloc, 18 en orbite). Sur les bancs de papier, la dalle est plate à 812 m
+    // et la caméra est posée par rapport à la SPHÈRE : la surface exagérée passe
+    // **au-dessus** d'elle, la caméra se retrouve enterrée, et la distance au
+    // maillage rendait **13,8 km pour une caméra à 900 m** — donc un crop plus
+    // GROSSIER en descendant. Prendre la plus petite des deux distances corrige
+    // ce banc-là et en casse un autre (`veille-repos` ⑦ : la caméra frôle la
+    // surface exagérée, la distance tombe à ~1 km et le crop réclame du z16 sur
+    // une emprise de 29 km). La condition juste n'est ni l'une ni l'autre :
+    // **le terme de relief ne vaut que quand la caméra est dehors**, ce qui est
+    // le cas de toute pose réelle du produit.
+    const surface = this._pointSurfaceCrop(rep, c.lat, c.lon)
+    const nue = latLonToSphere(c.lat, c.lon)
+    const dessus = surface && camPos.lengthSq() > surface.lengthSq()
+    // ⚠️ CONVERSION 1/2 : unités de globe → mètres, facteur `ORBITAL_M_PER_UNIT`
+    // = 63 710 m par unité (`R_GLOBE = 100` pour 6 371 km).
+    const distM = camPos.distanceTo(dessus ? surface : nue) * ORBITAL_M_PER_UNIT
+    if (!(distM > 0)) return ZOOM_SOCLE
+    const mppEcran = (2 * distM * Math.tan(((fov * Math.PI) / 180) / 2)) / hauteur
+    if (!(mppEcran > 0)) return ZOOM_SOCLE
+    // ⚠️ CONVERSION 2/2 : mercator → mètres au sol, facteur
+    // `CIRCONFERENCE_EQUATEUR_M · cos(lat)` = 30 877 km à Majorque.
+    const largeurM = CIRCONFERENCE_EQUATEUR_M * Math.cos((c.lat * Math.PI) / 180)
+    const z = Math.ceil(Math.log2(largeurM / (demTilePx(activeDemSource()) * PX_PAR_TEXEL_CROP * mppEcran)))
+    return Math.max(ZOOM_SOCLE, Math.min(z, plafond))
+  }
+
+  /**
+   * **L'EMPRISE EST-ELLE ENTIÈREMENT COUVERTE AU NIVEAU `L` ?** — la condition
+   * du palier atomique.
+   *
+   * ⚠️ **LA RÈGLE EST CELLE DE `_traverse`, PAS UNE AUTRE.** Une tuile compte
+   * comme couvrante si elle est `ready` **avec maillage** ; une tuile HORS DU
+   * CHAMP compte aussi, exactement comme dans le masque de R37 (« un enfant
+   * écarté vaut prêt, puisqu'aucun pixel ne dépend de lui »). Sans cette
+   * seconde branche, un bord d'emprise sorti de l'écran interdirait le palier
+   * **pour toujours** — le point fixe du §2 de la compétence, réinventé.
+   *
+   * ⛔ **AUCUNE TUILE N'EST CRÉÉE ICI** : la fonction lit `this.tiles`. Une
+   * absence rend `false`, et c'est `_prelireCrop` qui la fait naître, sur le
+   * crédit de l'image.
+   */
+  _cropCouvert(L, camDir) {
+    const rep = this._crop
+    if (!rep || L <= ROOT_Z) return false
+    // le niveau PARENT : c'est lui qu'on énumère, voir juste dessous
+    const P = L - 1
+    const n = 2 ** P
+    const y0 = Math.max(0, Math.floor((rep.cy - rep.demi) * n))
+    const y1 = Math.min(n - 1, Math.floor((rep.cy + rep.demi) * n))
+    const x0 = Math.floor((rep.cx - rep.demi) * n)
+    const x1 = Math.floor((rep.cx + rep.demi) * n)
+    if (y1 < y0 || x1 < x0) return false
+    if ((y1 - y0 + 1) * (x1 - x0 + 1) * 4 > TUILES_CROP_MAX) return false
+    // ⛔ **ON ÉNUMÈRE LES PARENTS, ET ON EXIGE LEURS QUATRE ENFANTS — LES FRÈRES
+    // DU BORD COMPRIS.** Un parent qui CHEVAUCHE l'emprise a des enfants
+    // entièrement dehors ; tant que l'un d'eux manque, `_traverse` prend le
+    // raffinement partiel (R37) et dessine ce parent SOUS ses enfants prêts.
+    // `tuileDansCrop` étant un test d'INTERSECTION, ce parent compte alors comme
+    // « dessiné dans l'emprise » : deux finesses dans le cadre. Mesuré au banc
+    // avec la seule énumération du niveau `L` : **une image à deux niveaux à
+    // chaque promotion** (`[13, 14]`, cinq tirages sur cinq). En passant par les
+    // parents, la promotion n'a lieu que quand le raffinement peut être ENTIER,
+    // et le compteur retombe à zéro.
+    for (let y = y0; y <= y1; y++) {
+      for (let xi = x0; xi <= x1; xi++) {
+        const x = ((xi % n) + n) % n
+        if (!tuileDansCrop(P, x, y, rep)) continue
+        for (const [cx, cy] of [[x * 2, y * 2], [x * 2 + 1, y * 2], [x * 2, y * 2 + 1], [x * 2 + 1, y * 2 + 1]]) {
+          // ⛔ **LA MÊME LISTE QUE `_children`, SINON LE PALIER SE BLOQUE POUR
+          // TOUJOURS — MESURÉ DANS L'APPLICATION.** Sous `poserCropSeul` (l'état
+          // de production), les enfants hors crop ne sont **jamais créés** :
+          // `_horsCropSeul` les écarte. Les attendre, c'est attendre une tuile
+          // que personne ne demandera — le crop est resté cloué à z14 aux quatre
+          // lieux (Majorque 900 m : 2,47 px par texel au lieu de 1,25). Et le
+          // raffinement partiel ne peut pas naître d'eux non plus, puisqu'ils
+          // n'entrent pas dans le masque.
+          if (this._horsCropSeul(L, cx, cy)) continue
+          const t = this.tiles.get(tileKey(L, cx, cy))
+          if (!t) return false
+          if (t.state === 'ready' && t.mesh) continue
+          // hors champ : aucun pixel n'en dépend, exactement comme dans le
+          // masque de R37 (« un enfant écarté vaut prêt »)
+          if (camDir && !this._dansLeChamp(t, camDir)) continue
+          return false
+        }
+      }
+    }
+    return true
+  }
+
+  /**
+   * **LE PALIER — CN2.** Un seul cran par image, et seulement quand le niveau
+   * visé couvre toute l'emprise. C'est la garantie « une seule finesse par
+   * image », y compris **pendant** l'affinage : entre deux paliers, l'écran ne
+   * change pas d'un pixel.
+   *
+   * ⚠️ **LA DESCENTE AUSSI EST ATOMIQUE.** Retomber vers un niveau grossier
+   * dont les ancêtres ont été évincés dessinerait un trou (ou un mélange) ; on
+   * ne redescend donc que sur du couvert. Rester trop fin ne coûte rien de
+   * plus : le raffinement, lui, s'arrête à la cible.
+   */
+  _majZoomCrop(camPos, camDir, camera) {
+    if (!this._crop) {
+      this._zCropCible = 0
+      this._zCropServi = 0
+      return
+    }
+    // levier débrayé (`cropZoomEcran = false`) : le dépôt d'avant CULL, au bit près
+    const zEcran = this._zCropEcran
+    this._zCropCible = !zEcran ? ZOOM_SOCLE : zEcran < ZOOM_SOCLE ? zEcran : this._zoomCropFin(camPos, camera)
+    // ⚠️ **L'AMORCE EST LE RÉGIME D'AVANT, EXPRÈS** : la première image sert au
+    // plus `ZOOM_SOCLE`, comme le dépôt. Tout ce qui est plus fin s'obtient
+    // ensuite, palier par palier — donc l'arrivée sur le bloc est inchangée.
+    //
+    // ⛔ **ET LE PALIER NE S'APPLIQUE QU'AU-DESSUS DU SOCLE — UN TEST VERT L'A
+    // EXIGÉ, PAS UNE INTUITION.** Jusqu'à `ZOOM_SOCLE`, la prescription reste
+    // celle du dépôt, suivie SANS attendre de couverture : c'est la borne
+    // d'écran de CULL ⑤, et elle doit pouvoir DESCENDRE instantanément (à
+    // 130 km elle vaut z11, à 900 km z4). Ma première écriture la faisait
+    // franchir un palier atomique : sur une emprise continentale, la couverture
+    // n'arrive jamais, le crop restait prescrit à z13 sur 6 376 km — CULL ⑤
+    // rejoué mot pour mot, et `test/crop-plafond-altitude.test.js` ① et ② l'ont
+    // attrapé au premier `npm test`.
+    if (this._zCropCible <= ZOOM_SOCLE) {
+      // régime du dépôt, au bit près : la borne d'écran est suivie sans délai,
+      // dans les deux sens. Les ancêtres du socle sont toujours là (ils sont le
+      // chemin de parcours), donc aucun trou n'est possible en redescendant.
+      this._zCropServi = this._zCropCible
+      return
+    }
+    if (this._zCropServi < ZOOM_SOCLE) this._zCropServi = ZOOM_SOCLE
+    if (this._zCropCible > this._zCropServi) {
+      if (this._cropCouvert(this._zCropServi + 1, camDir)) this._zCropServi++
+    } else if (this._zCropCible < this._zCropServi) {
+      if (this._cropCouvert(this._zCropServi - 1, camDir)) this._zCropServi--
+    }
+  }
+
+  /**
+   * **LA DEMANDE DU PALIER SUIVANT — CN2.** La tuile dessinée du crop fait
+   * naître ses enfants, qui ne seront DESSINÉS qu'au prochain palier.
+   *
+   * ⚠️ **CE N'EST PAS `_prelire`, ET LES DEUX GARDE-FOUS QU'ON RETIRE SONT
+   * MOTIVÉS** : `_prelire` ne sert que le centre de l'écran (`PRELECTURE_CENTRE`)
+   * parce qu'une descente libre abandonne ses bords. Le crop, lui, est une
+   * affiche : ses bords sont l'image. Le crédit, en revanche, se paie comme
+   * partout — le budget ne se desserre pas (×14 sur les requêtes, mesuré).
+   */
+  _prelireCrop(t, camDir) {
+    if (!this._enfantsPresents(t)) {
+      if (this._credit < 4) return
+      this._credit -= 4
+    }
+    for (const k of this._children(t)) {
+      if (!this._dansLeChamp(k, camDir)) continue
+      k.lastUsed = this.frame
+      if (k.state === 'empty') this._request(k)
+    }
+  }
+
   _contrePression() {
     return this.continu || this._cropAttendu
   }
@@ -5050,6 +5376,10 @@ export class Globe {
   /** Retire le crop — le globe redevient entier, parois comprises. */
   retirerCrop() {
     this._crop = null
+    // CN2 : le palier appartient à CE crop-là. Un repère neuf repart du régime
+    // d'arrivée (`ZOOM_SOCLE` au plus), jamais d'un palier hérité d'ailleurs.
+    this._zCropServi = 0
+    this._zCropCible = 0
     this.uniforms.uCropOn.value = 0
     this._melangeCrop(false)
     this.retirerParoisCrop()
@@ -8555,7 +8885,29 @@ export class Globe {
       return t.chord / Math.max(p.distanceTo(t.center) - t.chord * 0.5, 1)
     }
     const d = this._distanceEcran(t)
-    return 1000 - 1000 * (Math.min(d, 4) / 4) + (MAX_Z - t.z) * 0.1
+    // ══════ L'AFFICHE PASSE DEVANT — CN2 ═════════════════════════════════════
+    //
+    // ⚠️ **SOUS LE BLOC, TOUT EST AU CENTRE DE L'ÉCRAN, DONC PLUS RIEN NE
+    // DÉPARTAGE.** À 900 m le crop remplit le cadre : les tuiles de l'emprise ET
+    // celles du globe autour rendent `d = 0`, et le seul départage restant est
+    // `(MAX_Z − z) × 0,1`, qui **favorise le grossier** — c'est-à-dire tout sauf
+    // le palier qu'on cherche. Mesuré au banc avant ce bonus : le palier du crop
+    // met **200 images** à atteindre z16 à 900 m ; avec lui, 60 suffisent. Ce
+    // n'est pas un budget desserré (le crédit ne bouge pas, §5 de la
+    // compétence) : c'est un ORDRE de service. Ce qui est dans l'affiche part
+    // d'abord ; le reste part ensuite, et rien n'est demandé en plus.
+    // ⛔ **ET « DANS L'AFFICHE » INCLUT LES FRÈRES DU BORD — SANS EUX LE
+    // CORRECTIF NE TIENT PAS, MESURÉ.** Une tuile qui CHEVAUCHE l'emprise a des
+    // enfants entièrement DEHORS ; tant que l'un d'eux n'est pas prêt, le
+    // raffinement partiel (R37) dessine le parent sous ses enfants prêts, et
+    // `tuileDansCrop` — un test d'INTERSECTION — compte ce parent comme
+    // « dessiné dans l'emprise ». C'est exactement le `[11, 16]` que CN1 a
+    // mesuré au §5, et au premier essai j'ai rendu `[14, 15, 16]` à 900 m en
+    // servant l'emprise en premier et en affamant ses frères. Le bord de
+    // l'affiche part donc avec elle.
+    const c = this._crop
+    const affiche = c && (tuileDansCrop(t.z, t.x, t.y, c) || (t.z > ROOT_Z && tuileDansCrop(t.z - 1, t.x >> 1, t.y >> 1, c))) ? PRIORITE_CROP : 0
+    return 1000 - 1000 * (Math.min(d, 4) / 4) + (MAX_Z - t.z) * 0.1 + affiche
   }
 
   // ══════════ LA DISTANCE ÉCRAN DU BORD DE LA TUILE AU CENTRE — CIB ══════════
@@ -9262,6 +9614,10 @@ export class Globe {
     // ══════ LE ZOOM PRESCRIT PAR LE CROP SUIT L'ÉCRAN — CULL, défaut ⑤ ══════
     // Une seule valeur par image, pour toute l'emprise : voir `_zoomCropEcran`.
     this._zCropEcran = this._crop && this.cropZoomEcran ? this._zoomCropEcran(camPos) : 0
+    // ══════ ET LE NIVEAU DESSINÉ MONTE PAR PALIERS ENTIERS — CN2 ═════════════
+    // La cible peut valoir z16 ; ce qui est dessiné reste UNE seule valeur, et
+    // ne change qu'entre deux images entièrement couvertes.
+    this._majZoomCrop(camPos, camDir, camera)
 
     this._enParcours = true
     for (const root of this.roots) this._traverse(root, camPos, camDir)
@@ -9534,7 +9890,11 @@ export class Globe {
     // l'écran, la borne vaut 13 : **le régime d'arrivée est inchangé au bit
     // près**, et c'est le §5 de `/threejs-optimisation` (« réduis d'abord ce
     // qui entre ; souvent le second correctif devient inutile »).
-    const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop, this._zCropEcran || ZOOM_SOCLE) : 0
+    // ⚠️ **CN2 — C'EST `_zCropServi` QUI PRESCRIT, PAS LA CIBLE.** La cible est
+    // ce que l'écran veut ; le servi est ce que l'emprise sait déjà couvrir
+    // ENTIÈREMENT. Prescrire la cible ferait refendre au fil de l'eau et
+    // rejouerait le `[11, 16]` mesuré par CN1 au §5.
+    const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop, this._zCropServi || this._zCropEcran || ZOOM_SOCLE) : 0
     let wantSplit = zCrop
       ? t.z < zCrop
       : t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
@@ -9702,6 +10062,15 @@ export class Globe {
       // ⚠️ sur le chemin CONTINU seulement : c'est lui qui a le tri spatial et la
       // clé d'écran de PF2 ; sans eux, prélire, c'est remplir le cache d'invisible
       if (this.continu && this.prelecture && this._descend && !zCrop && t.z < MAX_Z && ratio > this.prelectureRatio) this._prelire(t, camDir)
+      // ══════ LE PALIER SUIVANT DU CROP — CN2 ═══════════════════════════════
+      // La tuile est au niveau SERVI et l'écran en veut un plus fin : ses
+      // enfants partent, sans rien changer à ce qui est dessiné cette image.
+      // ⛔ **PAS DE `MAX_Z` ICI, ET C'EST DÉLIBÉRÉ** : `MAX_Z = 15` borne le
+      // quadtree de DISTANCE (le globe autour) ; le crop, lui, est borné par
+      // `_plafondCrop()`, c'est-à-dire par la donnée. Monter `MAX_Z` aurait
+      // ouvert les niveaux fins à toute la calotte — la tempête de requêtes de
+      // la Tâche 4.
+      if (zCrop && t.z === zCrop && this._zCropCible > zCrop) this._prelireCrop(t, camDir)
       // ══════ L'IMAGERIE — Tâche R16, ET C'EST **ICI** QUE ÇA SE JOUE ═══════
       //
       // ⚠️⚠️ **SUR LES TUILES DESSINÉES, PAS SUR LES TUILES PARCOURUES — PIÈGE ①
