@@ -64,7 +64,7 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
-import { ancrageCartouche, baseCartoucheEnBloc } from './monde/cartouche-globe.js'
+import { ancrageCartouche, baseCartoucheEnBloc, poseDepuisParois } from './monde/cartouche-globe.js'
 import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
@@ -170,7 +170,7 @@ import { EXAGERATION_UNIQUE } from './monde/zoom-continu.js'
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
 // aucun. Voir `terrain.adopterFenetre`.
-import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre-bornee.js'
+import { construireFenetre, majHauteurs, recadrerFenetre, normaliserEmprise } from './monde/fenetre-bornee.js'
 // ⚠️ **LE FLUX EST LE CACHE DU QUADTREE, PAS UN SECOND CHARGEUR** (Tâche 6
 // quinquies) : `creerFlux` ne demande RIEN à sa naissance, et `remplirBorne`
 // borne le remplissage au débit RÉELLEMENT observé (règle R3, Tâche 4 ter).
@@ -4278,13 +4278,19 @@ function entrerEnVol() {
   realWater?.setCoastMask(null, false)
   coastMaskImage = null
   traffic.setZone(null)
-  // ⚠️ **LE CARTOUCHE SE CACHE, IL NE SE RECHARGE PAS.** `groundInfo.load`
-  // interroge un géocodeur : l'appeler sans lat/lon partirait chercher le nom de
-  // « NaN, NaN ». Et le laisser tel quel graverait sur le socle le nom et la
-  // plage d'altitude du palier qu'on vient de quitter — juste sur un cran (le
-  // lieu ne bouge pas), FAUX sur une plongée vers un autre continent.
-  // `fetchAndBuildDem` le rallume à l'atterrissage, à côté de `chargeCartouche`.
-  groundInfo.setVisible(false)
+  // ══════════ LE CARTOUCHE DIT CE QU'IL SAIT, TOUT DE SUITE — Tâche CAR ═════
+  //
+  // ⚠️ **IL SE CACHAIT ICI, ET C'ÉTAIT UN CLAQUEMENT PAR CRAN** (VID2 N4 : caché
+  // 1,1 à 1,8 s à chaque palier, sonde rAF) — pour ne pas graver le lieu qu'on
+  // quitte. Mais le lieu d'arrivée est CONNU à cette ligne (`loadSurface` vient
+  // d'écrire `params.demLat/demLon`), et l'emprise du palier se calcule sans
+  // rien charger (`empriseBlocMNT`). On ne cache donc plus : `loadSurface` a
+  // regravé les coordonnées justes et la barre d'échelle AVANT d'appeler ici
+  // (`groundInfo.annonce`, le seul appelant de cette fonction), et
+  // `chargeCartouche` complète (altitudes, nom, anecdote) à l'atterrissage.
+  // ⚠️ Hors mode sphère, `majCartoucheGlobe` ne gouverne pas la visibilité :
+  // on garde l'extinction d'avant, `fetchAndBuildDem` rallume.
+  if (!fusionDesPasses) groundInfo.setVisible(false)
   // ══════════ ET LE DAMIER PART AVEC LE MNT ═════════════════════════════════
   //
   // ⚠️ **`test/damier-uniformes.test.js` A ATTRAPÉ CETTE LIGNE MANQUANTE À LA
@@ -4536,6 +4542,20 @@ function largeurBlocM() {
   const f = terrain.fenetreBornee
   if (f?.largeurM > 0) return f.largeurM
   return dem?.extentMeters || 0
+}
+
+// La largeur du bloc du palier DEMANDÉ (`params.demZoom`, `demLat/demLon`),
+// avant que la fenêtre soit recadrée ou que le MNT arrive : c'est la même
+// emprise que `empriseBlocMNT` sert à `cadrageFenetre`, mesurée comme
+// `normaliserEmprise` le fait (largeur en degrés × cos de la latitude du
+// centre). Sert au cartouche provisoire d'`entrerEnVol` (Tâche CAR).
+function largeurBlocEstimeeM() {
+  if (!Number.isFinite(params.demLat) || !Number.isFinite(params.demLon) || !(params.demZoom > 0)) return null
+  try {
+    return normaliserEmprise(empriseBlocMNT({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })).largeurM
+  } catch {
+    return null
+  }
 }
 
 // ══════════ L'ALTITUDE DU PLAN `y = 0` DU BLOC — Tâche R15 ══════════════════
@@ -5426,8 +5446,51 @@ const _IDENTITE = [0, 0, 0, 1]
 // l'origine du bloc rend le repère de `crop-parois` à l'epsilon du double,
 // position ET quaternion (le relevé est dans `monde/cartouche-globe.js` §1).
 function echelleCartouche() {
+  const p = poseDesParois()
+  if (p) return p.echelle
   const largeur = largeurBlocM()
   return largeur > 0 ? facteurEchelle({ extentMeters: largeur, span: TERRAIN_SIZE }) : 0
+}
+//
+// ══════ ET LA TAILLE EST CELLE DES PAROIS, PAS DE L'EMPRISE DEMANDÉE — CAR ═══
+//
+// ⛔ **VID2 N5 : le cartouche faisait 2× (jusqu'à 4×) le socle pendant
+// WIDENING.** `largeurBlocM()` lit la fenêtre bornée, recadrée sur le NOUVEAU
+// palier dès `entrerEnVol` ; les parois du crop, elles, gardent l'ancienne
+// taille jusqu'à ce que le globe les repose. Mesuré à la sonde rAF : rapport
+// cartouche/parois **1,994 à z10, 1,998 à z11, 2,000 à z12, 4,000** en
+// WIDENING z12 → z10 — et le cartouche VISIBLE à 4× pendant 1,2 s.
+//
+// Le cartouche est du mobilier posé AUTOUR des parois : sa vérité, c'est
+// elles. On lit donc leur repère et leur largeur — `crop-parois` est posé par
+// le globe avec position, quaternion et une boîte englobante en unités de
+// globe — et on en tire la similitude : `echelle = largeur / TERRAIN_SIZE`.
+// C'est la même transformation que `ancrageCartouche`, prise par l'autre bout
+// (§1 de `monde/cartouche-globe.js` : identiques à l'epsilon du double au
+// repos). Sans parois (premières images, retour d'orbite) on retombe sur la
+// loi, comme avant.
+//
+// ⚠️ **LA BOÎTE EST CALCULÉE UNE FOIS PAR MAILLAGE** — `computeBoundingBox`
+// parcourt tous les sommets, et les parois ne changent pas de forme sans
+// changer d'objet (`poserParoisCrop` en crée un neuf).
+let _paroisMesurees = null
+function poseDesParois() {
+  const m = globe?._parois
+  if (!m?.geometry) return null
+  if (_paroisMesurees?.mesh !== m) {
+    const g = m.geometry
+    if (!g.boundingBox) g.computeBoundingBox()
+    const b = g.boundingBox
+    // largeur locale × échelle du maillage (1 après `decompose`, mais on la lit)
+    const largeur = (b.max.x - b.min.x) * (m.scale?.x || 1)
+    _paroisMesurees = { mesh: m, largeur }
+  }
+  return poseDepuisParois({
+    position: [m.position.x, m.position.y, m.position.z],
+    quaternion: [m.quaternion.x, m.quaternion.y, m.quaternion.z, m.quaternion.w],
+    largeur: _paroisMesurees.largeur,
+    span: TERRAIN_SIZE,
+  })
 }
 //
 // ══════ ET LA VISIBILITÉ SE DÉCIDE ICI, SOUS LE MODE SPHÈRE ════════════════
@@ -5445,21 +5508,30 @@ function echelleCartouche() {
 // suite et les quatre sites gardent la main, seuls.
 function majCartoucheGlobe() {
   if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
-  // ⚠️ **`dem` EST DANS LE PRÉDICAT, ET IL PORTE LE VOL.** `entrerEnVol` le met
-  // à `null` : sans lui, le cartouche du palier qu'on quitte resterait gravé
-  // pendant toute la descente, ce que la note d'`entrerEnVol` interdit.
-  const voulu = !!params.groundInfo && !!dem && cartoucheAffiche()
+  // ⚠️ **`dem` N'EST PLUS DANS LE PRÉDICAT — Tâche CAR (VID2 N4).** Il y était
+  // pour que le cartouche du palier qu'on quitte ne reste pas gravé pendant le
+  // vol ; mais `entrerEnVol` regrave maintenant le lieu d'arrivée dans la même
+  // image (`groundInfo.annonce`), donc il n'y a plus de mensonge à cacher — et
+  // le cacher coûtait **1,1 à 1,8 s de disparition à chaque cran** (sonde rAF).
+  // Un cartouche qui reste, avec un contenu juste, vaut mieux qu'un cartouche
+  // qui claque.
+  const voulu = !!params.groundInfo && cartoucheAffiche()
   if (voulu !== groundInfo.group.visible) groundInfo.setVisible(voulu)
   // ⚠️ **SORTIE SÈCHE QUAND LE CARTOUCHE EST CACHÉ.** Ce dépôt a déjà eu un
   // indicateur qui tournait 38 secondes à cause de reconstructions empilées :
   // celui-ci n'est qu'arithmétique, mais il n'a aucune raison de tourner en
   // orbite, et la garde est ce qui l'empêche d'y revenir par inadvertance.
   if (!voulu) return
-  const ancre = latLonOrigineBloc()
-  if (!ancre) return
-  const largeur = largeurBlocM()
-  if (!(largeur > 0)) return
-  const a = ancrageCartouche({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  // les parois d'abord (VID2 N5, voir `poseDesParois`) ; la loi sinon
+  const parois = poseDesParois()
+  const a = parois || (() => {
+    const ancre = latLonOrigineBloc()
+    if (!ancre) return null
+    const largeur = largeurBlocM()
+    if (!(largeur > 0)) return null
+    return ancrageCartouche({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  })()
+  if (!a) return
   groupeCartouche.position.set(a.position[0], a.position[1], a.position[2])
   groupeCartouche.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
   groupeCartouche.scale.setScalar(a.echelle)
@@ -7322,6 +7394,13 @@ modes = new Modes({
         params.demLon = lon
         if (zoom) params.demZoom = zoom
         params.demLocation = 'Custom'
+        // ══════ LE CARTOUCHE PREND LE LIEU À L'INSTANT OÙ IL EST DEMANDÉ — CAR ══
+        // Coordonnées et barre d'échelle sont connues ICI ; le reste arrive avec
+        // le MNT et le réseau (`chargeCartouche`). Regravé dans la même image,
+        // AVANT le vol comme avant le chargement bloquant : plus d'ancien lieu
+        // gravé sous un nouveau bloc (VID2 N3 — 2 à 3,3 s par cran, 426 ms de
+        // « Réunion » à Provence, sonde rAF).
+        groundInfo.annonce(lat, lon, { extentMeters: largeurBlocEstimeeM() })
         // ⚠️ `centreSur` : c'est LE point d'entrée de « on va quelque part ».
         // Les trois appelants de `loadSurface` portent tous un lieu VOULU — la
         // plongée depuis l'orbite (une recherche), l'escalier de zoom, et le
