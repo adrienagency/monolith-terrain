@@ -4885,12 +4885,16 @@ export class Globe {
     // repasse par pose de crop suffit et ne traverse aucune image.
     const effacaitAvant = Globe.prototype._effacementLateralActif.call(this)
     this._crop = rep
-    // ⚠️ **CN2 — UNE POSE NEUVE REPART DU RÉGIME D'ARRIVÉE.** Le palier
-    // (`_zCropServi`) est une propriété de l'EMPRISE : garder un z16 gagné sur
-    // l'emprise précédente ferait prescrire du fin sur une emprise non couverte,
-    // donc refendre au fil de l'eau — le mélange que tout ce correctif évite.
-    // On retombe donc au plus à `ZOOM_SOCLE`, exactement le dépôt d'avant, et le
-    // palier se regagne image par image.
+    // ⛔ **D25 — CE REMISE À ZÉRO ÉTAIT LA SURCOUCHE D'ADRIEN, MESURÉE.** Sous
+    // CN2, `_zCropServi` était un PALIER qui se regagnait image par image : une
+    // pose neuve — c'est-à-dire **tout changement d'échelle**, puisque
+    // `branchement-crop.js` repose le crop dès que `demZoom` ou `tuilesParBloc`
+    // bouge — rendait tout le bloc à `ZOOM_SOCLE` pendant des dizaines d'images.
+    // Mesuré (`sonde-tuile.mjs` B) : **500 à 788 retours en arrière de finesse**
+    // sur 20 images, jusqu'à 3 niveaux, alors que les tuiles fines étaient encore
+    // en cache. Les deux valeurs sont désormais recalculées à chaque image et se
+    // confondent ; la remise à zéro ne survit que pour ne pas laisser la valeur
+    // d'un AUTRE repère être lue avant le premier `update`.
     this._zCropServi = 0
     this._zCropCible = 0
     // ⛔ **LA RETENUE DE DÉMARRAGE S'ÉTEINT ICI, ET C'EST UNE RÉGRESSION LIVRÉE
@@ -5202,79 +5206,34 @@ export class Globe {
   }
 
   /**
-   * **L'EMPRISE EST-ELLE ENTIÈREMENT COUVERTE AU NIVEAU `L` ?** — la condition
-   * du palier atomique.
+   * **LA FINESSE DEMANDÉE — D25.** Il n'y a plus de palier : ce que l'écran
+   * demande est ce qui est prescrit, et le raffinement se fait **PAR TUILE**
+   * (R37) — une tuile prête est dessinée à sa finesse, elle n'attend pas ses
+   * sœurs.
    *
-   * ⚠️ **LA RÈGLE EST CELLE DE `_traverse`, PAS UNE AUTRE.** Une tuile compte
-   * comme couvrante si elle est `ready` **avec maillage** ; une tuile HORS DU
-   * CHAMP compte aussi, exactement comme dans le masque de R37 (« un enfant
-   * écarté vaut prêt, puisqu'aucun pixel ne dépend de lui »). Sans cette
-   * seconde branche, un bord d'emprise sorti de l'écran interdirait le palier
-   * **pour toujours** — le point fixe du §2 de la compétence, réinventé.
+   * ⛔ **CE QUI A ÉTÉ RETIRÉ ICI, ET POURQUOI — LIS `regle-D25.md`.** CN2 tenait
+   * DEUX niveaux : la cible et un « servi » qui ne montait d'un cran que lorsque
+   * le niveau suivant couvrait l'emprise **entière, frères du bord compris**
+   * (`_cropCouvert`, le PALIER ATOMIQUE). Il servait une exigence — *« une seule
+   * finesse par image, parce que l'affiche est imprimable »* — **que
+   * l'assistant a inventée et qu'Adrien a formellement démentie** le 2026-09-04.
    *
-   * ⛔ **AUCUNE TUILE N'EST CRÉÉE ICI** : la fonction lit `this.tiles`. Une
-   * absence rend `false`, et c'est `_prelireCrop` qui la fait naître, sur le
-   * crédit de l'image.
-   */
-  _cropCouvert(L, camDir) {
-    const rep = this._crop
-    if (!rep || L <= ROOT_Z) return false
-    // le niveau PARENT : c'est lui qu'on énumère, voir juste dessous
-    const P = L - 1
-    const n = 2 ** P
-    const y0 = Math.max(0, Math.floor((rep.cy - rep.demi) * n))
-    const y1 = Math.min(n - 1, Math.floor((rep.cy + rep.demi) * n))
-    const x0 = Math.floor((rep.cx - rep.demi) * n)
-    const x1 = Math.floor((rep.cx + rep.demi) * n)
-    if (y1 < y0 || x1 < x0) return false
-    if ((y1 - y0 + 1) * (x1 - x0 + 1) * 4 > TUILES_CROP_MAX) return false
-    // ⛔ **ON ÉNUMÈRE LES PARENTS, ET ON EXIGE LEURS QUATRE ENFANTS — LES FRÈRES
-    // DU BORD COMPRIS.** Un parent qui CHEVAUCHE l'emprise a des enfants
-    // entièrement dehors ; tant que l'un d'eux manque, `_traverse` prend le
-    // raffinement partiel (R37) et dessine ce parent SOUS ses enfants prêts.
-    // `tuileDansCrop` étant un test d'INTERSECTION, ce parent compte alors comme
-    // « dessiné dans l'emprise » : deux finesses dans le cadre. Mesuré au banc
-    // avec la seule énumération du niveau `L` : **une image à deux niveaux à
-    // chaque promotion** (`[13, 14]`, cinq tirages sur cinq). En passant par les
-    // parents, la promotion n'a lieu que quand le raffinement peut être ENTIER,
-    // et le compteur retombe à zéro.
-    for (let y = y0; y <= y1; y++) {
-      for (let xi = x0; xi <= x1; xi++) {
-        const x = ((xi % n) + n) % n
-        if (!tuileDansCrop(P, x, y, rep)) continue
-        for (const [cx, cy] of [[x * 2, y * 2], [x * 2 + 1, y * 2], [x * 2, y * 2 + 1], [x * 2 + 1, y * 2 + 1]]) {
-          // ⛔ **LA MÊME LISTE QUE `_children`, SINON LE PALIER SE BLOQUE POUR
-          // TOUJOURS — MESURÉ DANS L'APPLICATION.** Sous `poserCropSeul` (l'état
-          // de production), les enfants hors crop ne sont **jamais créés** :
-          // `_horsCropSeul` les écarte. Les attendre, c'est attendre une tuile
-          // que personne ne demandera — le crop est resté cloué à z14 aux quatre
-          // lieux (Majorque 900 m : 2,47 px par texel au lieu de 1,25). Et le
-          // raffinement partiel ne peut pas naître d'eux non plus, puisqu'ils
-          // n'entrent pas dans le masque.
-          if (this._horsCropSeul(L, cx, cy)) continue
-          const t = this.tiles.get(tileKey(L, cx, cy))
-          if (!t) return false
-          if (t.state === 'ready' && t.mesh) continue
-          // hors champ : aucun pixel n'en dépend, exactement comme dans le
-          // masque de R37 (« un enfant écarté vaut prêt »)
-          if (camDir && !this._dansLeChamp(t, camDir)) continue
-          return false
-        }
-      }
-    }
-    return true
-  }
-
-  /**
-   * **LE PALIER — CN2.** Un seul cran par image, et seulement quand le niveau
-   * visé couvre toute l'emprise. C'est la garantie « une seule finesse par
-   * image », y compris **pendant** l'affinage : entre deux paliers, l'écran ne
-   * change pas d'un pixel.
+   * ⚡ **CE QUE LE PALIER COÛTAIT, MESURÉ** (`scripts/sonde-tuile.mjs`,
+   * scénario B, latence de 4 images) : sur un crop DÉJÀ NET à z16, un simple
+   * changement d'échelle (`poserCrop` remettait `_zCropServi` à zéro) redessinait
+   * tout le bloc à z13/z14 pendant **au moins 20 images**, alors que la cible
+   * valait z16 **et que les tuiles z16 étaient encore en cache** — 500 à 788
+   * retours en arrière de finesse sur 20 images × 49 points, jusqu'à **3 niveaux**
+   * plus grossier. C'est mot pour mot la « surcouche plus colorée en moins bonne
+   * définition » d'Adrien : une tuile grossière porte **un seul raster** décodé
+   * pour la hauteur ET la couleur (CN1), donc moins d'ombrage fin et plus de
+   * teinte nue.
    *
-   * ⚠️ **LA DESCENTE AUSSI EST ATOMIQUE.** Retomber vers un niveau grossier
-   * dont les ancêtres ont été évincés dessinerait un trou (ou un mélange) ; on
-   * ne redescend donc que sur du couvert. Rester trop fin ne coûte rien de
-   * plus : le raffinement, lui, s'arrête à la cible.
+   * ⛔ **ET `_zCropServi` RESTE, PARCE QU'IL EST LU AILLEURS.** `main.js`
+   * (`getZoomCropServi`) et le cartouche l'affichent : il doit continuer à dire
+   * **ce qui est dessiné**. Sans palier, ce qui est dessiné est la cible — donc
+   * les deux valeurs se confondent, et le cartouche ne ment pas davantage
+   * qu'avant (0 écart sur 3 413 images, CN4).
    */
   _majZoomCrop(camPos, camDir, camera) {
     if (!this._crop) {
@@ -5298,42 +5257,24 @@ export class Globe {
     // n'arrive jamais, le crop restait prescrit à z13 sur 6 376 km — CULL ⑤
     // rejoué mot pour mot, et `test/crop-plafond-altitude.test.js` ① et ② l'ont
     // attrapé au premier `npm test`.
-    if (this._zCropCible <= ZOOM_SOCLE) {
-      // régime du dépôt, au bit près : la borne d'écran est suivie sans délai,
-      // dans les deux sens. Les ancêtres du socle sont toujours là (ils sont le
-      // chemin de parcours), donc aucun trou n'est possible en redescendant.
-      this._zCropServi = this._zCropCible
-      return
-    }
-    if (this._zCropServi < ZOOM_SOCLE) this._zCropServi = ZOOM_SOCLE
-    if (this._zCropCible > this._zCropServi) {
-      if (this._cropCouvert(this._zCropServi + 1, camDir)) this._zCropServi++
-    } else if (this._zCropCible < this._zCropServi) {
-      if (this._cropCouvert(this._zCropServi - 1, camDir)) this._zCropServi--
-    }
+    // ⛔ **UN SEUL RÉGIME, DANS LES DEUX SENS — D25.** La borne d'écran est
+    // suivie sans délai, comme le dépôt d'avant CN2 le faisait déjà **sous** le
+    // socle (`test/crop-plafond-altitude.test.js` ① et ②). Ce qui manque encore
+    // à l'écran ne manque plus en BLOC : `_traverse` prend le raffinement partiel
+    // de R37 — les enfants prêts se dessinent, le parent ne couvre que **sous les
+    // manquants** — donc l'affiche s'affine du centre vers les bords au lieu de
+    // basculer d'un coup.
+    this._zCropServi = this._zCropCible
+    void camDir
   }
 
-  /**
-   * **LA DEMANDE DU PALIER SUIVANT — CN2.** La tuile dessinée du crop fait
-   * naître ses enfants, qui ne seront DESSINÉS qu'au prochain palier.
-   *
-   * ⚠️ **CE N'EST PAS `_prelire`, ET LES DEUX GARDE-FOUS QU'ON RETIRE SONT
-   * MOTIVÉS** : `_prelire` ne sert que le centre de l'écran (`PRELECTURE_CENTRE`)
-   * parce qu'une descente libre abandonne ses bords. Le crop, lui, est une
-   * affiche : ses bords sont l'image. Le crédit, en revanche, se paie comme
-   * partout — le budget ne se desserre pas (×14 sur les requêtes, mesuré).
-   */
-  _prelireCrop(t, camDir) {
-    if (!this._enfantsPresents(t)) {
-      if (this._credit < 4) return
-      this._credit -= 4
-    }
-    for (const k of this._children(t)) {
-      if (!this._dansLeChamp(k, camDir)) continue
-      k.lastUsed = this.frame
-      if (k.state === 'empty') this._request(k)
-    }
-  }
+  // ⛔ **`_prelireCrop` A ÉTÉ RETIRÉ AVEC LE PALIER — D25.** Il faisait naître
+  // les enfants d'une tuile dessinée « au niveau servi » pour qu'ils soient
+  // dessinés **au palier suivant**. Sans palier, `zCrop` vaut la cible pour
+  // toute tuile de l'emprise, donc `t.z === zCrop && _zCropCible > zCrop` était
+  // devenu **impossible** : la condition ne pouvait plus être vraie une seule
+  // fois. Ce sont désormais `wantSplit` et R37 qui font naître ces enfants, sur
+  // le même crédit (`_credit -= 4`) et avec la même clé de priorité.
 
   _contrePression() {
     return this.continu || this._cropAttendu
@@ -9890,10 +9831,12 @@ export class Globe {
     // l'écran, la borne vaut 13 : **le régime d'arrivée est inchangé au bit
     // près**, et c'est le §5 de `/threejs-optimisation` (« réduis d'abord ce
     // qui entre ; souvent le second correctif devient inutile »).
-    // ⚠️ **CN2 — C'EST `_zCropServi` QUI PRESCRIT, PAS LA CIBLE.** La cible est
-    // ce que l'écran veut ; le servi est ce que l'emprise sait déjà couvrir
-    // ENTIÈREMENT. Prescrire la cible ferait refendre au fil de l'eau et
-    // rejouerait le `[11, 16]` mesuré par CN1 au §5.
+    // ⚡ **D25 — LA PRESCRIPTION EST CE QUE L'ÉCRAN DEMANDE.** `_zCropServi`
+    // vaut désormais `_zCropCible` (le palier atomique est abrogé). Le crop
+    // refend donc **au fil de l'eau**, tuile par tuile, et R37 dessine les
+    // enfants prêts sous un parent réduit aux quadrants manquants. Le `[11, 16]`
+    // que CN1 relevait dans le même cadre **n'est pas un défaut** : c'est le
+    // comportement normal d'un quadtree qui raffine (D25, §« ce qui est abrogé »).
     const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop, this._zCropServi || this._zCropEcran || ZOOM_SOCLE) : 0
     let wantSplit = zCrop
       ? t.z < zCrop
@@ -10062,15 +10005,10 @@ export class Globe {
       // ⚠️ sur le chemin CONTINU seulement : c'est lui qui a le tri spatial et la
       // clé d'écran de PF2 ; sans eux, prélire, c'est remplir le cache d'invisible
       if (this.continu && this.prelecture && this._descend && !zCrop && t.z < MAX_Z && ratio > this.prelectureRatio) this._prelire(t, camDir)
-      // ══════ LE PALIER SUIVANT DU CROP — CN2 ═══════════════════════════════
-      // La tuile est au niveau SERVI et l'écran en veut un plus fin : ses
-      // enfants partent, sans rien changer à ce qui est dessiné cette image.
-      // ⛔ **PAS DE `MAX_Z` ICI, ET C'EST DÉLIBÉRÉ** : `MAX_Z = 15` borne le
-      // quadtree de DISTANCE (le globe autour) ; le crop, lui, est borné par
-      // `_plafondCrop()`, c'est-à-dire par la donnée. Monter `MAX_Z` aurait
-      // ouvert les niveaux fins à toute la calotte — la tempête de requêtes de
-      // la Tâche 4.
-      if (zCrop && t.z === zCrop && this._zCropCible > zCrop) this._prelireCrop(t, camDir)
+      // ⛔ **IL Y AVAIT ICI LE PALIER SUIVANT DU CROP (`_prelireCrop`, CN2) — D25
+      // L'A RETIRÉ.** Sans palier, `zCrop` vaut la cible : la condition
+      // `_zCropCible > zCrop` ne peut plus être vraie. Les enfants du crop
+      // naissent maintenant par `wantSplit`, quarante lignes plus haut.
       // ══════ L'IMAGERIE — Tâche R16, ET C'EST **ICI** QUE ÇA SE JOUE ═══════
       //
       // ⚠️⚠️ **SUR LES TUILES DESSINÉES, PAS SUR LES TUILES PARCOURUES — PIÈGE ①

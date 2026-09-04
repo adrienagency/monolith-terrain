@@ -193,6 +193,27 @@ async function tourner(g, cam, images = 60) {
 }
 
 /** Le niveau le plus fin MAILLÉ dans l'emprise du crop. */
+/**
+ * **LA FINESSE RENDUE EN UN POINT — D25.** La première tuile VISIBLE qui peint
+ * le point, en descendant depuis la racine. Une tuile partielle (R37) ne peint
+ * que les quadrants de son masque : si le quadrant du point n’y est pas, on
+ * continue vers l’enfant. Rend 0 quand aucun maillage ne peint le point.
+ */
+function finesseEn(g, mx, my) {
+  for (let z = 2; z <= 22; z++) {
+    const n = 2 ** z
+    const x = Math.min(n - 1, Math.floor(mx * n))
+    const y = Math.min(n - 1, Math.floor(my * n))
+    const t = g.tiles.get(`${z}/${x}/${y}`)
+    if (!t || !t.mesh?.visible) continue
+    if (!t._partiel) return z
+    const cx = Math.floor(mx * n * 2) & 1
+    const cy = Math.floor(my * n * 2) & 1
+    if (t._partiel & (1 << (cx + (cy << 1)))) return z
+  }
+  return 0
+}
+
 const zDansCrop = (g) => {
   let z = 0
   for (const t of g.tiles.values()) if (t.mesh && t.z > z && g._crop && tuileDansCrop(t.z, t.x, t.y, g._crop)) z = t.z
@@ -295,23 +316,40 @@ test('② à l’altitude de travail, un texel servi ne couvre pas plus de 2 pix
   assert.deepEqual(echecs, [], `le texel servi est trop gros :\n  ${echecs.join('\n  ')}`)
 })
 
-// ═════ ③ GARDE — UNE SEULE FINESSE PAR IMAGE ═══════════════════════════════
+// ═════ ③ GARDE — AU REPOS, L’EMPRISE EST PEINTE À LA FINESSE SERVIE ═════
 //
-// ⛔ **L'EXIGENCE NON NÉGOCIABLE D'ADRIEN, ET ELLE EST TENUE AUJOURD'HUI.** Le
-// crop est une affiche imprimable : deux résolutions visibles dans le même cadre
-// sont un échec, même si elles sont plus nettes. Mesuré dans l'application :
-// l'histogramme des niveaux DESSINÉS dans l'emprise vaut `{13: n}` — un seul
-// niveau — à toutes les altitudes et sur les quatre lieux.
+// ⛔ **CE TEST GARDAIT « UNE SEULE FINESSE PAR IMAGE ». LA RÈGLE D25 L’ABROGE, ET
+// IL EST DONC RÉÉCRIT — PAS SUPPRIMÉ.** L’exigence n’a jamais été une demande
+// d’Adrien : l’assistant l’avait inventée (« l’affiche est imprimable ») et Adrien
+// l’a démentie mot pour mot le 2026-09-04. Le raffinement est désormais **par
+// tuile** : deux finesses voisines pendant l’affinage sont le comportement normal
+// d’un quadtree, et le `[11, 16]` que CN1 relevait n’est pas un défaut.
 //
-// ⚠️ **CE TEST EST VERT ET DOIT LE RESTER.** C'est lui qui interdit au
-// correcteur de gagner en netteté en laissant le quadtree refendre par distance
-// dans l'emprise.
-test('③ garde — une seule finesse dessinée dans l’emprise, à chaque altitude', async () => {
+// ⚡ **CE QUI RESTE VRAI, ET QUI EST PLUS FORT QUE L’ANCIENNE ASSERTION.** Ce banc
+// résout ses dalles en une microtâche : après `tourner`, tout est arrivé. **Au
+// REPOS**, l’affinage est fini, donc l’emprise doit être peinte **entièrement**
+// (aucun trou) et **à la finesse servie** (aucun reste plus grossier). L’ancienne
+// assertion — `n.length === 1` — se contentait de compter les niveaux visibles ;
+// celle-ci vérifie ce que chaque POINT de l’emprise reçoit, quadrant partiel de
+// R37 compris, donc elle attrape en plus un trou et un parent oublié dessous.
+//
+// ⚠️ **ET ELLE N’INTERDIT PLUS RIEN PENDANT L’AFFINAGE** — c’est
+// `test/crop-finesse-palier.test.js` qui garde le régime transitoire, avec une
+// porte réseau, et sur la bonne grandeur : le RETOUR EN ARRIÈRE.
+test('③ garde — au repos, chaque point de l’emprise est peint à la finesse servie', async () => {
   for (const altM of [20_000, 5_000, 2_000, 900, 600]) {
     const g = neuf(); poser(g, 15); await tourner(g, camera(LAT, LON, altM))
-    const n = niveauxDansCrop(g)
-    assert.ok(n.length > 0, `rien de dessiné dans l’emprise à ${altM} m — le test se mentirait`)
-    assert.equal(n.length, 1, `${n.length} finesses dans le même cadre à ${altM} m : ${JSON.stringify(n)}`)
+    const rep = g._crop
+    const f = []
+    for (let j = 0; j < 7; j++) {
+      for (let i = 0; i < 7; i++) {
+        const mx = rep.cx + rep.demi * ((2 * (i + 0.5)) / 7 - 1) * 0.98
+        const my = rep.cy + rep.demi * ((2 * (j + 0.5)) / 7 - 1) * 0.98
+        f.push(finesseEn(g, mx, my))
+      }
+    }
+    assert.equal(f.filter((z) => z === 0).length, 0, `à ${altM} m, ${f.filter((z) => z === 0).length} points de l’emprise ne sont peints par aucune tuile — un trou`)
+    assert.equal(Math.min(...f), g._zCropServi, `à ${altM} m, un reste plus grossier subsiste au repos : min z${Math.min(...f)} pour une finesse servie z${g._zCropServi}`)
   }
 })
 
