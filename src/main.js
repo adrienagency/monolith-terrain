@@ -68,6 +68,13 @@ import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
+// ⚡ **LE SEUIL DE MORT DU CROP, LU ET NON RECOPIÉ — Tâche SORTIE.** La poussée
+// de sortie de la molette a besoin de savoir OÙ elle doit porter l'altitude ;
+// en écrire une seconde valeur ici, c'était une sixième grandeur à tenir
+// d'accord avec `seuil-socle.js`. Elle ne DÉCIDE de rien : la mort reste
+// prononcée par `socleVisible` (D21 ①), la poussée ne fait que viser.
+import { SEUIL_MORT_M } from './monde/seuil-socle.js'
+import { creerConfirmationSortie } from './monde/sortie-molette.js'
 // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G. ⚠️ **PUR, ET C'EST LA CONDITION DE
 // SA VÉRIFICATION** : la loi ne peut pas vivre ici, aucun test ne charge
 // `main.js`. Voir `majEstompage` plus bas.
@@ -6789,7 +6796,10 @@ const veilleCrop = creerVeilleCrop({
   globe: () => globe,
   contexte: contexteCrop,
   // la naissance et la mort du crop posent l'état du compositeur — voir ci-dessus
-  surBascule: () => poserRegimeCrop(),
+  // ⚡ **ET LA POUSSÉE DE SORTIE S'ARRÊTE ICI — Tâche SORTIE.** La mort du crop
+  // est le seul événement qui doive l'éteindre : la laisser courir après aurait
+  // fait franchir des niveaux toute seule jusqu'à la porte orbitale.
+  surBascule: () => { poserRegimeCrop(); surBasculeCrop() },
   estompage: veilleEstompage,
   // ⚠️ **LE REPOS ENTRE PAR LA MÊME PORTE QUE L'ESTOMPAGE — Tâche N.** Il
   // commande deux choses qui doivent être vraies ensemble : l'estompage plein
@@ -13933,8 +13943,70 @@ function intentionZoom(deltaY) {
   if (!(Number.isFinite(deltaY) && deltaY !== 0)) return
   if (deltaY > 0) { veilleCrop?.armerSortie?.(); veilleSocle?.armerSortie?.() }
   else { veilleCrop?.desarmerSortie?.(); veilleSocle?.desarmerSortie?.() }
+  confirmerSortieMolette(deltaY)
 }
 renderer.domElement.addEventListener('wheel', (e) => intentionZoom(e.deltaY), { passive: true })
+
+// ══════════ LA MOLETTE SORT DU CROP — Tâche SORTIE, D21 ① amendée ═══════════
+//
+// > **Adrien, 2026-09-04 :** le clic droit reste un pan dans le crop ; les
+// > sorties du crop sont désormais **DEUX** — le dézoom à la molette et le
+// > bouton « map monde ».
+//
+// ⚡ **LA MOLETTE ÉTAIT UNE SORTIE SUR LE PAPIER SEULEMENT.** Mesuré ici avant
+// tout correctif (`scripts/sonde-sortie.mjs`, `.banc/SORTIE/avant-sortie-8.json`,
+// un cran par lecture, un chargement par mesure) : **161 à 162 crans** depuis
+// 466 m, dont **23 morts d'affilée** (crans 21 → 43, altitude figée à 616 m).
+//
+// ⛔ **LA CAUSE DES CRANS MORTS N'EST PAS LE PAS DE MOLETTE** — c'est
+// `controls.maxDistance` : la caméra colle au plafond du niveau, `_applyZoom`
+// clippe le déplacement mais le compteur encaisse l'intention (R23), et le
+// franchissement qui finit par libérer la caméra **CONSERVE l'altitude** (c'est
+// sa définition). Vingt-trois crans passent donc entièrement dans un compteur.
+// **Grossir le cran (direction A du brief) n'y change rien** : contre un
+// plafond, la taille du pas ne déplace personne. Et il aurait fallu `×1,56` par
+// cran pour tenir « ≤ 10 » — c'est-à-dire jeter le zoom doux de D19, noté 9,75.
+//
+// ➡️ **DIRECTION B : une sortie FRANCHE, armée par une intention confirmée.**
+// Trois crans de dézoom d'affilée dans le crop lancent `armerPousseeSortie` ;
+// la poussée pompe l'intention jusqu'à ce que l'altitude franchisse
+// `SEUIL_MORT_M`, et **c'est la loi de D21 ① qui tue le crop, pas ce code**.
+// `sortieArmee` était déjà vraie dès le premier cran : il ne manquait que
+// l'altitude.
+//
+// ⚠️ **TROIS, ET PAS UN** — le critère d'Adrien : « un cran de dézoom isolé ne
+// doit PAS sortir du crop ». Un cran de zoom AVANT remet le compte à zéro (il
+// désarme déjà `sortieArmee` deux lignes plus haut : une seule idée, un seul
+// endroit), et un silence de plus d'une seconde aussi — sans quoi trois crans
+// donnés à trois minutes d'intervalle éjecteraient Adrien du crop.
+//
+// ⚠️ **ARMÉ AU NIVEAU DU GESTE, comme l'intention elle-même**, et pour la même
+// raison : `_zoomGesture` sort tôt sur six gardes, et la confirmation s'y
+// perdrait. ⚡ **C'est aussi la leçon systémique du chantier** : un correctif de
+// geste se mesure sur le GESTE, jamais sur l'API qui lui ressemble.
+// ⚠️ **LA LOI EST PURE ET VIT AILLEURS** (`monde/sortie-molette.js`) : ni la
+// caméra, ni le crop, ni l'altitude. `main.js` n'est chargé par aucun test de ce
+// dépôt (§0 du plan) ; une confirmation écrite ici ne serait gardée par rien.
+const confirmationSortie = creerConfirmationSortie()
+/** ⚠️ La marge sur `SEUIL_MORT_M` paie les crans clippés du plancher du crop
+ *  (0,4 nat mesuré) ; elle est SANS effet sur le résultat, puisque la poussée
+ *  est arrêtée à la mort du crop — elle évite seulement une course trop courte. */
+const MARGE_SORTIE = 1.6
+function confirmerSortieMolette(deltaY) {
+  const dansLeCrop = !!(terreUniqueBranchee && veilleCrop?.pose && modes && modes.mode === 'surface')
+  if (!confirmationSortie.cran(deltaY, performance.now(), dansLeCrop)) return
+  const alt = altitudeCadrageM()
+  if (!(Number.isFinite(alt) && alt > 0)) return
+  const budget = Math.log((SEUIL_MORT_M * MARGE_SORTIE) / alt)
+  if (budget > 0) modes.armerPousseeSortie?.(budget)
+}
+// La poussée est arrêtée par la MORT du crop, et par elle seule — c'est le seul
+// endroit qui la connaisse (`surBascule`, à la naissance comme à la mort).
+function surBasculeCrop() {
+  confirmationSortie.reinitialiser()
+  if (!veilleCrop?.pose) modes?.annulerPousseeSortie?.()
+}
+window.__exp.confirmationSortie = confirmationSortie
 
 // ══════════ LE RESTE DU VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ════════════
 //

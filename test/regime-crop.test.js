@@ -169,7 +169,11 @@ test('② quater la veille du crop est branchée sur le régime, et l’état in
   const src = sansCommentaires(lire('src/main.js'))
   const i = src.indexOf('const veilleCrop = creerVeilleCrop({')
   const appel = src.slice(i, src.indexOf('\n})', i))
-  assert.match(appel, /surBascule: \(\) => poserRegimeCrop\(\)/)
+  // ⚡ **ET LA POUSSÉE DE SORTIE EST ÉTEINTE AU MÊME ENDROIT — tâche SORTIE.**
+  // `surBascule` est la seule porte appelée à la naissance ET à la mort du crop :
+  // c'est donc là, et nulle part ailleurs, que la poussée de sortie de la
+  // molette doit rendre la main. Le régime du compositeur reste en tête.
+  assert.match(appel, /surBascule: \(\) => \{ poserRegimeCrop\(\); surBasculeCrop\(\) \}/)
   assert.match(src, /poserRegimeCrop\(\)\ntick\(\)\n/, 'l’état initial (pas de crop → pas d’effets) est posé juste avant la première image')
   // le prédicat : `veilleCrop.pose` sous terre unique, la vue de surface sinon
   assert.match(src, /function dedansCrop\(\) \{\n  return terreUniqueBranchee \? !!veilleCrop\?\.pose : modes\?\.mode === 'surface'\n\}/)
