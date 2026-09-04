@@ -81,6 +81,11 @@ export function creerVeilleSocle({
   // ce qui est réellement POSÉ à l'écran — le ET des deux
   let pose = modeSurface && auSeuil
   let bascules = 0
+  // ⚡ **D21 ① — L'INTENTION DE SORTIE, LA MÊME QUE `branchement-crop.js`.**
+  // Les deux automates portent la même loi (`main.js:5891`) : si l'un exigeait
+  // une intention et l'autre non, `?terre=deux` et `?terre=unique` mourraient à
+  // deux endroits différents. Ici comme là-bas, seule la MORT en dépend.
+  let sortieArmee = false
 
   function poser() {
     const voulu = modeSurface && auSeuil
@@ -109,9 +114,17 @@ export function creerVeilleSocle({
      */
     maj(altitudeEllipsoideM) {
       if (!modeSurface) return pose
-      auSeuil = socleVisible({ altitudeEllipsoideM, visibleAvant: auSeuil })
+      auSeuil = socleVisible({ altitudeEllipsoideM, visibleAvant: auSeuil, sortieArmee })
+      if (!auSeuil) sortieArmee = false // l'intention est consommée
       return poser()
     },
+
+    /** D21 ① — armer la sortie : un dézoom explicite (molette, clic droit). */
+    armerSortie() { sortieArmee = true; return sortieArmee },
+    /** D21 ① — et la désarmer : un zoom AVANT. */
+    desarmerSortie() { sortieArmee = false; return sortieArmee },
+    /** L'intention est-elle armée ? — pour les sondes et les bancs. */
+    get sortieArmee() { return sortieArmee },
 
     /** Ce qui est posé à l'écran. */
     get visible() { return pose },

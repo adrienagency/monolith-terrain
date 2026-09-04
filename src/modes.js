@@ -383,6 +383,14 @@ export class Modes {
         // propre zoom. On ne touche à RIEN d'autre — le déplacement à deux
         // doigts appartient à OrbitControls, sur ce même élément.
         if (e.cancelable) e.preventDefault()
+        // ⚡ **D21 ① — LE PINCEMENT EST UN ZOOM, DONC UNE INTENTION.**
+        // ⛔ **ET IL NE PASSE PAR AUCUN ÉVÉNEMENT `wheel` DU DOM** : il en
+        // FABRIQUE un faux et le donne à `_zoomGesture` directement (c'est la
+        // ligne suivante). L'écouteur `wheel` de `main.js`, où les trois autres
+        // gestes de zoom arment la sortie du crop, ne le voit donc jamais —
+        // sans ce crochet, un pincement d'écartement sur tablette ne pourrait
+        // PLUS sortir du crop, et il ne resterait que le bouton monde.
+        this.hooks.intentionZoom?.(m.deltaY)
         this._zoomGesture({ deltaY: m.deltaY, clientX: m.clientX, clientY: m.clientY, preventDefault: NOOP })
       },
       { passive: false }

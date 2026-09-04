@@ -7008,11 +7008,27 @@ modes = new Modes({
     // le seuil du socle et l'estompage. **Aucun nombre nouveau n'entre dans le
     // dépôt** : le seuil de repos et son hystérésis sont ceux de la Tâche N,
     // mesurés, et la naissance du crop est celle du seuil.
-    arriveeSurLeBloc: () => !!veilleCrop?.repos,
-    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** `veilleCrop.pose` seul — un
-    // signal de LIEU. Son front descendant rend la vue au nadir, pour que la
-    // sortie d'orbite n'ait plus rien à faire claquer. Voir `_armerRetourNadir`.
-    surLeBloc: () => !!veilleCrop?.pose,
+    // ⚡ **D21 ② — `arriveeBloc`, PAS `repos`.** `repos` vaut « crop posé ET vue
+    // au repos » ; depuis D21 le crop naît au palier z7 (600 km), dix-huit fois
+    // plus haut que le bloc. Lire `repos` inclinerait la caméra en vue
+    // CONTINENTALE — la violation exacte que D16 ter nomme (« pas avant »).
+    // `arriveeBloc` ajoute le SEUL automate d'altitude qui n'a pas bougé :
+    // `SEUIL_BLOC_M` / `SEUIL_BLOC_MORT_M`, les deux seuils d'avant D21 au bit
+    // près. La bascule tombe donc exactement où elle tombait hier.
+    arriveeSurLeBloc: () => !!veilleCrop?.arriveeBloc,
+    // ⚡ **ET LE MIROIR : est-on SUR le bloc ?** Son front DESCENDANT rend la vue
+    // au nadir, pour que la sortie d'orbite n'ait plus rien à faire claquer.
+    // Voir `_armerRetourNadir`.
+    //
+    // ⚡ **D21 ② — `auBloc`, PAS `pose`, ET C'EST LA MOITIÉ SYMÉTRIQUE DU
+    // DÉPARTAGE.** La bascule de trois quarts arrive à `arriveeBloc` ; son
+    // retour doit partir au MÊME endroit, sinon D16 ter tombe par l'autre bout.
+    // Sur `pose`, le retour au nadir ne s'armerait plus qu'à **750 km**
+    // (`SEUIL_MORT_M`) : entre 750 km et 32 km la caméra garderait l'inclinaison
+    // héritée, alors que D16 ter écrit « NADIR, inchangé — aucune bascule
+    // pendant la descente » sur tout ce segment. Sur `auBloc`, le retour part à
+    // **40 342,8 m** — exactement où il partait avant D21.
+    surLeBloc: () => !!veilleCrop?.auBloc,
     // ⚡ **ET LE PRÉDICAT DU PIVOT — R27.** *« Il doit toujours viser le centre
     // de la Terre. Il change uniquement quand on passe en mode bloc croppé. »*
     //
@@ -7022,7 +7038,36 @@ modes = new Modes({
     // loi du mode plat hérité — où viser un point EST le produit. Le terme
     // `terreUniqueBranchee` est donc la moitié de la question, pas une prudence.
     // `?terre=deux` rend le dépôt d'avant, au bit près.
-    horsDuCrop: () => terreUniqueBranchee && !veilleCrop?.pose,
+    //
+    // ⚡ **D21 — `auBloc`, PAS `pose`, ET C'EST LA DÉCISION LA PLUS LOURDE DE
+    // CETTE TÂCHE. Elle protège D19, que D21 dit expressément ne pas abroger.**
+    //
+    // Ce prédicat ne décide pas seulement du pivot : il décide du **RÉGIME DE
+    // GESTES** (`regimeGeste` → `regimeTerreActif` → `appliqueBoutonsSouris`,
+    // `gesteDuBouton`). Le « régime de la Terre » — le vocabulaire de Google
+    // Earth de D19/GE2/GE3, glissé = on attrape la Terre, clic droit = zoom,
+    // milieu = inclinaison et cap — vit exactement là où `horsDuCrop` est vrai.
+    //
+    // ⛔ **Sur `pose`, D21 ③ l'amputerait de 600 km à 32 km — une bande de
+    // 568 km** où les trois gestes de D19 repasseraient d'un coup à
+    // OrbitControls (`gestes-terre.js:139` : `if (regime === REGIME.CROP) return
+    // GESTE.INERTE`). Personne ne l'a demandé, et deux conséquences en
+    // découlent : le clic droit y redeviendrait un PAN — donc **la deuxième
+    // sortie de D21 ① n'existerait plus comme geste** —, et le pivot passerait à
+    // l'axe du bloc en vue continentale, contre R27 (« il change uniquement
+    // quand on passe en mode bloc croppé »).
+    //
+    // ➡️ **La géométrie du crop naît à z7 ; le RÉGIME de gestes, lui, reste au
+    // bloc.** Ce sont deux questions, et D21 n'en déplace qu'une. Sur `auBloc`,
+    // le pivot bascule à 32 274,3 m — exactement où il basculait avant D21.
+    horsDuCrop: () => terreUniqueBranchee && !veilleCrop?.auBloc,
+    // ⚡ **D21 ① — LE CROCHET DU PINCEMENT.** `modes.js` fabrique un faux
+    // événement de molette pour le pincement et le donne à `_zoomGesture` sans
+    // passer par le DOM : l'écouteur `wheel` de ce fichier ne le voit pas. Ce
+    // crochet est le seul chemin par lequel un pincement d'écartement peut armer
+    // la sortie du crop. ⚠️ **Même fonction que les trois autres gestes** — une
+    // seconde écriture du sens du dézoom serait une loi de plus à tenir.
+    intentionZoom: (deltaY) => intentionZoom(deltaY),
     // ⚡ **L'ALTITUDE DE LA CAMÉRA QUI REND — LA VRAIE, PAS SA JAMBE VERTICALE.**
     // Tâche D16, étape ①. `_altitudeFondM()` (modes.js) vaut `camY × emprise / span` :
     // c'est le côté VERTICAL du triangle. La caméra de fond, elle, est à
@@ -13821,6 +13866,37 @@ renderer.domElement.addEventListener('pointercancel', annulerSaisie)
 // scrolle vers le point visé au centre », et le centre ne doit pas glisser.
 renderer.domElement.addEventListener('wheel', () => { saisieTerre.elan.dLat = 0; saisieTerre.elan.dLon = 0; gestesTerre.epingle = null }, { passive: true })
 
+// ══════════ D21 ① — LA SORTIE DU CROP EST UNE INTENTION ═══════════════════
+//
+// > **Adrien, 2026-09-04 :** *« Les seuls moyens de sortir du mode crop
+// > seraient : de cliquer sur la map monde ; de zoomer dézoomer à l'aide du clic
+// > droit gardé enfoncé ; de déscroller via le bouton de scroll central. »*
+//
+// ⚠️ **RÉSERVE, ÉCRITE ICI PARCE QUE C'EST ICI QU'ELLE SE TRANCHE.** « le bouton
+// de scroll central » est lu comme **la molette, en dézoom** : `déscroller` est
+// du vocabulaire de molette, et le bouton du MILIEU vient d'être attribué à
+// l'inclinaison et au cap par D19 (`boutons-camera.js:76`, GE2/GE3). Lui donner
+// aussi la sortie du crop serait contradictoire — un même bouton inclinerait ET
+// sortirait. **Si Adrien voulait dire le bouton du milieu enfoncé, c'est UNE
+// ligne à changer** : appeler `armerSortie()` depuis `GESTE.INCLINAISON` au lieu
+// d'ici.
+//
+// ⚠️ **ARMÉ AU NIVEAU DU DOM, PAS DANS `modes._zoomGesture`, ET C'EST VOULU.**
+// L'intention est un fait du GESTE (« l'utilisateur a demandé à s'éloigner »),
+// pas de ce que le zoom a réussi à faire : `_zoomGesture` sort tôt sur six
+// gardes (`locked`, `busy`, `_diveTween`, les crochets de suivi et de cadrage),
+// et l'intention se perdrait sur chacune. Ici elle ne se perd jamais.
+//
+// ⚠️ **ET LE ZOOM AVANT DÉSARME** — la ligne « dans le crop, zoom avant → le
+// crop vit » du critère de C1. Sans ça, un aller-retour molette laisserait une
+// mine amorcée sous le crop.
+function intentionZoom(deltaY) {
+  if (!(Number.isFinite(deltaY) && deltaY !== 0)) return
+  if (deltaY > 0) { veilleCrop?.armerSortie?.(); veilleSocle?.armerSortie?.() }
+  else { veilleCrop?.desarmerSortie?.(); veilleSocle?.desarmerSortie?.() }
+}
+renderer.domElement.addEventListener('wheel', (e) => intentionZoom(e.deltaY), { passive: true })
+
 // ══════════ LE RESTE DU VOCABULAIRE DE GOOGLE EARTH — Tâche GE2 ════════════
 //
 // > **Adrien, 2026-09-03 :** *« Attribue à notre programme exactement les mêmes
@@ -13963,6 +14039,12 @@ function surPointerMoveGeste(ev) {
     // l'image, par `_applyZoom` — l'intégrateur de l'escalier, qui garde ses
     // paliers (`_franchirSiBesoin`) et sa butée du sol. 200 px = ln 2 = ×2.
     gestesTerre.dLogGlisse += (zoomDuGlisseDroit(dy) / CRAN) * (Math.LN2 / CRANS_UN_NIVEAU)
+    // ⚡ **D21 ① — LA DEUXIÈME SORTIE.** Le clic droit maintenu EST le geste de
+    // zoom de D19 ; tiré dans le sens du dézoom, il arme la sortie du crop.
+    // ⚠️ **SUR LE PAS DE CETTE IMAGE, PAS SUR LE CUMUL** : `dLogGlisse` est
+    // consommé et remis à zéro à chaque image par `appliquerGestesTerre`, donc
+    // le lire ne dirait rien du sens du geste en cours.
+    intentionZoom(zoomDuGlisseDroit(dy))
   } else if (gestesTerre.actif === GESTE.INCLINAISON) {
     const p = pasInclinaison({ dxPx: dx, dyPx: dy, inclinaisonDeg: inclinaisonCouranteDeg() + gestesTerre.dInclinaisonDeg })
     gestesTerre.dInclinaisonDeg += p.dInclinaisonDeg
@@ -14105,7 +14187,12 @@ const SEUIL_HERITE_DEG = 1
 function redresserSiHerite(regime) {
   if (regime !== REGIME.SURFACE || gestesTerre.inclinaisonManuelle) return
   if (!modes || modes.busy || modes.travel || modes._fonduPose || modes._diveTween || (tween && tween.active)) return
-  if (veilleCrop?.pose) return
+  // ⚡ **D21 ② — `auBloc`, PAS `pose`.** Ce redressement est celui de D16 ter
+  // (« la vue de trois quarts arrive au bloc, pas avant ») : sa condition est
+  // « je ne suis PAS au bloc », pas « le crop n'existe pas ». Sur `pose`, il se
+  // tairait dès 600 km et l'inclinaison héritée du vol de présentation resterait
+  // posée sur toute la descente — le défaut bimodal que GE2 tour 2 a payé.
+  if (veilleCrop?.auBloc) return
   if (THREE.MathUtils.radToDeg(controls.getPolarAngle()) <= SEUIL_HERITE_DEG) return
   // « toute porte qui confie la caméra rend D'ABORD ce que le cadrage a emprunté »
   // (test/damier-cadre.test.js) : le balayage est un pilote, il rend avant.
@@ -14134,6 +14221,13 @@ function appliquerGestesTerre(dt) {
     const pas = Math.sign(c.restant) * Math.min(Math.abs(c.restant), c.parImage)
     c.restant -= pas
     gestesTerre.dLogGlisse += pas
+    // ⚡ **D21 ① — LE DOUBLE-CLIC EST UN ZOOM, DONC UNE INTENTION.** Le
+    // double-clic DROIT dézoome (`zoomDuDoubleClic`, `gestes-terre.js`) : il
+    // passe par la même porte que le clic droit maintenu, et il doit armer la
+    // sortie par le même chemin. ⚠️ `pas` est du LOG de distance et non un
+    // `deltaY` — mais `intentionZoom` ne lit que son SIGNE, et les deux ont la
+    // même convention (positif = on s'éloigne).
+    intentionZoom(pas)
     if (Math.abs(c.restant) < 1e-12) gestesTerre.courseDoubleClic = null
   }
   if (gestesTerre.dLogGlisse && dt > 1e-4 && !(modes.busy || modes._diveTween || modes.travel || modes._fonduPose)) {

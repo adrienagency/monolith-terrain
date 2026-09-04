@@ -62,7 +62,15 @@ test('à 4 000 km le socle n’est pas posé ; sous le seuil de naissance, il l�
   assert.equal(veille.visible, true)
   assert.deepEqual(m.vus, [], 'rien ne doit être appliqué tant que rien ne change')
 
-  // 4 000 km : la capture d'Adrien. Le socle doit PARTIR.
+  // ⚡ **D21 ① — SANS INTENTION, 4 000 km NE TUENT RIEN.** C'est le défaut
+  // qu'Adrien nomme : « on ne puisse plus revenir en mode non crop uniquement
+  // par l'altitude ». Le socle survit à dix fois son seuil de mort.
+  assert.equal(veille.maj(4_000_000), true, 'le socle meurt sans intention — D21 ① tombe')
+  assert.equal(veille.visible, true)
+  assert.deepEqual(m.vus, [], 'et rien n’a été appliqué')
+
+  // 4 000 km AVEC l'intention (un dézoom explicite) : le socle doit PARTIR.
+  veille.armerSortie()
   assert.equal(veille.maj(4_000_000), false)
   assert.equal(veille.visible, false)
   assert.deepEqual(m.vus, [false])
@@ -83,20 +91,37 @@ test('les altitudes de cadrage des poses d’arrivée : le socle vit à z11 et p
     4: 3_680_260, 5: 920_060, 6: 575_040, 7: 359_400, 8: 205_370, 9: 102_690,
     10: 51_340, 11: 25_670, 12: 12_840, 13: 6_420, 14: 3_210, 15: 1_600,
   }
-  // en DESCENDANT depuis l'orbite : le socle est absent jusqu'à z10 inclus
+  // ⚡ **D21 ③ — LE SOCLE NAÎT DÉSORMAIS DÈS z7, ET LA MESURE DIT MÊME UN CRAN
+  // PLUS TÔT.** Il était absent jusqu'à z10 inclus ; `SEUIL_NAISSANCE_M` vaut
+  // maintenant 600 000 m. Rejoué contre la table ci-dessus, la ligne de partage
+  // tombe entre **z5 (920 060 m)** et **z6 (575 040 m)** : la pose d'arrivée z6
+  // est déjà 24 960 m SOUS le seuil. Adrien demande « dès z7 » — au plus tard
+  // z7 — et c'est tenu avec un cran de marge, pas raté.
   const veilleBas = creerVeilleSocle({ appliquer: () => {}, socleAuDepart: false })
-  for (const z of [4, 5, 6, 7, 8, 9, 10]) {
+  for (const z of [4, 5]) {
     assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), false, `le socle ne devrait pas naître à z${z}`)
+  }
+  assert.ok(ALT_ARRIVEE_M[6] < SEUIL_NAISSANCE_M && ALT_ARRIVEE_M[5] > SEUIL_NAISSANCE_M,
+    'la ligne de partage a quitté l’intervalle z5 / z6 — le chiffre de D21 ③ est à refaire')
+  for (const z of [6, 7, 8, 9, 10]) {
+    assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), true, `D21 ③ : le socle doit vivre à z${z}`)
   }
   for (const z of [11, 12, 13, 14, 15]) {
     assert.equal(veilleBas.maj(ALT_ARRIVEE_M[z]), true, `le socle devrait vivre à z${z}`)
   }
-  // et en REMONTANT, l'hystérésis ne le tue toujours qu'au-dessus de z10
+  // ⚡ **ET EN REMONTANT — LES DEUX RÈGLES DE D21 SE CROISENT ICI.**
+  // ① sans intention, AUCUNE pose d'arrivée ne tue le crop, pas même z4 ;
+  // ③ avec l'intention, l'hystérésis (750 000 m) le tue entre z6 et z5.
   const veilleHaut = creerVeilleSocle({ appliquer: () => {}, socleAuDepart: true })
-  for (const z of [15, 14, 13, 12, 11]) {
+  for (const z of [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4]) {
+    assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[z]), true,
+      `D21 ① : le socle meurt à z${z} sans qu’on l’ait demandé`)
+  }
+  veilleHaut.armerSortie()
+  for (const z of [15, 14, 13, 12, 11, 10, 9, 8, 7, 6]) {
     assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[z]), true, `le socle devrait survivre à z${z}`)
   }
-  assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[10]), false, 'le socle devrait mourir à z10')
+  assert.equal(veilleHaut.maj(ALT_ARRIVEE_M[5]), false, 'intention armée, le socle meurt à z5')
 })
 
 // ══════════ ② CELUI QUI COMPTE : CENT OSCILLATIONS, UNE BASCULE ═════════════
@@ -119,6 +144,12 @@ test('cent oscillations autour du seuil de MORT ne produisent qu’UNE bascule',
   const veille = creerVeilleSocle({ appliquer: m.appliquer, socleAuDepart: true })
   const bas = SEUIL_MORT_M * 0.999
   const haut = SEUIL_MORT_M * 1.001
+  // ⚡ D21 ① : sans intention, cent oscillations au seuil de mort ne font RIEN.
+  for (let i = 0; i < 100; i++) { veille.maj(haut); veille.maj(bas) }
+  assert.equal(veille.bascules, 0)
+  assert.equal(veille.visible, true)
+  // avec l'intention, l'hystérésis reprend ses droits : UNE bascule, pas 200
+  veille.armerSortie()
   for (let i = 0; i < 100; i++) { veille.maj(haut); veille.maj(bas) }
   assert.equal(veille.bascules, 1)
   assert.deepEqual(m.vus, [false])
@@ -155,6 +186,8 @@ test('en orbite la veille GÈLE le seuil : l’altitude de bloc n’y veut plus 
   // au retour en surface, l'état d'avant est rendu, puis la première image tranche
   veille.poserMode(true)
   assert.deepEqual(m.vus, [false, true])
+  // ⚡ D21 ① : la première altitude de surface décide — SI l'intention est armée
+  veille.armerSortie()
   assert.equal(veille.maj(4_000_000), false, 'et la première altitude de surface décide')
   assert.deepEqual(m.vus, [false, true, false])
 })

@@ -61,7 +61,7 @@ import { rayonEauDansSocle, rayonCoinEau } from '../src/plinth.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 import { gridTemplate } from '../src/grid-template.js'
 import { blockExtentMeters } from '../src/landmarks.js'
-import { empriseSocle, ZOOM_SOCLE, SEUIL_NAISSANCE_M } from '../src/monde/seuil-socle.js'
+import { empriseSocle, ZOOM_SOCLE, SEUIL_BLOC_M } from '../src/monde/seuil-socle.js'
 import { tuilesEmprise } from '../src/monde/flux-terrain.js'
 
 // Le réglage de PRODUCTION du coin, lu là où il vit vraiment :
@@ -586,8 +586,14 @@ test('⑧ la courbe ne DÉPASSE pas ses ancres — Fritsch–Carlson, pas Catmul
 
 test('⑧ le pont altitude ↔ zoom est celui de `seuil-socle.js`, pas un second réglage', () => {
   // ⚠️ Dérivé, PAS posé : c'est la même équation que celle dont
-  // `SEUIL_NAISSANCE_M` est tiré, lue dans l'autre sens.
-  assert.ok(Math.abs(zoomDepuisAltitude(SEUIL_NAISSANCE_M, { lat: 45 }) - ZOOM_SOCLE) < 1e-12)
+  // `SEUIL_BLOC_M` est tiré, lue dans l'autre sens.
+  //
+  // ⚠️ **DEPUIS D21 LE LIEN PORTE LE NOM `SEUIL_BLOC_M`, ET IL N'EST PAS
+  // CASSÉ : IL EST RENOMMÉ.** D21 fait naître le crop au palier z7 (600 km), et
+  // `SEUIL_NAISSANCE_M` ne descend donc plus de cette équation-là. La grandeur
+  // qui en descend — le bloc à 60 % de la hauteur — s'appelle désormais
+  // `SEUIL_BLOC_M`, et elle vaut l'ancienne au bit près.
+  assert.ok(Math.abs(zoomDepuisAltitude(SEUIL_BLOC_M, { lat: 45 }) - ZOOM_SOCLE) < 1e-12)
   for (const z of [3.25, 7, 11.75]) {
     assert.ok(Math.abs(zoomDepuisAltitude(altitudeDepuisZoom(z, { lat: 45 }), { lat: 45 }) - z) < 1e-12)
   }

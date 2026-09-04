@@ -51,6 +51,8 @@ import {
   LARGEUR_SOCLE_M,
   SEUIL_MORT_M,
   SEUIL_NAISSANCE_M,
+  SEUIL_BLOC_M,
+  SEUIL_BLOC_MORT_M,
   altitudePourFraction,
   fractionEcran,
 } from '../src/monde/seuil-socle.js'
@@ -146,8 +148,17 @@ test('①e une altitude NON FINIE conserve l’état — même contrat que socle
 
 // ══════════ ② LES DEUX BORNES SE DÉRIVENT ══════════════════════════════════
 
-test('②a le début du fondu EST le seuil de mort du socle, pas un chiffre voisin', () => {
-  assert.equal(ALT_ESTOMPAGE_DEBUT_M, SEUIL_MORT_M)
+test('②a le début du fondu EST l’hystérésis de l’ARRIVÉE AU BLOC, pas un chiffre voisin', () => {
+  // ⚠️ **DEPUIS D21 CE N'EST PLUS `SEUIL_MORT_M`, ET LE CHIFFRE NE BOUGE PAS.**
+  // D21 fait naître le crop au palier z7 : `SEUIL_MORT_M` vaut 750 km. Y
+  // accrocher le fondu effacerait la planète en vue RÉGIONALE — 0,576 à 100 km
+  // au lieu de 0. Le fondu suit la GRANDEUR DU SOCLE À L'IMAGE, pas la
+  // naissance de sa géométrie.
+  assert.equal(ALT_ESTOMPAGE_DEBUT_M, SEUIL_BLOC_MORT_M)
+  assert.ok(Math.abs(ALT_ESTOMPAGE_DEBUT_M - 40342.8) < 0.1, 'la valeur d’avant D21, au bit près')
+  assert.ok(ALT_ESTOMPAGE_DEBUT_M < SEUIL_MORT_M)
+  // ⛔ la mesure qui a tranché : à 100 km la Terre reste ENTIÈRE
+  assert.equal(estompageTerre({ altitudeEllipsoideM: 100_000 }), 0)
 })
 
 test('②b la fin du fondu est l’altitude où le socle occupe TOUTE la hauteur', () => {
@@ -185,16 +196,23 @@ test('②d RÈGLE R1 — le module ne connaît ni fraction d’écran, ni débit
 // ══════════ ③ L'ORDRE DES TROIS ALTITUDES ══════════════════════════════════
 
 test('③a le fondu COMMENCE avant que le socle naisse, et FINIT après', () => {
-  assert.ok(ALT_ESTOMPAGE_FIN_M < SEUIL_NAISSANCE_M, 'le fondu finirait avant la naissance du socle')
-  assert.ok(SEUIL_NAISSANCE_M < ALT_ESTOMPAGE_DEBUT_M, 'le fondu commencerait après la naissance du socle')
+  // ⚠️ **L'ALTITUDE DE RÉFÉRENCE EST `SEUIL_BLOC_M` DEPUIS D21** — c'est elle
+  // qui porte le sens « le socle occupe une part importante de l'image », et
+  // c'est l'ancien `SEUIL_NAISSANCE_M` au bit près.
+  assert.ok(ALT_ESTOMPAGE_FIN_M < SEUIL_BLOC_M, 'le fondu finirait avant l’arrivée au bloc')
+  assert.ok(SEUIL_BLOC_M < ALT_ESTOMPAGE_DEBUT_M, 'le fondu commencerait après l’arrivée au bloc')
+  // ⛔ et la naissance du crop, elle, est TRÈS au-dessus du fondu : à 600 km la
+  // planète est entière. C'est le départage de D21, lu par ce module.
+  assert.ok(SEUIL_NAISSANCE_M > ALT_ESTOMPAGE_DEBUT_M)
+  assert.equal(estompageTerre({ altitudeEllipsoideM: SEUIL_NAISSANCE_M }), 0)
 })
 
-test('③b à la naissance du socle, la Terre autour est ENTAMÉE mais encore là', () => {
+test('③b à l’arrivée au bloc, la Terre autour est ENTAMÉE mais encore là', () => {
   // ⚠️ C'est la propriété PERCEPTIVE de la tâche : le bloc se détache pendant
   // qu'on descend, il n'apparaît pas dans un écran déjà vide. Les deux bornes
   // sont larges exprès — c'est un encadrement, pas un chiffre-titre.
-  const f = estompageTerre({ altitudeEllipsoideM: SEUIL_NAISSANCE_M })
-  assert.ok(f > 0.05 && f < 0.5, `estompage à la naissance du socle : ${f}`)
+  const f = estompageTerre({ altitudeEllipsoideM: SEUIL_BLOC_M })
+  assert.ok(f > 0.05 && f < 0.5, `estompage à l’arrivée au bloc : ${f}`)
 })
 
 // ══════════ ④ LA VEILLE ════════════════════════════════════════════════════

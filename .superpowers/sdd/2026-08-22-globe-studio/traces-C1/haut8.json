@@ -1,0 +1,4681 @@
+{
+ "pose": {
+  "mode": "surface",
+  "d": 105.183,
+  "altFondM": 35770,
+  "altPorteeM": 621589,
+  "regime": {
+   "regimeGeste": "surface",
+   "horsDuCrop": true,
+   "surLeBloc": false,
+   "tiltDeg": 0.00005731104651187513,
+   "mouseButtons": {
+    "LEFT": -1,
+    "MIDDLE": -1,
+    "RIGHT": -1
+   },
+   "enableRotate": false,
+   "enablePan": true
+  },
+  "diag": {
+   "phiDeg": 0.00005731104651187513,
+   "azDeg": 37.56859203080399,
+   "up": [
+    0,
+    1,
+    0
+   ],
+   "cible": [
+    2.723655064934119,
+    -0.2999999999999999,
+    -0.7760727789272605
+   ],
+   "pos": [
+    2.7237043575394524,
+    80.52434740637834,
+    -0.7760086985403315
+   ],
+   "levelZoom": 0.4703519140721535,
+   "zoomVel": 0,
+   "busy": false,
+   "damping": true,
+   "retoursNadir": 2,
+   "inclinaisonManuelle": false,
+   "fonduPose": false,
+   "cropPose": true,
+   "horsDuCrop": true,
+   "regime": "surface",
+   "altFondM": 621589.1918917409,
+   "sph": [
+    0,
+    0
+   ]
+  }
+ },
+ "altViseeM": 576000,
+ "gestes": {
+  "c1-bouton-monde": [
+   {
+    "images": 115,
+    "dLatDeg": 0,
+    "dLonDeg": 4.0279,
+    "rotationDeg": 3.7544,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 621589,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2302,
+    "pireRapportImage": 4.3445,
+    "rapportAlt": 0.0388,
+    "pireRapportAlt": 3.1992,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 234,
+    "dLatDeg": 0,
+    "dLonDeg": 7.7938,
+    "rotationDeg": 7.2639,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 601535,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2229,
+    "pireRapportImage": 4.4869,
+    "rapportAlt": 0.0376,
+    "pireRapportAlt": 3.2084,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 8.88e-16,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005744443898678118,
+     "azDeg": 37.56859202450722,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7246588099641507,
+      -0.3000000000000001,
+      -0.7844650592464435
+     ],
+     "pos": [
+      2.7247066488358316,
+      77.95853397679299,
+      -0.7844028687132486
+     ],
+     "levelZoom": 0.43367651079749014,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 601535.0906107184,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.23429941702817,
+     "azDeg": 63.54593833263387,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.0274134583234,
+      -127.17607289511773,
+      145.80485130248792
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 15999999.999999998,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 235,
+    "dLatDeg": 0,
+    "dLonDeg": 7.8409,
+    "rotationDeg": 7.3079,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 640682,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2371,
+    "pireRapportImage": 4.2171,
+    "rapportAlt": 0.04,
+    "pireRapportAlt": 3.1905,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 8.88e-16,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 37.568592031982604,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7035366979368143,
+      -0.3,
+      -0.801163510140564
+     ],
+     "pos": [
+      2.703587513330971,
+      82.96582326067245,
+      -0.801097450128168
+     ],
+     "levelZoom": 0.5396154016085626,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 640681.5702750647,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.23312684504239,
+     "azDeg": 63.59147288074538,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.1455271017413,
+      -127.16937463141032,
+      145.57308581787495
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 15999999.999999998,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 234,
+    "dLatDeg": 0,
+    "dLonDeg": 7.8451,
+    "rotationDeg": 7.3119,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 632387,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2341,
+    "pireRapportImage": 4.2716,
+    "rapportAlt": 0.0395,
+    "pireRapportAlt": 3.1943,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573237639305409,
+     "azDeg": 37.568592027799454,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7429685088798568,
+      -0.3000000000000001,
+      -0.8288880864118494
+     ],
+     "pos": [
+      2.7430186538124723,
+      81.90365457241984,
+      -0.8288228979994468
+     ],
+     "levelZoom": 0.5042026842949754,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 632387.123259977,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.23117999347686,
+     "azDeg": 63.598654708978906,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.1676421144259,
+      -127.15825321347593,
+      145.53826120716718
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 16000000.000000004,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 234,
+    "dLatDeg": 0,
+    "dLonDeg": 7.8343,
+    "rotationDeg": 7.3018,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 630594,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2335,
+    "pireRapportImage": 4.2835,
+    "rapportAlt": 0.0394,
+    "pireRapportAlt": 3.1951,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057400009272061864,
+     "azDeg": 37.568592029857044,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6674214318792364,
+      -0.3,
+      -0.8238369110844287
+     ],
+     "pos": [
+      2.667471503528443,
+      81.67448667813082,
+      -0.8237718179404627
+     ],
+     "levelZoom": 0.5737075002296941,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 630594.1744878949,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.2315346947229,
+     "azDeg": 63.58213448106963,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.12496153686203,
+      -127.16027946044986,
+      145.62243463832635
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 16000000.000000004,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 234,
+    "dLatDeg": 0,
+    "dLonDeg": 7.8187,
+    "rotationDeg": 7.2871,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 653436,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2418,
+    "pireRapportImage": 4.136,
+    "rapportAlt": 0.0408,
+    "pireRapportAlt": 3.1847,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005737460541630463,
+     "azDeg": 37.568592035634126,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7125388760774047,
+      -0.3,
+      -0.7926020471878948
+     ],
+     "pos": [
+      2.71259071037303,
+      84.59776590174435,
+      -0.7925346626035988
+     ],
+     "levelZoom": 0.5385608136419381,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 653435.6569504369,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.2337280356001,
+     "azDeg": 63.569891647868346,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.089479326216,
+      -127.17280891156072,
+      145.68289879142117
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 16000000.000000004,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 235,
+    "dLatDeg": 0,
+    "dLonDeg": 7.8303,
+    "rotationDeg": 7.298,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 652041,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2413,
+    "pireRapportImage": 4.1447,
+    "rapportAlt": 0.0408,
+    "pireRapportAlt": 3.1854,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057317405573920985,
+     "azDeg": 37.56859202109359,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6856917893086947,
+      -0.3,
+      -0.8012873464982689
+     ],
+     "pos": [
+      2.6857434629149552,
+      84.41903884775256,
+      -0.8012201708101114
+     ],
+     "levelZoom": 0.5749079183407675,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 652041.2948869228,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.23311814916124,
+     "azDeg": 63.57950017061453,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.11511856695995,
+      -127.16932495638899,
+      145.6343478580979
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 15999999.999999998,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 234,
+    "dLatDeg": 0,
+    "dLonDeg": 7.7858,
+    "rotationDeg": 7.2565,
+    "dTiltDeg": 0,
+    "dAzimutDeg": -37.569,
+    "altDebutM": 634687,
+    "altFinM": 16000000,
+    "rapportDistance": 0.2349,
+    "pireRapportImage": 4.2563,
+    "rapportAlt": 0.0397,
+    "pireRapportAlt": 3.1933,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→orbital",
+    "deltaLndMax": 0,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005749517376283245,
+     "azDeg": 37.56859202875253,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6940454517259753,
+      -0.3,
+      -0.8038094363250753
+     ],
+     "pos": [
+      2.6940959272414435,
+      82.19889741812138,
+      -0.8037438181549664
+     ],
+     "levelZoom": 0.5378994256520164,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 634687.3735999991,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 111.23294104618023,
+     "azDeg": 63.53561067161153,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      0,
+      0
+     ],
+     "pos": [
+      293.0038261936585,
+      -127.16831325904033,
+      145.85901123059583
+     ],
+     "levelZoom": 0,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "orbite",
+     "altFondM": 15999999.999999998,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "c1-boutons-camera": [
+   {
+    "images": 380,
+    "dLatDeg": -0.0576,
+    "dLonDeg": -0.201,
+    "rotationDeg": 0.196,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 634630,
+    "altFinM": 560590,
+    "rapportDistance": 1.1114,
+    "pireRapportImage": 1.0365,
+    "rapportAlt": 1.1321,
+    "pireRapportAlt": 1.0029,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0359,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 368,
+    "dLatDeg": -0.0549,
+    "dLonDeg": -0.2024,
+    "rotationDeg": 0.1965,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 638330,
+    "altFinM": 560580,
+    "rapportDistance": 1.1178,
+    "pireRapportImage": 1.0406,
+    "rapportAlt": 1.1387,
+    "pireRapportAlt": 1.0046,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0398,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057431748289843635,
+     "azDeg": 37.56859203285691,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.686708144761129,
+      -0.3,
+      -0.7820495493515318
+     ],
+     "pos": [
+      2.6867588498951394,
+      82.66571691418453,
+      -0.7819836326773282
+     ],
+     "levelZoom": 0.538318849163208,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 638329.7780486215,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.0000524809599258001,
+      72.71928529340067,
+      0.000052480959925800115
+     ],
+     "levelZoom": 0.538318849163208,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560579.9179398946,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 376,
+    "dLatDeg": -0.0593,
+    "dLonDeg": -0.2041,
+    "rotationDeg": 0.1993,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 644965,
+    "altFinM": 560597,
+    "rapportDistance": 1.1292,
+    "pireRapportImage": 1.0383,
+    "rapportAlt": 1.1505,
+    "pireRapportAlt": 1.0028,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0376,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005737460541630463,
+     "azDeg": 37.56859202889219,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7093399406580243,
+      -0.3,
+      -0.8451064177352515
+     ],
+     "pos": [
+      2.709391112040459,
+      83.51200120630521,
+      -0.8450398949380868
+     ],
+     "levelZoom": 0.5736126412224453,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 644964.6647182422,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.000052480959925800054,
+      72.7192852934006,
+      0.00005248095992580007
+     ],
+     "levelZoom": 0.5736126412224453,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560596.9859032758,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 367,
+    "dLatDeg": -0.0572,
+    "dLonDeg": -0.202,
+    "rotationDeg": 0.1968,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 623210,
+    "altFinM": 560589,
+    "rapportDistance": 1.0918,
+    "pireRapportImage": 1.0271,
+    "rapportAlt": 1.1117,
+    "pireRapportAlt": 1.0036,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0267,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 37.5685920293822,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.681815055051961,
+      -0.2999999999999993,
+      -0.8141766883689254
+     ],
+     "pos": [
+      2.6818645060717192,
+      80.73016693724149,
+      -0.8141124020432411
+     ],
+     "levelZoom": 0.5396408439516668,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 623209.5099185273,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 44.99999999999999,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.00005248095992580014,
+      72.71928529340072,
+      0.00005248095992580015
+     ],
+     "levelZoom": 0.5396408439516668,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560588.6143366403,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 344,
+    "dLatDeg": -0.0551,
+    "dLonDeg": -0.2051,
+    "rotationDeg": 0.1989,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 643288,
+    "altFinM": 560581,
+    "rapportDistance": 1.1264,
+    "pireRapportImage": 1.037,
+    "rapportAlt": 1.1475,
+    "pireRapportAlt": 1.0044,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0364,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057438093988806695,
+     "azDeg": 37.56859202860536,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.722641017480949,
+      -0.3000000000000001,
+      -0.784918178774804
+     ],
+     "pos": [
+      2.722692115861756,
+      83.29992561076247,
+      -0.7848517508797542
+     ],
+     "levelZoom": 0.5040483610941209,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 643288.1879416809,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.0000524809599258003,
+      72.71928529340094,
+      0.000052480959925800305
+     ],
+     "levelZoom": 0.5040483610941209,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560580.6944708508,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 367,
+    "dLatDeg": -0.0548,
+    "dLonDeg": -0.2049,
+    "rotationDeg": 0.1987,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 642278,
+    "altFinM": 560580,
+    "rapportDistance": 1.1247,
+    "pireRapportImage": 1.0302,
+    "rapportAlt": 1.1457,
+    "pireRapportAlt": 1.0037,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0298,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005734283477019151,
+     "azDeg": 37.56859202855822,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.720327287933058,
+      -0.29999999999999993,
+      -0.7812186469225761
+     ],
+     "pos": [
+      2.7203782228384097,
+      83.17090404030368,
+      -0.7811524315456183
+     ],
+     "levelZoom": 0.5044046619858757,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 642278.4976644255,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.0000524809599258001,
+      72.71928529340067,
+      0.000052480959925800115
+     ],
+     "levelZoom": 0.5044046619858757,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560579.6930155832,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 356,
+    "dLatDeg": -0.0551,
+    "dLonDeg": -0.2027,
+    "rotationDeg": 0.1968,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 620605,
+    "altFinM": 560581,
+    "rapportDistance": 1.0873,
+    "pireRapportImage": 1.0362,
+    "rapportAlt": 1.1071,
+    "pireRapportAlt": 1.0041,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0355,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005751418776558874,
+     "azDeg": 37.56859202645272,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6908701055046813,
+      -0.2999999999999998,
+      -0.7849929072472269
+     ],
+     "pos": [
+      2.690919495593523,
+      80.39815189768738,
+      -0.784928700131727
+     ],
+     "levelZoom": 0.5036053539786626,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 620605.4214365225,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.0000524809599258001,
+      72.71928529340067,
+      0.000052480959925800115
+     ],
+     "levelZoom": 0.5036053539786626,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560580.7146996013,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 369,
+    "dLatDeg": -0.0569,
+    "dLonDeg": -0.2025,
+    "rotationDeg": 0.1971,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 7.431,
+    "altDebutM": 629295,
+    "altFinM": 560588,
+    "rapportDistance": 1.1023,
+    "pireRapportImage": 1.0378,
+    "rapportAlt": 1.1226,
+    "pireRapportAlt": 1.0045,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.0371,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005741270698469858,
+     "azDeg": 37.568592041015066,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6878892796190925,
+      -0.29999999999999866,
+      -0.8101703818328921
+     ],
+     "pos": [
+      2.68793926109731,
+      81.508766505212,
+      -0.8101054059112379
+     ],
+     "levelZoom": 0.5384614375956758,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 629294.591099563,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 45,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      0,
+      -1.5,
+      0
+     ],
+     "pos": [
+      0.00005248095992580017,
+      72.71928529340076,
+      0.00005248095992580018
+     ],
+     "levelZoom": 0.5384614375956758,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 3,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 560587.5299226531,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "c1-inclinaison-gauche-nadir": [
+   {
+    "images": 578,
+    "dLatDeg": 0.8381,
+    "dLonDeg": -0.6928,
+    "rotationDeg": 1.0592,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 620124,
+    "altFinM": 620124,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 510,
+    "dLatDeg": 0.829,
+    "dLonDeg": -0.6852,
+    "rotationDeg": 1.0476,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 613357,
+    "altFinM": 613357,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005744443898678118,
+     "azDeg": 37.56859202790611,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.718486026440463,
+      -0.3,
+      -0.794765855335003
+     ],
+     "pos": [
+      2.7185347895727485,
+      79.47051110094941,
+      -0.7947024632630298
+     ],
+     "levelZoom": 0.4697920272456008,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 613357.0644203068,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005744443898678118,
+     "azDeg": 37.56859202731448,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.37727682832489,
+      -0.30000000000000016,
+      -12.567773072970876
+     ],
+     "pos": [
+      -6.377228065192605,
+      79.47051110094941,
+      -12.567709680898902
+     ],
+     "levelZoom": 0.4697920272456008,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 613357.0644203078,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 579,
+    "dLatDeg": 0.8276,
+    "dLonDeg": -0.6841,
+    "rotationDeg": 1.0458,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 612325,
+    "altFinM": 612325,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000574063584794561,
+     "azDeg": 37.568592026951265,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.696955092362127,
+      -0.29999999999999777,
+      -0.8056662071986859
+     ],
+     "pos": [
+      2.697003742257522,
+      79.33806230927081,
+      -0.8056029623346677
+     ],
+     "levelZoom": 0.5038887033239919,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 612324.9436552848,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000574063584794561,
+     "azDeg": 37.56859202734984,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.383427488286883,
+      -0.29999999999999766,
+      -12.558852334051828
+     ],
+     "pos": [
+      -6.383378838391487,
+      79.33806230927081,
+      -12.55878908918781
+     ],
+     "levelZoom": 0.5038887033239919,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 612324.9436552858,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 594,
+    "dLatDeg": 0.8508,
+    "dLonDeg": -0.7032,
+    "rotationDeg": 1.0751,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 629449,
+    "altFinM": 629449,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005738730874988581,
+     "azDeg": 37.568592033228434,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.738847930172868,
+      -0.3,
+      -0.8267934885737788
+     ],
+     "pos": [
+      2.738897901181663,
+      81.52782935870508,
+      -0.8267285262623552
+     ],
+     "levelZoom": 0.505210608763557,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 629448.6491751658,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005738730874988581,
+     "azDeg": 37.56859203302968,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.595840021521232,
+      -0.2999999999999998,
+      -12.907709985706958
+     ],
+     "pos": [
+      -6.595790050512437,
+      81.52782935870508,
+      -12.907645023395535
+     ],
+     "levelZoom": 0.505210608763557,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 629448.6491751658,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 375,
+    "dLatDeg": 0.828,
+    "dLonDeg": -0.6844,
+    "rotationDeg": 1.0463,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 612594,
+    "altFinM": 612594,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005738730874988581,
+     "azDeg": 37.568592033784945,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6675974470461847,
+      -0.29999999999999993,
+      -0.8211896722155849
+     ],
+     "pos": [
+      2.667646101477655,
+      79.37192601929428,
+      -0.8211264214546847
+     ],
+     "levelZoom": 0.5379109318709463,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 612594.2407272115,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005738730874988581,
+     "azDeg": 37.56859203477644,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.416718595458503,
+      -0.3000000000000001,
+      -12.579448065244627
+     ],
+     "pos": [
+      -6.416669941027032,
+      79.37192601929428,
+      -12.579384814483728
+     ],
+     "levelZoom": 0.5379109318709463,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 612594.2407272105,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 550,
+    "dLatDeg": 0.8264,
+    "dLonDeg": -0.6831,
+    "rotationDeg": 1.0443,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 611425,
+    "altFinM": 611425,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859202632074,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7188924355429696,
+      -0.3,
+      -0.8261101778608856
+     ],
+     "pos": [
+      2.7189409232161164,
+      79.22216217155103,
+      -0.826047143885789
+     ],
+     "levelZoom": 0.5049747500721877,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 611424.9868508604,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859202726687,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.348032248543044,
+      -0.3000000000000006,
+      -12.561954222432997
+     ],
+     "pos": [
+      -6.347983760869896,
+      79.22216217155103,
+      -12.561891188457901
+     ],
+     "levelZoom": 0.5049747500721877,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 611424.9868508612,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 397,
+    "dLatDeg": 0.8182,
+    "dLonDeg": -0.6763,
+    "rotationDeg": 1.0339,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 605368,
+    "altFinM": 605368,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005744443898678118,
+     "azDeg": 37.56859202884714,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7348515004026024,
+      -0.3,
+      -0.7801229648018276
+     ],
+     "pos": [
+      2.734899639146874,
+      78.44908879412952,
+      -0.7800603844342745
+     ],
+     "levelZoom": 0.43560859376840866,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 605368.425173201,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005744443898678118,
+     "azDeg": 37.568592028434516,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.24229776144464,
+      -0.2999999999999999,
+      -12.400245172373815
+     ],
+     "pos": [
+      -6.24224962270037,
+      78.44908879412952,
+      -12.400182592006262
+     ],
+     "levelZoom": 0.43560859376840866,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 605368.425173201,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 450,
+    "dLatDeg": 0.8217,
+    "dLonDeg": -0.6792,
+    "rotationDeg": 1.0384,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 607980,
+    "altFinM": 607980,
+    "rapportDistance": 1,
+    "pireRapportImage": 1,
+    "rapportAlt": 1,
+    "pireRapportAlt": 1,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 44,
+    "centre0DerivePx": 256,
+    "curseur0DerivePx": 256,
+    "mode": "surface→surface",
+    "deltaLndMax": 0,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573237639305409,
+     "azDeg": 37.56859202808243,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7203405384090646,
+      -0.30000000000000027,
+      -0.7522325994831678
+     ],
+     "pos": [
+      2.720388780461235,
+      78.7842221855843,
+      -0.7521698848153446
+     ],
+     "levelZoom": 0.4336955564515393,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 607979.9335530094,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000573237639305409,
+     "azDeg": 37.56859202823928,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      -6.295723624528607,
+      -0.30000000000000027,
+      -12.422509954593242
+     ],
+     "pos": [
+      -6.295675382476436,
+      78.7842221855843,
+      -12.422447239925418
+     ],
+     "levelZoom": 0.4336955564515393,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 607979.9335530075,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "c1-molette-dezoom-1cran": [
+   {
+    "images": 131,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 615901,
+    "altFinM": 626685,
+    "rapportDistance": 0.9831,
+    "pireRapportImage": 1.0009,
+    "rapportAlt": 0.9828,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.000942,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 128,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 608357,
+    "altFinM": 618937,
+    "rapportDistance": 0.9832,
+    "pireRapportImage": 1.0013,
+    "rapportAlt": 0.9829,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00128,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005746981197343663,
+     "azDeg": 37.56859202999049,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7209977366940623,
+      -0.30000000000000016,
+      -0.8320133263646154
+     ],
+     "pos": [
+      2.72104612935254,
+      78.82951013089423,
+      -0.831950415908597
+     ],
+     "levelZoom": 0.505376058454612,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 608357.3485811434,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005745712688069334,
+     "azDeg": 37.56859202900049,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7209977366987963,
+      -0.30000000000000016,
+      -0.8320133263491329
+     ],
+     "pos": [
+      2.721046946199108,
+      80.18293804743143,
+      -0.8319493539987284
+     ],
+     "levelZoom": 0.5223353917788746,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 618937.1563745752,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 105,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 630206,
+    "altFinM": 641189,
+    "rapportDistance": 0.9831,
+    "pireRapportImage": 1.0013,
+    "rapportAlt": 0.9829,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00132,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 37.568592037293755,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7205160327413074,
+      -0.3,
+      -0.8320056961026372
+     ],
+     "pos": [
+      2.7205660295455862,
+      81.62448641355456,
+      -0.8319407002570945
+     ],
+     "levelZoom": 0.539487669589531,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 630205.8034260597,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005734283477019151,
+     "azDeg": 37.56859203619392,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7205160327484657,
+      -0.3,
+      -0.832005696079234
+     ],
+     "pos": [
+      2.720566881356051,
+      83.02948131163375,
+      -0.8319395928893906
+     ],
+     "levelZoom": 0.556492147872831,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 641188.7126277968,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 74,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 618404,
+    "altFinM": 629608,
+    "rapportDistance": 0.9825,
+    "pireRapportImage": 1.0014,
+    "rapportAlt": 0.9822,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00144,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057304686744168496,
+     "azDeg": 39.80557108457919,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7214984328650393,
+      -0.3,
+      -0.8033351276835932
+     ],
+     "pos": [
+      2.7215499218215595,
+      80.11581972345797,
+      -0.8032733409357521
+     ],
+     "levelZoom": 0.5058440869334538,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 618403.9374241264,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 39.80557108497166,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7214984328622696,
+      -0.3,
+      -0.8033351276929751
+     ],
+     "pos": [
+      2.7215508337644327,
+      81.54918770054162,
+      -0.803272246610363
+     ],
+     "levelZoom": 0.5235115468970403,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 629608.4873146742,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 129,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 615560,
+    "altFinM": 626186,
+    "rapportDistance": 0.9833,
+    "pireRapportImage": 1.001,
+    "rapportAlt": 0.983,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.000987,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005734283477019151,
+     "azDeg": 39.80557109306828,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.697316055792542,
+      -0.3000000000000014,
+      -0.774243764265345
+     ],
+     "pos": [
+      2.697367346596631,
+      79.75305209755143,
+      -0.7741822153004402
+     ],
+     "levelZoom": 0.5051298686422938,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 615559.5685167575,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 39.80557109328466,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.697316055786203,
+      -0.3000000000000014,
+      -0.7742437642874306
+     ],
+     "pos": [
+      2.6973682233695797,
+      81.11247798903779,
+      -0.7741811631873808
+     ],
+     "levelZoom": 0.5219688560456859,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 626185.9704287678,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 135,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 621067,
+    "altFinM": 631793,
+    "rapportDistance": 0.9833,
+    "pireRapportImage": 1.0012,
+    "rapportAlt": 0.983,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00119,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005741270698469858,
+     "azDeg": 37.56859202686244,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7070980480672997,
+      -0.3000000000000004,
+      -0.7883562291507183
+     ],
+     "pos": [
+      2.707147386983641,
+      80.4570330417073,
+      -0.78829208855947
+     ],
+     "levelZoom": 0.5072196723539126,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621066.6950318185,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 37.568592026515695,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7070980480733535,
+      -0.3000000000000004,
+      -0.7883562291299375
+     ],
+     "pos": [
+      2.7071481698487903,
+      81.82926348043331,
+      -0.7882910708218643
+     ],
+     "levelZoom": 0.5240690075351809,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 631793.2600092543,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 114,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 626178,
+    "altFinM": 637345,
+    "rapportDistance": 0.9828,
+    "pireRapportImage": 1.0011,
+    "rapportAlt": 0.9825,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00115,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057400009272061864,
+     "azDeg": 36.027373382190625,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6774609533806006,
+      -0.30000000000000054,
+      -0.7870323910781482
+     ],
+     "pos": [
+      2.6775089240827734,
+      81.11091250370899,
+      -0.7869664313626535
+     ],
+     "levelZoom": 0.5412712918412181,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 626177.5912867452,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000574063584794561,
+     "azDeg": 36.027373381429776,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6774609533834037,
+      -0.30000000000000054,
+      -0.787032391068611
+     ],
+     "pos": [
+      2.677509771266325,
+      82.53949686496503,
+      -0.786965266479585
+     ],
+     "levelZoom": 0.5586669305088193,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 637344.6612509789,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 135,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 610369,
+    "altFinM": 621184,
+    "rapportDistance": 0.9829,
+    "pireRapportImage": 1.0011,
+    "rapportAlt": 0.9826,
+    "pireRapportAlt": 1.0001,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00111,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573237639305409,
+     "azDeg": 37.56859202642502,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.669097239455137,
+      -0.30000000000000043,
+      -0.8149647648126898
+     ],
+     "pos": [
+      2.6691456664790407,
+      79.08745028543595,
+      -0.8149018096816093
+     ],
+     "levelZoom": 0.5390835455938038,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 610368.6599309588,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.000057317405573920985,
+     "azDeg": 37.56859202626432,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6690972394657266,
+      -0.30000000000000043,
+      -0.8149647647780071
+     ],
+     "pos": [
+      2.6691465050515344,
+      80.4710817852843,
+      -0.814900719516451
+     ],
+     "levelZoom": 0.5563622494605538,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621184.4827132398,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "c1-molette-zoom-avant-6crans": [
+   {
+    "images": 282,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 602448,
+    "altFinM": 495641,
+    "rapportDistance": 1.2111,
+    "pireRapportImage": 1.004,
+    "rapportAlt": 1.2155,
+    "pireRapportAlt": 1.0003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00403,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 279,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 589099,
+    "altFinM": 484569,
+    "rapportDistance": 1.2113,
+    "pireRapportImage": 1.004,
+    "rapportAlt": 1.2157,
+    "pireRapportAlt": 1.0003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00399,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005734283477019151,
+     "azDeg": 37.56859202769525,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.715852574181041,
+      -0.2999999999999999,
+      -0.803266270928662
+     ],
+     "pos": [
+      2.7158993571946985,
+      76.3668832866999,
+      -0.8032054530109045
+     ],
+     "levelZoom": 0.43776902582325444,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 589098.7108044385,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.000057317405573920985,
+     "azDeg": 37.5685920256056,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7158525741808752,
+      -0.2999999999999999,
+      -0.8032662709292123
+     ],
+     "pos": [
+      2.715891180189666,
+      62.99467197757835,
+      -0.8032160831177786
+     ],
+     "levelZoom": 0.24610033473069806,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 484568.9555407928,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 290,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 627758,
+    "altFinM": 516499,
+    "rapportDistance": 1.2112,
+    "pireRapportImage": 1.0049,
+    "rapportAlt": 1.2154,
+    "pireRapportAlt": 1.0004,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00487,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005741270698469858,
+     "azDeg": 37.568592031559234,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7574858526081254,
+      -0.30000000000000004,
+      -0.8099758464202851
+     ],
+     "pos": [
+      2.757535713967337,
+      81.31215793781296,
+      -0.8099110266533163
+     ],
+     "levelZoom": 0.4682024701323759,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 627757.6500611206,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005739365936228282,
+     "azDeg": 37.56859203266603,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7574858525950003,
+      -0.30000000000000004,
+      -0.8099758464649731
+     ],
+     "pos": [
+      2.7575270045658353,
+      67.07914498899427,
+      -0.809922348902895
+     ],
+     "levelZoom": 0.27655977343419436,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 516498.705732774,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 279,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 644269,
+    "altFinM": 530024,
+    "rapportDistance": 1.2115,
+    "pireRapportImage": 1.0036,
+    "rapportAlt": 1.2155,
+    "pireRapportAlt": 1.0003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00358,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000573237639305409,
+     "azDeg": 37.56859203200371,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.718958660257106,
+      -0.3000000000000002,
+      -0.7787278773168594
+     ],
+     "pos": [
+      2.719009733622513,
+      83.42565418650024,
+      -0.7786614819418378
+     ],
+     "levelZoom": 0.5035603156281023,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 644269.0694971922,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859203301382,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7189586602545903,
+      -0.3000000000000002,
+      -0.7787278773256557
+     ],
+     "pos": [
+      2.719000799460985,
+      68.81036530936315,
+      -0.7786730963573512
+     ],
+     "levelZoom": 0.3117196074649876,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 530023.5881561143,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 282,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 624932,
+    "altFinM": 514141,
+    "rapportDistance": 1.2113,
+    "pireRapportImage": 1.0038,
+    "rapportAlt": 1.2155,
+    "pireRapportAlt": 1.0003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00382,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005738730874988581,
+     "azDeg": 39.80557109130447,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.732274165948602,
+      -0.3,
+      -0.7142838750095339
+     ],
+     "pos": [
+      2.732326266829383,
+      80.95437467863866,
+      -0.7142213539525943
+     ],
+     "levelZoom": 0.4355996832811841,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 624932.0326639081,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729577951308232,
+     "azDeg": 39.80557108981262,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7322741659568166,
+      -0.3,
+      -0.7142838749781026
+     ],
+     "pos": [
+      2.7323171098601375,
+      66.78052140231996,
+      -0.714232342294113
+     ],
+     "levelZoom": 0.24390873109012004,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 514140.58654748107,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 283,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 621104,
+    "altFinM": 510953,
+    "rapportDistance": 1.2114,
+    "pireRapportImage": 1.005,
+    "rapportAlt": 1.2156,
+    "pireRapportAlt": 1.0004,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00494,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005751418776558874,
+     "azDeg": 37.5685920233928,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7177268668923165,
+      -0.3,
+      -0.7784498949776597
+     ],
+     "pos": [
+      2.7177762961722265,
+      80.4621859402911,
+      -0.7783856369137641
+     ],
+     "levelZoom": 0.46918169464769854,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621104.0074872088,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.000057482494266865524,
+     "azDeg": 37.56859202369011,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7177268668945938,
+      -0.3,
+      -0.7784498949697114
+     ],
+     "pos": [
+      2.7177676492150087,
+      66.3707130896211,
+      -0.7783968779531621
+     ],
+     "levelZoom": 0.277438606835627,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 510953.130618175,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 286,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 644807,
+    "altFinM": 530447,
+    "rapportDistance": 1.2115,
+    "pireRapportImage": 1.0041,
+    "rapportAlt": 1.2156,
+    "pireRapportAlt": 1.0004,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00413,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057431748289843635,
+     "azDeg": 37.56859203356518,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.680191391805995,
+      -0.3000000000000005,
+      -0.8166264812749823
+     ],
+     "pos": [
+      2.6802426025397366,
+      83.49299890314637,
+      -0.8165599073211296
+     ],
+     "levelZoom": 0.5740859751421948,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 644807.2714036162,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005751418776558874,
+     "azDeg": 37.568592028816326,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6801913918351272,
+      -0.30000000000000043,
+      -0.8166264811793725
+     ],
+     "pos": [
+      2.6802337221904944,
+      68.86329828961883,
+      -0.8165714517173952
+     ],
+     "levelZoom": 0.38220686684236793,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 530447.0718760001,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 266,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 648001,
+    "altFinM": 533017,
+    "rapportDistance": 1.2117,
+    "pireRapportImage": 1.0059,
+    "rapportAlt": 1.2157,
+    "pireRapportAlt": 1.0005,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": null,
+    "centre0DerivePx": null,
+    "curseur0DerivePx": null,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.00587,
+    "cropPose": "true→true",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057317405573920985,
+     "azDeg": 37.568592029803625,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.685351325748119,
+      -0.29999999999999905,
+      -0.8123646861675217
+     ],
+     "pos": [
+      2.685402683824591,
+      83.9017267574339,
+      -0.8122979206681104
+     ],
+     "levelZoom": 0.5740366799921861,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 648000.9613352901,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.000057317405573920985,
+     "azDeg": 37.56859202819149,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6853513257534334,
+      -0.29999999999999905,
+      -0.8123646861499549
+     ],
+     "pos": [
+      2.6853937118568196,
+      69.19214886806091,
+      -0.8123095842155516
+     ],
+     "levelZoom": 0.3820350314086184,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 533016.5954126861,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ],
+  "c1-droit-dezoom": [
+   {
+    "images": 372,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 620907,
+    "altFinM": 1780172,
+    "rapportDistance": 1.4056,
+    "pireRapportImage": 2.021,
+    "rapportAlt": 0.3488,
+    "pireRapportAlt": 1.003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005731104651187513,
+     "azDeg": 37.56859203080399,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.723655064934119,
+      -0.2999999999999999,
+      -0.7760727789272605
+     ],
+     "pos": [
+      2.7237043575394524,
+      80.52434740637834,
+      -0.7760086985403315
+     ],
+     "levelZoom": 0.4703519140721535,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 621589.1918917409,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 383,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 611881,
+    "altFinM": 1754201,
+    "rapportDistance": 1.4058,
+    "pireRapportImage": 2.0027,
+    "rapportAlt": 0.3488,
+    "pireRapportAlt": 1.003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.694,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859202603018,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.747864237060116,
+      -0.3000000000000001,
+      -0.8151746421252241
+     ],
+     "pos": [
+      2.7479127605528966,
+      79.28090812859875,
+      -0.8151115615846027
+     ],
+     "levelZoom": 0.46958955714069645,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 611880.9783785758,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859202526491,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.6869660593574185,
+      -0.30000000000000004,
+      6.796206339349384
+     ],
+     "pos": [
+      7.687000575245242,
+      56.307748958039035,
+      6.79625121000356
+     ],
+     "levelZoom": 0.12301596686072161,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1754201.0726185394,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 371,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 635492,
+    "altFinM": 1821427,
+    "rapportDistance": 1.4058,
+    "pireRapportImage": 2.0211,
+    "rapportAlt": 0.3489,
+    "pireRapportAlt": 1.0031,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057482494266865524,
+     "azDeg": 37.56859203784126,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7194865012248037,
+      -0.3,
+      -0.7839711712076507
+     ],
+     "pos": [
+      2.7195370290359757,
+      82.3025877472703,
+      -0.7839054850531485
+     ],
+     "levelZoom": 0.5033973516378492,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 635491.8370427067,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005753952999539997,
+     "azDeg": 37.5685920363992,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.679871625065866,
+      -0.3,
+      6.804007207468885
+     ],
+     "pos": [
+      7.6799076032315465,
+      58.45860541704825,
+      6.804053979084257
+     ],
+     "levelZoom": 0.1568237613578743,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1821426.74595757,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 380,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 619827,
+    "altFinM": 1776673,
+    "rapportDistance": 1.4059,
+    "pireRapportImage": 2.0213,
+    "rapportAlt": 0.3489,
+    "pireRapportAlt": 1.003,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.0000574063584794561,
+     "azDeg": 37.56859203503264,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.716680206807723,
+      -0.2999999999999999,
+      -0.7697341586396163
+     ],
+     "pos": [
+      2.7167294437878633,
+      80.29909810165692,
+      -0.7696701505654484
+     ],
+     "levelZoom": 0.46885048613422786,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 619826.5696096875,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000573491903074535,
+     "azDeg": 37.56859203272072,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.679170051645771,
+      -0.29999999999999993,
+      6.807566460426593
+     ],
+     "pos": [
+      7.6792050375331,
+      57.02768109389207,
+      6.807611942080114
+     ],
+     "levelZoom": 0.12227689585425308,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1776673.2770798185,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 365,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 632700,
+    "altFinM": 1813835,
+    "rapportDistance": 1.4055,
+    "pireRapportImage": 2.0209,
+    "rapportAlt": 0.3488,
+    "pireRapportAlt": 1.0031,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057368252694653495,
+     "azDeg": 37.568592028714455,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6905991726185894,
+      -0.30000000000000143,
+      -0.8017407283660195
+     ],
+     "pos": [
+      2.690649381559358,
+      81.94475464314212,
+      -0.8016754567430201
+     ],
+     "levelZoom": 0.539091167513984,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 632700.1236040272,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.000057368252694653495,
+     "azDeg": 37.56859203401734,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.672649793256509,
+      -0.3,
+      6.7995648177835015
+     ],
+     "pos": [
+      7.672685515796569,
+      58.215306181169964,
+      6.799611257085571
+     ],
+     "levelZoom": 0.19251757723400909,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1813834.797026466,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 374,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 633483,
+    "altFinM": 1816049,
+    "rapportDistance": 1.4055,
+    "pireRapportImage": 2.0209,
+    "rapportAlt": 0.3488,
+    "pireRapportAlt": 1.0031,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.000057431748289843635,
+     "azDeg": 37.568592027173494,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.6969901799579317,
+      -0.3,
+      -0.8108988649706675
+     ],
+     "pos": [
+      2.6970405054676263,
+      82.04456082075878,
+      -0.8108334418080606
+     ],
+     "levelZoom": 0.5395250692080958,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 633483.0986269338,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005736189926945049,
+     "azDeg": 37.5685920280869,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.674247545070583,
+      -0.29999999999999993,
+      6.797275283685399
+     ],
+     "pos": [
+      7.674283306721079,
+      58.285859311230546,
+      6.797321773831045
+     ],
+     "levelZoom": 0.19295147892812092,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1816048.7759694473,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 364,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 648254,
+    "altFinM": 1858309,
+    "rapportDistance": 1.4054,
+    "pireRapportImage": 2.0208,
+    "rapportAlt": 0.3488,
+    "pireRapportAlt": 1.0031,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.703,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005745078328399935,
+     "azDeg": 37.5685920245019,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.687007312999231,
+      -0.3,
+      -0.8085536829678157
+     ],
+     "pos": [
+      2.687058810449752,
+      83.93421777396887,
+      -0.8084867362821276
+     ],
+     "levelZoom": 0.5735651042642328,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 648253.7520748489,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.0000574063584794561,
+     "azDeg": 37.56859202552082,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.671751828222158,
+      -0.29999999999999993,
+      6.797861579264913
+     ],
+     "pos": [
+      7.671788443285461,
+      59.637491523958666,
+      6.797909178847212
+     ],
+     "levelZoom": 0.2269915139842578,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1858309.356519149,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   },
+   {
+    "images": 374,
+    "dLatDeg": 0,
+    "dLonDeg": 0,
+    "rotationDeg": 0,
+    "dTiltDeg": 0,
+    "dAzimutDeg": 0,
+    "altDebutM": 623884,
+    "altFinM": 1788151,
+    "rapportDistance": 1.406,
+    "pireRapportImage": 2.0213,
+    "rapportAlt": 0.3489,
+    "pireRapportAlt": 1.0031,
+    "terreDerivePx": 0,
+    "saisiVsPointeurPx": 300,
+    "centre0DerivePx": 0,
+    "curseur0DerivePx": 0,
+    "mode": "surface→surface",
+    "deltaLndMax": 0.704,
+    "cropPose": "true→false",
+    "horsDuCrop": "true→true",
+    "tiltDebutDeg": 0,
+    "refus": "0→0",
+    "diagAvant": {
+     "phiDeg": 0.00005737460541630463,
+     "azDeg": 37.56859202293553,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      2.7321884282577393,
+      -0.30000000000000016,
+      -0.7826899705757941
+     ],
+     "pos": [
+      2.7322379545842006,
+      80.81761567104778,
+      -0.7826255863513808
+     ],
+     "levelZoom": 0.46917478105783583,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": true,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 623883.6226586855,
+     "sph": [
+      0,
+      0
+     ]
+    },
+    "diagApres": {
+     "phiDeg": 0.00005729832627056611,
+     "azDeg": 37.56859202468669,
+     "up": [
+      0,
+      1,
+      0
+     ],
+     "cible": [
+      7.683047107066233,
+      -0.3,
+      6.804327507361529
+     ],
+     "pos": [
+      7.683082285541967,
+      57.39442562934115,
+      6.804373239379989
+     ],
+     "levelZoom": 0.12260119077786105,
+     "zoomVel": 0,
+     "busy": false,
+     "damping": true,
+     "retoursNadir": 2,
+     "inclinaisonManuelle": false,
+     "fonduPose": false,
+     "cropPose": false,
+     "horsDuCrop": true,
+     "regime": "surface",
+     "altFondM": 1788151.4393255378,
+     "sph": [
+      0,
+      0
+     ]
+    }
+   }
+  ]
+ },
+ "redressements": [
+  {
+   "images": 760,
+   "tiltDebutDeg": 46.222,
+   "tiltMaxDeg": 46.222,
+   "plusGrandPasDeg": 1.475,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 796,
+   "tiltDebutDeg": 46.003,
+   "tiltMaxDeg": 46.003,
+   "plusGrandPasDeg": 1.364,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 799,
+   "tiltDebutDeg": 48.208,
+   "tiltMaxDeg": 48.208,
+   "plusGrandPasDeg": 1.445,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 803,
+   "tiltDebutDeg": 47.203,
+   "tiltMaxDeg": 47.203,
+   "plusGrandPasDeg": 1.391,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 828,
+   "tiltDebutDeg": 50.553,
+   "tiltMaxDeg": 50.553,
+   "plusGrandPasDeg": 1.475,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 808,
+   "tiltDebutDeg": 47.252,
+   "tiltMaxDeg": 47.252,
+   "plusGrandPasDeg": 1.404,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 811,
+   "tiltDebutDeg": 49.198,
+   "tiltMaxDeg": 49.198,
+   "plusGrandPasDeg": 1.458,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 798,
+   "tiltDebutDeg": 48.709,
+   "tiltMaxDeg": 48.709,
+   "plusGrandPasDeg": 1.474,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 807,
+   "tiltDebutDeg": 50.308,
+   "tiltMaxDeg": 50.308,
+   "plusGrandPasDeg": 1.474,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 812,
+   "tiltDebutDeg": 48.281,
+   "tiltMaxDeg": 48.281,
+   "plusGrandPasDeg": 1.426,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 827,
+   "tiltDebutDeg": 49.653,
+   "tiltMaxDeg": 49.653,
+   "plusGrandPasDeg": 1.474,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 801,
+   "tiltDebutDeg": 49.459,
+   "tiltMaxDeg": 49.459,
+   "plusGrandPasDeg": 1.465,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 796,
+   "tiltDebutDeg": 46.216,
+   "tiltMaxDeg": 46.216,
+   "plusGrandPasDeg": 1.376,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 788,
+   "tiltDebutDeg": 46.268,
+   "tiltMaxDeg": 46.268,
+   "plusGrandPasDeg": 1.371,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 784,
+   "tiltDebutDeg": 47.974,
+   "tiltMaxDeg": 47.974,
+   "plusGrandPasDeg": 1.425,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 813,
+   "tiltDebutDeg": 49.139,
+   "tiltMaxDeg": 49.139,
+   "plusGrandPasDeg": 1.47,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 786,
+   "tiltDebutDeg": 48.066,
+   "tiltMaxDeg": 48.066,
+   "plusGrandPasDeg": 1.439,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 807,
+   "tiltDebutDeg": 46.945,
+   "tiltMaxDeg": 46.945,
+   "plusGrandPasDeg": 1.391,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 808,
+   "tiltDebutDeg": 48.609,
+   "tiltMaxDeg": 48.609,
+   "plusGrandPasDeg": 1.468,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 797,
+   "tiltDebutDeg": 47.437,
+   "tiltMaxDeg": 47.437,
+   "plusGrandPasDeg": 1.413,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 845,
+   "tiltDebutDeg": 50.37,
+   "tiltMaxDeg": 50.37,
+   "plusGrandPasDeg": 1.474,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 827,
+   "tiltDebutDeg": 48.809,
+   "tiltMaxDeg": 48.809,
+   "plusGrandPasDeg": 1.449,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 825,
+   "tiltDebutDeg": 45.364,
+   "tiltMaxDeg": 45.364,
+   "plusGrandPasDeg": 1.341,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 842,
+   "tiltDebutDeg": 45.26,
+   "tiltMaxDeg": 45.26,
+   "plusGrandPasDeg": 1.341,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 861,
+   "tiltDebutDeg": 46.361,
+   "tiltMaxDeg": 46.361,
+   "plusGrandPasDeg": 1.399,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 827,
+   "tiltDebutDeg": 48.754,
+   "tiltMaxDeg": 48.754,
+   "plusGrandPasDeg": 1.454,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 802,
+   "tiltDebutDeg": 48.813,
+   "tiltMaxDeg": 48.813,
+   "plusGrandPasDeg": 1.446,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 791,
+   "tiltDebutDeg": 48.293,
+   "tiltMaxDeg": 48.293,
+   "plusGrandPasDeg": 1.432,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 822,
+   "tiltDebutDeg": 48.052,
+   "tiltMaxDeg": 48.052,
+   "plusGrandPasDeg": 1.416,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 806,
+   "tiltDebutDeg": 47.771,
+   "tiltMaxDeg": 47.771,
+   "plusGrandPasDeg": 1.416,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 934,
+   "tiltDebutDeg": 48.916,
+   "tiltMaxDeg": 48.916,
+   "plusGrandPasDeg": 1.478,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 851,
+   "tiltDebutDeg": 50.178,
+   "tiltMaxDeg": 50.178,
+   "plusGrandPasDeg": 1.475,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 813,
+   "tiltDebutDeg": 47.712,
+   "tiltMaxDeg": 47.712,
+   "plusGrandPasDeg": 1.45,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 749,
+   "tiltDebutDeg": 47.23,
+   "tiltMaxDeg": 47.23,
+   "plusGrandPasDeg": 1.407,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 804,
+   "tiltDebutDeg": 45.67,
+   "tiltMaxDeg": 45.67,
+   "plusGrandPasDeg": 1.355,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 786,
+   "tiltDebutDeg": 46.105,
+   "tiltMaxDeg": 46.105,
+   "plusGrandPasDeg": 1.382,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 853,
+   "tiltDebutDeg": 44.082,
+   "tiltMaxDeg": 44.082,
+   "plusGrandPasDeg": 1.401,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 797,
+   "tiltDebutDeg": 46.172,
+   "tiltMaxDeg": 46.172,
+   "plusGrandPasDeg": 1.366,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 809,
+   "tiltDebutDeg": 49.622,
+   "tiltMaxDeg": 49.622,
+   "plusGrandPasDeg": 1.465,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 825,
+   "tiltDebutDeg": 49.35,
+   "tiltMaxDeg": 49.35,
+   "plusGrandPasDeg": 1.459,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 822,
+   "tiltDebutDeg": 48.065,
+   "tiltMaxDeg": 48.065,
+   "plusGrandPasDeg": 1.422,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 835,
+   "tiltDebutDeg": 46.655,
+   "tiltMaxDeg": 46.655,
+   "plusGrandPasDeg": 1.382,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 853,
+   "tiltDebutDeg": 46.434,
+   "tiltMaxDeg": 46.434,
+   "plusGrandPasDeg": 1.383,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 786,
+   "tiltDebutDeg": 45.93,
+   "tiltMaxDeg": 45.93,
+   "plusGrandPasDeg": 1.36,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 816,
+   "tiltDebutDeg": 48.634,
+   "tiltMaxDeg": 48.634,
+   "plusGrandPasDeg": 1.436,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 800,
+   "tiltDebutDeg": 48.372,
+   "tiltMaxDeg": 48.372,
+   "plusGrandPasDeg": 1.425,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 802,
+   "tiltDebutDeg": 49.151,
+   "tiltMaxDeg": 49.151,
+   "plusGrandPasDeg": 1.455,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  },
+  {
+   "images": 770,
+   "tiltDebutDeg": 45.602,
+   "tiltMaxDeg": 45.602,
+   "plusGrandPasDeg": 1.349,
+   "tiltFinDeg": 0,
+   "retoursNadir": 2
+  }
+ ],
+ "reglages": {
+  "mouseButtons": {
+   "LEFT": -1,
+   "MIDDLE": -1,
+   "RIGHT": -1
+  },
+  "NOMS": "THREE.MOUSE: 0=ROTATE 1=DOLLY 2=PAN",
+  "enableZoom": false,
+  "enablePan": true,
+  "enableRotate": false,
+  "enableDamping": true,
+  "dampingFactor": 0.03
+ }
+}

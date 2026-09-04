@@ -63,7 +63,7 @@ import {
 // décide du CADRAGE ; ⑥b interdit à `rampe-crop.js` de l'importer. Le lien entre
 // les deux crans du recollage et les seuils de vie du crop est donc VÉRIFIÉ ici
 // (⑧b), là où une dépendance ne crée aucune boucle.
-import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
+import { SEUIL_BLOC_M, SEUIL_BLOC_MORT_M } from '../src/monde/seuil-socle.js'
 import { plancherPivot, rampeT as rampeTSocleTest } from '../src/monde/naturel-crop.js'
 import { unitesEnMetres, margeCoteM, MARGE_COTE_UNITES } from '../src/monde/habillage-crop.js'
 import { repereCrop, latLonDeLocal, localCrop, dansCrop } from '../src/monde/crop-sphere.js'
@@ -1104,15 +1104,21 @@ test('⑧b le recollage est ACHEVÉ avant que le crop puisse mourir — exécut�
   // régime mondial d'un seul coup à la mort du crop ; si le recollage n'était pas
   // fini, cette bascule serait visible. Elle ne l'est pas parce que l'image porte
   // DÉJÀ le régime mondial quand elle survient.
+  // ⚠️ **LES DEUX BORNES SONT CELLES DU BLOC, PAS CELLES DU CROP — D21.** Ce
+  // que ce test garde est un raccord D'IMAGE : la rampe doit avoir rendu le
+  // régime mondial avant que le bloc cesse d'occuper l'écran. Depuis D21 le
+  // crop naît à 600 km et meurt à 750 km, mais la RAMPE travaille à l'échelle
+  // du bloc — ce sont `SEUIL_BLOC_M` / `SEUIL_BLOC_MORT_M`, les deux seuils
+  // d'avant D21 au bit près, qui encadrent le recollage.
   const satureA = 2 ** CRAN_RECOLLAGE_HAUT
-  assert.ok(satureA >= SEUIL_NAISSANCE_M,
-    `le recollage sature à ${satureA} m, avant même la naissance du crop (${SEUIL_NAISSANCE_M} m)`)
-  assert.ok(satureA < SEUIL_MORT_M,
-    `le recollage sature à ${satureA} m, APRÈS la mort du crop (${SEUIL_MORT_M} m) — il y aurait une marche`)
+  assert.ok(satureA >= SEUIL_BLOC_M,
+    `le recollage sature à ${satureA} m, avant même l’arrivée au bloc (${SEUIL_BLOC_M} m)`)
+  assert.ok(satureA < SEUIL_BLOC_MORT_M,
+    `le recollage sature à ${satureA} m, APRÈS la sortie du bloc (${SEUIL_BLOC_MORT_M} m) — il y aurait une marche`)
   // ⚠️ **ET LA BORNE EST CONDITIONNELLE, DONC ON L'ÉCRIT.** Le poids se mesure
   // au-dessus du SOL du crop : il sature à `satureA + terreBas`. La condition
   // tient tant que la terre la plus basse du bloc est sous ce seuil-ci.
-  const solMax = SEUIL_MORT_M - satureA
+  const solMax = SEUIL_BLOC_MORT_M - satureA
   assert.ok(solMax > 7500, `la marge de sol ne vaut que ${solMax} m`)
   // le point le plus bas d'un bloc de 10,4 km ne peut pas dépasser 7 575 m sur
   // Terre : le sommet du monde est à 8 848 m et aucun plateau n'est à ce niveau.
