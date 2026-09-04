@@ -155,6 +155,7 @@ import { MERCATOR_MAX_LAT } from '../geo.js'
 // payé (un cycle qui ne casse **qu'en production**) ne se referme donc pas ici.
 import { peindreBathyTuile, indexBathy } from '../dem.js'
 import { bandeBruitAdmise, fuseBathymetry, resolutionBathyM } from '../bathy.js'
+import { vetoTerre } from '../coast-veto.js'
 
 // ⚠️ **IMPORTÉE, PAS RECOPIÉE — et c'est la différence avec `seuil-socle.js`.**
 // Là-bas la recopie se justifie : ce module-là est PUR (ni DOM, ni three, ni
@@ -493,6 +494,11 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE, aussi = null
 // vient précisément de supprimer.
 const BATHY_PX = 256
 
+// Le côté du masque de veto, cuit sur l'emprise entière. Plus fin que toute
+// grille de nœuds de l'application (n ≤ 768 ⇒ 769 nœuds) : le rééchantillonnage
+// vers le champ ne peut donc que sous-échantillonner, jamais inventer.
+const VETO_PX = 1024
+
 /**
  * Charge la nappe bathymétrique qui couvre `emprise`, et la garde sur le flux.
  *
@@ -527,8 +533,26 @@ export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
     // ⚠️ Le PLUS grossier, pas le plus fin : c'est la cellule la plus large qui
     // dessine les carrés, et la règle est globale à l'emprise fusionnée.
     zPire: -1,
+    // 🔴 VETO — LE TRAIT DE CÔTE DE L'EMPRISE, cuit une fois ici et relu par
+    // `remplirHauteurs` à chaque raffinement. `null` tant qu'il n'est pas là.
+    veto: null, vetoBoite: null,
   }
   flux.bathy = etat
+  // ⚠️ **LANCÉ, PAS ATTENDU.** La promesse de `demanderBathy` signifie « les
+  // tuiles bathy sont peintes » : y accrocher le trait de côte ferait attendre
+  // à la mer un masque dont elle n'a pas besoin pour exister, et un échec
+  // réseau du masque retarderait le fond marin. Le veto arrive quand il arrive ;
+  // le raffinement suivant le prend.
+  {
+    const bv = boiteMerc(emprise)
+    etat.vetoBoite = bv
+    const pasM = ((bv.x1 - bv.x0) * 40075016.686 * Math.cos(((Number(emprise.nord) + Number(emprise.sud)) / 2) * (Math.PI / 180))) / VETO_PX
+    vetoTerre({
+      u0: bv.x0, u1: bv.x1, v0: bv.y0, v1: bv.y1,
+      largeur: VETO_PX, hauteur: VETO_PX, metresParCellule: pasM,
+      cle: `f/${bv.x0.toFixed(9)}/${bv.y0.toFixed(9)}/${bv.x1.toFixed(9)}/${bv.y1.toFixed(9)}`,
+    }).then((m) => { if (flux.bathy === etat) etat.veto = m })
+  }
   etat.promesse = (async () => {
     // UN SEUL aller-retour d'index pour toute la session : `indexBathy` mémorise
     // sa promesse, et un échec y rend `normalizeIndex(null)` — z8 partout,
@@ -784,10 +808,60 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
     const latMid = ((Number(emprise.nord) + Number(emprise.sud)) / 2) * (Math.PI / 180)
     const pasSolM = dx * 40075016.686 * Math.cos(latMid)
     const bande = bandeBruitAdmise(resolutionBathyM(e.zPire, (latMid * 180) / Math.PI), pasSolM)
-    champ.set(fuseBathymetry(champ, mer, bande === 0 ? { noiseBand: 0 } : undefined))
+    // 🔴 VETO — LE TRAIT DE CÔTE, TROISIÈME ET DERNIER SITE DE FUSION.
+    // ⚠️ **`remplirHauteurs` EST SYNCHRONE**, et le veto se cuit sur le réseau.
+    // On ne l'attend donc PAS : on l'amorce et on l'utilise dès qu'il est là.
+    // Le premier remplissage d'une nouvelle emprise se comporte exactement
+    // comme avant (AU BIT), les suivants portent le veto — et il y en a
+    // toujours, `remplirHauteurs` étant rappelée à chaque raffinement.
+    // Transformer la fonction en async aurait fait attendre le réseau à une
+    // fonction appelée par image : le prix serait payé par tout le monde pour
+    // une information qu'on peut recevoir en retard.
+    const veto = vetoDuChamp(e, b, cote)
+    const opts = bande === 0 || veto ? { ...(bande === 0 ? { noiseBand: 0 } : {}), ...(veto ? { terreVeto: veto } : {}) } : undefined
+    champ.set(fuseBathymetry(champ, mer, opts))
   }
 
   return { remplis, manquants: total - remplis, bathy, sortie: out }
+}
+
+/**
+ * LE VETO CÔTIER DE L'EMPRISE, rééchantillonné à la grille des nœuds.
+ *
+ * ⚠️ **AUCUN RÉSEAU ICI, ET C'EST DÉLIBÉRÉ.** `remplirHauteurs` est appelée à
+ * CHAQUE raffinement ; y lancer un `fetch` ferait payer le réseau à une
+ * fonction du chemin d'image. Le masque est cuit une fois par emprise dans
+ * `demanderBathy` (là où l'attente est déjà légitime et déjà attendue par les
+ * bancs) ; ici on ne fait que le lire, et on rend `null` tant qu'il n'est pas
+ * arrivé — auquel cas la fusion est celle d'avant, AU BIT.
+ *
+ * Plus proche voisin : le masque est cuit à `VETO_PX` (1024), plus fin que
+ * toute grille de nœuds de l'application (n ≤ 768 ⇒ 769 nœuds), et il porte un
+ * BIT. Interpoler un bit n'a pas de sens ; le voisin, si.
+ *
+ * @returns {Uint8Array|null}
+ */
+function vetoDuChamp(e, b, cote) {
+  const src = e?.veto
+  if (!src) return null
+  // la boîte du masque, telle que `demanderBathy` l'a cuite
+  const { x0, y0, x1, y1 } = e.vetoBoite
+  const out = new Uint8Array(cote * cote)
+  const dx = (b.x1 - b.x0) / (cote - 1 || 1)
+  const dy = (b.y1 - b.y0) / (cote - 1 || 1)
+  const px = (x1 - x0) / VETO_PX
+  const py = (y1 - y0) / VETO_PX
+  for (let j = 0; j < cote; j++) {
+    const sy = Math.floor((b.y0 + j * dy - y0) / py)
+    if (sy < 0 || sy >= VETO_PX) continue
+    const o = sy * VETO_PX
+    for (let i = 0; i < cote; i++) {
+      const sx = Math.floor((b.x0 + i * dx - x0) / px)
+      if (sx < 0 || sx >= VETO_PX) continue
+      out[j * cote + i] = src[o + sx]
+    }
+  }
+  return out
 }
 
 // Le tampon de travail de la mer, gardé sur le flux. ⚠️ **2,4 Mo À n = 768 :
