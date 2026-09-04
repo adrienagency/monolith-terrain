@@ -277,6 +277,43 @@ export function detectNoiseFill(land, sea, opts = {}) {
   return dedans >= sondes * part
 }
 
+// ══════════ 🔴 B6 — DEUX ABSENCES NE FONT PAS UNE TERRE ══════════════════════
+//
+// PLAT et VETO ont travaillé sur les QUATRE portes qui mettent un pixel SOUS
+// l'eau (le zéro exact, l'aplat de remplissage, la bande de bruit, le pixel déjà
+// négatif). Le défaut de Rodrigues est le SENS INVERSE, et il n'a qu'une sortie :
+//
+//   > `if (s >= level || sMuet) { out[i] = l }`
+//
+// C'est le SEUL endroit de ce module où un pixel peut ressortir ÉMERGÉ alors que
+// la source marine a été lue. Il est juste tant que `l` mesure quelque chose. En
+// pleine mer profonde, `l` ne mesure RIEN : mesuré à Rodrigues, la tuile
+// terrarium rend **0,000 m pile sur 262 144 pixels sur 262 144**. Et `s >= level`
+// veut dire que la source fine ne mesure rien non plus (le tuileur aplatit la
+// terre à zéro). Deux absences — et le code rendait celle qui veut dire TERRE.
+//
+// À l'écran : des barres beiges longues, fines, à bout franc, posées sur 4 000 m
+// de fond (images `f_003`, `f_018` d'Adrien). Leur longueur est celle d'une
+// tuile, parce que c'est une frange de tuile.
+//
+// D'OÙ VIENNENT LES `s >= level` EN PLEIN OCÉAN — mesuré, pas supposé
+// (`scripts/b6-porte.mjs`, `scripts/b6-striage.mjs`) :
+//
+//   tuile bathy z8 171/142 (large de Rodrigues), fichier PNG SANS PERTE
+//     valeurs distinctes 673 · pas de quantification 1,00 m
+//     min −4 640,00 m · **max 0,00 m EXACTEMENT** · 79 pixels à zéro
+//   le même champ après `resampleCatmullRom` (256 → 512) : **max +6,18 m**
+//
+// Le positif n'est donc pas dans la donnée : c'est le DÉPASSEMENT du cubique
+// autour de la sentinelle de terre du tuileur. 257 pixels sortent émergés.
+//
+// LA RÈGLE : quand les deux sources sont muettes **et que le trait de côte a été
+// consulté et ne déclare aucune terre**, le pixel n'est pas de la terre — il
+// prend `level − SEA_EPS`. Le juge est le même que celui de VETO, pris dans
+// l'autre sens : VETO retire à la mer le droit de prendre de la terre, B6 retire
+// à l'absence le droit d'en fabriquer. Voir `merFranche` (src/coast-veto.js).
+//
+// ⚠️ `merFranche` absent ou faux ⇒ comportement d'avant, AU BIT. C'est testé.
 /**
  * Fusionne deux champs d'altitude de MÊME taille, en mètres.
  *
@@ -285,10 +322,12 @@ export function detectNoiseFill(land, sea, opts = {}) {
  * @param {Float32Array|null} sea - bathymétrie fine, alignée pixel à pixel.
  *   `null` ou taille différente ⇒ on rend `land` inchangé (repli sûr).
  * @param {{blendDepth?: number, seaLevel?: number, fillShare?: number,
- *   noiseBand?: number, terreVeto?: Uint8Array}} [opts]
+ *   noiseBand?: number, terreVeto?: Uint8Array, merFranche?: boolean}} [opts]
  *   `fillShare` règle la détection des aplats de remplissage (detectFillLevels).
  *   `terreVeto` : masque du trait de côte VECTORIEL aligné pixel à pixel sur
  *   `land` (≠ 0 = TERRE certaine). Voir l'encart 🔴 VETO ci-dessus.
+ *   `merFranche` : le trait de côte a été consulté ET ne déclare AUCUNE terre
+ *   sur cette emprise. Voir l'encart 🔴 B6 ci-dessus.
  * @returns {Float32Array} un NOUVEAU tableau (les entrées ne sont pas mutées)
  */
 export function fuseBathymetry(land, sea, opts = {}) {
@@ -316,6 +355,10 @@ export function fuseBathymetry(land, sea, opts = {}) {
   // d'un demi-champ : mieux vaut le comportement d'avant qu'un masque de
   // travers. Voir l'encart au-dessus de `bandeBruitAdmise`.
   const veto = opts.terreVeto && opts.terreVeto.length === land.length ? opts.terreVeto : null
+  // 🔴 B6 — DEUX ABSENCES NE FONT PAS UNE TERRE. Voir l'encart au-dessus de
+  // `fuseBathymetry`. ⚠️ `=== true` : une valeur absente, `undefined` ou
+  // truthy-par-accident garde le comportement d'avant, AU BIT.
+  const merFranche = opts.merFranche === true && !(level > 0)
   const out = new Float32Array(land.length)
   for (let i = 0; i < land.length; i++) {
     const l = land[i]
@@ -359,7 +402,26 @@ export function fuseBathymetry(land, sea, opts = {}) {
     }
     const s = sea[i]
     if (!Number.isFinite(s)) {
-      out[i] = l
+      // 🔴 B6 — L'AUTRE FORME DE LA MÊME ABSENCE, ET C'EST LA PLUS GRANDE.
+      //
+      // Ici la source fine n'a RIEN PEINT (case hors couverture). En pleine mer
+      // profonde c'est le cas MASSIF, parce que le tuileur écarte délibérément
+      // les tuiles qui n'ont que de l'abysse (`build-bathy-tiles.mjs`, garde
+      // `SHELF = −500`), au motif que « les tuiles écartées gardent
+      // silencieusement l'ancien relief ». ⛔ **CE MOTIF N'EST PLUS VRAI** : le
+      // terrarium Mapterhorn n'a PAS d'ancien relief en mer — mesuré à
+      // Rodrigues, 262 144 pixels sur 262 144 à 0,000 m PILE. L'absence de
+      // bathymétrie n'y laisse donc pas un fond grossier, elle laisse **zéro**,
+      // que le nuanceur peint en TERRE.
+      //
+      // Compté (`scripts/b6-marches.mjs`, bande de 7×7 tuiles à Rodrigues) :
+      // **26 tuiles sur 49 (53,1 % du champ) sans aucune bathymétrie à z9** au
+      // plancher normal. Le globe s'en sort par la seconde chance du terrarium
+      // muet (`fondMarinTuile`) ; les deux autres chemins n'en ont pas toujours.
+      //
+      // Même juge et même prudence que ci-dessous : on ne creuse que si le trait
+      // de côte a répondu ET ne déclare aucune terre.
+      out[i] = merFranche && noData ? level - SEA_EPS : l
       continue
     }
     // ⚠️ UN ÉCHANTILLON ÉMERGÉ N'EST PAS UN FOND À ZÉRO — c'est une ABSENCE.
@@ -389,7 +451,43 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // couvre déjà `s === 0`).
     const sMuet = level > 0 && s > -NODATA_EPS && s < NODATA_EPS
     if (s >= level || sMuet) {
-      out[i] = l
+      // 🔴 B6 — DEUX ABSENCES NE FONT PAS UNE TERRE.
+      //
+      // On arrive ici parce que la source fine ne mesure rien (`s >= level` :
+      // le tuileur APLATIT la terre à zéro, ce zéro ne mesure pas un fond). Et
+      // si `noData` est vrai, le relief de référence ne mesure rien non plus.
+      // `out[i] = l` rend alors **le zéro muet du terrarium**, que le nuanceur
+      // peint en TERRE — au milieu de 4 000 m de fond. C'est la barre beige à
+      // arête franche qu'Adrien a filmée à Rodrigues.
+      //
+      // ⛔ ET CE N'EST PAS UNE CINQUIÈME PORTE DE PLUS, C'EST LA SORTIE : les
+      // quatre portes de `VETO §②` mettent un pixel SOUS l'eau ; celle-ci l'en
+      // fait SORTIR. Elle est donc la seule qui puisse fabriquer de la terre.
+      //
+      // MESURÉ (`scripts/b6-porte.mjs`, tuile z8 171/142 au large de Rodrigues) :
+      // la tuile bathy brute a pour maximum **0,00 m EXACTEMENT** (79 pixels de
+      // haut-fond aplatis par le tuileur) ; après `resampleCatmullRom` le champ
+      // monte à **+6,18 m** — le dépassement du cubique autour de la sentinelle
+      // de terre. 257 pixels franchissent alors `s >= level` et ressortent
+      // émergés à 0 m, en une frange à bord franc de la largeur de la tuile.
+      //
+      // ⚠️ LE GARDE EST LE TRAIT DE CÔTE, ET IL EST NON LOCAL — c'est le même
+      // juge que VETO, pris dans l'autre sens. `merFranche` n'est vrai que si
+      // les polygones OSM ont été chargés SANS ERREUR et ne déclarent AUCUNE
+      // terre sur l'emprise (`src/coast-veto.js`). Un haut-fond réellement
+      // émergé (Cargados Carajos, un motu, un îlot) est dans OSM : la côte n'y
+      // est pas franche, et le pixel garde son `l` AU BIT. Un banc entièrement
+      // submergé (Saya de Malha) n'y est pas, et il n'a rien à faire en terre.
+      //
+      // ⛔ ET ON N'INVENTE PAS DE PROFONDEUR : `level − SEA_EPS`, c'est-à-dire
+      // « de l'eau, la moins profonde possible » — la constante que ce module
+      // utilise déjà pour dire « un pixel de mer ne remonte jamais à zéro ».
+      // Creuser jusqu'au fond voisin serait une mesure fabriquée.
+      //
+      // ⚠️ `level > 0` (nappe de lac déclarée) ÉTEINT la règle : `merFranche`
+      // parle de la côte MARINE, elle n'a rien à dire sous un lac. C'est dans
+      // la définition de `merFranche` ci-dessus, et c'est testé.
+      out[i] = merFranche && noData ? level - SEA_EPS : l
       continue
     }
     // MER — la source fine ne peut que creuser sous le niveau, jamais émerger

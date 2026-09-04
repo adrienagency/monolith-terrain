@@ -155,7 +155,7 @@ import { MERCATOR_MAX_LAT } from '../geo.js'
 // payé (un cycle qui ne casse **qu'en production**) ne se referme donc pas ici.
 import { peindreBathyTuile, indexBathy } from '../dem.js'
 import { bandeBruitAdmise, fuseBathymetry, resolutionBathyM } from '../bathy.js'
-import { vetoTerre } from '../coast-veto.js'
+import { vetoTerre, merFranche } from '../coast-veto.js'
 
 // ⚠️ **IMPORTÉE, PAS RECOPIÉE — et c'est la différence avec `seuil-socle.js`.**
 // Là-bas la recopie se justifie : ce module-là est PUR (ni DOM, ni three, ni
@@ -536,6 +536,9 @@ export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
     // 🔴 VETO — LE TRAIT DE CÔTE DE L'EMPRISE, cuit une fois ici et relu par
     // `remplirHauteurs` à chaque raffinement. `null` tant qu'il n'est pas là.
     veto: null, vetoBoite: null,
+    // 🔴 B6 — « la côte a été consultée, et elle ne déclare aucune terre ici ».
+    // `false` tant qu'elle n'a pas répondu : voir l'encart 🔴 B6 de src/bathy.js.
+    merFranche: false,
   }
   flux.bathy = etat
   // ⚠️ **LANCÉ, PAS ATTENDU.** La promesse de `demanderBathy` signifie « les
@@ -547,11 +550,16 @@ export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
     const bv = boiteMerc(emprise)
     etat.vetoBoite = bv
     const pasM = ((bv.x1 - bv.x0) * 40075016.686 * Math.cos(((Number(emprise.nord) + Number(emprise.sud)) / 2) * (Math.PI / 180))) / VETO_PX
-    vetoTerre({
+    const argCote = {
       u0: bv.x0, u1: bv.x1, v0: bv.y0, v1: bv.y1,
       largeur: VETO_PX, hauteur: VETO_PX, metresParCellule: pasM,
       cle: `f/${bv.x0.toFixed(9)}/${bv.y0.toFixed(9)}/${bv.x1.toFixed(9)}/${bv.y1.toFixed(9)}`,
-    }).then((m) => { if (flux.bathy === etat) etat.veto = m })
+    }
+    vetoTerre(argCote).then((m) => { if (flux.bathy === etat) etat.veto = m })
+    // 🔴 B6 — L'AVIS INVERSE, SUR LA MÊME PROMESSE MÉMOÏSÉE : « la côte a
+    // répondu, aucune terre sur l'emprise ». Même règle que le veto — LANCÉ,
+    // PAS ATTENDU ; tant qu'il n'est pas là, la fusion est celle d'avant AU BIT.
+    merFranche(argCote).then((f) => { if (flux.bathy === etat) etat.merFranche = f })
   }
   etat.promesse = (async () => {
     // UN SEUL aller-retour d'index pour toute la session : `indexBathy` mémorise
@@ -818,7 +826,27 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
     // fonction appelée par image : le prix serait payé par tout le monde pour
     // une information qu'on peut recevoir en retard.
     const veto = vetoDuChamp(e, b, cote)
-    const opts = bande === 0 || veto ? { ...(bande === 0 ? { noiseBand: 0 } : {}), ...(veto ? { terreVeto: veto } : {}) } : undefined
+    // 🔴 B6 — DEUX ABSENCES NE FONT PAS UNE TERRE (encart de src/bathy.js).
+    // ⚠️ C'est un BOOLÉEN d'emprise, pas un masque : rien à rééchantillonner,
+    // et il ne mord que là où le terrarium ET la source fine sont muets.
+    //
+    // ⛔ **ET IL EXIGE UNE COUVERTURE COMPLÈTE DU SOCLE — `remplis === total`.**
+    // Sans ce garde, un TROU du quadtree (nœud jamais écrit, donc `out` = 0,
+    // donc `noData` pour la fusion) serait pris pour de la pleine mer et rendu
+    // à l'eau : exactement la faute que
+    // `test/flux-terrain.test.js` « un TROU du relief ne devient PAS une fosse »
+    // interdit, et qui m'a attrapé au premier essai (429 nœuds noyés). Ici
+    // l'absence de relief et l'absence de mesure ne se distinguent pas au pixel :
+    // le seul discriminant sûr est global, et c'est la couverture.
+    const franche = e.merFranche === true && remplis === total
+    const opts =
+      bande === 0 || veto || franche
+        ? {
+            ...(bande === 0 ? { noiseBand: 0 } : {}),
+            ...(veto ? { terreVeto: veto } : {}),
+            ...(franche ? { merFranche: true } : {}),
+          }
+        : undefined
     champ.set(fuseBathymetry(champ, mer, opts))
   }
 

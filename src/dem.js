@@ -22,7 +22,7 @@ import {
   resolutionBathyM,
 } from './bathy.js'
 import { normalizeIndex, tileMaxZoom, zoneAt } from './bathy-sources.js'
-import { vetoTerre } from './coast-veto.js'
+import { vetoTerre, merFranche } from './coast-veto.js'
 import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
 import { quantizeElevation, quantizeElevations } from './dem-quant.js'
 import {
@@ -559,21 +559,26 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // doivent le porter, sinon le damier et le crop divergeraient sur la même
   // emprise — l'écart que B3 a mis une session à diagnostiquer. `null` (hors
   // couverture, panne réseau) ⇒ comportement d'avant, AU BIT.
-  const veto = seaData
-    ? await vetoTerre({
-        u0: (cx - half) / n, u1: (cx - half + tilesAcross) / n,
-        v0: (cy - half) / n, v1: (cy - half + tilesAcross) / n,
-        largeur: sizePx, hauteur: sizePx, metresParCellule: pasBlocM, zoom,
-        cle: `b/${zoom}/${cx - half}/${cy - half}/${tilesAcross}/${sizePx}`,
-      })
-    : null
+  const argCote = {
+    u0: (cx - half) / n, u1: (cx - half + tilesAcross) / n,
+    v0: (cy - half) / n, v1: (cy - half + tilesAcross) / n,
+    largeur: sizePx, hauteur: sizePx, metresParCellule: pasBlocM, zoom,
+    cle: `b/${zoom}/${cx - half}/${cy - half}/${tilesAcross}/${sizePx}`,
+  }
+  // 🔴 B6 — ET SON AVIS INVERSE, PRIS SUR LA MÊME PROMESSE MÉMOÏSÉE : « la côte
+  // a répondu, et elle ne déclare aucune terre ici ». Voir l'encart 🔴 B6 de
+  // `src/bathy.js`. Coût réseau supplémentaire : ZÉRO (même clé de cache).
+  const [veto, franche] = seaData
+    ? await Promise.all([vetoTerre(argCote), merFranche(argCote)])
+    : [null, false]
   const optsFusion =
-    Number.isFinite(nappeZone) || Number.isFinite(fonduZone) || bandeBruit === 0 || veto
+    Number.isFinite(nappeZone) || Number.isFinite(fonduZone) || bandeBruit === 0 || veto || franche
       ? {
           ...(Number.isFinite(nappeZone) ? { seaLevel: nappeZone + 0.5 } : {}),
           ...(Number.isFinite(fonduZone) ? { blendDepth: fonduZone } : {}),
           ...(bandeBruit === 0 ? { noiseBand: 0 } : {}),
           ...(veto ? { terreVeto: veto } : {}),
+          ...(franche ? { merFranche: true } : {}),
         }
       : undefined
   const fused = seaData ? fuseBathymetry(data, seaData, optsFusion) : data

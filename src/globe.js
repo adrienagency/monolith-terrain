@@ -17,7 +17,7 @@ import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
 import { bandeBruitAdmise, fuseBathymetry, overzoomTile, resolutionBathyM } from './bathy.js'
-import { vetoTerre } from './coast-veto.js'
+import { vetoTerre, merFranche } from './coast-veto.js'
 // ⚠️ `dem.js` N'IMPORTE PAS `globe.js` (il s'en garde explicitement, voir
 // l'encart de `memo-tuiles-mnt.js`) : le sens unique est acquis, pas espéré.
 import { peindreBathyTuile, indexBathy } from './dem.js'
@@ -3698,16 +3698,25 @@ async function fondMarinTuile(z, x, y, heights, px) {
   // tuile à chaque recuisson (palette, nappe, retour d'un cran), et la
   // rasterisation ne se repaie jamais.
   const n = 2 ** z
-  const veto = await vetoTerre({
+  const argCote = {
     u0: x / n, u1: (x + 1) / n, v0: y / n, v1: (y + 1) / n,
     largeur: px, hauteur: px, metresParCellule: pasTuileM, zoom: z,
     cle: `t/${z}/${x}/${y}/${px}`,
-  })
-  // ⚠️ `opts` peut rester `undefined` : sans bande à éteindre NI veto, l'appel
-  // est celui d'avant AU BIT — nappe et bande de fondu comprises.
+  }
+  // 🔴 B6 — LES DEUX AVIS SORTENT DE LA MÊME PROMESSE MÉMOÏSÉE (même clé, même
+  // rasterisation) : `merFranche` ne coûte pas un octet de réseau de plus que
+  // `vetoTerre`. Voir `src/coast-veto.js`.
+  const [veto, franche] = await Promise.all([vetoTerre(argCote), merFranche(argCote)])
+  // ⚠️ `opts` peut rester `undefined` : sans bande à éteindre, NI veto, NI mer
+  // franche, l'appel est celui d'avant AU BIT — nappe et bande de fondu comprises.
   const optsFusion =
-    bandePlat === 0 || veto
-      ? { ...(opts ?? {}), ...(bandePlat === 0 ? { noiseBand: 0 } : {}), ...(veto ? { terreVeto: veto } : {}) }
+    bandePlat === 0 || veto || franche
+      ? {
+          ...(opts ?? {}),
+          ...(bandePlat === 0 ? { noiseBand: 0 } : {}),
+          ...(veto ? { terreVeto: veto } : {}),
+          ...(franche ? { merFranche: true } : {}),
+        }
       : opts
   const fondu = fuseBathymetry(heights, sea, optsFusion)
   return fondu === heights ? null : fondu
