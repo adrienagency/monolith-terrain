@@ -546,15 +546,101 @@ export class WaterLayer {
   // de `peintCelluleSol` / `peintCelluleNuit` (main.js). Ces deux-là copient des
   // MOSAÏQUES DE TUILES auto-hébergées : leur patron est juste PARCE QUE leur
   // source est locale. Le calque d'eau ne partage pas cette propriété.
+  // ══════ ⚡ ON DESSINE LE LOCAL D'ABORD, ON ATTEND OVERPASS ENSUITE — RIV-C ══
+  //
+  // ⛔ **CE `rebuild` ATTENDAIT OVERPASS AVANT DE DESSINER QUOI QUE CE SOIT, ET
+  // C'ÉTAIT 97,3 % DU TEMPS RESSENTI.** La ligne fautive était un
+  // `await Promise.all([fetchOverpassLines, fetchOverpassAreas])` posé AVANT
+  // toute la suite : la donnée garantie (Natural Earth, tuiles Overture — des
+  // fichiers LOCAUX, servis en quelques dizaines de millisecondes) restait
+  // derrière un enrichissement FACULTATIF venu d'un service public.
+  //
+  // ⚠️⚠️ **ET VOICI CE QUE J'AI CRU PUIS RÉFUTÉ, PARCE QUE ÇA BORNE CE QUE CE
+  // CORRECTIF ACHÈTE.** J'avais écrit ici « ≈ 13 s gagnées sur le premier
+  // trait ». **C'EST FAUX, et c'est ma propre mesure qui le dit.**
+  // `scripts/sonde-riv-c.mjs`, contexte de navigateur NEUF par cas (le
+  // disjoncteur se ferme 60 s et rend tout gratuit — sans ça on ne mesure rien),
+  // **médiane de 3 tours**, délai entre le vol et le premier trait bleu :
+  //
+  //   | lieu · zoom      | avant     | après     |
+  //   |------------------|-----------|-----------|
+  //   | Rhône z12        | 13 699 ms | 13 481 ms |
+  //   | Rhône z13        |  8 830 ms |  8 777 ms |
+  //   | Mississippi z12  | 10 836 ms | 11 452 ms |
+  //   | Mississippi z13  | 10 819 ms | 11 051 ms |
+  //
+  // **Aucun gain sur cette grandeur-là.** Parce que sur un VOL, les deux
+  // premières reconstructions n'ont RIEN à peindre : le MNT est encore en route,
+  // l'emprise est à mi-chemin. Peindre plus tôt ne peint pas plus tôt quelque
+  // chose qui n'existe pas encore. Ce qui décide du premier trait, sur un vol,
+  // c'est l'arrivée du relief (≈ 76 Mo, ~500 requêtes), pas Overpass. Les 13,7 s
+  // du rapport RIV sont une SOMME DE MURS de reconstruction — elles ne sont pas
+  // en série devant le premier trait.
+  //
+  // ➡️ **CE QUI EST GAGNÉ, LUI, EST MESURÉ ET REPRODUCTIBLE** : le mur BLOQUANT
+  // des deux premières reconstructions, **12,1–12,3 s → 10,6–11,7 s** (médiane
+  // de 3 tours, les six lieux × zooms), et il vient de l'échéance partagée
+  // d'`overpass.js`. Ce que le correctif d'ORDRE apporte, lui, c'est que ce mur
+  // n'est plus DEVANT la peinture : dès qu'il y a du local à montrer, c'est
+  // montré. `test/eau-attente.test.js` l'épingle — sans ce correctif, **zéro**
+  // peinture tant qu'Overpass n'a pas rendu la main.
+  //
+  // ⚠️ **CE N'EST PAS UN GAIN DE FLUIDITÉ NON PLUS, ET LE DIRE SERAIT FAUX.**
+  // L'A/B rivières allumées/éteintes dans la même session borne le coût CPU du
+  // calque à **+72 ms** ; la saccade appartient au globe qui maille son relief
+  // (tâche unique de 1 627 ms, 688 requêtes, 88 Mo dans la même fenêtre).
+  //
+  // LE CHANGEMENT EST UN ORDRE, PAS UNE MÉCANIQUE : les requêtes partent
+  // toujours au même instant et par le même chemin ; on ne les attend
+  // simplement plus pour peindre. Si elles arrivent, une seconde peinture
+  // REMPLACE la première.
+  //
+  // ⚠️ **ET SI ELLES N'ARRIVENT PAS, IL N'Y A PAS DE SECONDE PEINTURE DU TOUT.**
+  // C'est ce qui rend l'absence de clignotement gratuite dans le cas mesuré :
+  // `feats == null && areas == null` (le cas de cette machine, et de tout
+  // visiteur dont le réseau n'atteint pas Overpass) sort sans rien retoucher.
+  // On repeint dès qu'Overpass a RÉPONDU, même vide — une réponse vide est une
+  // information ("il n'y a pas d'eau ici"), et c'est exactement ce que
+  // l'ancienne branche `if (feats)` faisait déjà : un tableau vide est vrai,
+  // donc il écrasait le repli Natural Earth. Ne pas le reproduire changerait
+  // les pixels.
   async rebuild({ dem, terrain, params }) {
     const id = ++this._buildId
+    if (!params.waterEnabled || !dem || params.source !== 'real') {
+      _remiseChrono(); this._clear(); this.usingOsm = false; this.loading = false; return
+    }
+    const bounds = patchBounds(dem)
+    const zoom = params.demZoom ?? 8
+    const socle = { dem, terrain, params, bounds, zoom, id }
+    if (zoom < OSM_MIN_ZOOM) { await this._peindre(socle, null); return }
+
+    // Les requêtes partent MAINTENANT — mais on ne les attend pas ici.
+    // Le `.catch` est celui de l'appelant : `fetchOverpass*` rend déjà `null`
+    // sur échec, ce filet ne couvre qu'un rejet inattendu, et il évite qu'un
+    // rejet non traité tue la reconstruction locale qui, elle, va aboutir.
+    this.loading = true
+    const enrichissement = Promise.all([
+      fetchOverpassLines(bounds, 'water'),
+      fetchOverpassAreas(bounds),
+    ]).catch(() => [null, null])
+
+    await this._peindre(socle, null) // ⚡ le trait bleu est à l'écran ICI
+
+    const [feats, areas] = await enrichissement
+    if (id !== this._buildId) return
+    this.loading = false
+    if (dem !== terrain.dem) return
+    if (feats == null && areas == null) return // rien de neuf : on ne retouche RIEN
+    await this._peindre(socle, { feats, areas })
+  }
+
+  // Une peinture complète du calque, à partir des sources déjà en main.
+  // `osm` vaut `null` (on ne dessine que le local garanti) ou
+  // `{ feats, areas }` (la réponse d'Overpass, qui remplace ce qu'elle couvre).
+  async _peindre({ dem, terrain, params, bounds, zoom, id }, osm) {
     _remiseChrono()
     const _tDebut = _mnt()
     this._clear()
-    if (!params.waterEnabled || !dem || params.source !== 'real') { this.usingOsm = false; this.loading = false; return }
-    const bounds = patchBounds(dem)
-    const zoom = params.demZoom ?? 8
-    const useOsm = zoom >= OSM_MIN_ZOOM
 
     // rivers: OSM waterways when zoomed in, else NE river centerlines. Each
     // entry carries its source strokeweight (OSM ways have none, so they
@@ -562,14 +648,8 @@ export class WaterLayer {
     let riverEntries = null
     let areaParts = null
     let osmOk = false
-    if (useOsm) {
-      this.loading = true
-      const [feats, areas] = await Promise.all([
-        fetchOverpassLines(bounds, 'water'),
-        fetchOverpassAreas(bounds),
-      ])
-      this.loading = false
-      if (id !== this._buildId || dem !== terrain.dem) return
+    if (osm) {
+      const { feats, areas } = osm
       if (feats) { riverEntries = filterRiverwayLines(feats).map((f) => ({ ring: f.coords, strokeweight: undefined })); osmOk = true }
       // area fetch is best-effort: failure/throttle just means no filled polygons, lines still render.
       // Overpass areas never carry holes (parseOverpassAreas ignores inner members for v1).
