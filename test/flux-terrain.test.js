@@ -199,6 +199,14 @@ globalThis.fetch = async (url) => {
     if (banc.porte) await banc.porte
     return { ok: true, status: 200, blob: async () => ({ size: OCTETS_BATHY, url }) }
   }
+  // 🔴 VETO — LE TRAIT DE CÔTE N'EST PAS UNE TUILE D'ALTITUDE. `coast-veto.js`
+  // demande `data/coast-z6/{x}/{y}.json` (et `data/land-10m.json` au large) ;
+  // ces fichiers-là sont servis PAR LE SITE, comme `data/bathy/`, et non par un
+  // bucket lointain. Les faire passer par le modèle de latence d'AWS les
+  // laissait en attente dans `attentes`, et le banc perdait ses tuiles.
+  // 404 = « pas de terre ici », le repli documenté du module : le veto rend
+  // alors `null` et la fusion est celle d'avant, AU BIT.
+  if (url.startsWith('data/coast-z6/') || url.startsWith('data/land-10m')) return { ok: false, status: 404 }
   const duree = ((OCTETS_TUILE * 8) / ((DEBIT_MBS * 1e6) / MAX_CONCURRENT)) * 1000
   await new Promise((r) => attentes.push({ du: horloge + duree, r }))
   return { ok: true, status: 200, blob: async () => ({ size: OCTETS_TUILE, url }) }

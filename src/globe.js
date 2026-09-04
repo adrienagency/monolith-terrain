@@ -17,6 +17,7 @@ import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { amontDemande, creerFabriqueMateriau, habillerPhotoTuile, libererMateriauTuile } from './monde/materiau-tuile.js'
 import { bandeBruitAdmise, fuseBathymetry, overzoomTile, resolutionBathyM } from './bathy.js'
+import { vetoTerre } from './coast-veto.js'
 // ⚠️ `dem.js` N'IMPORTE PAS `globe.js` (il s'en garde explicitement, voir
 // l'encart de `memo-tuiles-mnt.js`) : le sens unique est acquis, pas espéré.
 import { peindreBathyTuile, indexBathy } from './dem.js'
@@ -3665,11 +3666,31 @@ async function fondMarinTuile(z, x, y, heights, px) {
   // carré blanc. Voir `bandeBruitAdmise` (src/bathy.js) et son tableau de lieux.
   // ⚠️ `opts` peut être `undefined` : on ne le remplace QUE si la règle mord,
   // sinon l'appel reste celui d'avant AU BIT (nappe et bande de fondu comprises).
-  const bandePlat = bandeBruitAdmise(
-    resolutionBathyM(peint, c.lat),
-    ((156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / 2 ** z) * (256 / px)
-  )
-  const fondu = fuseBathymetry(heights, sea, bandePlat === 0 ? { ...(opts ?? {}), noiseBand: 0 } : opts)
+  const pasTuileM = ((156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / 2 ** z) * (256 / px)
+  const bandePlat = bandeBruitAdmise(resolutionBathyM(peint, c.lat), pasTuileM)
+  // 🔴 VETO — LE TRAIT DE CÔTE, ET C'EST ICI QUE ÇA COMPTE POUR CE QU'ADRIEN
+  // VOIT. La règle d'échelle ci-dessus ne mord pas à z11–z13 (rapport 8 à 16),
+  // et c'est là que la Camargue perdait 100 % de ses tuiles z11 et z12. Le veto
+  // est NON LOCAL : il vient des polygones OSM, pas du champ. Voir
+  // `src/coast-veto.js`.
+  //
+  // ⚠️ LE COÛT EST PAYÉ UNE FOIS PAR TUILE, PAS PAR PIXEL : `vetoTerre` cuit un
+  // masque et le mémoïse sur la clé (z,x,y,px) — le quadtree redemande la même
+  // tuile à chaque recuisson (palette, nappe, retour d'un cran), et la
+  // rasterisation ne se repaie jamais.
+  const n = 2 ** z
+  const veto = await vetoTerre({
+    u0: x / n, u1: (x + 1) / n, v0: y / n, v1: (y + 1) / n,
+    largeur: px, hauteur: px, metresParCellule: pasTuileM, zoom: z,
+    cle: `t/${z}/${x}/${y}/${px}`,
+  })
+  // ⚠️ `opts` peut rester `undefined` : sans bande à éteindre NI veto, l'appel
+  // est celui d'avant AU BIT — nappe et bande de fondu comprises.
+  const optsFusion =
+    bandePlat === 0 || veto
+      ? { ...(opts ?? {}), ...(bandePlat === 0 ? { noiseBand: 0 } : {}), ...(veto ? { terreVeto: veto } : {}) }
+      : opts
+  const fondu = fuseBathymetry(heights, sea, optsFusion)
   return fondu === heights ? null : fondu
 }
 

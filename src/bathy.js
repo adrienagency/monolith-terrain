@@ -204,6 +204,33 @@ export const CELLULE_MAX_PX = 32
  *   éteindre la règle. ⚠️ Une entrée non finie rend `NOISE_BAND` : un appelant
  *   qui ne sait pas mesurer son échelle garde le comportement d'avant, AU BIT.
  */
+// ══════════ 🔴 VETO — LE TRAIT DE CÔTE DÉCIDE, PAS UNE SOURCE GROSSIÈRE ══════
+//
+// La règle d'échelle ci-dessus borne le régime « rapport > 32 ». Elle ne mord
+// PAS à z11–z13 (rapport 8 à 16), et c'est LÉGITIME : c'est exactement le
+// régime où la bande de B5 est prouvée nécessaire à Porquerolles. Or c'est là
+// que la Camargue perd encore 100 % de deux tuiles (relevé PLAT, §⑥ de son
+// rapport), et **à z12 aucune règle LOCALE ne peut trancher** entre un marais
+// IGN uniformément à +0,13 m et un remplissage WebP uniformément à +0,3 m —
+// quatre discriminants testés, aucun ne tient.
+//
+// L'information manquante est NON LOCALE, et elle est déjà au dépôt : le trait
+// de côte vectoriel (`src/coast-veto.js`, polygones OSM de
+// `public/data/coast-z6`). D'où `terreVeto` :
+//
+//   > **une cellule que le trait de côte déclare TERRE ne peut pas être rendue
+//   > à la mer par la bande de bruit, quoi que dise la source fine.**
+//
+// ⛔ ET SEULEMENT LA BANDE DE BRUIT. C'est le point qui garde la mer en mer.
+// La bande de B5 est la SEULE règle de ce module qui prenne une terre franche
+// et POSITIVE et la reclasse en mer (voir l'encart de `NOISE_BAND`). Les autres
+// chemins — zéro exact, aplat de remplissage, pixel déjà sous le niveau —
+// restent ouverts AU BIT, et c'est par eux que l'eau réelle arrive : les étangs
+// de Camargue passent par le zéro exact du terrarium (contours ORGANIQUES,
+// `.banc/PLAT/apres/cam15-muets.png`), pas par la bande. Un veto qui aurait
+// aussi fermé ces portes aurait asséché le Vaccarès.
+//
+// ⚠️ `terreVeto` absent ⇒ comportement d'avant, AU BIT. C'est testé.
 export function bandeBruitAdmise(resolutionSourceM, metersPerPixel) {
   if (!Number.isFinite(resolutionSourceM) || !Number.isFinite(metersPerPixel) || metersPerPixel <= 0) return NOISE_BAND
   return resolutionSourceM > CELLULE_MAX_PX * metersPerPixel ? 0 : NOISE_BAND
@@ -257,8 +284,11 @@ export function detectNoiseFill(land, sea, opts = {}) {
  *   sur le trait de côte et sur toute la terre émergée.
  * @param {Float32Array|null} sea - bathymétrie fine, alignée pixel à pixel.
  *   `null` ou taille différente ⇒ on rend `land` inchangé (repli sûr).
- * @param {{blendDepth?: number, seaLevel?: number, fillShare?: number}} [opts]
+ * @param {{blendDepth?: number, seaLevel?: number, fillShare?: number,
+ *   noiseBand?: number, terreVeto?: Uint8Array}} [opts]
  *   `fillShare` règle la détection des aplats de remplissage (detectFillLevels).
+ *   `terreVeto` : masque du trait de côte VECTORIEL aligné pixel à pixel sur
+ *   `land` (≠ 0 = TERRE certaine). Voir l'encart 🔴 VETO ci-dessus.
  * @returns {Float32Array} un NOUVEAU tableau (les entrées ne sont pas mutées)
  */
 export function fuseBathymetry(land, sea, opts = {}) {
@@ -281,6 +311,11 @@ export function fuseBathymetry(land, sea, opts = {}) {
   // B5 — le bruit autour du zéro, voir l'encart au-dessus de `NOISE_BAND`.
   const bande = opts.noiseBand ?? NOISE_BAND
   const bruitZero = detectNoiseFill(land, sea, opts)
+  // 🔴 VETO — le trait de côte, aligné pixel à pixel sur `land`. Une taille
+  // différente est ignorée EN SILENCE VOLONTAIRE plutôt que de décaler le veto
+  // d'un demi-champ : mieux vaut le comportement d'avant qu'un masque de
+  // travers. Voir l'encart au-dessus de `bandeBruitAdmise`.
+  const veto = opts.terreVeto && opts.terreVeto.length === land.length ? opts.terreVeto : null
   const out = new Float32Array(land.length)
   for (let i = 0; i < land.length; i++) {
     const l = land[i]
@@ -312,7 +347,10 @@ export function fuseBathymetry(land, sea, opts = {}) {
     // B5 — dans la bande de bruit ET là où la source fine dit immergé : absence.
     // ⚠️ `sea[i] < level` est lu ICI, avant le test de terre, parce que c'est
     // précisément un pixel classé terre (+0,3 m) qu'il faut rendre à la mer.
-    const bruit = bruitZero && l >= level - bande && l <= level + bande && sea[i] < level - (opts.noiseMinDepth ?? NOISE_MIN_DEPTH)
+    // 🔴 VETO — `!(veto && veto[i])` EST TOUT LE CORRECTIF DE LA TÂCHE VETO, et
+    // il est posé ICI et NULLE PART AILLEURS. Le trait de côte ne rend pas de la
+    // terre : il retire à la bande de bruit le droit d'en prendre.
+    const bruit = !(veto && veto[i]) && bruitZero && l >= level - bande && l <= level + bande && sea[i] < level - (opts.noiseMinDepth ?? NOISE_MIN_DEPTH)
     const noData = (l > -NODATA_EPS && l < NODATA_EPS) || remplissage || bruit
     // TERRE — intouchable, et c'est elle qui définit le rivage
     if (l >= level && !noData) {

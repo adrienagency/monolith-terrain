@@ -206,6 +206,12 @@ function rasterize(ringGroups, dem, size) {
 
 // z4–z8: the bundled Natural Earth 10m land (one file, whole world)
 let landPromise = null
+// ⚠️ EXPORTÉ POUR LE VETO (src/coast-veto.js), ET DÉLIBÉRÉMENT PAS RECOPIÉ :
+// deux chargeurs de la même donnée, ce sont deux caches qui divergent et deux
+// fois le réseau. `loadLandFeatures` rend directement les entités.
+export async function loadLandFeatures() {
+  return (await loadLand()).features
+}
 function loadLand() {
   landPromise ??= fetch('data/land-10m.json').then((r) => {
     if (!r.ok) throw new Error(`land-10m.json → HTTP ${r.status}`)
@@ -229,7 +235,10 @@ function fetchGridTile(x, y) {
   }
   return p
 }
-async function loadGridFeatures(bbox) {
+// ⚠️ EXPORTÉE POUR LE VETO : `gridCache` mémoïse les tuiles z6, et le veto
+// partage donc EXACTEMENT les mêmes polygones que le masque côtier du nuanceur.
+// Deux rasterisations d'une même vérité, jamais deux vérités.
+export async function loadGridFeatures(bbox) {
   const { x0, x1, y0, y1 } = gridTileRange(bbox, GRID_ZOOM)
   const jobs = []
   for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) jobs.push(fetchGridTile(x, y))
