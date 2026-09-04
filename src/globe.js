@@ -484,7 +484,8 @@ uniform float uCropCoin;
 uniform float uCropCoinN;
 // LE BORD DE LA MER — Tache J. (debut, fin) du fondu, en demi-cotes de crop,
 // MESURES DEPUIS LA FRONTIERE DE LA DECOUPE : 0 = la frontiere. La loi vit dans
-// src/monde/mer-sphere.js (bordDeMer) et SUIT L'ESTOMPAGE de la Terre autour.
+// src/monde/mer-sphere.js (bordDeMer) et ne suit QUE L'EMPRISE DU SOCLE : elle
+// ne prend plus aucun parametre depuis le defaut 2 d'Adrien du 2026-09-04.
 // ⚠️ uCropCoin et uCropCoinN etaient DECLARES ICI ET LUS PAR PERSONNE depuis la
 // Tache F — deux uniformes morts, exactement ce que le §Q du plan traque. Ils
 // portent desormais la mesure du bord, la MEME que celle de la decoupe
@@ -4889,12 +4890,15 @@ export class Globe {
     // sont opaques en production ; sans cette bascule leur `1.0 - estompage`
     // serait ignoré par le moteur et un bandeau blanc resterait au pôle.
     this._melangeCalottes(true)
-    // ⚠️ **ET LA MER SUIT, SINON ELLE FLOTTE.** Tâche J : sans cette ligne, la
-    // planète s'efface et il reste un rectangle bleu de plusieurs centaines de
-    // kilomètres au-dessus du vide — relevé à l'écran, « la mer déborde de
-    // ~400 km sur un bloc de 10 km ». C'est le SEUL appel par image du bord, et
-    // `creerVeilleEstompage` ne le déclenche que sur changement de valeur.
-    this._majBordMer()
+    // ⛔ **IL Y AVAIT ICI UN APPEL À `_majBordMer`, ET C'ÉTAIT LE DÉFAUT ②
+    // D'ADRIEN (2026-09-04).** La Tâche J l'avait posé pour que la mer « suive »
+    // l'estompage ; la conséquence mesurée est que la nappe s'étendait jusqu'à
+    // DEUX demi-côtés hors du crop dès que l'estompage n'était pas plein —
+    // c'est-à-dire à chaque geste, l'estompage n'étant plein qu'au repos.
+    // ⚠️ **LA MER NE SUIT PLUS L'ESTOMPAGE : ELLE SUIT LE SOCLE**, et rien
+    // d'autre (`bordDeMer`, qui ne prend plus aucun paramètre). L'estompage
+    // n'écrit donc plus rien sur la mer, et le retirer d'ici est ce qui le
+    // PROUVE — laisser l'appel rendrait la dépendance invisible mais vivante.
     return v
   }
 
@@ -4939,7 +4943,8 @@ export class Globe {
     u.uEstompageOn.value = 0
     u.uEstompage.value = 1
     this._melangeCalottes(false)
-    this._majBordMer()
+    // ⛔ **PLUS D'APPEL À `_majBordMer` ICI NON PLUS** — même raison qu'à
+    // `poserEstompage` : le bord de la mer ne dépend plus de l'estompage.
   }
 
   /** Les calottes passent (ou non) dans la liste triée du moteur. */
@@ -6486,9 +6491,11 @@ export class Globe {
         uCropCoin: u.uCropCoin,
         uCropCoinN: u.uCropCoinN,
         // ⚠️ **PROPRE À LA MER, PAS PARTAGÉ** : les deux bornes sont exprimées
-        // dans la mesure de la découpe, mais leur AMPLITUDE dépend de `portee`,
-        // qui est une grandeur de la calotte. Posé juste après, par
-        // `_majBordMer` — un seul écrivain, celui que `poserEstompage` rappelle.
+        // dans la mesure de la découpe, celle du socle. Posé juste après, par
+        // `_majBordMer` — un seul écrivain, et un seul appelant depuis que la
+        // mer ne suit plus l'estompage (défaut ② d'Adrien, 2026-09-04).
+        // ⚠️ **LE NEUTRE `(0, 1)` RESTE UN NEUTRE, PAS UN ÉTAT** : il vit le
+        // temps d'une construction, `_majBordMer` l'écrase avant tout dessin.
         uMerBord: { value: new THREE.Vector2(0, 1) },
         // ══════ LA RÉFRACTION — Tâche R2 ════════════════════════════════════
         //
@@ -6629,24 +6636,23 @@ export class Globe {
   }
 
   /**
-   * Recale le bord de la mer sur l'estompage courant — Tâche J.
+   * Pose le bord de la mer : **à l'emprise du socle, toujours.**
    *
-   * ⚠️ **DEUX FLOTTANTS, PAS UNE RECUISSON.** La calotte se bâtit à l'arrêt ;
-   * faire varier sa `portee` avec l'estompage la reconstruirait par image
-   * (385² de champ, 193² de sommets). La géométrie reste donc à sa portée, et
-   * c'est le FONDU qui bouge.
+   * ⚠️ **DEUX FLOTTANTS, PAS UNE RECUISSON.** La calotte se bâtit à l'arrêt
+   * (385² de champ, 193² de sommets) : l'écrêtage vit dans le FRAGMENT, sur la
+   * même superellipse que le `discard` des tuiles. La géométrie garde donc sa
+   * portée de 3 demi-côtés — c'est sur elle que le champ est cuit — et c'est le
+   * nuanceur qui n'en garde que le crop.
    *
-   * ⚠️ **ET LA VALEUR NEUTRE EST ZÉRO, COMME POUR LES CALOTTES POLAIRES.** Les
-   * trois sites qui lisent `uEstompage` n'ont pas la même : les tuiles prennent
-   * `1.0` quand l'interrupteur est éteint (le crop seul), les calottes `0.0`
-   * (la planète entière). La mer est du second groupe — sans `poserEstompage`,
-   * la planète est entière, donc la mer peut aller jusqu'au bord de la calotte.
+   * ⛔ **ELLE LISAIT `uEstompage`, ET C'ÉTAIT LE DÉFAUT ② D'ADRIEN.** Elle
+   * portait même le piège nommé dans le brief : `uEstompageOn` à 0 se lisait
+   * « planète entière », donc « mer jusqu'au bord de la calotte » — un crop
+   * parfaitement découpé sous une nappe qui ne l'était pas du tout. La mesure
+   * est dans `bordDeMer`. **Un seul appelant reste : `poserMer`.**
    */
   _majBordMer() {
     if (!this._mer) return
-    const u = this.uniforms
-    const estompage = u.uEstompageOn.value > 0.5 ? u.uEstompage.value : 0
-    const b = bordDeMer(estompage, this._merEtat?.portee ?? PORTEE_CROP)
+    const b = bordDeMer()
     this._mer.material.uniforms.uMerBord.value.set(b.debut, b.fin)
   }
 

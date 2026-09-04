@@ -64,7 +64,6 @@ import {
   RETRAIT_EAU_CROP,
   MARGE_EAU_CROP,
   construireJupeMer,
-  FRACTION_BANDE_BORD,
   bordDeMer,
   couleursFondDuSocle,
   // ⚠️ **Tache P6** : les deux couleurs de la LAME, la meme faute un cran plus haut.
@@ -1384,7 +1383,7 @@ test('⑪b la mer S ARRÊTE AU BLOC quand la Terre autour est effacée', () => {
   // 0,22 unité de socle DEHORS, pleine opacité sur l'arête, fondu au-dessus du
   // vide. Le socle fait exactement l'inverse. **Un test peut verrouiller un
   // défaut : celui-ci l'a fait pendant tout le chantier.**
-  const b = bordDeMer(1)
+  const b = bordDeMer()
   assert.ok(Math.abs(b.fin + RETRAIT_EAU_CROP) < 1e-12, `fin ${b.fin} : la mer doit RENTRER`)
   assert.ok(b.fin < 0, 'à estompage plein la mer s éteint DANS le crop, pas dehors')
   assert.ok(Math.abs(b.debut + 2 * RETRAIT_EAU_CROP) < 1e-12,
@@ -1398,41 +1397,63 @@ test('⑪b la mer S ARRÊTE AU BLOC quand la Terre autour est effacée', () => {
   assert.ok(b.fin < porteeHorizon(REPERE, 32274, R_TERRE_M) / 1000)
 })
 
-test('⑪c la mer VA JUSQU AU BORD DE LA CALOTTE quand la planète est entière', () => {
-  const b = bordDeMer(0)
-  // ⚠️ **LE RETRAIT S APPLIQUE AUSSI ICI, ET IL EST NÉGLIGEABLE ICI** : 0,22
-  // unité de socle sur deux demi-côtés de calotte, soit 0,4 %. On l'écrit
-  // plutôt que de faire deux lois selon l'estompage.
-  assert.ok(Math.abs(b.fin - (PORTEE_CROP - 1 - RETRAIT_EAU_CROP)) < 1e-12, `fin ${b.fin}`)
-  // la bande de fondu couvre la fraction annoncée de l'anneau extérieur
-  assert.ok(Math.abs(b.debut - ((PORTEE_CROP - 1) * (1 - FRACTION_BANDE_BORD) - RETRAIT_EAU_CROP)) < 1e-12)
+test('⑪c la mer NE DÉBORDE JAMAIS DU SOCLE — défaut ② d Adrien, 2026-09-04', () => {
+  // ⛔ **CE TEST REMPLACE « la mer va jusqu au bord de la calotte quand la
+  // planète est entière », ET C EST LA CORRECTION DE FOND.** Cette phrase-là
+  // était la loi d avant, et elle disait exactement le défaut :
+  //
+  //   > *« On a la mer qui prend beaucoup plus que la taille du crop, et
+  //   > parfois ne se crope pas du tout. »*
+  //
+  // MESURÉ AU GPU (`scripts/sonde-mer-crop.mjs`, 1 280×800, La Réunion, crop
+  // posé) : à estompage 0 la nappe couvrait **407 358 px hors de l emprise du
+  // socle, 39,8 % de l écran** ; sa silhouette passait de 111 661 à 517 270 px,
+  // soit **×4,6**. Et l estompage tombe à 0,295 sur 178 images sur 180 pendant
+  // un simple zoom à la molette depuis 31 km, à **0,000** depuis 55 km.
+  //
+  // ⚠️ **LA LOI EST DONC : UNE SEULE VALEUR, CELLE DU SOCLE.** D23 le dit —
+  // la mer animée appartient au crop ; hors du crop, l océan est la bathymétrie
+  // peinte par le nuanceur de tuile (PF3 §1).
+  const b = bordDeMer()
+  assert.ok(b.fin < 0, `la mer doit s éteindre DEDANS : ${b.fin}`)
+  assert.ok(Math.abs(b.fin + RETRAIT_EAU_CROP) < 1e-12, `fin ${b.fin}`)
+  assert.ok(Math.abs(b.debut + 2 * RETRAIT_EAU_CROP) < 1e-12, `debut ${b.debut}`)
+  // et le témoin de ce qui est réparé : la loi d avant, rejouée. À estompage 0
+  // elle rendait `PORTEE_CROP − 1 − RETRAIT`, c est-à-dire DEUX demi-côtés de
+  // crop DEHORS — la calotte entière.
+  const ancien = (e) => (PORTEE_CROP - 1) * (1 - e) - RETRAIT_EAU_CROP
+  assert.ok(ancien(0) > 1.9, 'témoin : la loi d avant sortait de deux demi-côtés')
+  assert.ok(b.fin < ancien(0.999), 'la mer ne doit pas dépendre de l estompage, même presque plein')
 })
 
-test('⑪d le bord est MONOTONE en estompage — c est ce qui interdit un à-coup', () => {
-  // ⚠️ **UNE MUTATION DE SIGNE SURVIT À DEUX BORNES SEULES.** On balaie.
-  let precedent = Infinity
-  for (let i = 0; i <= 40; i++) {
-    const b = bordDeMer(i / 40)
-    assert.ok(b.fin <= precedent + 1e-12, `la mer ne doit jamais S ÉTENDRE en descendant (${i})`)
-    assert.ok(b.debut <= b.fin, `bornes incohérentes à ${i} : ${b.debut} / ${b.fin}`)
-    // la bande a une largeur STRICTEMENT positive à tout estompage : une bande
-    // nulle serait une arête dure, et c'est ce que le plancher interdit
-    assert.ok(b.fin - b.debut >= RETRAIT_EAU_CROP - 1e-12, `bande nulle à ${i}`)
-    precedent = b.fin
+test('⑪d `bordDeMer` NE PREND PLUS AUCUN PARAMÈTRE — ni estompage ni portée', () => {
+  // ⚠️ **UN PARAMÈTRE QUE LE CORPS IGNORE EST UN PARAMÈTRE MORT**, et ce
+  // chantier en a déjà trouvé cinq. Laisser `estompage` en signature aurait
+  // laissé croire que la mer le suit encore : c est précisément la croyance qui
+  // a coûté le défaut ②. On lit donc la SOURCE, pas seulement le résultat.
+  const src = readFileSync(new URL('../src/monde/mer-sphere.js', import.meta.url), 'utf8')
+  const sig = /export function bordDeMer\(([^)]*)\)/.exec(src)
+  assert.ok(sig, 'bordDeMer doit rester exportée')
+  assert.equal(sig[1].trim(), '', `signature non vide : « ${sig[1]} »`)
+  const corps = /export function bordDeMer\(\)\s*\{([\s\S]*?)^\}/m.exec(src)?.[1] ?? ''
+  assert.ok(!/estompage|portee|PORTEE_CROP/.test(corps), `le corps lit encore une entrée : ${corps}`)
+  // et le comportement : appelée n importe comment, elle rend la MÊME chose
+  for (const bruit of [undefined, 0, 0.5, 1, NaN, null, 'x', {}, -5, 12]) {
+    assert.deepEqual(bordDeMer(bruit, 42), bordDeMer(), `${String(bruit)}`)
   }
-  // et le SENS n'est pas interchangeable : effacer la Terre RÉTRÉCIT la mer
-  assert.ok(bordDeMer(1).fin < bordDeMer(0).fin)
 })
 
-test('⑪e une valeur non finie ne peut pas faire disparaître la mer', () => {
-  // même contrat que `poserEstompage` : un NaN dans un uniforme éteint la
-  // moitié d'un GPU sans un mot. Ici il retombe sur « la planète est entière ».
-  for (const mauvais of [NaN, undefined, null, 'x', {}]) {
-    assert.deepEqual(bordDeMer(mauvais), bordDeMer(0), `${String(mauvais)}`)
-  }
-  // et l'écrêtage tient des deux côtés
-  assert.deepEqual(bordDeMer(-5), bordDeMer(0))
-  assert.deepEqual(bordDeMer(12), bordDeMer(1))
+test('⑪e la bande de fondu a une largeur STRICTEMENT positive — pas d arête dure', () => {
+  const b = bordDeMer()
+  assert.ok(b.debut < b.fin, 'bornes inversées')
+  assert.ok(Math.abs((b.fin - b.debut) - RETRAIT_EAU_CROP) < 1e-12,
+    `la bande vaut le retrait : ${b.fin - b.debut}`)
+  // ⚠️ **ET LE TÉMOIN DE LA TÂCHE P4 EST GARDÉ** : le mode plat rentre son eau
+  // de 0,44 unité de socle par rapport à ce que le code d avant P4 posait.
+  assert.ok(Math.abs((RETRAIT_EAU_CROP - b.fin) * (COTE_CROP_UNITES / 2) - 0.44) < 1e-9)
+  // et l ordre de grandeur qui a fondé la Tâche J : la mer d avant allait à
+  // l horizon géométrique, ~93 demi-côtés à l altitude de naissance du socle.
+  assert.ok(b.fin < porteeHorizon(REPERE, 32274, R_TERRE_M) / 1000)
 })
 
 test('⑪f `PORTEE_CROP` rend l emprise de la mer RÉSERVABLE — les trous 2 et 3 sont le même', () => {
@@ -1470,21 +1491,56 @@ test('⑪g le nuanceur de la mer LIT vraiment le bord, et sur la mesure de la D�
   assert.ok(/if \(bord <= 0\.0\) discard;/.test(frag))
 })
 
-test('⑪h `poserMer` POSE le bord, et `poserEstompage` le RECALE', () => {
+test('⑪h `poserMer` POSE le bord au socle, et l ESTOMPAGE NE LE BOUGE PLUS', () => {
+  // ⛔ **AVANT LE 2026-09-04 CE TEST EXIGEAIT L INVERSE** : « sans estompage
+  // posé, la planète est ENTIÈRE : la mer va au bord » — c est-à-dire le défaut
+  // ② d Adrien, verrouillé par un test. Un test peut verrouiller un défaut ;
+  // celui-ci l a fait pendant tout le chantier, comme ⑪b avant P4.
+  //
+  // ⚡ **ET LE PIÈGE ÉTAIT DANS LA LECTURE, PAS DANS LA LOI** : `_majBordMer`
+  // lisait `uEstompageOn > 0.5 ? uEstompage : 0`, donc **l interrupteur éteint
+  // valait « planète entière », donc « mer jusqu au bord de la calotte »**.
+  // `retirerCrop` éteint cet interrupteur ; une nappe reposée derrière lui
+  // n était donc PAS découpée, sur un crop qui l était parfaitement.
   const g = globeAvecCrop()
+  const attendu = bordDeMer()
   return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
     const u = g._mer.material.uniforms.uMerBord.value
-    const attendu = bordDeMer(0, PORTEE_CROP)
-    // sans estompage posé, la planète est ENTIÈRE : la mer va au bord
-    assert.ok(Math.abs(u.y - attendu.fin) < 1e-9, `fin ${u.y}`)
-    Globe.prototype.poserEstompage.call(g, 1)
-    assert.ok(Math.abs(u.y + RETRAIT_EAU_CROP) < 1e-9, `après estompage plein : ${u.y}`)
-    assert.ok(u.y < 0, 'la mer doit RENTRER dans le crop, pas déborder — Tâche P4')
-    assert.ok(Math.abs(u.x + 2 * RETRAIT_EAU_CROP) < 1e-9, `debut ${u.x}`)
-    // et le retour : `retirerEstompage` rend la planète entière, donc la mer
+    // à la naissance, sans aucun estompage posé — `uEstompageOn` vaut 0
+    assert.equal(g.uniforms.uEstompageOn.value, 0, 'le décor du test doit partir interrupteur ÉTEINT')
+    assert.ok(Math.abs(u.y - attendu.fin) < 1e-9, `fin à la naissance : ${u.y}`)
+    assert.ok(u.y < 0, 'la mer doit RENTRER dans le crop, pas déborder')
+    assert.ok(Math.abs(u.x - attendu.debut) < 1e-9, `debut ${u.x}`)
+    // ⚠️ **LES TROIS ÉTATS D ESTOMPAGE, ET AUCUN NE DOIT DÉPLACER LA NAPPE.**
+    for (const e of [0, 0.22, 0.5, 1]) {
+      Globe.prototype.poserEstompage.call(g, e)
+      assert.ok(Math.abs(u.y - attendu.fin) < 1e-12, `estompage ${e} a bougé la mer : ${u.y}`)
+      assert.ok(Math.abs(u.x - attendu.debut) < 1e-12, `estompage ${e} a bougé la bande : ${u.x}`)
+    }
     Globe.prototype.retirerEstompage.call(g)
-    assert.ok(Math.abs(u.y - attendu.fin) < 1e-9, `après retrait : ${u.y}`)
+    assert.ok(Math.abs(u.y - attendu.fin) < 1e-12, `après retrait : ${u.y}`)
   })
+})
+
+test('⑪h bis ni `poserEstompage` ni `_majBordMer` ne LISENT l estompage pour la mer', () => {
+  // ⚠️ **PAS UN `grep` DE NOM : ON EXTRAIT LES DEUX CORPS.** Le comportement
+  // ci-dessus se rejoue à l identique si quelqu un remet la lecture avec une
+  // valeur qui se trouve valoir 1 — c est exactement comme cela que la
+  // coïncidence de `lakeColor` a failli cacher la Tâche P6.
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const maj = /_majBordMer\(\)\s*\{([\s\S]*?)^  \}/m.exec(src)?.[1]
+  assert.ok(maj, '`_majBordMer` doit rester extractible')
+  assert.ok(!/uEstompage/.test(maj), `\`_majBordMer\` lit encore l estompage : ${maj}`)
+  assert.ok(!/portee|PORTEE_CROP/.test(maj), `\`_majBordMer\` lit encore une portée : ${maj}`)
+  const pose = /poserEstompage\(estompage\)\s*\{([\s\S]*?)^  \}/m.exec(src)?.[1]
+  assert.ok(pose, '`poserEstompage` doit rester extractible')
+  // ⚠️ **ON CHERCHE L APPEL, PAS LE MOT** : les deux corps portent un encart
+  // ⛔ qui NOMME `_majBordMer` pour dire qu il a été retiré — et c est cet
+  // encart qui doit rester lisible.
+  assert.ok(!/this\._majBordMer\(\)/.test(pose), '`poserEstompage` ne doit plus toucher au bord de la mer')
+  const retire = /retirerEstompage\(\)\s*\{([\s\S]*?)^  \}/m.exec(src)?.[1]
+  assert.ok(retire, '`retirerEstompage` doit rester extractible')
+  assert.ok(!/this\._majBordMer\(\)/.test(retire), '`retirerEstompage` ne doit plus toucher au bord de la mer')
 })
 
 test('⑪i `poserMer` REFUSE un champ vide, et le refus N EFFACE PAS la mer en place', () => {
