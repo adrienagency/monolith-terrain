@@ -25,6 +25,7 @@ import {
   textesDuCarnet,
   phraseDuCarnet,
   libelleFenetrePentes,
+  fenetreDePentes,
   carnetALaLigne,
   prochaineBarriere,
   prochainRavitaillement,
@@ -181,10 +182,33 @@ test('le point déjà franchi est relégué à la ligne « depuis »', () => {
 
 test('le repère de portée de la bande de pente DÉRIVE de la constante', () => {
   // écrit en dur (« Pente des 2 prochains kilomètres »), il devenait faux en
-  // silence le jour où on changeait le défaut de fenetreDePentes
+  // silence le jour où on changeait le défaut de fenetreDePentes.
+  //
+  // ⚠️ NE COMPARE PAS LE LIBELLÉ À `PORTEE_PENTES`. La version d'avant écrivait
+  // `assert.equal(t.portee, '+' + PORTEE_PENTES + ' km')` : les deux côtés de
+  // l'égalité bougeaient ensemble, l'assertion ne pouvait pas échouer, et
+  // passer la constante de 2 à 4 laissait ce test ET carnet-course.test.js
+  // verts. La porte que le commentaire de carnet-course.js:15-19 croit fermer
+  // restait grande ouverte. La garde exerce désormais la VRAIE contrainte, en
+  // deux temps : ① le libellé affiché dit le nombre LITTÉRAL attendu ; ② la
+  // bande réellement calculée par défaut est celle de ce même nombre. Changer
+  // la constante seule casse ①, débrancher le défaut casse ②.
   const t = textesDuCarnet(carnetALaLigne({ cumKm, eles, waypoints: [] }, 0))
-  assert.equal(t.portee, `+${PORTEE_PENTES} km`)
-  assert.match(libelleFenetrePentes([{ classe: 'douce' }, { classe: 'raide' }]), new RegExp(`${PORTEE_PENTES} prochains`))
+  assert.equal(t.portee, '+2 km')
+  assert.match(libelleFenetrePentes([{ classe: 'douce' }, { classe: 'raide' }]), /\b2 prochains kilomètres\b/)
+  // ② le défaut de fenetreDePentes EST la fenêtre de 2 km que le libellé annonce
+  assert.deepEqual(
+    fenetreDePentes(cumKm, eles, 0),
+    fenetreDePentes(cumKm, eles, 0, { porteeKm: 2 }),
+    'la bande par défaut doit couvrir les 2 km que le libellé annonce',
+  )
+  assert.notDeepEqual(
+    fenetreDePentes(cumKm, eles, 0, { porteeKm: 2 }),
+    fenetreDePentes(cumKm, eles, 0, { porteeKm: 4 }),
+    'jeu d’essai dégénéré : 2 km et 4 km doivent donner des bandes distinctes',
+  )
+  // et la constante exportée reste la source unique des deux
+  assert.equal(PORTEE_PENTES, 2)
   // et l'étiquette DIT ce que la bande montre, au lieu de décrire la bande
   assert.match(libelleFenetrePentes([{ classe: 'douce' }, { classe: 'raide' }]), /douce, raide/)
 })
