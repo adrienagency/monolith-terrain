@@ -1012,16 +1012,24 @@ export const PLAFOND_FILE = 256
 const PLANCHER_DIST_M = 1
 const PLANCHER_DIST = PLANCHER_DIST_M * (R_GLOBE / EARTH_RADIUS_M)
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
-// ⚠️ **CULL ④ — DE COMBIEN DE NIVEAUX L'EMPRISE PEUT DÉPASSER LE SOCLE et rester
-// « le bloc ».** L'effacement latéral des jupes (P14) a été mesuré sur le socle
-// (3 tuiles à `ZOOM_SOCLE`) ; sa bande vaut une FRACTION du demi-côté, donc elle
-// grandit avec l'emprise. À 1,5 niveau, l'emprise vaut au plus 2,8 fois le socle
-// et la bande reste de l'ordre du chanfrein mesuré ; au-delà (z9 = 181 km, z8 =
-// 363 km, z4 = 6 376 km) c'est une fenêtre continentale, et la bande efface des
-// jupes que plus aucun mur ne couvre. Le repère de P14 lui-même est à
-// `ZOOM_SOCLE − 1` (`test/crop-parois.test.js`, `P14_ZOOM = 12`) : la tolérance
-// le contient, et c'est délibéré — son banc est le domaine à préserver.
-const TOLERANCE_BLOC = 1.5
+// ⛔ **CULL ④ AVAIT POSÉ ICI `TOLERANCE_BLOC = 1.5` — RETIRÉE PAR SOC ①, ET LA
+// MESURE DIT POURQUOI.** L'effacement latéral des jupes (P14) n'était actif que
+// pour `rep.zoom ≥ ZOOM_SOCLE − 1,5`, c'est-à-dire z12 et z13. **Au z11 de la
+// vidéo d'Adrien (crop de 42 km), il était donc ÉTEINT, et les jupes des tuiles
+// traversaient le mur** : relevé au banc (`scripts/sonde-soc.mjs`, Provence
+// 44,2149 / 5,797, z11, vue de trois quarts, grain éteint), **15 308 px de
+// traînées sur 365 colonnes** entre la capture et la même capture sans jupes,
+// contre **589 px** entre deux captures identiques (les nuages) ; l'effacement
+// forcé (`jupeDomaine = false`) rend **532 px**, le niveau du témoin. Ce sont
+// les « traits de quadtree dans le socle ».
+//
+// Le vrai domaine de l'effacement n'est pas un zoom : c'est **« un mur couvre
+// la bande »**. `_effacementLateralActif` le lit maintenant sur les parois
+// elles-mêmes (leur repère, étiqueté à la construction, contre `_crop`), et
+// les parois suivent le crop dans la même image depuis SOC ②③ (la plaque
+// provisoire, `construireParoisCrop`). CULL avait raison sur le défaut — une
+// bande effacée sans mur derrière ouvre des trous — et la tolérance en niveaux
+// n'en était qu'une approximation, qui laissait passer z11.
 // ⚠️ **CULL ⑤ — LA MARGE DU PLAFOND D'ÉCRAN, EN NIVEAUX.** Voir `_zoomCropEcran`
 // : le critère est pris au centre du crop, la vue d'arrivée est oblique, et sans
 // marge l'arrivée perdait un niveau (z12 au lieu de z13).
@@ -7983,6 +7991,60 @@ export class Globe {
     })
   }
 
+  /** Les tuiles dont le MAILLAGE est là, du plus fin au plus grossier — SOC. */
+  tuilesAvecMaillage() {
+    const out = []
+    for (const t of this.tiles.values()) if (t.mesh?.geometry?.attributes?.position) out.push(t)
+    out.sort((a, b) => b.z - a.z)
+    return out
+  }
+
+  /**
+   * LA HAUTEUR QUE LE GPU DESSINE, LUE DANS LE MAILLAGE LUI-MÊME — SOC ②③④.
+   *
+   * ⚡ **`hauteurDessinee` REPRODUIT la loi du maillage depuis `t.heights` ; ici
+   * on LIT le maillage.** La différence n'est pas la loi (`interpolerMaille`,
+   * la même diagonale, les mêmes nœuds), c'est la DISPONIBILITÉ : `t.heights`
+   * n'existe que sous réservation (`gardeHauteurs`), donc **après un aller
+   * réseau** à chaque pose de crop ; le maillage, lui, est là pour toute tuile
+   * dessinée, racines z2 comprises. C'est ce qui permet de bâtir les parois
+   * dans la MÊME image que la découpe (la plaque provisoire), au lieu de
+   * laisser la plaque du repère d'avant autour d'un relief deux fois plus
+   * petit — le « bout de terre qui flotte au milieu du socle vide » d'Adrien.
+   *
+   * ⚠️ **LA HAUTEUR SE DÉDUIT DU RAYON, DANS LA MONNAIE DE `_buildMesh`** :
+   * `posAt` pose chaque sommet à `R_GLOBE + h × echelle`, sommets en RTC
+   * (`mesh.position` porte l'origine). On inverse exactement cela ; le facteur
+   * `(R_GLOBE / EARTH_RADIUS_M) × exaggeration` est celui de la construction.
+   * `test/socle-plaque.test.js` ① confronte cette lecture à `hauteurDessinee`
+   * sur une tuile qui porte les deux.
+   *
+   * ⚠️ **`null` TRAVERSE**, comme pour ses deux sœurs : sans maillage qui couvre
+   * le point, le refus de couverture des parois reste aussi mordant.
+   *
+   * @param {number} lat
+   * @param {number} lon
+   * @param {Array} [candidates] la liste pré-filtrée (`tuilesAvecMaillage`)
+   * @returns {number|null} mètres
+   */
+  hauteurMaillee(lat, lon, candidates = null) {
+    const best = this._tuileLaPlusFine(lat, lon, candidates || this.tuilesAvecMaillage())
+    if (!best) return null
+    const t = best.t
+    const attr = t.mesh?.geometry?.attributes?.position
+    if (!attr) return null
+    const G = segmentsTuile(t.z)
+    if (attr.count < (G + 1) * (G + 1)) return null
+    const a = attr.array
+    const o = t.mesh.position
+    const echelle = (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
+    if (!(echelle > 0)) return null
+    return interpolerMaille(best.tx, best.ty, G, (i, j) => {
+      const k = (j * (G + 1) + i) * 3
+      return (Math.hypot(a[k] + o.x, a[k + 1] + o.y, a[k + 2] + o.z) - R_GLOBE) / echelle
+    })
+  }
+
   /**
    * La tuile la plus FINE qui couvre un point — **une seule écriture**.
    *
@@ -8088,7 +8150,10 @@ export class Globe {
     // ⚠️ **ON PASSE `hauteurSurface` TELLE QUELLE, `null` COMPRIS.** L'ancienne
     // version rattrapait le `null` en `0` — le niveau de la mer — et fabriquait
     // une encoche muette. La décision et son motif sont au §7 de `parois-crop.js`.
-    const solide = construireSolideCrop({
+    // ⚠️ **`batir` EST UNE FERMETURE SUR LES ARGUMENTS DE L'APPEL** : la plaque
+    // provisoire (SOC) rejoue exactement le même solide, avec une autre source
+    // de hauteur — même forme, même profondeur, même chanfrein.
+    const batir = (hauteur) => construireSolideCrop({
       couvertureMin,
       repere: this._crop,
       forme: {
@@ -8111,7 +8176,7 @@ export class Globe {
       // porte la mesure : 18,94 m d'écart moyen absolu le long de l'anneau, ±10
       // pixels à l'écran, dans les DEUX SENS — la paroi dépassait la surface
       // ici, la surface pendait par-dessus l'arête là.
-      hauteur: (lat, lon) => this.hauteurDessinee(lat, lon, liste),
+      hauteur,
       rayon: R_GLOBE,
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
       profondeur,
@@ -8130,12 +8195,94 @@ export class Globe {
       // aussi de repli, et un infini y produirait des sommets `NaN`.
       plancherMer: this._fondCrop ? -Math.max(this._fondCrop.profMaxM, 0) : 0,
     })
+    const solide = batir((lat, lon) => this.hauteurDessinee(lat, lon, liste))
 
-    // ⚠️ **LE REFUS NE TOUCHE PAS AUX PAROIS DÉJÀ POSÉES.** C'est ce qui le rend
-    // acceptable : le bloc précédent reste à l'écran jusqu'à ce que la donnée
-    // arrive, et l'appelant n'a rien à défaire.
-    if (solide.refus) return { mesh: null, solide, couverture: solide.couverture, refus: solide.refus }
+    // ══════ LA PLAQUE PROVISOIRE — SOC ②③④ ═══════════════════════════════════
+    //
+    // > **Adrien, 2026-09-05 :** *« Je n'ai pas un bout de terre qui flotte au
+    // > milieu du socle vide. »* · *« Lorsque je passe d'un niveau inférieur à
+    // > un niveau supérieur, la terre se met immédiatement à la taille du crop,
+    // > elle n'est pas minuscule avant de charger à la bonne taille. »*
+    //
+    // ⛔ **LE REFUS NE TOUCHAIT PAS AUX PAROIS DÉJÀ POSÉES — ET C'ÉTAIT LE
+    // DÉFAUT.** « Le bloc précédent reste à l'écran jusqu'à ce que la donnée
+    // arrive » était juste tant que le bloc précédent avait la MÊME emprise.
+    // Mais `poserCrop` change `uCropDemi` dans la même image que la pose : la
+    // découpe des tuiles est aussitôt à la nouvelle largeur (moitié de l'ancienne
+    // à chaque niveau), pendant que la plaque, bâtie sur le repère d'avant,
+    // attend que les hauteurs RÉSERVÉES arrivent du réseau — jusqu'à 6 s dans la
+    // vidéo d'Adrien (`m_078` → `m_090`, « REFINING z13 »), 0,5 à 2,5 s à
+    // l'arrivée d'un `flyTo` au banc (`.banc/SOC/avant-z1[123]/journal.json` :
+    // 30 à 150 images de refus, couverture 0 puis 0,933). Pendant ce temps : un
+    // relief deux fois plus petit que sa plaque (②), qui « grandit » quand la
+    // plaque est enfin rebâtie (③), et en vol une bande de terre estompée entre
+    // le relief et l'arête d'avant (④). **Trois symptômes, une cause.**
+    //
+    // ➡️ Quand la couverture par les hauteurs refuse, on bâtit **la même paroi
+    // depuis le MAILLAGE DESSINÉ** (`hauteurMaillee`) : il est là pour toute
+    // tuile à l'écran, racines comprises, donc la plaque suit la découpe dans la
+    // MÊME image. Le refus est rendu tel quel — la reprise rebâtira la paroi
+    // définitive (P11, hauteurs réservées) quand elles seront là, et le mesh
+    // provisoire est remplacé à ce moment-là. Une plaque provisoire déjà posée
+    // pour CE repère n'est pas rebâtie à chaque reprise.
+    //
+    // ⚠️ **PAR LE PROTOTYPE, ET C'EST OBLIGATOIRE** — même raison que
+    // `_effacementLateralActif` : les globes de papier des tests empruntent
+    // `construireParoisCrop` par `Globe.prototype…call(faux)` et ne portent que
+    // les membres qu'ils exercent.
+    if (solide.refus) {
+      const prov = Globe.prototype._paroisProvisoires.call(this, batir)
+      return { mesh: prov, solide, couverture: solide.couverture, refus: solide.refus, provisoire: !!prov }
+    }
+    const mesh = Globe.prototype._poserSolideParois.call(this, solide, false)
+    return { mesh, solide, couverture: solide.couverture, refus: null, provisoire: false }
+  }
 
+  /**
+   * La plaque provisoire — voir `construireParoisCrop`. Rend le mesh posé, ou
+   * `null` si même le maillage ne couvre pas l'anneau (avant les racines).
+   *
+   * @param {(hauteur: Function, liste: Array) => object} batir le constructeur du
+   *   solide avec les arguments de l'appel — la MÊME forme, la même profondeur
+   */
+  _paroisProvisoires(batir) {
+    const rep = this._crop
+    const p = this._parois
+    const r = p?.userData?.repere
+    if (p && p.userData?.provisoire && r && r.cx === rep.cx && r.cy === rep.cy && r.demi === rep.demi) return p
+    // ⚠️ `plaqueProvisoire = false` : levier de BANC (règle D13) qui rejoue le
+    // dépôt d'avant SOC — le refus sans plaque — pour l'A/B à témoin nul dans
+    // une seule page (`scripts/sonde-soc.mjs --provisoire 0`).
+    if (this.plaqueProvisoire === false) return null
+    // par le prototype : les globes de papier (voir `construireParoisCrop`)
+    // ⚠️ **FILTRÉE SUR LA BOÎTE DU CROP, ET C'EST UN COÛT MESURÉ** : sans le
+    // filtre, `_tuileLaPlusFine` parcourt tout le cache (jusqu'à 1 700 tuiles)
+    // pour chacun des ~1 140 points du solide — 75 ms relevés à la pose du z11
+    // (`.banc/SOC/apres-z11/journal.json`). Les ancêtres grossiers passent le
+    // filtre (leur boîte CONTIENT le crop), donc la couverture ne perd rien.
+    // ⚠️ **LA BOÎTE EST DILATÉE D'UN CHEVEU** : `tuileDansCrop` est STRICT, et un
+    // point de l'anneau posé exactement sur le bord est/sud du crop tombe à
+    // `tx = 1` de la tuile du dedans, c'est-à-dire DANS la voisine — que le
+    // filtre strict écarterait. Mesuré au banc (`test/socle-plaque.test.js` ②) :
+    // sans la dilatation, la couverture n'est pas 1 et la plaque ne vient pas.
+    const boite = { cx: rep.cx, cy: rep.cy, demi: rep.demi * (1 + 1e-6) }
+    const liste = Globe.prototype.tuilesAvecMaillage.call(this).filter((t) => tuileDansCrop(t.z, t.x, t.y, boite))
+    if (!liste.length) return null
+    const solide = batir((lat, lon) => Globe.prototype.hauteurMaillee.call(this, lat, lon, liste))
+    if (!solide || solide.refus) return null
+    return Globe.prototype._poserSolideParois.call(this, solide, true)
+  }
+
+  /**
+   * Pose le solide des parois dans le groupe du globe — le mesh, son repère
+   * étiqueté, et les quatre grandeurs dérivées que le rideau d'eau et les jupes
+   * lisent. **Une seule écriture** pour la paroi définitive et la provisoire.
+   *
+   * @param {object} solide ce que rend `construireSolideCrop`, sans refus
+   * @param {boolean} provisoire bâtie depuis le maillage (SOC), pas les hauteurs
+   * @returns {object} le mesh
+   */
+  _poserSolideParois(solide, provisoire) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(solide.positions, 3))
     // l'occlusion de contact, cuite par sommet. ⚠️ NOM PROPRE, pas `color` : le
@@ -8162,7 +8309,8 @@ export class Globe {
     plate.computeBoundingSphere()
     geo.dispose()
 
-    this.retirerParoisCrop()
+    // une seule retaille des jupes, sur la paroi neuve (voir `retirerParoisCrop`)
+    Globe.prototype.retirerParoisCrop.call(this, { retailler: false })
     const mesh = new THREE.Mesh(plate, this._materiauParois())
     mesh.name = 'crop-parois'
     // le repère local du crop : (est, haut, sud) posé à l'origine du crop. C'est
@@ -8180,6 +8328,13 @@ export class Globe {
     // Sans cette ligne, un socle éteint reviendrait au premier déplacement,
     // parce que ce mesh-ci vient de naître. Voir `_paroisVisibles`.
     mesh.visible = this._paroisVisibles
+    // ⚠️ **LE REPÈRE EST ÉTIQUETÉ SUR LE MESH — SOC.** Deux lecteurs : la plaque
+    // provisoire (« déjà bâtie pour CE repère ? ») et `_effacementLateralActif`
+    // (« un mur couvre-t-il la bande de CE crop ? »). Une copie, pas une
+    // référence : `_crop` est remplacé à chaque pose, et c'est précisément le
+    // désaccord entre les deux qu'on veut pouvoir lire.
+    mesh.userData.repere = { cx: this._crop.cx, cy: this._crop.cy, demi: this._crop.demi, zoom: this._crop.zoom }
+    mesh.userData.provisoire = !!provisoire
     this._parois = mesh
     // ⚠️ **LE FOND DU BLOC EST RETENU POUR LE RIDEAU D'EAU — Tâche P4.** Le
     // ruban de mer descend jusqu'à LUI, pas jusqu'à une profondeur à part : deux
@@ -8230,7 +8385,7 @@ export class Globe {
     // toujours plus vieilles que son fond. `_retaillerJupe` est idempotente et
     // recalcule depuis l'anneau de bord — la rappeler ne creuse rien.
     this._retaillerJupes()
-    return { mesh, solide, couverture: solide.couverture, refus: null }
+    return mesh
   }
 
   /**
@@ -8248,8 +8403,15 @@ export class Globe {
     if (this._parois) this._parois.visible = this._paroisVisibles
   }
 
-  /** Retire les parois — le crop redevient une peau flottante. */
-  retirerParoisCrop() {
+  /**
+   * Retire les parois — le crop redevient une peau flottante.
+   *
+   * @param {{retailler?: boolean}} [arg] `retailler: false` quand une paroi
+   *   neuve est posée dans la foulée (`_poserSolideParois`) : la retaille des
+   *   jupes est faite UNE fois, sur la paroi neuve, pas deux — la passe
+   *   intermédiaire (« plus de mur, jupes pleines ») ne serait jamais dessinée.
+   */
+  retirerParoisCrop({ retailler = true } = {}) {
     if (!this._parois) return
     this.group.remove(this._parois)
     this._parois.geometry.dispose()
@@ -8361,11 +8523,34 @@ export class Globe {
   _effacementLateralActif() {
     const rep = this._crop
     if (!rep) return false
-    // ⚠️ `jupeDomaine = false` : levier de BANC (CULL ④) qui rejoue le dépôt —
-    // l'effacement partout, quelle que soit la largeur de l'emprise.
+    // ⚠️ `jupeDomaine = false` : levier de BANC (CULL ④) qui rejoue l'effacement
+    // partout, mur ou pas — c'est l'A/B qui a désigné les traînées de SOC ①.
     if (this.jupeDomaine === false) return true
-    if (!Number.isFinite(rep.zoom)) return true
-    return rep.zoom >= ZOOM_SOCLE - TOLERANCE_BLOC
+    // ══════ SOC ① — LE DOMAINE, C'EST LE MUR ═══════════════════════════════
+    //
+    // > **Adrien, 2026-09-05 :** *« Je ne vois plus de traits de quadtree dans
+    // > le socle. »*
+    //
+    // ⚡ La bande de P14 n'a de sens que si un mur la couvre : elle efface la
+    // jupe des sommets que le mur, rentré du chanfrein, ne couvre plus. Le seul
+    // témoin fiable de « un mur couvre la bande » est le mur lui-même, bâti
+    // pour CE repère — pas un seuil de zoom (voir l'encart de l'ancienne
+    // `TOLERANCE_BLOC`, en tête de fichier). Sans parois : rien à effacer.
+    // Parois d'un AUTRE repère (une pose neuve, avant la plaque provisoire) :
+    // rien non plus — la bande serait au bord d'une emprise sans mur, le trou
+    // de CULL ④.
+    const p = this._parois
+    // ⚠️ **`undefined`, PAS `null`, DIT « GLOBE DE PAPIER ».** Le constructeur pose
+    // `_parois = null` et `retirerParoisCrop` l'y remet : en production le membre
+    // existe toujours. Un globe de papier qui ne le porte pas (les tests P14 de
+    // `crop-parois.test.js`) rejoue le dépôt d'avant — l'effacement actif.
+    if (p === undefined) return true
+    if (!p) return false
+    const r = p.userData?.repere
+    // un mur sans étiquette : les globes de papier des tests (`_parois: {}`),
+    // qui rejouent le dépôt d'avant — la production étiquette toujours.
+    if (!r) return true
+    return r.cx === rep.cx && r.cy === rep.cy && r.demi === rep.demi
   }
 
   _retaillerJupe(t) {
