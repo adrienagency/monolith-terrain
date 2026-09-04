@@ -975,7 +975,9 @@ export const CRAN_RECOLLAGE_BAS = 11
  *
  * ⚠️ **2¹⁵ = 32 768 m, ET CE N'EST PAS UN NOMBRE ROND CHOISI POUR SA BEAUTÉ** :
  * le crop NAÎT à `SEUIL_NAISSANCE_M` = 32 274 m et MEURT à `SEUIL_MORT_M` =
- * 40 343 m (`seuil-socle.js`, relevé). Le recollage est donc achevé **avant** que
+ * 40 343 m (`seuil-socle.js`, relevé — ⚠️ **chiffres faux entre D21 et D23, où
+ * les deux valaient 600 et 750 km ; relus et revérifiés le 2026-09-04**). Le
+ * recollage est donc achevé **avant** que
  * le bloc puisse disparaître : à sa mort, `retirerRampe` rend le régime mondial
  * à une image qui le portait déjà. **Il n'y a pas de marche à la mort du crop.**
  *

@@ -214,20 +214,20 @@ test('② de l’orbite au sol : rien au-dessus du seuil, la chaîne entière en
   const g = globeFactice()
   const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice() })
 
-  // ⚡ **D21 ③ — LA CHAÎNE ENTIÈRE DESCEND DE z11 À z6.** `SEUIL_NAISSANCE_M`
-  // vaut 600 000 m : la pose d'arrivée z6 (575 040 m) est déjà dessous, celle
-  // de z5 (920 060 m) encore au-dessus. Adrien demande « dès z7 » — c'est tenu
-  // avec un cran de marge.
-  for (const z of [4, 5]) {
+  // ⚡ **D23 — LA LIGNE DE PARTAGE EST REVENUE ENTRE z10 ET z11.** D21 ② est
+  // abrogé : `SEUIL_NAISSANCE_M` vaut de nouveau 32 274,3 m, donc la pose
+  // d'arrivée z11 (25 670 m) est la première dessous, celle de z10 (51 340 m)
+  // encore au-dessus. Sous D21 elle tombait entre z5 (920 060) et z6 (575 040).
+  for (const z of [4, 5, 6, 7, 8, 9, 10]) {
     assert.equal(veille.maj(ALT_ARRIVEE_M[z]), false, `pas de crop à z${z}`)
   }
-  assert.deepEqual(quoi(g), [], 'à z4 et z5 on regarde la planète : rien ne doit être posé')
+  assert.deepEqual(quoi(g), [], 'de z4 à z10 on regarde la planète : rien ne doit être posé')
 
-  assert.equal(veille.maj(ALT_ARRIVEE_M[6]), true, 'D21 ③ : le crop doit naître dès z6/z7')
+  assert.equal(veille.maj(ALT_ARRIVEE_M[11]), true, 'D23 : le crop doit naître à z10/z11')
   assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
 
   // et il ne se repose pas à chaque palier plus fin
-  for (const z of [7, 8, 9, 10, 11, 12, 13, 14, 15]) assert.equal(veille.maj(ALT_ARRIVEE_M[z]), true)
+  for (const z of [12, 13, 14, 15]) assert.equal(veille.maj(ALT_ARRIVEE_M[z]), true)
   assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'],
     'la chaîne ne doit pas être rejouée tant que le lieu ne bouge pas')
   assert.equal(veille.bascules, 1)

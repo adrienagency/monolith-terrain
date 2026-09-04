@@ -181,7 +181,9 @@ export const LAT_REFERENCE = 45
 // `camera.fov = 33`, `camGlobe.fov = 33` — `templates-user.js` sauvegarde
 // `'fov'`, donc un template appliqué au démarrage repose `params.fov`. Les deux
 // seuils ci-dessous sont donc dérivés à 30° pendant que la caméra en fait 33.
-// **Conséquence exacte, calculée et non supposée :** à `SEUIL_NAISSANCE_M`, un
+// **Conséquence exacte, calculée et non supposée :** à `SEUIL_BLOC_M` (⚠️ nom
+// corrigé le 2026-09-04 : sous D21 ce commentaire citait `SEUIL_NAISSANCE_M`,
+// qui valait alors un palier de 600 km sans aucun rapport avec le fov), un
 // socle vu à 33° occupe `0,6 × tan(15°)/tan(16,5°)` = **54,3 % de la hauteur**
 // au lieu de 60 %. C'est le MÊME sens que l'obliquité de la caméra d'arrivée et
 // que la latitude (les deux écrits plus haut) : **les trois écarts vont dans la
@@ -240,10 +242,15 @@ export function altitudePourFraction({ largeurM, fraction, fovDeg = FOV_DEG }) {
 // Leurs valeurs d'aujourd'hui, pour mémoire et pour la relecture :
 //
 //   LARGEUR_SOCLE_M    =  10 377,4 m   (z13 à 45°)
-//   SEUIL_BLOC_M       =  32 274,3 m   (60 % de la hauteur)      ← ex-NAISSANCE
-//   SEUIL_BLOC_MORT_M  =  40 342,8 m   (48 % de la hauteur, ×1,25) ← ex-MORT
-//   SEUIL_NAISSANCE_M  = 600 000   m   (D21 : le palier z7)
-//   SEUIL_MORT_M       = 750 000   m   (×1,25 — ET une intention, D21 ①)
+//   SEUIL_BLOC_M       =  32 274,3 m   (60 % de la hauteur — ARRIVÉE AU BLOC)
+//   SEUIL_BLOC_MORT_M  =  40 342,8 m   (48 % de la hauteur, ×1,25)
+//   SEUIL_NAISSANCE_M  =  32 274,3 m   (D23 : la MÊME VALEUR, un AUTRE SENS)
+//   SEUIL_MORT_M       =  40 342,8 m   (idem — ET une intention, D21 ① reste)
+//
+// ⚠️ **QUATRE CONSTANTES, DEUX VALEURS, ET C'EST VOULU (D23).** Les deux paires
+// coïncident aujourd'hui ; elles ne portent pas le même sens (géométrie du crop
+// et régime de gestes d'un côté, arrivée au bloc et estompage de l'autre). Voir
+// le §6 bis.
 //
 // ⚠️ Pour situer : le plan avait d'abord écrit **120 km et 180 km**. À 120 km,
 // ce socle-ci occupe **16,1 %** de la hauteur de l'image — et le socle fantôme
@@ -253,10 +260,20 @@ export function altitudePourFraction({ largeurM, fraction, fovDeg = FOV_DEG }) {
 
 export const LARGEUR_SOCLE_M = blockExtentMeters(ZOOM_SOCLE, LAT_REFERENCE)
 
-// ══════════ 6 bis. D21 — LA NAISSANCE EST UN PALIER, L'ARRIVÉE AU BLOC RESTE
-//                  UNE FRACTION D'ÉCRAN, ET ELLES ÉTAIENT CONFONDUES ════════
+// ══════════ 6 bis. D23 — LE CROP REVIENT À Z10, MAIS LES TROIS GRANDEURS
+//                  RESTENT SÉPARÉES ═══════════════════════════════════════════
 //
-// > **Adrien, 2026-09-04 (D21) :** *« Le mode crop doit s'activer dès Z7. »*
+// > **Adrien, 2026-09-04 (D23) :** *« Il y a beaucoup trop de bugs, on va
+// > laisser un crop à partir de Z10 uniquement. Annule le crop à Z7. »*
+//
+// ⛔ **D21 ② est ABROGÉ** : la naissance du crop n'est plus le palier z7 (600 km)
+// mais de nouveau la fraction d'écran de 60 %, `SEUIL_BLOC_M` = 32 274,3 m.
+// La mesure qui l'a fait abroger (C1) : à 600 km le crop coûtait **495 → 1 700
+// tuiles** — 1 700 étant exactement `CACHE_MAX_CONTINU` — et **19,9 → 129,9 ms
+// par image à CPU ×4**, sans que z8 ni z9 rachètent rien.
+//
+// ⚡ **CE QUI SURVIT À L'ABROGATION, ET C'EST L'ESSENTIEL** : la séparation
+// ci-dessous. Elle a été faite POUR z7 mais elle vaut INDÉPENDAMMENT de lui.
 //
 // ⚠️ **CE PARAGRAPHE SÉPARE TROIS GRANDEURS QUE CE FICHIER APPELAIT
 // `SEUIL_NAISSANCE_M` À LUI TOUT SEUL.** Jusqu'à D21, la même altitude
@@ -267,24 +284,30 @@ export const LARGEUR_SOCLE_M = blockExtentMeters(ZOOM_SOCLE, LAT_REFERENCE)
 //   ③ le haut du fondu d'estompage de la planète (`estompage-terre.js:115`,
 //      via `SEUIL_MORT_M`).
 //
-// **D21 ne déplace que ①, et les deux autres ne doivent PAS suivre :**
-//   · déplacer ② inclinerait la caméra **à 600 km** — la vue de trois quarts
-//     arriverait en vue continentale, ce que D16 ter interdit mot pour mot
-//     (« pas avant ») ;
-//   · déplacer ③ effacerait la planète **depuis 750 km** : à 100 km le fondu
-//     rendrait **0,576** au lieu de **0** — la Terre à moitié gommée en vue
-//     régionale, sur un seuil que personne n'a demandé de bouger.
+// **Ce que déplacer ① tout seul faisait aux deux autres, mesuré par C1 :**
+//   · déplacer ② inclinait la caméra **à 600 km** — la vue de trois quarts
+//     arrivait en vue continentale, ce que D16 ter interdit mot pour mot
+//     (« pas avant ») ; relevé `tiltDeg = 48,77°` à 650 km ;
+//   · déplacer ③ effaçait la planète **depuis 750 km** : à 100 km le fondu
+//     rendait **0,576** au lieu de **0** — la Terre à moitié gommée en vue
+//     régionale, sur un seuil que personne n'a demandé de bouger ;
+//   · et ① portait une QUATRIÈME chose que personne n'avait vue : le **régime
+//     de gestes** (`horsDuCrop`). Sur `pose`, OrbitControls reprenait les trois
+//     boutons entre 600 km et 32 km — `{LEFT:0, MIDDLE:2, RIGHT:2}` relevé —
+//     donc D19 amputé de **568 km** et le clic droit redevenu un PAN, c'est-à-
+//     dire **la deuxième sortie du crop d'Adrien disparue**.
 //
-// ➡️ **② et ③ restent accrochés à la fraction d'écran** (le socle occupe 60 %
-// de la hauteur : c'est bien « arriver au bloc »), **seule ① passe au palier
-// z7.** Les constantes ci-dessous portent ce départ, et rien d'autre ne change.
+// ➡️ **D23 ramène ① à la valeur de ②, PAS à la constante de ②.** Les deux paires
+// coïncident de nouveau en valeur, et c'est précisément pour ça qu'il serait
+// tentant — et faux — de les refusionner : la prochaine fois qu'un seuil bouge,
+// le défaut ci-dessus reviendrait entier. ⛔ **Elles restent quatre.**
 
 /**
  * **L'ARRIVÉE AU BLOC** — l'altitude à laquelle le socle occupe
  * `FRACTION_NAISSANCE` de la hauteur de l'image. **32 274,3 m.**
  *
- * ⚠️ **C'EST L'ANCIEN `SEUIL_NAISSANCE_M`, AU BIT PRÈS**, et c'est délibéré :
- * D21 ne demande de bouger ni la bascule de trois quarts ni l'estompage. C'est
+ * ⚠️ **C'EST LE SEUIL D'AVANT D21, AU BIT PRÈS**, et il ne s'est jamais déplacé :
+ * ni D21 ni D23 ne bougent la bascule de trois quarts ou l'estompage. C'est
  * aussi cette valeur dont `zoomDepuisAltitude(…, {lat: 45})` rend exactement
  * `ZOOM_SOCLE` (`exageration-continue.js` §3, verrouillé par test) — le lien
  * que le brief C1 demande de ne pas casser en silence. Il ne l'est pas : il
@@ -296,8 +319,10 @@ export const SEUIL_BLOC_M = altitudePourFraction({
 })
 
 /**
- * L'hystérésis de l'arrivée au bloc — **40 342,8 m**, l'ancien `SEUIL_MORT_M`.
- * C'est le haut du fondu d'estompage (`ALT_ESTOMPAGE_DEBUT_M`).
+ * L'hystérésis de l'arrivée au bloc — **40 342,8 m**, le seuil de mort d'avant
+ * D21. C'est le haut du fondu d'estompage (`ALT_ESTOMPAGE_DEBUT_M`), et
+ * l'estompage reste accroché ICI, pas à `SEUIL_MORT_M` : les deux valent la même
+ * chose depuis D23, mais seul celui-ci dit « le socle remplit l'écran ».
  */
 export const SEUIL_BLOC_MORT_M = altitudePourFraction({
   largeurM: LARGEUR_SOCLE_M,
@@ -308,30 +333,46 @@ export const SEUIL_BLOC_MORT_M = altitudePourFraction({
  * **LE PALIER DE PLONGÉE z7**, en mètres — `DIVE_TIERS` de `modes.js`,
  * l'entrée `{ altM: 600000, zoom: 7 }`.
  *
- * ⚠️ **RECOPIÉ, PAS IMPORTÉ, ET VERROUILLÉ PAR TEST.** Ce module est PUR ;
- * `modes.js` tire three.js. Le précédent est explicite dans ce fichier même
- * (les deux conversions de `geo.js`, §8, « recopiées volontairement plutôt
- * qu'importées »). `test/seuil-socle.test.js` rejoue la valeur contre
- * `DIVE_TIERS` pour qu'une dérive ne puisse pas passer en silence.
+ * ⛔ **D23 : PLUS AUCUN SEUIL N'EN DESCEND.** Il a porté `SEUIL_NAISSANCE_M`
+ * entre D21 et D23 ; la mesure de C1 (495 → 1 700 tuiles, 19,9 → 129,9 ms à
+ * CPU ×4) a fait abroger D21 ②. La constante reste exportée et **verrouillée
+ * par test contre `DIVE_TIERS`** — c'est le seul lien pur du dépôt vers cette
+ * table, et le rendre muet ferait disparaître la garde avec lui.
+ *
+ * ⚠️ **RECOPIÉ, PAS IMPORTÉ.** Ce module est PUR ; `modes.js` tire three.js.
+ * Le précédent est explicite dans ce fichier même (les deux conversions de
+ * `geo.js`, §8, « recopiées volontairement plutôt qu'importées »).
  */
 export const ALT_PALIER_Z7_M = 600_000
 
 /**
- * **LA NAISSANCE DU CROP — D21 ③.** Ce n'est plus une fraction d'écran : c'est
- * le palier z7 qu'Adrien nomme. **600 000 m**, dix-huit fois plus haut que
- * `SEUIL_BLOC_M`.
+ * **LA NAISSANCE DU CROP — D23.** Retour à la paire z10 : la même altitude que
+ * `SEUIL_BLOC_M`, **32 274,3 m**, la fraction d'écran de 60 %.
+ *
+ * ⚠️ **ET POURTANT ELLE RESTE UNE CONSTANTE À PART, C'EST LE CŒUR DE D23.**
+ * Elle vaut aujourd'hui la même chose que `SEUIL_BLOC_M`, mais elle ne dit pas
+ * la même chose : celle-ci décide de la **géométrie du crop** et du **régime de
+ * gestes** (`horsDuCrop`, donc D19 au clic droit) ; `SEUIL_BLOC_M` décide de
+ * l'**arrivée au bloc** (D16 ter : la bascule de trois quarts et son miroir, le
+ * retour au nadir) et de l'**estompage**. ⛔ **On ne les refusionne pas.**
+ * Les avoir confondues coûtait, au seul changement de valeur, une amputation de
+ * D19 sur 568 km et la disparition de la deuxième sortie du crop (C1, réfutation
+ * n° 5). C'est la classe de défaut revenue dix fois sur ce chantier : plusieurs
+ * sens portés par une seule grandeur.
  */
-export const SEUIL_NAISSANCE_M = ALT_PALIER_Z7_M
+export const SEUIL_NAISSANCE_M = SEUIL_BLOC_M
 
 /**
- * **LA MORT DU CROP**, même hystérésis (`1 / 0,8 = ×1,25`) — **750 000 m**.
+ * **LA MORT DU CROP** — D23 : la paire z10, donc **40 342,8 m**, la même valeur
+ * que `SEUIL_BLOC_MORT_M` (hystérésis `1 / 0,8 = ×1,25`). Constante à part pour
+ * la même raison que ci-dessus.
  *
- * ⚠️ **ET DEPUIS D21 ①, LA FRANCHIR NE SUFFIT PLUS.** La mort demande EN PLUS
- * une INTENTION de sortie — voir `sortieArmee` au §7. Sans elle, l'inclinaison,
- * le cap et les boutons de caméra peuvent monter aussi haut qu'ils veulent :
- * le crop reste.
+ * ⚠️ **ET DEPUIS D21 ①, LA FRANCHIR NE SUFFIT PLUS — D23 garde D21 ① entière.**
+ * La mort demande EN PLUS une INTENTION de sortie — voir `sortieArmee` au §7.
+ * Sans elle, l'inclinaison, le cap et les boutons de caméra peuvent monter aussi
+ * haut qu'ils veulent : le crop reste.
  */
-export const SEUIL_MORT_M = SEUIL_NAISSANCE_M / RAPPORT_HYSTERESIS
+export const SEUIL_MORT_M = SEUIL_BLOC_MORT_M
 
 // ══════════ 7. LA BASCULE ═══════════════════════════════════════════════════
 

@@ -181,6 +181,11 @@ export const FLAGS = {
   // (40 343 m, l'hystérésis ×1,25) — voir `src/monde/seuil-socle.js`, dont
   // c'est la loi, et `src/monde/veille-socle.js`, qui en tient l'état.
   //
+  // ⚠️ **CES DEUX CHIFFRES ONT ÉTÉ FAUX ENTRE D21 ET D23** (600 km et 750 km,
+  // le palier z7). **Relus et revérifiés le 2026-09-04 : D21 ② est abrogé, ils
+  // sont de nouveau exacts.** ⚡ Et la mort demande DEPUIS D21 ① une intention
+  // de sortie en plus du seuil — l'altitude seule ne tue plus le crop.
+  //
   // ⚠️ **C'EST LA DEMANDE D'ADRIEN, MOT POUR MOT** : « le crop n'apparaît que
   // lorsque la Terre que l'on zoome occupe une partie assez importante de
   // l'écran ». Il a signalé le défaut à l'écran le 2026-08-21, capture à

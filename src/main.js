@@ -14201,6 +14201,14 @@ function appliquerInclinaison(dInclinaisonDeg, dCapDeg) {
 // crop, jusqu'à 2 400 km d'altitude.** Un cap tourné sur un cône de 54° n'est
 // pas un cap tourné au nadir : −69° contre −50°, avec 17° de roulis du sol.
 //
+// ⚡ **RELU LE 2026-09-04 — CE PARAGRAPHE REDEVIENT VIVANT AVEC D23.** Pendant
+// D21 ② `SEUIL_NAISSANCE_M` valait 600 km, très au-dessus de toute pose de
+// démarrage : le crop naissait TOUJOURS, et le défaut bimodal décrit ci-dessus
+// était masqué de bout en bout. D23 ramène le seuil à 32 274,3 m, c'est-à-dire
+// **de nouveau à cheval sur la pose du vol de démarrage (30,7 – 33,6 km)**. Le
+// redressement ci-dessous reprend donc du service — et toute mesure prise avant
+// que le vol de démarrage soit immobile reste un faux constat en puissance.
+//
 // ⛔ **C'est une violation de D16 ter** (« la vue de trois quarts arrive au
 // bloc, pas avant »), antérieure à GE2, que le crop de démarrage masquait une
 // fois sur deux. Le redressement AUTOMATIQUE est donc armé ici aussi — par le

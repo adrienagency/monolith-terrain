@@ -109,8 +109,12 @@ import {
 // ligne `fov: 30` des réglages de `main.js` (⚠️ **PAS `main.js:263`, qui parle du
 // maillage du bloc central : citation fausse dans le commentaire même qui
 // réparait une source fausse, corrigée le 2026-08-21 par la Tâche I**), et c'est
-// elle qui alimente `SEUIL_NAISSANCE_M` (32 274 m), le chiffre auquel la bascule
-// de la mer se compare.
+// elle qui alimente `SEUIL_BLOC_M` (32 274 m), le chiffre auquel la bascule de
+// la mer se compare. ⚠️ **NOM CORRIGÉ LE 2026-09-04** : ce commentaire disait
+// `SEUIL_NAISSANCE_M`, ce qui était FAUX pendant D21 ② — la naissance du crop
+// valait alors le palier z7 (600 km), qui ne descend d'aucun champ de vision.
+// Depuis D23 les deux valent de nouveau la même chose ; raison de plus de
+// nommer celle qui porte le SENS, pas celle qui coïncide.
 // ⚠️ **ET CE N'EST QU'UN DÉFAUT.** Relevé sur l'application VIVANTE le
 // 2026-08-21 : `params.fov = 33`, `camera.fov = 33`, `camGlobe.fov = 33` —
 // `templates-user.js` sauvegarde `'fov'`, donc un template appliqué au démarrage
@@ -6214,8 +6218,9 @@ export class Globe {
    *   l'application (la ligne `fov: 30` des réglages de `main.js` ; **pas**
    *   `main.js:263`, qui parle du maillage du bloc central). Tour de correction
    *   1 : le défaut portait `33`, introuvable ailleurs dans le dépôt, alors que
-   *   `SEUIL_NAISSANCE_M` (`seuil-socle.js`, 32 274 m) — la valeur même à
-   *   laquelle la bascule se compare — est déjà calculée à `30`.
+   *   `SEUIL_BLOC_M` (`seuil-socle.js`, 32 274 m) — la valeur même à laquelle
+   *   la bascule se compare — est déjà calculée à `30`. (⚠️ nom corrigé le
+   *   2026-09-04, voir le §`FOV_DEG` en tête de ce fichier.)
    *   ⚠️ **MAIS UN DÉFAUT N'EST PAS CE QUI TOURNE.** Relevé le 2026-08-21 sur
    *   l'application vivante : `camGlobe.fov = 33`, posé par un template
    *   (`templates-user.js` sauvegarde `'fov'`). **L'appelant doit passer le fov
