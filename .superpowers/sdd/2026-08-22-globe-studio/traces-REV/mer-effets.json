@@ -1,0 +1,1259 @@
+{
+  "quand": "2026-09-04T11:17:09.290Z",
+  "port": 7731,
+  "lieu": [
+    -21.1,
+    55.5,
+    12
+  ],
+  "charges": [
+    {
+      "n": 1,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3722.232663411007,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 435
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 90,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39565.513963769554,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 736
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 41024.968173818306,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 736
+        },
+        "crans": [
+          {
+            "cran": 88,
+            "altCadrageM": 37739,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 89,
+            "altCadrageM": 39566,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 90,
+            "altCadrageM": 41025,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 90
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 41024.968173818306,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 736
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 18,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31771.63382902424,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 908
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 26366.725740180424,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 988
+        },
+        "merApresMs": 4361,
+        "crans": [
+          {
+            "cran": 16,
+            "altCadrageM": 34061,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 32994,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 18,
+            "altCadrageM": 31772,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 18
+      }
+    },
+    {
+      "n": 2,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 4180.178087916307,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 580
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 85,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39646.864920108,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 864
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 40864.64336477608,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 779
+        },
+        "crans": [
+          {
+            "cran": 83,
+            "altCadrageM": 38490,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 84,
+            "altCadrageM": 39647,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 85,
+            "altCadrageM": 40865,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 85
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 40864.64336477608,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 779
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 20,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31741.475044011975,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 886
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 25707.7361851189,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 926
+        },
+        "merApresMs": 22,
+        "crans": [
+          {
+            "cran": 18,
+            "altCadrageM": 34322,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 19,
+            "altCadrageM": 33342,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 20,
+            "altCadrageM": 31741,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 20
+      }
+    },
+    {
+      "n": 3,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 4196.0068358758235,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 497
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 85,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39313.49073569771,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 800
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 40495.31687685972,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 714
+        },
+        "crans": [
+          {
+            "cran": 83,
+            "altCadrageM": 38128,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 84,
+            "altCadrageM": 39313,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 85,
+            "altCadrageM": 40495,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 85
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 40495.31687685972,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 714
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 17,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31783.62436777241,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 906
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 28227.78285833875,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 938
+        },
+        "merApresMs": 16,
+        "crans": [
+          {
+            "cran": 15,
+            "altCadrageM": 33698,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 16,
+            "altCadrageM": 32814,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 31784,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 17
+      }
+    },
+    {
+      "n": 4,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3785.4947474042415,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 524
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 89,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39610.614920624896,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 809
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 41183.592503439606,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 809
+        },
+        "crans": [
+          {
+            "cran": 87,
+            "altCadrageM": 37982,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 88,
+            "altCadrageM": 39611,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 89,
+            "altCadrageM": 41184,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 89
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 41183.592503439606,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 809
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 18,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31732.888275950252,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 980
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 26133.604071683083,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 1008
+        },
+        "merApresMs": 5,
+        "crans": [
+          {
+            "cran": 16,
+            "altCadrageM": 33875,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 32508,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 18,
+            "altCadrageM": 31733,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 18
+      }
+    },
+    {
+      "n": 5,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3680.1247726065785,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 620
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 91,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 40271.45334348951,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 873
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 41790.69233353982,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 774
+        },
+        "crans": [
+          {
+            "cran": 89,
+            "altCadrageM": 39105,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 90,
+            "altCadrageM": 40271,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 91,
+            "altCadrageM": 41791,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 91
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 41790.69233353982,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 774
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 16,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31959.265440269573,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 994
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 28368.845282265494,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 987
+        },
+        "merApresMs": 43,
+        "crans": [
+          {
+            "cran": 14,
+            "altCadrageM": 34540,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 15,
+            "altCadrageM": 33292,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 16,
+            "altCadrageM": 31959,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 16
+      }
+    },
+    {
+      "n": 6,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3707.042580179292,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 494
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 90,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39677.965221025755,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 857
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 41059.35901740135,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 780
+        },
+        "crans": [
+          {
+            "cran": 88,
+            "altCadrageM": 37698,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 89,
+            "altCadrageM": 39678,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 90,
+            "altCadrageM": 41059,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 90
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 41059.35901740135,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 780
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 17,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31769.18272398425,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 948
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 26963.759860866354,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 980
+        },
+        "merApresMs": 9,
+        "crans": [
+          {
+            "cran": 15,
+            "altCadrageM": 33976,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 16,
+            "altCadrageM": 32602,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 31769,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 17
+      }
+    },
+    {
+      "n": 7,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3686.7645323384995,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 454
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 90,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39443.06331736114,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 853
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 40460.90608626845,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 717
+        },
+        "crans": [
+          {
+            "cran": 88,
+            "altCadrageM": 37700,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 89,
+            "altCadrageM": 39443,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 90,
+            "altCadrageM": 40461,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 90
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 40460.90608626845,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 717
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 17,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31829.555562648722,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 946
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 26790.666734987833,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 994
+        },
+        "merApresMs": 11,
+        "crans": [
+          {
+            "cran": 15,
+            "altCadrageM": 34105,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 16,
+            "altCadrageM": 33053,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 31830,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 17
+      }
+    },
+    {
+      "n": 8,
+      "dansLeCrop": {
+        "mode": "surface",
+        "altCadrageM": 3683.1438382719953,
+        "cropPose": true,
+        "dedansCrop": true,
+        "auBloc": true,
+        "crop": true,
+        "mer": true,
+        "merRefract": true,
+        "uCropOn": 1,
+        "ao": true,
+        "dof": true,
+        "grain": 0.2,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 644
+      },
+      "sortie": {
+        "sorti": true,
+        "cranSortie": 90,
+        "avant": {
+          "mode": "surface",
+          "altCadrageM": 39406.278105700934,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 913
+        },
+        "apres": {
+          "mode": "surface",
+          "altCadrageM": 40469.164153787584,
+          "cropPose": false,
+          "dedansCrop": false,
+          "auBloc": false,
+          "crop": false,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 0,
+          "ao": false,
+          "dof": true,
+          "grain": 0,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 720
+        },
+        "crans": [
+          {
+            "cran": 88,
+            "altCadrageM": 37424,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 89,
+            "altCadrageM": 39406,
+            "cropPose": true,
+            "mer": true
+          },
+          {
+            "cran": 90,
+            "altCadrageM": 40469,
+            "cropPose": false,
+            "mer": false
+          }
+        ],
+        "cransTotal": 90
+      },
+      "horsDuCrop": {
+        "mode": "surface",
+        "altCadrageM": 40469.164153787584,
+        "cropPose": false,
+        "dedansCrop": false,
+        "auBloc": false,
+        "crop": false,
+        "mer": false,
+        "merRefract": false,
+        "uCropOn": 0,
+        "ao": false,
+        "dof": true,
+        "grain": 0,
+        "grainVoulu": 0.2,
+        "ssaoVoulu": true,
+        "tuiles": 720
+      },
+      "naissance": {
+        "ne": true,
+        "cranNaissance": 17,
+        "etatBascule": {
+          "mode": "surface",
+          "altCadrageM": 31797.639240014567,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": false,
+          "merRefract": false,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 958
+        },
+        "etat": {
+          "mode": "surface",
+          "altCadrageM": 26827.57865665471,
+          "cropPose": true,
+          "dedansCrop": true,
+          "auBloc": true,
+          "crop": true,
+          "mer": true,
+          "merRefract": true,
+          "uCropOn": 1,
+          "ao": true,
+          "dof": true,
+          "grain": 0.2,
+          "grainVoulu": 0.2,
+          "ssaoVoulu": true,
+          "tuiles": 998
+        },
+        "merApresMs": 22,
+        "crans": [
+          {
+            "cran": 15,
+            "altCadrageM": 34096,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 16,
+            "altCadrageM": 32856,
+            "cropPose": false,
+            "mer": false
+          },
+          {
+            "cran": 17,
+            "altCadrageM": 31798,
+            "cropPose": true,
+            "mer": false
+          }
+        ],
+        "cransTotal": 17
+      }
+    }
+  ]
+}

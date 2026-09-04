@@ -1,0 +1,797 @@
+{
+ "etiquette": "D23",
+ "quand": "2026-09-04T11:06:43.802Z",
+ "images": 30,
+ "effets": true,
+ "bascule": false,
+ "swiftshader": false,
+ "machines": [
+  {
+   "machine": "mienne",
+   "taux": 1,
+   "dpr": 1,
+   "contexte": {
+    "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002216) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "palier": 0,
+    "palierNom": "PLEINE QUALITÉ",
+    "ecran": [
+     1280,
+     800
+    ],
+    "pixelRatio": 1,
+    "dpr": 1,
+    "canevas": [
+     1280,
+     800
+    ],
+    "flags": "?cadence=pleine",
+    "gouverneur": {
+     "avant": {
+      "tier": 0,
+      "startTier": 0
+     },
+     "grainDepart": 0.26,
+     "ssaoDepart": false,
+     "bokehDepart": false
+    }
+   },
+   "postes": [
+    {
+     "poste": "crop",
+     "etat0": {
+      "mode": "surface",
+      "busy": false,
+      "altM": 4998.830378055876,
+      "pose": true,
+      "bascules": 1,
+      "crop": true,
+      "mer": true,
+      "merRT": true,
+      "cropOn": 1,
+      "ao": true,
+      "dof": true,
+      "grain": 0.2,
+      "tuiles": 158,
+      "enVol": 0
+     },
+     "etat": {
+      "mode": "surface",
+      "busy": false,
+      "altM": 4998.830378055876,
+      "pose": true,
+      "bascules": 1,
+      "crop": true,
+      "mer": true,
+      "merRT": true,
+      "cropOn": 1,
+      "ao": true,
+      "dof": true,
+      "grain": 0.2,
+      "tuiles": 158,
+      "enVol": 0
+     },
+     "resume": {
+      "n": 31,
+      "parPasse": [
+       {
+        "nom": "PasseFond[globe]",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 1.340416,
+         "p99": 2.88768,
+         "moy": 1.6851406451612903
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.5,
+         "p99": 0.6999999955296516,
+         "moy": 0.5258064519974494
+        },
+        "calls": {
+         "n": 31,
+         "p50": 29,
+         "p99": 29,
+         "moy": 29
+        },
+        "tris": {
+         "n": 31,
+         "p50": 140172,
+         "p99": 140172,
+         "moy": 140172
+        }
+       },
+       {
+        "nom": "N8AOPostPass",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.14336,
+         "p99": 0.674816,
+         "moy": 0.21058064516129027
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.10000000149011612,
+         "p99": 0.29999999701976776,
+         "moy": 0.12258064482481248
+        },
+        "calls": {
+         "n": 31,
+         "p50": 7,
+         "p99": 7,
+         "moy": 7
+        },
+        "tris": {
+         "n": 31,
+         "p50": 7,
+         "p99": 7,
+         "moy": 7
+        }
+       },
+       {
+        "nom": "RenderPass[bloc]",
+        "enabled": false,
+        "gpu": {
+         "n": 0,
+         "p50": null,
+         "p99": null,
+         "moy": null
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "calls": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "tris": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        }
+       },
+       {
+        "nom": "EffectPass(DepthOfField)",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.386048,
+         "p99": 1.277952,
+         "moy": 0.5244531612903225
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.29999999701976776,
+         "p99": 0.3999999985098839,
+         "moy": 0.26774193610875835
+        },
+        "calls": {
+         "n": 31,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        },
+        "tris": {
+         "n": 31,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        }
+       },
+       {
+        "nom": "EffectPass(SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette)",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.062464,
+         "p99": 0.0768,
+         "moy": 0.08872464516129032
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.09999999403953552,
+         "p99": 0.10000000149011612,
+         "moy": 0.05483870953321457
+        },
+        "calls": {
+         "n": 31,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        },
+        "tris": {
+         "n": 31,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        }
+       }
+      ],
+      "gpuTotal": {
+       "n": 31,
+       "p50": 2.356224,
+       "p99": 3.99872,
+       "moy": 2.508899096774194
+      },
+      "cpuComposer": {
+       "n": 31,
+       "p50": 1,
+       "p99": 1.3999999985098839,
+       "moy": 1.025806451757108
+      },
+      "dtRaf": {
+       "n": 31,
+       "p50": 11.899999998509884,
+       "p99": 15.5,
+       "moy": 12.267741935628075
+      },
+      "glErr": 0,
+      "glErrCodes": [],
+      "etat": {
+       "mode": "surface",
+       "busy": false,
+       "altM": 4998.830378055876,
+       "pose": true,
+       "bascules": 1,
+       "crop": true,
+       "mer": true,
+       "merRT": true,
+       "cropOn": 1,
+       "ao": true,
+       "dof": true,
+       "grain": 0.2,
+       "tuiles": 158,
+       "enVol": 0
+      }
+     },
+     "temoin": [
+      3.38,
+      3.37,
+      null,
+      1.82,
+      3.56
+     ],
+     "echelleTemoin": {
+      "avant": 1,
+      "apres": 2,
+      "canevas": [
+       2560,
+       1600
+      ]
+     },
+     "recolte": {
+      "restantes": 0,
+      "disjoint": false
+     },
+     "image": "D23-mienne-crop-effets-1280x800.rgba.gz",
+     "w": 1280,
+     "h": 800,
+     "repos": {
+      "n": 30,
+      "p50": 0,
+      "p99": 0,
+      "moy": 0
+     }
+    },
+    {
+     "poste": "surface",
+     "etat0": {
+      "mode": "surface",
+      "busy": false,
+      "altM": 129999.99329029988,
+      "pose": true,
+      "bascules": 1,
+      "crop": true,
+      "mer": true,
+      "merRT": true,
+      "cropOn": 1,
+      "ao": true,
+      "dof": true,
+      "grain": 0.2,
+      "tuiles": 1700,
+      "enVol": 542
+     },
+     "etat": {
+      "mode": "surface",
+      "busy": false,
+      "altM": 129999.99329029988,
+      "pose": true,
+      "bascules": 1,
+      "crop": true,
+      "mer": true,
+      "merRT": true,
+      "cropOn": 1,
+      "ao": true,
+      "dof": true,
+      "grain": 0.2,
+      "tuiles": 1700,
+      "enVol": 585
+     },
+     "resume": {
+      "n": 31,
+      "parPasse": [
+       {
+        "nom": "PasseFond[globe]",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 10.482688,
+         "p99": 14.340096,
+         "moy": 10.852484129032261
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 14.899999998509884,
+         "p99": 20.5,
+         "moy": 15.238709678092311
+        },
+        "calls": {
+         "n": 31,
+         "p50": 1309,
+         "p99": 1316,
+         "moy": 1302.1290322580646
+        },
+        "tris": {
+         "n": 31,
+         "p50": 1478566,
+         "p99": 1491526,
+         "moy": 1474856.064516129
+        }
+       },
+       {
+        "nom": "N8AOPostPass",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.272384,
+         "p99": 0.294912,
+         "moy": 0.27988232258064516
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.19999999552965164,
+         "p99": 0.29999999701976776,
+         "moy": 0.16774193485898356
+        },
+        "calls": {
+         "n": 31,
+         "p50": 7,
+         "p99": 7,
+         "moy": 7
+        },
+        "tris": {
+         "n": 31,
+         "p50": 7,
+         "p99": 7,
+         "moy": 7
+        }
+       },
+       {
+        "nom": "RenderPass[bloc]",
+        "enabled": false,
+        "gpu": {
+         "n": 0,
+         "p50": null,
+         "p99": null,
+         "moy": null
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "calls": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "tris": {
+         "n": 31,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        }
+       },
+       {
+        "nom": "EffectPass(DepthOfField)",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.705536,
+         "p99": 1.565696,
+         "moy": 0.834626064516129
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.29999999701976776,
+         "p99": 0.4000000059604645,
+         "moy": 0.28387096788614025
+        },
+        "calls": {
+         "n": 31,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        },
+        "tris": {
+         "n": 31,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        }
+       },
+       {
+        "nom": "EffectPass(SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette)",
+        "enabled": true,
+        "gpu": {
+         "n": 31,
+         "p50": 0.115712,
+         "p99": 0.132096,
+         "moy": 0.14144412903225806
+        },
+        "cpu": {
+         "n": 31,
+         "p50": 0.10000000149011612,
+         "p99": 0.20000000298023224,
+         "moy": 0.0806451615306639
+        },
+        "calls": {
+         "n": 31,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        },
+        "tris": {
+         "n": 31,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        }
+       }
+      ],
+      "gpuTotal": {
+       "n": 31,
+       "p50": 11.599872000000001,
+       "p99": 16.119808,
+       "moy": 12.108436645161293
+      },
+      "cpuComposer": {
+       "n": 31,
+       "p50": 15.5,
+       "p99": 20.899999998509884,
+       "moy": 15.87741935541553
+      },
+      "dtRaf": {
+       "n": 31,
+       "p50": 44.100000001490116,
+       "p99": 65.10000000149012,
+       "moy": 45.81290322566225
+      },
+      "glErr": 0,
+      "glErrCodes": [],
+      "etat": {
+       "mode": "surface",
+       "busy": false,
+       "altM": 129999.99329029988,
+       "pose": true,
+       "bascules": 1,
+       "crop": true,
+       "mer": true,
+       "merRT": true,
+       "cropOn": 1,
+       "ao": true,
+       "dof": true,
+       "grain": 0.2,
+       "tuiles": 1700,
+       "enVol": 585
+      }
+     },
+     "temoin": [
+      1.09,
+      2.63,
+      null,
+      1.35,
+      2.49
+     ],
+     "echelleTemoin": {
+      "avant": 1,
+      "apres": 2,
+      "canevas": [
+       2560,
+       1600
+      ]
+     },
+     "recolte": {
+      "restantes": 0,
+      "disjoint": false
+     },
+     "image": "D23-mienne-surface-effets-1280x800.rgba.gz",
+     "w": 1280,
+     "h": 800,
+     "repos": {
+      "n": 30,
+      "p50": 0,
+      "p99": 4529,
+      "moy": 553.6666666666666
+     }
+    },
+    {
+     "poste": "orbite",
+     "etat0": {
+      "mode": "orbital",
+      "busy": false,
+      "altM": 1999999.9999999998,
+      "pose": false,
+      "bascules": 2,
+      "crop": false,
+      "mer": false,
+      "merRT": false,
+      "cropOn": 0,
+      "ao": false,
+      "dof": true,
+      "grain": 0,
+      "tuiles": 753,
+      "enVol": 0
+     },
+     "etat": {
+      "mode": "orbital",
+      "busy": false,
+      "altM": 1999999.9999999998,
+      "pose": false,
+      "bascules": 2,
+      "crop": false,
+      "mer": false,
+      "merRT": false,
+      "cropOn": 0,
+      "ao": false,
+      "dof": true,
+      "grain": 0,
+      "tuiles": 753,
+      "enVol": 0
+     },
+     "resume": {
+      "n": 40,
+      "parPasse": [
+       {
+        "nom": "PasseFond[globe]",
+        "enabled": true,
+        "gpu": {
+         "n": 40,
+         "p50": 0.161792,
+         "p99": 0.185344,
+         "moy": 0.18309119999999995
+        },
+        "cpu": {
+         "n": 40,
+         "p50": 0.7000000029802322,
+         "p99": 0.8000000044703484,
+         "moy": 0.6900000004097819
+        },
+        "calls": {
+         "n": 40,
+         "p50": 45,
+         "p99": 45,
+         "moy": 45
+        },
+        "tris": {
+         "n": 40,
+         "p50": 100226,
+         "p99": 100226,
+         "moy": 100226
+        }
+       },
+       {
+        "nom": "N8AOPostPass",
+        "enabled": false,
+        "gpu": {
+         "n": 0,
+         "p50": null,
+         "p99": null,
+         "moy": null
+        },
+        "cpu": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "calls": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "tris": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        }
+       },
+       {
+        "nom": "RenderPass[bloc]",
+        "enabled": false,
+        "gpu": {
+         "n": 0,
+         "p50": null,
+         "p99": null,
+         "moy": null
+        },
+        "cpu": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "calls": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        },
+        "tris": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0,
+         "moy": 0
+        }
+       },
+       {
+        "nom": "EffectPass(DepthOfField)",
+        "enabled": true,
+        "gpu": {
+         "n": 40,
+         "p50": 0.390144,
+         "p99": 0.443392,
+         "moy": 0.3921152
+        },
+        "cpu": {
+         "n": 40,
+         "p50": 0.20000000298023224,
+         "p99": 0.3999999985098839,
+         "moy": 0.21249999906867742
+        },
+        "calls": {
+         "n": 40,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        },
+        "tris": {
+         "n": 40,
+         "p50": 12,
+         "p99": 12,
+         "moy": 12
+        }
+       },
+       {
+        "nom": "EffectPass(SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette)",
+        "enabled": true,
+        "gpu": {
+         "n": 40,
+         "p50": 0.069632,
+         "p99": 0.553984,
+         "moy": 0.09765919999999999
+        },
+        "cpu": {
+         "n": 40,
+         "p50": 0,
+         "p99": 0.10000000149011612,
+         "moy": 0.04750000014901161
+        },
+        "calls": {
+         "n": 40,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        },
+        "tris": {
+         "n": 40,
+         "p50": 3,
+         "p99": 3,
+         "moy": 3
+        }
+       }
+      ],
+      "gpuTotal": {
+       "n": 40,
+       "p50": 0.6225919999999999,
+       "p99": 1.159168,
+       "moy": 0.6728656000000002
+      },
+      "cpuComposer": {
+       "n": 40,
+       "p50": 1,
+       "p99": 1.1999999955296516,
+       "moy": 0.9924999995157122
+      },
+      "dtRaf": {
+       "n": 40,
+       "p50": 9.5,
+       "p99": 12.699999995529652,
+       "moy": 9.690000000037253
+      },
+      "glErr": 0,
+      "glErrCodes": [],
+      "etat": {
+       "mode": "orbital",
+       "busy": false,
+       "altM": 1999999.9999999998,
+       "pose": false,
+       "bascules": 2,
+       "crop": false,
+       "mer": false,
+       "merRT": false,
+       "cropOn": 0,
+       "ao": false,
+       "dof": true,
+       "grain": 0,
+       "tuiles": 753,
+       "enVol": 0
+      }
+     },
+     "temoin": [
+      3.37,
+      null,
+      null,
+      1.79,
+      3.34
+     ],
+     "echelleTemoin": {
+      "avant": 1,
+      "apres": 2,
+      "canevas": [
+       2560,
+       1600
+      ]
+     },
+     "recolte": {
+      "restantes": 0,
+      "disjoint": false
+     },
+     "image": "D23-mienne-orbite-effets-1280x800.rgba.gz",
+     "w": 1280,
+     "h": 800,
+     "repos": {
+      "n": 39,
+      "p50": 0,
+      "p99": 0,
+      "moy": 0
+     }
+    }
+   ],
+   "passes": {
+    "ext": true,
+    "noms": [
+     "PasseFond[globe]",
+     "N8AOPostPass",
+     "RenderPass[bloc]",
+     "EffectPass(DepthOfField)",
+     "EffectPass(SMAA+Exposure+ToneMapping+HueSaturation+BrightnessContrast+Noise+Vignette)"
+    ],
+    "enabled": [
+     true,
+     true,
+     false,
+     true,
+     true
+    ]
+   },
+   "journal": [
+    "THREE.WebGLProgram: Program Info Log: (204,1): warning X4000: use of potentially uninitialized variable (f_surfaceFx_int)\n\n\n\u0000",
+    "THREE.WebGLProgram: Program Info Log: (566,1): warning X4000: use of potentially uninitialized variable (f_surfaceFx_int)\n\n\n\u0000",
+    "THREE.WebGLProgram: Program Info Log: (85,12-86): warning X3595: gradient instruction used in a loop with varying iteration; partial derivatives may have undefined value\n(85,12-86): warning X3595: gradient instruction used in a loop with varying iteration; partial derivatives may have undefined valu",
+    "THREE.WebGLProgram: Program Info Log: (566,1): warning X4000: use of potentially uninitialized variable (f_surfaceFx_int)\n\n\n\u0000"
+   ]
+  }
+ ]
+}
