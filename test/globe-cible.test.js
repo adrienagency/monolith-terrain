@@ -83,7 +83,7 @@ const { Globe, _resetTileMemo, planTuile, MAX_Z } = await import('../src/globe.j
 const { latLonToSphere, R_GLOBE, ORBITAL_M_PER_UNIT } = await import('../src/geo.js')
 const {
   _resetDemSource, DEM_SOURCES, noterTrouTuile, trouConnu, nombreDeTrous,
-  clearTrous, isFallbackActive, rememberRegionMaxZoom, regionKey,
+  clearTrous, isFallbackActive, rememberRegionMaxZoom, regionKey, _setRoutageTrous,
 } = await import('../src/dem-source.js')
 
 function camera(lat, lon, altM) {
@@ -501,4 +501,69 @@ test('⑤ LES REQUÊTES ÉCONOMISÉES : une descente sur une zone trouée ne ré
   assert.equal(mapterhorn, 0, `${mapterhorn} descendants d un 404 repartent chez mapterhorn — autant d allers-retours perdus`)
   clearTrous()
   _resetDemSource(DEM_SOURCES.aws.id)
+})
+
+test('⑤ le levier `?trous=0` débranche le routage — sinon l A/B du banc compare deux fois la même chose', () => {
+  clearTrous()
+  _setRoutageTrous(false)
+  noterTrouTuile('mapterhorn', 12, 500, 500)
+  assert.equal(nombreDeTrous(), 0, 'le levier baissé note quand même les trous — les deux branches du banc seraient identiques')
+  assert.equal(trouConnu('mapterhorn', 13, 1000, 1000, 12), false)
+  _setRoutageTrous(true)
+  noterTrouTuile('mapterhorn', 12, 500, 500)
+  assert.ok(trouConnu('mapterhorn', 13, 1000, 1000, 12), 'le levier relevé ne rebranche pas le routage')
+  clearTrous()
+})
+
+// ⛔ **CE TEST EXISTE PARCE QU'UNE MUTATION A SURVÉCU.** Relâcher `_aucunEnfant`
+// en `!_enfantsPresents` — c'est-à-dire retenir aussi les parents dont un enfant
+// est DÉJÀ parti — ne faisait rougir personne : l'invariant du parcours
+// (« un parent de périphérie vierge n'engendre pas ») reste vrai quand on retient
+// PLUS. Le prédicat est donc extrait (`_barriereRetient`) et interrogé de face.
+test('③ le prédicat de la barrière, de face : périphérie VIERGE seulement (mutation survivante)', async () => {
+  const g = neuf()
+  const cam = camera(LAT, LON, 300_000)
+  for (let i = 0; i < 8; i++) { g.update(cam, 0.016); await calme(g) }
+  g.barriereCible = true
+  g._barriereActive = true
+
+  const vues = [...g.tiles.values()].filter((t) => t.z > 2 && isFinite(g._distanceEcran(t)))
+  const centre = vues.find((t) => g._dansLaCible(t))
+  assert.ok(centre, 'harnais : aucune tuile dans la cible')
+  // ① le CENTRE n'est jamais retenu
+  assert.equal(g._barriereRetient(centre), false, 'la barrière retient une tuile de la CIBLE')
+
+  // ⚠️ **ON FABRIQUE LA TUILE DE PÉRIPHÉRIE VIERGE PLUTÔT QUE DE LA CHERCHER.**
+  // Cherchée, elle peut manquer — et les deux assertions qui comptent se
+  // retrouvent dans une branche `else` que le mutant ne visite jamais : la
+  // relâche de `_aucunEnfant` en `!_enfantsPresents` a survécu exactement comme
+  // ça. Fabriquée, la question est toujours posée.
+  const modele = vues.find((t) => !g._dansLaCible(t)) || vues[0]
+  const vierge = { z: 7, x: 4242, y: 4242, center: modele.center, rayon: modele.rayon, chord: modele.chord }
+  assert.equal(g._dansLaCible(vierge), g._dansLaCible(modele), 'harnais : la tuile fabriquée n hérite pas de la position écran')
+  // on force la périphérie : la distance écran de CETTE tuile, et d'elle seule,
+  // est posée à 1,2 NDC — au-delà de R_CIBLE (0,798), donc hors de la cible
+  const dEcran = g._distanceEcran.bind(g)
+  g._distanceEcran = (t) => (t === vierge ? 1.2 : dEcran(t)) // 1,2 NDC > R_CIBLE
+  assert.equal(g._dansLaCible(vierge), false, 'harnais : la tuile fabriquée est vue dans la cible')
+
+  // ② une périphérie VIERGE est retenue
+  assert.equal(g._aucunEnfant(vierge), true, 'harnais : la tuile fabriquée a déjà des enfants')
+  assert.equal(g._barriereRetient(vierge), true, 'une périphérie VIERGE n est pas retenue — la barrière ne retient rien')
+
+  // ③ dès qu UN enfant existe, elle n est PLUS retenue : sa requête est partie,
+  //    la retenir la ferait payer deux fois (le garde-fou anti-brassage)
+  g.tiles.set(`8/8484/8484`, { z: 8, x: 8484, y: 8484, state: 'loading' })
+  assert.equal(g._aucunEnfant(vierge), false, 'harnais : l enfant posé n est pas vu')
+  assert.equal(
+    g._barriereRetient(vierge), false,
+    'la barrière retient un parent dont un enfant est DÉJÀ parti — sa requête sera payée deux fois'
+  )
+  g.tiles.delete('8/8484/8484')
+
+  // ④ et le levier baissé lève tout
+  g.barriereCible = false
+  assert.equal(g._barriereRetient(vierge), false, 'le levier baissé ne lève pas la barrière')
+  g._distanceEcran = dEcran
+  g.dispose()
 })

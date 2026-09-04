@@ -206,10 +206,30 @@ export function clearRegionMemo() {
 const TROUS_MAX = 4096
 const trous = new Set() // `sourceId:z/x/y` — la tuile a rendu 404 sur la source fine
 
+// ⚠️ **LE LEVIER EST UN DRAPEAU D'URL, PAS UNE PROPRIÉTÉ D'OBJET, ET C'EST LE
+// SEUL ENDROIT D'OÙ IL PEUT VENIR.** `planTuile` est une fonction PURE de module
+// (c'est ce qui la rend testable en node) : elle ne voit aucun globe, donc aucun
+// `globe.routerTrous` ne pourrait l'atteindre. `?trous=0` suit exactement le
+// patron de `?dem=aws` juste au-dessus, et il sert à ce que le banc puisse faire
+// l'A/B — sans lui, les deux branches de la campagne portaient TOUTES LES DEUX
+// le correctif, et les 63 quatre-cent-quatre relevés étaient identiques des deux
+// côtés : la mesure ne comparait rien.
+let routageTrous = true
+try {
+  if (typeof location !== 'undefined' && location.search && new URLSearchParams(location.search).get('trous') === '0') routageTrous = false
+} catch {}
+
 /** Note un 404 de couverture sur la source fine, pour cette tuile et ses descendants. */
 export function noterTrouTuile(sourceId, z, x, y) {
+  if (!routageTrous) return
   if (trous.size >= TROUS_MAX) trous.clear()
   trous.add(`${sourceId}:${z}/${x}/${y}`)
+}
+
+/** Tests et bancs : (dé)branche le routage des descendants d'un 404. */
+export function _setRoutageTrous(v) {
+  routageTrous = !!v
+  if (!v) trous.clear()
 }
 
 /**

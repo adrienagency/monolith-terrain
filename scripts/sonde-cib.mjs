@@ -74,6 +74,15 @@ const DEPART_M = Number(opt('--depart', '800000'))
 const ARRIVEE_M = Number(opt('--arrivee', '20000'))
 const PERIODE = Number(opt('--periode', '40'))
 const VISIBLE = opt('--visible', '0') !== '0'
+// ⚠️ **LE DÉBIT EST UN PARAMÈTRE, PAS UN DÉCOR.** La barrière ordonnance des
+// CRÉNEAUX ; elle ne peut rien rendre là où les créneaux ne sont pas le goulot.
+// Sur la liaison de cette machine, le premier A/B mesurait 20 à 26 % de créneaux
+// VIDES à CPU ×4 : le tuyau n'était pas plein, donc retenir la périphérie
+// n'accélérait rien (mesuré, §3 du rapport). PF2 travaillait sur un réseau que
+// l'application classe « lent » (1,4–1,6 Mb/s) — c'est ce régime-là qu'il faut
+// reproduire pour juger, et `--reseau <kbps>` le pose au protocole CDP.
+const RESEAU = Number(opt('--reseau', '0'))
+const REQUETE = opt('--query', '') // ex. `trous=0` pour débrancher le 404 → AWS
 const FAMINE = opt('--famine', '0') !== '0' // coupe le réseau des tuiles du CENTRE
 const SORTIE = opt('--sortie', path.join(RACINE, '.banc', 'CIB'))
 const LARGEUR = 1280, HAUTEUR = 720
@@ -296,11 +305,24 @@ async function lancer() {
     const h = externe(ev.request.url); if (!h) return
     enCours.set(ev.requestId, phase); const c = cle(phase); c.requetes++; c.hotes[h] = (c.hotes[h] || 0) + 1
   })
+  // ⚠️ **LES 404 SONT RETENUS UN PAR UN, ET C'EST LA SEULE MESURE HONNÊTE DU
+  // CORRECTIF.** L'A/B naïf (drapeau levé / baissé) ne compare rien : la molette
+  // est inertielle, les deux descentes ne visitent pas les mêmes tuiles, et le
+  // premier essai a rendu PLUS de 404 avec le correctif qu'avec (71 contre 51 à
+  // Ajaccio) — du bruit de trajectoire, pas un effet. Ce que le correctif
+  // supprime est exact et se compte SUR UNE SEULE COURSE : les 404 dont un
+  // ANCÊTRE a déjà rendu 404. Chacun de ceux-là est un aller-retour que la
+  // mémoire des trous économise.
+  const quatreCentQuatre = []
   cdp.on('Network.responseReceived', (ev) => {
     const ph = enCours.get(ev.requestId); if (ph === undefined) return
     const h = externe(ev.response.url) || '?'
     const k = `${h.split('.')[0]}:${ev.response.status}`
     const c = cle(ph); c.statuts[k] = (c.statuts[k] || 0) + 1
+    if (ev.response.status === 404) {
+      const m = /mapterhorn\.com\/(\d+)\/(\d+)\/(\d+)\./.exec(ev.response.url)
+      if (m) quatreCentQuatre.push({ z: +m[1], x: +m[2], y: +m[3], phase: ph })
+    }
   })
   cdp.on('Network.loadingFinished', (ev) => { const ph = enCours.get(ev.requestId); if (ph === undefined) return; enCours.delete(ev.requestId); cle(ph).octets += ev.encodedDataLength || 0 })
   const poserPhase = async (p) => { phase = p; await page.evaluate((p2) => { window.__cib.phase = p2 }, p) }
@@ -308,8 +330,8 @@ async function lancer() {
   page.on('pageerror', (er) => erreurs.push('pageerror: ' + String(er.message).slice(0, 160)))
   page.on('console', (m) => { if (m.type() === 'error') erreurs.push(m.text().slice(0, 160)) })
 
-  const journal = { etiquette: ETIQ, port: PORT, cpu: CPU, lieu: LIEU, barriere: BARRIERE, famine: FAMINE, departM: DEPART_M, arriveeM: ARRIVEE_M, viewport: [LARGEUR, HAUTEUR], date: new Date().toISOString() }
-  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  const journal = { etiquette: ETIQ, port: PORT, cpu: CPU, reseauKbps: RESEAU, query: REQUETE, lieu: LIEU, barriere: BARRIERE, famine: FAMINE, departM: DEPART_M, arriveeM: ARRIVEE_M, viewport: [LARGEUR, HAUTEUR], date: new Date().toISOString() }
+  await page.goto(`http://127.0.0.1:${PORT}/${REQUETE ? '?' + REQUETE : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForFunction('!!(window.__exp && window.__exp.globe)', { timeout: 90000 })
   journal.instrument = await page.evaluate(INSTRUMENTER)
   await page.evaluate((b) => { const g = window.__exp.globe; if ('barriereCible' in g) g.barriereCible = b }, BARRIERE)
@@ -364,6 +386,17 @@ async function lancer() {
     })
   }
 
+  // ⚠️ **LE BRIDAGE SE POSE APRÈS LE CHARGEMENT DE LA PAGE, PAS AVANT.**
+  // `Network.emulateNetworkConditions` ne sait pas exempter un hôte : posé au
+  // départ, il bride AUSSI le serveur `vite` de dev, et l'application ne finit
+  // jamais de démarrer (90 s de délai dépassé, mesuré). On le pose donc juste
+  // avant la descente, quand la page est en place et que seules les tuiles
+  // partent encore sur le vrai réseau.
+  if (RESEAU > 0) {
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 60, downloadThroughput: RESEAU * 1000 / 8, uploadThroughput: RESEAU * 1000 / 8 })
+    journal.bridageMs = Date.now()
+  }
+
   await poserPhase('descente')
   const marques = { debut: await page.evaluate(() => Math.round(performance.now())) }
   for (let i = 0; i < 600; i++) {
@@ -416,6 +449,17 @@ async function lancer() {
   const premierZ = {}
   for (const i of imgs) if (i.zCentre !== null && premierZ[i.zCentre] === undefined) premierZ[i.zCentre] = i.t - marques.debut
 
+  // les 404 dont un ANCÊTRE a aussi 404 : ce sont EXACTEMENT les allers-retours
+  // que la mémoire des trous supprime
+  const vus = new Set()
+  let descendantsDe404 = 0
+  for (const q of quatreCentQuatre) {
+    let ancetre = false
+    for (let z = q.z - 1, x = q.x >> 1, y = q.y >> 1; z >= 0; z--, x >>= 1, y >>= 1) if (vus.has(`${z}/${x}/${y}`)) { ancetre = true; break }
+    if (ancetre) descendantsDe404++
+    vus.add(`${q.z}/${q.x}/${q.y}`)
+  }
+
   const c = P.creneaux
   const resume = {
     images: imgs.length, dureeMs: imgs.length ? imgs[imgs.length - 1].t - imgs[0].t : 0,
@@ -456,6 +500,7 @@ async function lancer() {
     cacheMax: Math.max(0, ...imgs.map((i) => i.cache)),
     reseau: { descente: reseau.descente ?? null, tout: Object.values(reseau).reduce((s, r) => ({ requetes: s.requetes + r.requetes, octets: s.octets + r.octets }), { requetes: 0, octets: 0 }) },
     calmeFinMs: journal.calmeFin.ms,
+    trous404: { total: quatreCentQuatre.length, descendantsDe404, distincts: vus.size },
   }
   // ① la courbe : le nuage mesuré, RÉSUMÉ par tranche de 0,1 NDC, plus le
   // balayage synthétique de la loi
@@ -476,6 +521,7 @@ async function lancer() {
   console.log(`RETARD (% de sa population) — total moy ${resume.retardTotal.moy} · CENTRE moy ${resume.retardCentre.moy} p90 ${resume.retardCentre.p90} · PÉRIPHÉRIE moy ${resume.retardPeri.moy} p90 ${resume.retardPeri.p90}`)
   console.log(`z moyen : centre ${resume.zCentreMoy} · périphérie ${resume.zPeriMoy} · trous max ${resume.trous.max} (périphérie ${resume.trous.peri}) sur ${resume.trous.images} images`)
   console.log(`RÉSEAU descente : ${resume.reseau.descente?.requetes} req · ${((resume.reseau.descente?.octets || 0) / 1048576).toFixed(2)} Mio · statuts ${JSON.stringify(resume.reseau.descente?.statuts)}`)
+  console.log(`404 MAPTERHORN : ${resume.trous404.total} au total, dont ${resume.trous404.descendantsDe404} DESCENDANTS d un 404 déjà connu — autant d allers-retours économisables`)
   console.log(`COURBE (d NDC → clé, médiane) : ${resume.courbeMesuree.map((t) => `${t.d}:${t.pMed}`).join(' ')}`)
   console.log(`_traverse p50 ${resume.traverse.p50} p99 ${resume.traverse.p99} · update p50 ${resume.update.p50} p99 ${resume.update.p99} · cache max ${resume.cacheMax} · calme ${resume.calmeFinMs} ms`)
   if (erreurs.length) console.log(`⚠️ ${erreurs.length} erreurs : ${erreurs.slice(0, 3).join(' | ')}`)

@@ -4035,8 +4035,27 @@ export class Globe {
     this.raffinementPartiel = true
     this.protegerEnfants = true
     // ══════ LA BARRIÈRE D'ORDONNANCEMENT — CIB / D22 ③ ═════════════════════
-    // Débrayable pour l'A/B du banc dans la MÊME session, levée en production.
-    this.barriereCible = true
+    //
+    // ⛔ **BAISSÉE PAR DÉFAUT, ET C'EST LA MESURE QUI L'A DÉCIDÉ, PAS UNE
+    // PRUDENCE.** Le mécanisme est écrit, testé et instrumenté ; ce qu'il fait
+    // au chiffre d'Adrien, mesuré en A/B entrelacé sur trois lieux :
+    //   · liaison rapide, CPU ×4 — netteté au centre 36,5 → 33,3 s · 43,8 →
+    //     48,7 s · 48,9 → 47,6 s, soit le bruit de la durée du geste ; retard
+    //     du centre 5,6 → 5,7 · 6,2 → 6,0 · 6,3 → 6,3 % : PLAT ;
+    //   · liaison bridée à 1,5 Mb/s (le régime où les six créneaux SONT le
+    //     goulot, donc celui que D22 vise) — netteté 21,2 → 40,5 s et 22,0 →
+    //     27,1 s, retard du centre **18,5 → 28,4 %** et 17,1 → 57,9 % : la
+    //     barrière DÉGRADE le centre, exactement là où elle devait le servir.
+    // L'occupation des créneaux, elle, ne tombe pas (93,2 → 92,6 %) : le
+    // garde-fou anti-créneau-vide fait son travail, ce n'est pas lui le coupable.
+    // La piste (NON vérifiée — voir le rapport) : un parent de périphérie retenu
+    // n'engendre pas, donc `_porteuses` baisse, donc la cible du cache SOUPLE
+    // (`_porteuses + CACHE_SOUPLE`) baisse, donc l'éviction mord plus — cache
+    // max 580 → 543 sur la paire de Chamonix. Ce serait le §5 de
+    // `/threejs-optimisation` mot pour mot : deux défauts qui n'en font qu'un,
+    // et le second correctif appliqué avant le premier se lit comme une
+    // régression. Tant que ce n'est pas mesuré, la barrière reste débrayée.
+    this.barriereCible = false
     this._barriereActive = false // décidée en FIN d'image, lue par le parcours SUIVANT
     this._centreEnAttente = 0 // tuiles de la cible que l'image veut et n'a pas
     this._centreEnAttentePrec = Infinity // pour détecter le PROGRÈS du centre
@@ -9036,10 +9055,10 @@ export class Globe {
     // son `lastUsed`, donc sa protection contre l'éviction et la purge de file :
     // on paierait sa requête DEUX fois pour ne rien gagner. « Annuler six
     // requêtes ne rachète rien » (PF2, `_annuler`) vaut aussi pour la file.
-    if (wantSplit && this.barriereCible && this._barriereActive && this.continu && !this._dansLaCible(t) && this._aucunEnfant(t)) {
+    if (wantSplit && this._barriereRetient(t)) {
       wantSplit = false
       this._barriereRefus++
-    } else if (wantSplit && this.barriereCible && this._barriereActive && this.continu && !this._dansLaCible(t) && !this._enfantsPresents(t)) {
+    } else if (wantSplit && this._barriereArmeeIci(t) && !this._enfantsPresents(t)) {
       // la barrière était armée, la tuile est bien en périphérie, et elle passe
       // QUAND MÊME parce qu'un de ses enfants existe déjà : c'est la mesure qui
       // sépare « rien à retenir » de « garde-fou trop serré »
@@ -9360,6 +9379,23 @@ export class Globe {
    */
   _enfantAcquis(z, x, y) {
     return this._horsCropSeul(z, x, y) || this.tiles.has(tileKey(z, x, y))
+  }
+
+  /**
+   * CIB : la barrière est-elle armée ET cette tuile est-elle de la périphérie ?
+   * ⚠️ Extraite parce qu'un prédicat écrit en ligne dans `_traverse` ne se teste
+   * QUE de biais : la campagne de mutation a relâché `_aucunEnfant` en
+   * `!_enfantsPresents` et **aucun test n'a rougi** — l'invariant du parcours
+   * (« un parent de périphérie vierge n'engendre pas ») reste vrai quand on
+   * retient PLUS. Ce qu'il fallait, c'est pouvoir poser la question directement.
+   */
+  _barriereArmeeIci(t) {
+    return !!this.barriereCible && this._barriereActive && this.continu && !this._dansLaCible(t)
+  }
+
+  /** CIB : ce raffinement est-il retenu par la barrière ? */
+  _barriereRetient(t) {
+    return this._barriereArmeeIci(t) && this._aucunEnfant(t)
   }
 
   /** CIB : aucun des quatre enfants n'existe encore — le raffinement les crée TOUS. */
