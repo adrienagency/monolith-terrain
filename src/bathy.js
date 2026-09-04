@@ -613,6 +613,281 @@ export function smoothSeaFloor(data, size, opts = {}) {
   return data
 }
 
+// ══════════ 🟣 LISS — LE STRIAGE DE L'ABYSSE, ET RIEN D'AUTRE ════════════════
+//
+// LE DÉFAUT. Adrien filme un PEIGNE sur toute la mer : des bandes régulières,
+// verticales et horizontales, criantes quand le relief est exagéré. B6 a mesuré
+// et TRANCHÉ : ce n'est pas un bogue. C'est la LIGNÉATION PROPRE DE GEBCO — les
+// traces des campagnes de sondage — présente dans le fichier PNG SANS PERTE
+// avant qu'on y touche, à 25-97 m de pic-à-pic contre 1,00 m de pas
+// d'encodage. Et le rééchantillonnage ne l'ajoute pas : il l'ATTÉNUE.
+//
+// On ne « corrige » donc pas une erreur : on prend un ARBITRAGE, celui d'Adrien
+// — lisser le relief sous-marin PROFOND, là où personne ne vérifie la vérité
+// bathymétrique au mètre près, en laissant intacts le trait de côte et les
+// hauts-fonds.
+//
+// ─────────────────────────────── OÙ COMMENCE « LE PROFOND » — LA DÉRIVATION
+//
+// ⛔ CE SEUIL N'EST PAS POSÉ AU GOÛT. Il est pris à la seule grandeur du produit
+// qui sépare déjà le plateau de l'abysse, et elle est écrite dans le tuileur :
+//
+//     scripts/build-bathy-tiles.mjs:88     const SHELF = +arg('shelf', -500)
+//     …:326   if (m > SHELF) return true   // du plateau
+//
+// `probeWorthIt` n'écrit une tuile bathy QUE si elle touche de l'eau plus haute
+// que SHELF. Autrement dit, **−500 m est la profondeur sous laquelle le produit
+// a décidé qu'il n'y avait plus rien de fin à décrire** : sous elle, aucune
+// tuile n'est cuite pour elle-même, et c'est le socle GEBCO — 464 m de maille,
+// interpolé entre des traces de sondage — qui répond seul. C'est exactement la
+// définition que le brief demandait : « la profondeur sous laquelle plus aucune
+// source fine ne couvre ». Le seuil du lissage EST le seuil du tuileur.
+//
+// ────────── ET LA TRANSITION — TROIS ÉCRITURES, DEUX RÉFUTÉES PAR LA CAPTURE
+//
+// Le fondu vaut le même nombre que le seuil : le lissage vaut 0 à −500 m et
+// plein à −1 000 m. ⚠️ **Mais ce n'est PAS le fondu qui rend la transition
+// invisible, et je l'ai cru deux fois.**
+//
+// ① `fondu = 500` SEUL ⇒ **UN LISERÉ EN ESCALIER** tout autour du plateau de
+//    Rodrigues (capture). Un fondu est une distance en PROFONDEUR ; ce qui se
+//    voit, c'est sa largeur au SOL. Or l'isobathe 500 m n'est pas un endroit
+//    quelconque : **c'est le TALUS**, l'endroit le plus raide de l'océan.
+//    Mesuré sur 120 tuiles z8 : la bande −500 → −1 000 m fait **1 pixel de
+//    large en médiane**. La force passait donc de 0 à plein en UNE cellule.
+//    ⚡ CONTRE-ÉPREUVE QUI TRANCHE (`.banc/LISS/essai-seuil2000/`) : en
+//    déplaçant le SEUIL à 2 000 m, le liseré **suit le seuil**. Ce n'était donc
+//    pas « le talus enfin révélé sous le bruit », c'était bien MA transition.
+//    Sans ce contrôle j'aurais livré le liseré en le prenant pour de la
+//    géographie.
+// ② `fondu = 3 000` ⇒ le liseré disparaît (capture `essai-fondu3000/`), **et le
+//    critère se perd** : sur 250 tuiles abyssales le striage résiduel remonte
+//    de 0,5 à 2,3 m de médiane et **62 tuiles sur 250 repassent au-dessus de
+//    5 m**, parce que tout ce qui est entre 1 000 et 3 000 m n'est plus lissé
+//    qu'à moitié. Élargir le fondu, c'est acheter la transition avec le défaut.
+// ③ ⚡ **CE QUI MARCHE : `force = k · wB`** — voir le corps de `lisseAbysse`.
+//    `wB` est la moyenne de boîte des poids, c'est-à-dire **la même porte, mais
+//    lue sur le VOISINAGE au lieu du pixel**. Elle monte donc sur la largeur de
+//    la fenêtre du filtre, en ESPACE, quelle que soit la raideur du talus — et
+//    elle est déjà calculée, donc gratuite. Fondu de nouveau à 500 : le liseré
+//    ne revient pas (capture `apres/rodrigues-large.png`) ET le striage
+//    retombe à 0,5 m de médiane, 246 tuiles sur 250 sous le critère.
+//    ⛔ Le seuil, lui, ne bouge pas d'un mètre : c'est lui, et lui seul, qui
+//    garantit qu'aucun haut-fond n'est touché.
+//
+// `smooth()` (smoothstep) a une dérivée NULLE aux deux bouts : la transition
+// est C¹ par construction, pas par réglage. Mesurée : rapport-LISS §④.
+//
+// ──────────────────────────────────────── LE RAYON — UNE LONGUEUR AU SOL
+//
+// ⛔ PAS UN RAYON EN PIXELS. Une tuile z8 porte 575 m de maille à Rodrigues, une
+// tuile z4 en porte 9 210 : le même rayon en pixels lisserait 2,9 km ici et
+// 46 km là. Or les niveaux GROSSIERS n'ont PAS le défaut — ils sont déjà
+// moyennés par le tuileur, et B6 a mesuré que le Catmull-Rom du surzoom leur
+// retire encore l'essentiel (pic-à-pic divisé par 30 à 200 après ×32). Le
+// peigne vient des tuiles servies NATIVEMENT. Un rayon exprimé en MÈTRES AU SOL
+// se convertit donc en 5 px sur une tuile z8, en 1 px sur une z6, et en **0 px
+// sur une z4** : la règle s'éteint d'elle-même là où elle nuirait.
+//
+// La VALEUR, elle, est dérivée du critère et pas de l'esthétique — c'est la plus
+// petite qui passe sous 5 m de pic-à-pic bande-à-bande sur les quatre tuiles
+// abyssales mesurées (scripts/liss-striage.mjs, fenêtre 128² entièrement sous
+// −1 000 m, projection sur chaque axe puis écart d'une bande à la moyenne de ses
+// deux voisines) :
+//
+//   tuile                brut X/Y     r=3×2      r=4×2      **r=5×2**   r=6×2
+//   z8 173/142 (−3 059)   8,5/ 7,9   1,0/1,5    0,8/1,1    0,6/0,9    0,5/0,8
+//   z8 172/142 (−3 905)  28,8/36,8   3,8/7,7    2,9/5,7    2,0/4,5    1,4/3,6
+//   z8 171/142 (−4 067)  42,1/18,7   4,3/3,9    3,0/2,9    1,8/2,3    1,3/1,9
+//   z6  43/35  (−3 451)  48,0/31,7   4,1/6,2    3,0/3,7    2,0/2,4    1,6/1,9
+//
+// r=4×2 laisse 5,7 m ; r=5×2 passe partout. 5 px × 575 m = **2 900 m**.
+//
+// ⚠️ DEUX PASSES, ET C'EST MESURÉ AUSSI. Une boîte seule est un mauvais
+// passe-bas : son premier lobe secondaire laisse ~22 % du signal (r=2×1 rend
+// encore 9,1/12,0 là où r=2×2 rend 6,2/8,1). Deux boîtes valent un filtre
+// triangulaire, dont les lobes sont au carré. Le coût reste O(1) par pixel.
+//
+// ⛔ ET UN RAYON PLANCHER DE 3 PIXELS, QUI EST UN REFUS DE LISSER.
+// En dessous, la boîte n'est plus un passe-bas, c'est une moyenne de trois
+// cases : elle retire du relief RÉEL sans atteindre le critère. Mesuré sur la
+// tuile z6 43/35, où le rayon au sol ne vaut qu'1 px : le striage tombe de
+// 48,0 à 14,2 m — encore TROIS FOIS le critère — pour un déplacement maximal de
+// **1 062 m** et la plus grosse marche latérale de tout le relevé. Le mauvais
+// marché, très exactement. À r < 3 on ne lisse donc PAS, et c'est sans
+// conséquence sur le peigne : B6 a mesuré que les niveaux grossiers arrivent à
+// l'écran par un surzoom ×4 à ×32 dont le Catmull-Rom divise déjà le striage
+// par 30 à 200. **Le peigne vient des tuiles servies NATIVEMENT.**
+//
+// ──────────────────────── ⚠️ CE QUE J'AI CRU PUIS RÉFUTÉ, ET QUI EST DANS LE CODE
+//
+// ① « Il suffit de réutiliser `smoothSeaFloor` en lui passant `seaLevel: −500`. »
+//    Élégant — et FAUX, pour une raison qui ne se voit qu'à la mesure. Son
+//    masque est BINAIRE (`v < level` ⇒ poids 1, sinon 0). Au voisinage de
+//    l'isobathe, la fenêtre ne contient qu'une poignée de pixels admis, tous du
+//    côté profond : la moyenne saute d'un pixel à l'autre. Mesuré sur 1 061
+//    tuiles : **2 591 m de marche latérale** du champ de correction. On aurait
+//    remplacé le peigne par un liseré le long de l'isobathe 500 — exactement
+//    l'artefact contre l'artefact que le brief interdit. D'où le poids CONTINU
+//    ci-dessous : le poids d'un pixel dans la moyenne EST sa propre force de
+//    lissage `k`, qui vaut 0 à −500 m et monte en smoothstep. Plus de masque,
+//    plus de saut : 2 591 → 1 373 m, puis 341 m avec le plancher de rayon.
+//
+// ② « On borne la correction à ±100 m, et le lissage ne peut plus abîmer une
+//    falaise. » ➡️ RÉFUTÉ PAR LA MESURE, et à l'envers : la borne **rallume le
+//    striage**. `moyenne − v` n'est pas fait que du striage, il porte surtout la
+//    COURBURE locale du fond ; la borne mord donc partout où le relief est
+//    marqué, et elle mord de façon IRRÉGULIÈRE — ce qui réinjecte de la haute
+//    fréquence. Mesuré : sans borne le striage tombe à 1,8/4,5 m ; borné à
+//    100 m il reste à **14,9/21,4 m**, trois fois le critère. La borne a été
+//    retirée.
+//
+// ────────────────────────────────── ⛔ LES TROIS INTERDITS, PAR CONSTRUCTION
+//
+// Ce ne sont pas des promesses vérifiées après coup : ils tombent de la forme de
+// la règle, et c'est ce qui les rend tenables.
+//
+//  1. **LE TRAIT DE CÔTE NE BOUGE PAS.** Le rivage est décidé par le relief de
+//     référence dans `fuseBathymetry` (branche TERRE, en amont de tout), jamais
+//     par la source marine — leçon des polders. Et ici on ne touche QUE des
+//     pixels de source déjà sous −500 m.
+//  2. **LES HAUTS-FONDS ET PLATEAUX RESTENT NETS.** `smoothSeaFloor` saute tout
+//     pixel `v >= level` : au-dessus de −500 m, la sortie est l'entrée AU BIT.
+//     Lagons, récifs, plateaux continentaux, EMODnet, BlueTopo, swisstopo — tout
+//     ce pour quoi la bathymétrie fine a été intégrée vit là, et n'est pas lu.
+//  3. **AUCUN PIXEL NE CHANGE DE CÔTÉ.** La moyenne ne porte que sur des pixels
+//     eux-mêmes sous −500 m, donc `moyenne < −500` ; la sortie
+//     `v + (moyenne − v)·k` avec `k ∈ [0,1]` est entre deux valeurs sous
+//     −500 m, donc sous −500 m. **Un pixel lissé ne peut pas remonter à zéro,
+//     ni s'en approcher à moins de 500 m.** C'est une PREUVE, pas un relevé.
+//
+// ⚠️ OÙ C'EST BRANCHÉ, ET POURQUOI PAS AILLEURS. Le brief laissait trois
+// endroits : la cuisson (permanent, mais il faut tout recuire, et la
+// bathymétrie sur disque est une jonction partagée), la FUSION (CPU, à chaque
+// tuile — c'est là que `smoothSeaFloor` a déjà coûté 84 ms par bloc et s'est
+// fait retirer, voir src/dem.js), ou le RENDU. Aucun des trois : c'est branché
+// au **DÉCODAGE DE LA TUILE SOURCE** (`loadBathyTile`, src/dem.js), qui est
+// MÉMOÏSÉ. Une tuile z8 sert 2 070 fois ; le lissage y coûte donc une fois ce
+// que la fusion aurait coûté deux mille fois. ⚡ Et surtout : les TROIS sites de
+// fusion (`dem.js`, `flux-terrain.js`, `globe.js:fondMarinTuile`) passent tous
+// par `peindreBathyTuile`, donc par `loadBathyTile`. Un seul point de pose, et
+// les trois sites en héritent — ce que le brief exigeait et qu'aucun correctif
+// posé à un seul site n'avait tenu ici.
+
+/** = |SHELF| du tuileur. Voir l'encart ci-dessus : c'est LA dérivation. */
+export const ABYSSE_M = 500
+/**
+ * Le fondu, en mètres de profondeur au-delà du seuil.
+ * ⚠️ Il ne suffit PAS à rendre la transition invisible — c'est `k · wB` qui le
+ * fait, en espace. Voir l'encart, ① à ③ : l'élargir a été essayé, mesuré, et
+ * refusé (il rachète la transition en perdant le critère).
+ */
+export const ABYSSE_FONDU_M = 500
+/** Rayon du lissage, EN MÈTRES AU SOL (jamais en pixels). Voir l'encart. */
+export const RAYON_ABYSSE_M = 2900
+/** Deux boîtes valent un filtre triangulaire — les lobes secondaires au carré. */
+export const PASSES_ABYSSE = 2
+/** ⛔ En dessous, on REFUSE de lisser. Voir l'encart : c'est un mauvais marché. */
+export const RAYON_ABYSSE_MIN_PX = 3
+
+/**
+ * Le rayon en pixels de tuile, pour une maille au sol donnée.
+ * ⚠️ Rend 0 — donc « ne rien faire » — dès que la maille est trop grosse pour
+ * que le rayon demandé fasse plus de `RAYON_ABYSSE_MIN_PX` pixels : c'est ce
+ * qui éteint la règle sur les niveaux de repli grossiers. Une maille non finie
+ * ou nulle rend 0 : un appelant qui ne sait pas mesurer son échelle garde le
+ * comportement d'avant, AU BIT.
+ * @param {number} mailleM - maille au sol d'un pixel de la tuile (m)
+ * @param {number} [rayonM]
+ */
+export function rayonAbyssePx(mailleM, rayonM = RAYON_ABYSSE_M) {
+  if (!Number.isFinite(mailleM) || mailleM <= 0 || !Number.isFinite(rayonM) || rayonM <= 0) return 0
+  const r = Math.floor(rayonM / mailleM)
+  return r < RAYON_ABYSSE_MIN_PX ? 0 : r
+}
+
+/**
+ * LISSE L'ABYSSE d'une tuile bathymétrique carrée, SUR PLACE.
+ *
+ * ⚡ CONVOLUTION NORMALISÉE À POIDS CONTINU. Le poids d'un pixel dans la moyenne
+ * EST sa force de lissage `k = smoothstep((profondeur − seuil) / fondu)` : nul
+ * au-dessus de l'isobathe du seuil, plein un fondu plus bas. Il n'y a donc
+ * AUCUN masque binaire nulle part, et c'est ce qui interdit la ligne de niveau
+ * (voir ① de l'encart ci-dessus, mesuré à 2 591 m de marche avec un masque).
+ *
+ * ⛔ ET LES TROIS INTERDITS TOMBENT DE LÀ, SANS RELEVÉ :
+ *   · `k = 0` au-dessus de −seuil ⇒ un haut-fond sort AU BIT ;
+ *   · les poids sont nuls au-dessus de −seuil ⇒ `moyenne < −seuil` ;
+ *   · sortie = `v + (moyenne − v)·k`, barycentre de deux valeurs sous −seuil,
+ *     donc **sous −seuil** : aucun pixel ne remonte, aucun ne change de côté.
+ *
+ * @param {Float32Array} data - altitudes en mètres (négatives en mer)
+ * @param {number} size - côté de la grille carrée
+ * @param {{mailleM?: number, radius?: number, rayonM?: number, seuilM?: number,
+ *   fonduM?: number, passes?: number}} [opts]
+ *   `mailleM` : maille au sol d'un pixel — c'est l'entrée normale. `radius`
+ *   court-circuite la conversion (bancs et tests).
+ * @returns {Float32Array} `data`
+ */
+export function lisseAbysse(data, size, opts = {}) {
+  const r = Number.isFinite(opts.radius) ? Math.floor(opts.radius) : rayonAbyssePx(opts.mailleM, opts.rayonM)
+  if (!data || r < 1 || !(size >= 3) || data.length !== size * size) return data
+  const seuil = Number.isFinite(opts.seuilM) && opts.seuilM > 0 ? opts.seuilM : ABYSSE_M
+  const fondu = Math.max(1e-3, Number.isFinite(opts.fonduM) && opts.fonduM > 0 ? opts.fonduM : ABYSSE_FONDU_M)
+  const passes = Number.isFinite(opts.passes) && opts.passes >= 1 ? Math.floor(opts.passes) : PASSES_ABYSSE
+  const n = size * size
+  const val = new Float32Array(n)
+  const wgt = new Float32Array(n)
+  const k = new Float32Array(n)
+  const w = 2 * r + 1
+  // flou par boîte séparable en sommes glissantes — O(1) par pixel quel que soit
+  // le rayon, comme `smoothSeaFloor`. Le bord est RÉPLIQUÉ (voir §⑤ du rapport :
+  // le biais de bord est mesuré, il ne fabrique pas de couture).
+  const boxPass = (src, horizontal) => {
+    const dst = new Float32Array(n)
+    for (let a = 0; a < size; a++) {
+      let acc = 0
+      const at = (b) => (horizontal ? a * size + b : b * size + a)
+      for (let b = -r; b <= r; b++) acc += src[at(Math.min(size - 1, Math.max(0, b)))]
+      for (let b = 0; b < size; b++) {
+        dst[at(b)] = acc / w
+        acc += src[at(Math.min(size - 1, b + r + 1))] - src[at(Math.max(0, b - r))]
+      }
+    }
+    return dst
+  }
+  for (let p = 0; p < passes; p++) {
+    for (let i = 0; i < n; i++) {
+      const v = data[i]
+      // ⚠️ `-v - seuil` et pas `seuil - v` : `v` est NÉGATIF en mer. Une valeur
+      // non finie (case non peinte) rend NaN ⇒ `smooth` la ramène à 0 ⇒ poids
+      // nul et pixel intact — pas de NaN qui se propage dans la somme glissante.
+      const kk = Number.isFinite(v) ? smooth((-v - seuil) / fondu) : 0
+      k[i] = kk
+      val[i] = kk > 0 ? v * kk : 0
+      wgt[i] = kk > 0 ? kk : 0
+    }
+    const vB = boxPass(boxPass(val, true), false)
+    const wB = boxPass(boxPass(wgt, true), false)
+    for (let i = 0; i < n; i++) {
+      // ⚡ LA FORCE EST `k · wB`, ET LE SECOND FACTEUR EST GRATUIT.
+      //
+      // `wB[i]` est déjà le VOISINAGE de `k` (la moyenne de boîte des poids) :
+      // c'est donc la même porte, mais ÉTALÉE SUR LE RAYON DU FILTRE au lieu
+      // d'être lue au pixel. C'est elle qui tue le liseré du talus — voir ③ de
+      // l'encart 🟣 LISS : `k` seul saute de 0 à 1 en UNE cellule au talus,
+      // `k · wB` monte sur toute la largeur de la fenêtre, par construction.
+      //
+      // ⛔ ET LES TROIS INTERDITS TIENNENT TOUJOURS : `k[i] = 0` au-dessus du
+      // seuil (le pixel sort au bit), `wB ∈ [0,1]` (donc `k·wB ∈ [0,1]`, la
+      // sortie reste le barycentre de deux valeurs sous −seuil).
+      if (!(k[i] > 0) || !(wB[i] > 1e-6)) continue
+      data[i] += (vB[i] - data[i] * wB[i]) * k[i]
+    }
+  }
+  return data
+}
+
 // ══════════════ AGRANDISSEMENT DU FOND MARIN — Catmull-Rom ═══════════════════
 //
 // POURQUOI ce module contient sa propre interpolation plutôt que de laisser
