@@ -434,8 +434,11 @@ export function buildCineButton(ctx) {
 //   src/pilote-cam.js      la caméra qui assemble les deux — TOUJOURS
 //                          construite par main.js, toujours mise à jour par
 //                          image, jamais mise en sommeil
-//   src/pilote-banc.js     bancs d'essai, chargés à la demande par import()
-//   src/poursuite-banc.js
+//   ⚠️ `src/pilote-banc.js` et `src/poursuite-banc.js` étaient annoncés ici
+//   comme « chargés à la demande par import() » : CET import() N'A JAMAIS
+//   EXISTÉ (aucun des 20 import() de src/ ne pointait vers eux). Ils ne se
+//   chargeaient qu'à la main dans la console, et ils ont été supprimés le
+//   2026-09-04. `git show a93c392~1:src/pilote-banc.js` les rend si besoin.
 //   test/pilote.test.js, test/poursuite.test.js
 //
 // ⚠️ ET DEUX CHEMINS LA RÉVEILLENT ENCORE TOUT SEULS. Le retrait du bouton ne
