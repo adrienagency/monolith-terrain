@@ -6008,9 +6008,23 @@ const veilleRepos = creerVeilleRepos()
 // plus haut pour l'ordre des deux appels dans `tick()`.
 function majEstompage() {
   if (!frontiereActive) return
-  if (terreUniqueBranchee) return
+  // ⚡ **LE FONDU DU REPOS AVANCE ICI, ET SANS AUCUNE GARDE — MIX, défaut ①.**
+  //
+  // ⛔ **LE LAISSER À `veilleCrop.maj` L'AURAIT GELÉ EXACTEMENT LÀ OÙ IL DOIT
+  // COURIR.** `majSeuilSocle` s'arrête sur `modes.busy` et sur l'absence de
+  // bloc — c'est-à-dire sur **les images du cran**, celles pendant lesquelles la
+  // Terre autour s'allume puis s'éteint. Le fondu n'avancerait qu'entre les
+  // crans, et la marche d'une image resterait entière. `estompage-terre.js` §8
+  // porte la mesure : `uEstompage` fait **1 → 0 → 1, un flanc par IMAGE**, deux
+  // fois par cran, 550 à 830 ms d'alentours à pleine opacité.
+  //
+  // ⚠️ **ET ÇA RESTE UN SEUL ÉCRIVAIN** : `avancerFondu` ne décide de rien, il
+  // avance d'une image la porte que `poserRepos` a armée. La LOI d'altitude
+  // continue de n'être nourrie que par `veilleCrop` sous `terre unique`.
+  if (terreUniqueBranchee) { veilleEstompage.avancerFondu(); return }
   if (modes?.busy || !(largeurBlocM() > 0)) return
   veilleEstompage.maj(altitudeCadrageM())
+  veilleEstompage.avancerFondu()
 }
 
 // ══════════ LA LOI DE TEXTURE ANCRÉE AU MONDE — Tâche K ════════════════════

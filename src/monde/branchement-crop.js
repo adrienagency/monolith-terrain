@@ -747,6 +747,16 @@ export function creerVeilleCrop({
   // elle tombait hier.
   let auBloc = false
   let basculesRepos = 0
+  // ⚡ **CE QUI EST POSÉ SUR `poserCropSeul`, SÉPARÉ DE `reposApplique`** — il
+  // ne le suit plus à l'image près, voir `appliquerRepos`.
+  //
+  // ⚠️ **`false`, PAS `null`, ET DEUX TESTS L'EXIGENT.** Un départ à `null`
+  // ferait poser `poserCropSeul(false)` à la première image, alors que le globe
+  // y est DÉJÀ : « sans crop posé, le repos n'est relayé à personne » et « sans
+  // veille de repos, le comportement est celui d'avant la tâche »
+  // (`test/veille-repos.test.js` ⑥ et ⑥ bis) veulent zéro appel, pas un appel
+  // sans effet.
+  let cropSeulApplique = false
 
   function appliquerRepos(g) {
     // ⛔ **IL Y AVAIT ICI UN `modeSurface &&`, ET C'ÉTAIT DU CODE MORT —
@@ -763,14 +773,44 @@ export function creerVeilleCrop({
     // de `retirer`. ⚠️ **L'INVARIANT QUI LE REMPLACE EST ÉCRIT ICI** : hors
     // surface, il n'y a pas de crop, donc rien à relayer.
     const voulu = !!(pose && auRepos)
-    if (voulu === reposApplique) return reposApplique
-    reposApplique = voulu
-    basculesRepos++
-    estompage?.poserRepos(voulu)
-    // ⚠️ **UN GLOBE SANS `poserCropSeul` N'EST PAS UNE PANNE** — même contrat
-    // que `poserFondCrop` (Tâche J bis) : ce module se vérifie sous node contre
-    // un globe de papier, qui ne porte que les méthodes qu'il exerce.
-    g?.poserCropSeul?.(voulu)
+    if (voulu !== reposApplique) {
+      reposApplique = voulu
+      basculesRepos++
+      estompage?.poserRepos(voulu)
+    }
+    // ⚡ **LE PARCOURS RÉDUIT ATTEND LA FIN DU FONDU — MIX, défaut ① d'Adrien.**
+    //
+    // ⛔ **LES DEUX ÉTAIENT PAIRÉS À L'IMAGE PRÈS, ET C'EST CE QUI RENDRAIT LE
+    // FONDU INVISIBLE.** Le commentaire du bloc ci-dessus dit vrai — l'estompage
+    // plein et le parcours réduit doivent être vrais ENSEMBLE ou faux ensemble —
+    // mais il parle de l'ÉTAT STABLE, pas de l'instant du basculement. Depuis
+    // que la porte du repos se fond en `IMAGES_FONDU_REPOS` images
+    // (`estompage-terre.js` §8), couper le parcours à la PREMIÈRE image du repos
+    // ferait disparaître d'un coup les tuiles que le fondu est justement en
+    // train d'estomper : la marche reviendrait par cette porte-ci. Mesuré avant
+    // correction, à la MÊME image que la marche de `uEstompage` : **cache
+    // 1 105 → 989 tuiles et 297 → 287 dessinées en UNE image**
+    // (`.banc/MIX/avant.json`, palier 0, images 5 090 → 5 092).
+    //
+    // ⚠️ **L'ASYMÉTRIE EST CELLE DE `veille-repos.js`, ET POUR LA MÊME RAISON** :
+    // on redessine le dehors dès la première image du geste (le fondu monte
+    // ensuite), on cesse de le dessiner seulement quand il est ENTIÈREMENT
+    // effacé. L'invariant « pas de coût sans dessin, pas de dessin sans coût »
+    // est tenu à l'état stable, le seul où il ait un sens.
+    //
+    // ⚠️ **UN ESTOMPAGE SANS `fonduAcheve` N'EST PAS UNE PANNE** — même contrat
+    // que `poserCropSeul` juste en dessous : ce module se vérifie contre des
+    // veilles de papier, et sans fondu déclaré le couple retombe exactement sur
+    // le comportement d'avant.
+    const acheve = estompage && 'fonduAcheve' in estompage ? !!estompage.fonduAcheve : true
+    const seul = reposApplique && acheve
+    if (seul !== cropSeulApplique) {
+      cropSeulApplique = seul
+      // ⚠️ **UN GLOBE SANS `poserCropSeul` N'EST PAS UNE PANNE** — même contrat
+      // que `poserFondCrop` (Tâche J bis) : ce module se vérifie sous node contre
+      // un globe de papier, qui ne porte que les méthodes qu'il exerce.
+      g?.poserCropSeul?.(seul)
+    }
     return reposApplique
   }
 
