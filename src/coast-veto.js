@@ -204,7 +204,13 @@ export function rasteriseTerre(anneaux, { u0, v0, u1, v1, largeur, hauteur }) {
 // ⚠️ MÉMOÏSÉ PAR CLÉ, ET C'EST CE QUI REND LE VETO GRATUIT AU RAFFINEMENT. Le
 // quadtree redemande la MÊME tuile à chaque recuisson (changement de palette,
 // de nappe, retour d'un cran) ; sans cache le veto se paierait à chaque fois.
-const cache = new Map() // cle → Promise<Uint8Array|null>
+// 🔴 B6 — LE CACHE PORTE DÉSORMAIS DEUX RÉPONSES, ET C'EST VOULU. `vetoTerre`
+// rend `null` dans TROIS cas qu'il ne distingue pas : la côte a été consultée et
+// n'a trouvé aucune terre, l'emprise est hors du monde, ou le réseau a échoué.
+// Le premier est une INFORMATION (« ici c'est la pleine mer »), les deux autres
+// sont une ABSTENTION. `merFranche` sépare les trois — et il le fait sur la
+// MÊME promesse mémoïsée, donc sans un octet de réseau ni de calcul en plus.
+const cache = new Map() // cle → Promise<{masque: Uint8Array|null, franche: boolean}>
 const CACHE_MAX = 96
 export function videCacheVeto() {
   cache.clear()
@@ -223,6 +229,27 @@ export function videCacheVeto() {
  *   et la fusion se comporte alors exactement comme avant.
  */
 export function vetoTerre(o) {
+  return avisCote(o).then((r) => r.masque)
+}
+
+/**
+ * 🔴 B6 — LA CÔTE A-T-ELLE ÉTÉ CONSULTÉE, ET DIT-ELLE FRANCHEMENT « PLEINE MER » ?
+ *
+ * `true` **seulement** quand les polygones de terre ont été chargés SANS ERREUR
+ * et qu'aucun ne touche l'emprise. Une emprise hors du monde, une panne réseau,
+ * une grille dégénérée : `false`. C'est une information POSITIVE, pas l'absence
+ * de veto — et c'est toute la différence, parce que l'appelant s'en sert pour
+ * refuser de peindre de la TERRE (voir l'encart 🔴 B6 de `src/bathy.js`).
+ *
+ * Mêmes paramètres et même mémoïsation que `vetoTerre` : au cache chaud, gratuit.
+ *
+ * @returns {Promise<boolean>}
+ */
+export function merFranche(o) {
+  return avisCote(o).then((r) => r.franche)
+}
+
+function avisCote(o) {
   const { cle } = o
   if (cle && cache.has(cle)) {
     const p = cache.get(cle)
@@ -232,7 +259,9 @@ export function vetoTerre(o) {
   }
   const p = calculeVeto(o).catch((err) => {
     console.warn('veto côtier indisponible:', err)
-    return null
+    // ⚠️ UNE PANNE N'EST PAS UNE PLEINE MER. `franche: false` garde le
+    // comportement d'avant, AU BIT, plutôt que de creuser sur une absence.
+    return { masque: null, franche: false }
   })
   if (cle) {
     cache.set(cle, p)
@@ -242,13 +271,14 @@ export function vetoTerre(o) {
 }
 
 async function calculeVeto({ u0, v0, u1, v1, largeur, hauteur, metresParCellule, zoom }) {
-  if (!(largeur > 0) || !(hauteur > 0) || !(u1 > u0) || !(v1 > v0)) return null
+  const abstention = { masque: null, franche: false }
+  if (!(largeur > 0) || !(hauteur > 0) || !(u1 > u0) || !(v1 > v0)) return abstention
   // ⚠️ HORS DU MONDE, ON S'ABSTIENT. La fenêtre continue exprime ses emprises en
   // Mercator NON BORNÉ (elle enjambe l'antiméridien en sortant de [0,1]) ;
   // `lonLatToGridTile` PINCE alors la longitude et rendrait une tuile z6 du bon
   // côté du globe pour une emprise de l'autre. Un veto de travers vaut moins que
   // pas de veto du tout — c'est la leçon des cinq faux constats de PLAT.
-  if (u0 < 0 || u1 > 1 || v0 < 0 || v1 > 1) return null
+  if (u0 < 0 || u1 > 1 || v0 < 0 || v1 > 1) return abstention
   const bbox = bboxDepuisUV({ u0, v0, u1, v1 })
   const r = gridTileRange(bbox, GRID_ZOOM)
   const nTuiles = (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1)
@@ -258,7 +288,9 @@ async function calculeVeto({ u0, v0, u1, v1, largeur, hauteur, metresParCellule,
   const grossier = (Number.isFinite(zoom) && zoom <= COAST_NE_MAX) || nTuiles > TUILES_Z6_MAX
   const features = grossier ? await loadLandFeatures() : await loadGridFeatures(bbox)
   const anneaux = landPolygonsInBBox(features, bbox)
-  if (!anneaux.length) return null // aucune terre en vue : rien à protéger
+  // 🔴 B6 — AUCUNE TERRE EN VUE : rien à protéger (`masque: null`, exactement
+  // comme avant), MAIS la côte a répondu, et sa réponse est « pleine mer ».
+  if (!anneaux.length) return { masque: null, franche: true }
   const brut = rasteriseTerre(anneaux, { u0, v0, u1, v1, largeur, hauteur })
-  return erodeTerre(brut, largeur, hauteur, rayonVeto(metresParCellule))
+  return { masque: erodeTerre(brut, largeur, hauteur, rayonVeto(metresParCellule)), franche: false }
 }
