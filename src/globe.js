@@ -239,9 +239,11 @@ import {
   DemSourceError,
   activeDemSource,
   fallbackToAws,
+  noterTrouTuile,
   peekRegionMaxZoom,
   regionKey,
   resolveRegionMaxZoom,
+  trouConnu,
 } from './dem-source.js'
 
 // ═══════════════ LES NUANCEURS DE LA MER — Tâche F ═════════════════════════
@@ -872,6 +874,37 @@ const PRELECTURE_RETRAIT = 10
 const PRELECTURE_CENTRE = 850
 // sous ce crédit de création (place libre + récupérable), on ne prélit pas
 const PRELECTURE_CREDIT_MIN = 400
+
+// ═══════════ LA CIBLE — D22, le rayon DÉRIVÉ et la barrière ═════════════════
+//
+// > Adrien : « une sorte de cible. Plus la tuile est proche du centre de la
+// > cible, plus elle est prioritaire. (…) charger uniquement une version low def
+// > sur les tuiles non prioritaires, qui ne se chargent que quand les tuiles
+// > prioritaires ont totalement terminé leur chargement. »
+//
+// ⚠️ **LE RAYON N'EST PAS POSÉ EN DUR, IL EST DÉRIVÉ.** La clé de PF2 mesure la
+// distance du BORD de la tuile au centre de l'écran en NDC (l'écran est le carré
+// [−1, 1]², d'aire 4, sa demi-diagonale vaut √2). Le disque « prioritaire » est
+// celui qui couvre **la MOITIÉ des pixels** : π R² = 2, donc
+//
+//     R_CIBLE = √(2 / π) = 0,7979 NDC
+//
+// C'est le seul choix qui ne demande aucun réglage : « la moitié de l'écran »
+// est une phrase, pas un nombre. Il tombe entre le disque inscrit (R = 1, tout
+// le bord) et le garde-fou de la prélecture (0,6 NDC, R37) — donc la cible est
+// plus large que ce que la prélecture protège déjà, et strictement à l'intérieur
+// de l'écran.
+const R_CIBLE = Math.sqrt(2 / Math.PI)
+
+// ⚠️ **L'ÉCHÉANCE ANTI-FAMINE SE COMPTE EN ABSENCE DE PROGRÈS, PAS EN DURÉE.**
+// Une barrière qui se lève « au bout de N ms » se lèverait sur une descente
+// SAINE dès que le réseau traîne — exactement les tirages à 2 s de vol médian du
+// banc PF2. Le compteur est donc remis à zéro à chaque fois que le centre AVANCE
+// (une tuile prioritaire de moins en attente) : l'échéance ne tombe que sur un
+// centre RÉELLEMENT bloqué — 404 de couverture, quarantaine, tuile absente.
+// 1 500 ms = au-delà du p99 de vol d'une tuile sur les bancs sains (156–487 ms
+// de médiane, PF2 §3), en deçà de ce qu'un œil appelle « ça ne vient jamais ».
+const BARRIERE_ECHEANCE_MS = 1500
 
 // LE TRI SPATIAL (plan « globe continu », Tâche 4) — derrière `globeContinu`.
 //
@@ -3325,7 +3358,16 @@ export function planTuile(z, x, y, source = activeDemSource()) {
   const connu = peekRegionMaxZoom(regionKey(source.id, z, x, y))
   if (connu === undefined) return null // pas encore sondé
   if (connu === null) return surAws // hors couverture ICI — la session garde Mapterhorn
-  return { source, tile: overzoomTile(z, x, y, connu) }
+  const tile = overzoomTile(z, x, y, connu)
+  // ══════ LE DESCENDANT D'UN 404 VA DROIT CHEZ AWS — CIB ═══════════════════
+  // La sonde répond PAR ZONE (z8, ~150 km) ; la mer à l'intérieur d'une zone
+  // couverte rend 404 tuile par tuile, et chacun de ces 404 coûtait un
+  // aller-retour AVANT le vrai chargement AWS (PF2 §5 : 40 % des requêtes
+  // d'une descente en dev). Une fois le trou connu, ses descendants ne
+  // repassent plus par la source fine. ⚠️ **Ce n'est PAS le repli de session**
+  // (`fallbackToAws`) : la tuile d'à côté, sur la terre ferme, garde Mapterhorn.
+  if (trouConnu(source.id, tile.z, tile.x, tile.y, source.baseZoom)) return surAws
+  return { source, tile }
 }
 
 // Une SEULE entrée par URL, promesse comprise : deux demandes qui se
@@ -3579,6 +3621,11 @@ async function fetchTile(z, x, y, plan) {
     // endroit qui décide ce qu'est une panne ; `err.status` ne sert plus qu'au
     // diagnostic.
     if (err instanceof DemSourceError || source.id === DEM_SOURCES.aws.id) throw err
+    // ⚠️ ON NOTE LE TROU AVANT DE RATTRAPER — CIB. C'est ce qui évite le
+    // SECOND aller-retour aux descendants de cette tuile (`planTuile`). On note
+    // la tuile RÉELLEMENT DEMANDÉE (`tile`, qui peut être un ancêtre surzoomé),
+    // pas (z, x, y) : c'est elle dont l'absence vaut pour toute sa descendance.
+    noterTrouTuile(source.id, tile.z, tile.x, tile.y)
     source = DEM_SOURCES.aws
     tile = overzoomTile(z, x, y, source.maxZoom)
     img = await tileBitmap(source.url(tile.z, tile.x, tile.y), source.tilePx * source.tilePx * 4)
@@ -3970,6 +4017,7 @@ export class Globe {
     this._enParcours = false // la pompe se tait pendant `_traverse` — voir `_pump`
     this._visites = 0 // tuiles PARCOURUES à la dernière image (mesure de l'emprise)
     this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
+    this._refusPrec = 0 // le `_refus` de l'image PRÉCÉDENTE — voir `_deciderBarriere`
     this._refusFile = 0 // requêtes REFUSÉES par PLAFOND_FILE à la dernière image
     this._purgees = 0 // entrées de file PÉRIMÉES retirées à la dernière image
     // R37 : les parents dessinés PARTIELLEMENT à cette image (masque par
@@ -3986,6 +4034,20 @@ export class Globe {
     // MÊME session (le pixel n'est comparable qu'ainsi) — levés en production
     this.raffinementPartiel = true
     this.protegerEnfants = true
+    // ══════ LA BARRIÈRE D'ORDONNANCEMENT — CIB / D22 ③ ═════════════════════
+    // Débrayable pour l'A/B du banc dans la MÊME session, levée en production.
+    this.barriereCible = true
+    this._barriereActive = false // décidée en FIN d'image, lue par le parcours SUIVANT
+    this._centreEnAttente = 0 // tuiles de la cible que l'image veut et n'a pas
+    this._centreEnAttentePrec = Infinity // pour détecter le PROGRÈS du centre
+    this._barriereSansProgres = 0 // ms écoulées sans que le centre avance
+    this._barriereRefus = 0 // raffinements de périphérie retenus à la dernière image
+    this._barriereEcheances = 0 // fois où l'échéance anti-famine a levé la barrière
+    this._barriereHorsCreneaux = 0 // images où le centre attend mais les créneaux ne sont pas pourvus
+    this._barriereHorsFamine = 0 // images où l'échéance a désarmé la barrière
+    this._barriereHorsCredit = 0 // images où c'est le CRÉDIT qui bloque le centre
+    this._barriereSansEnfant = 0 // parents de périphérie que la barrière a VU passer
+    this._barriereImages = 0 // images pendant lesquelles la barrière a tenu
     this._descend = false
     this._rayonCamPrec = 0
     // zones z8 dont la sonde de couverture est EN VOL — voir `_sonder`
@@ -7981,15 +8043,36 @@ export class Globe {
       if (!p) return 0
       return t.chord / Math.max(p.distanceTo(t.center) - t.chord * 0.5, 1)
     }
+    const d = this._distanceEcran(t)
+    return 1000 - 1000 * (Math.min(d, 4) / 4) + (MAX_Z - t.z) * 0.1
+  }
+
+  // ══════════ LA DISTANCE ÉCRAN DU BORD DE LA TUILE AU CENTRE — CIB ══════════
+  //
+  // La grandeur brute derrière la clé de PF2, en NDC : centre projeté moins
+  // rayon projeté, jamais négative. Une grande tuile qui COUVRE le centre vaut
+  // 0 ; le coin de l'écran vaut √2 ; `Infinity` derrière la caméra.
+  //
+  // ⚠️ **ELLE EST EXTRAITE PARCE QUE LA BARRIÈRE SE COMPARE À UN RAYON, PAS À
+  // UNE CLÉ.** `_priorite` ajoute `(MAX_Z − z) × 0,1` pour départager à égalité :
+  // ce départage vaut jusqu'à 1,3 point, soit 0,0052 NDC — invisible dans un
+  // tri, mais il déplacerait le bord de la cible d'une tuile grossière à l'autre
+  // si on posait le seuil sur la clé. La cible est une question de GÉOMÉTRIE
+  // d'écran ; le niveau n'a rien à y faire.
+  _distanceEcran(t) {
     const m = this._matVue.elements
     const c = t.center
     const w = m[3] * c.x + m[7] * c.y + m[11] * c.z + m[15]
-    if (!(w > 0)) return 0 // derrière la caméra : en dernier
+    if (!(w > 0)) return Infinity // derrière la caméra : en dernier
     const x = (m[0] * c.x + m[4] * c.y + m[8] * c.z + m[12]) / w
     const y = (m[1] * c.x + m[5] * c.y + m[9] * c.z + m[13]) / w
     const r = (t.rayon * this._echelleProj) / w // rayon projeté, en NDC (axe vertical)
-    const d = Math.max(0, Math.hypot(x, y) - r)
-    return 1000 - 1000 * (Math.min(d, 4) / 4) + (MAX_Z - t.z) * 0.1
+    return Math.max(0, Math.hypot(x, y) - r)
+  }
+
+  /** La tuile est-elle DANS la cible — le disque qui couvre la moitié des pixels ? */
+  _dansLaCible(t) {
+    return this._distanceEcran(t) <= R_CIBLE
   }
 
   // Une fois par image, après le parcours : la caméra a bougé, la file suit.
@@ -8182,6 +8265,65 @@ export class Globe {
     t.texture = null
     t._partiel = 0
     this._partiels.delete(t)
+  }
+
+  // ══════════ LA BARRIÈRE, DÉCIDÉE EN FIN D'IMAGE — CIB / D22 ③ ══════════════
+  //
+  // ⚠️ **ELLE SE DÉCIDE POUR L'IMAGE SUIVANTE, ET C'EST NÉCESSAIRE.** `_traverse`
+  // visite les seize racines dans l'ordre du tableau, pas dans celui de l'écran :
+  // un compteur consommé PENDANT le parcours qui l'alimente dépendrait de l'ordre
+  // de visite — la périphérie visitée avant le centre passerait, celle visitée
+  // après serait retenue, et la mesure changerait d'une racine à l'autre sans
+  // que rien ne le dise. Une image de retard à 60 Hz vaut 16 ms ; l'ordre de
+  // visite, lui, ne se rattrape pas.
+  //
+  // Trois conditions, et les deux dernières sont des garde-fous MESURÉS :
+  //
+  //  1. **le centre n'a pas fini** — au moins un enfant de la cible que l'image
+  //     veut et n'a pas (`_centreEnAttente`) ;
+  //  2. ⚠️ **les six créneaux sont pourvus** (`inFlight + queue ≥ MAX_CONCURRENT`).
+  //     C'est LE risque nommé par le brief : « une barrière mal posée laisse des
+  //     créneaux vides pendant que le centre finit ». Quand le centre attend sur
+  //     autre chose qu'un créneau — une sonde de couverture (`planTuile` sans
+  //     réponse), une quarantaine — le vol peut tomber à zéro avec la file vide ;
+  //     retenir la périphérie coûterait alors du débit sans rien accélérer. La
+  //     barrière ne tient donc QUE tant qu'il y a de quoi remplir les créneaux ;
+  //  3. **l'échéance anti-famine** n'est pas dépassée (voir `BARRIERE_ECHEANCE_MS`) :
+  //     le compteur repart à zéro dès que le centre AVANCE, donc il ne monte que
+  //     sur un centre réellement bloqué. Passé le délai, la barrière tombe pour
+  //     cette image — la périphérie se raffine — et se réarme dès le prochain
+  //     progrès du centre.
+  _deciderBarriere(dt) {
+    const attente = this._centreEnAttente
+    if (attente < this._centreEnAttentePrec) this._barriereSansProgres = 0 // le centre AVANCE
+    else if (attente > 0) this._barriereSansProgres += Math.max(0, dt) * 1000
+    else this._barriereSansProgres = 0
+    this._centreEnAttentePrec = attente
+    const affamee = this._barriereSansProgres >= BARRIERE_ECHEANCE_MS
+    const creneauxPourvus = this.inFlight + this.queue.length >= MAX_CONCURRENT
+    // ⚠️ **ET PAS QUAND C'EST LE CRÉDIT QUI BLOQUE LE CENTRE — MESURÉ, PAS
+    // SUPPOSÉ.** `test/globe-eviction` ⑤ (cache saturé, caméra STRICTEMENT
+    // immobile) est passé au rouge à la première version : 12 requêtes et les
+    // tuiles dessinées oscillant entre 328 et 337 sur 20 images. La cause est un
+    // CYCLE LIMITE, pas un réglage : à cache plein, `_credit < 4` refuse le
+    // raffinement du centre, donc `_centreEnAttente` ne retombe JAMAIS à zéro,
+    // donc la barrière tient pour toujours ; la périphérie retenue perd son
+    // `lastUsed`, s'évince, se redemande à l'image d'après. La barrière est un
+    // ordonnanceur de RÉSEAU ; quand le goulot est le cache, elle n'a rien à y
+    // faire — c'est le §5 de `/threejs-optimisation` mot pour mot (« un budget à
+    // zéro est le MARQUEUR du plafond, pas sa cause »).
+    const active = this.continu && attente > 0 && creneauxPourvus && !affamee && !this._refusPrec
+    if (affamee && this._barriereActive) this._barriereEcheances++
+    // ⚠️ POURQUOI LA BARRIÈRE NE TIENT PAS — les trois refus, comptés séparément.
+    // Sans eux, « 0 raffinement retenu » ne se distingue pas de « rien à retenir »,
+    // et le premier tirage de la sonde rendait exactement ce chiffre-là.
+    if (this.continu && attente > 0) {
+      if (!creneauxPourvus) this._barriereHorsCreneaux++
+      else if (affamee) this._barriereHorsFamine++
+      else if (this._refusPrec) this._barriereHorsCredit++
+    }
+    this._barriereActive = active
+    if (active) this._barriereImages++
   }
 
   _pump() {
@@ -8558,6 +8700,7 @@ export class Globe {
     this._drawn = 0
     this._visites = 0
     this._porteuses = 0
+    this._refusPrec = this._refus // CIB : lu par `_deciderBarriere`, avant la remise à zéro
     this._refus = 0
     this._refusFile = 0
     this._purgees = 0
@@ -8582,6 +8725,18 @@ export class Globe {
     this._partiels.clear()
     this._nPartiels = 0
     this._prelues = 0
+    this._barriereRefus = 0
+    // ⚠️ **LA BARRIÈRE SE DÉCIDE ICI, AVANT LE PARCOURS, SUR L'ÉTAT DU VOL À CET
+    // INSTANT** — et pas en fin d'image comme à ma première version. La mesure
+    // qui a tranché : `test/globe-eviction` ⑤ enchaîne `update()` puis un DRAIN
+    // COMPLET du réseau ; une décision prise en fin d'image lisait donc six
+    // créneaux pourvus, et le parcours suivant appliquait cette barrière-là à un
+    // vol déjà vide. Résultat : un cycle de période 2 (blocage, dégel, blocage),
+    // 12 requêtes caméra strictement immobile. La grandeur qui compte — « y
+    // a-t-il de quoi remplir les six créneaux ? » — se lit au moment où le
+    // parcours décide, pas une image plus tôt.
+    this._deciderBarriere(dt)
+    this._centreEnAttente = 0
     {
       const r = camPos.length()
       this._descend = this._rayonCamPrec > 0 && r < this._rayonCamPrec * (1 - 1e-7)
@@ -8852,6 +9007,45 @@ export class Globe {
     // code mort — il l'était, et il cesse de l'être si on coupe trop bas.
     if (this._retenueAvantCrop() && !this._crop) wantSplit = false
 
+    // ══════ LA BARRIÈRE : LA PÉRIPHÉRIE FINE ATTEND QUE LE CENTRE AIT FINI ═══
+    //
+    // D22 ③, mot pour mot : « tant qu'une tuile prioritaire est en vol, aucune
+    // tuile de périphérie ne prend un créneau pour sa version fine ».
+    //
+    // ⚠️ **ET LA BARRIÈRE EST POSÉE ICI, DANS `_traverse`, PAS DANS `_pump` —
+    // C'EST TOUT LE SUJET, ET LE BRIEF LE DIT AVANT LA MESURE.** Retenir dans la
+    // pompe une entrée DÉJÀ ENFILÉE ne peut faire qu'une chose : laisser un
+    // créneau vide pendant que le centre finit. Or « le gain de PF2 est venu de
+    // vider la file, pas du vol » — annuler six requêtes ne rachète rien. Posée
+    // à l'admission du raffinement, la barrière ne retient aucun créneau : elle
+    // empêche la périphérie d'ENTRER dans la file, et les six créneaux vont donc
+    // aux descendants du centre, que le parcours produit en abondance. Elle rend
+    // au passage du CRÉDIT de cache au centre, ce qui est le levier du §5 de
+    // `/threejs-optimisation` (« réduis d'abord ce qui entre »).
+    //
+    // ⚠️ **ET ELLE NE RETIENT QUE CE QUI COÛTE UNE REQUÊTE** (`_enfantsPresents`,
+    // la même garde que l'admission par crédit juste en dessous) : si les quatre
+    // enfants sont déjà en cache, descendre ne prend aucun créneau, et refuser
+    // ferait REGRESSER l'écran — une périphérie déjà nette redeviendrait floue,
+    // c'est-à-dire exactement le défaut que R37 vient de tuer. La barrière ne
+    // peut donc jamais rendre un pixel plus grossier qu'il ne l'était : elle
+    // diffère des requêtes, elle n'efface rien.
+    // ⚠️ ET « pas un seul enfant en cache », pas « les quatre » : un enfant DÉJÀ
+    // parti (loading, ou prêt) ne rendrait aucun créneau si on retenait son
+    // parent — il a déjà pris le sien. Le retenir quand même lui ferait perdre
+    // son `lastUsed`, donc sa protection contre l'éviction et la purge de file :
+    // on paierait sa requête DEUX fois pour ne rien gagner. « Annuler six
+    // requêtes ne rachète rien » (PF2, `_annuler`) vaut aussi pour la file.
+    if (wantSplit && this.barriereCible && this._barriereActive && this.continu && !this._dansLaCible(t) && this._aucunEnfant(t)) {
+      wantSplit = false
+      this._barriereRefus++
+    } else if (wantSplit && this.barriereCible && this._barriereActive && this.continu && !this._dansLaCible(t) && !this._enfantsPresents(t)) {
+      // la barrière était armée, la tuile est bien en périphérie, et elle passe
+      // QUAND MÊME parce qu'un de ses enfants existe déjà : c'est la mesure qui
+      // sépare « rien à retenir » de « garde-fou trop serré »
+      this._barriereSansEnfant++
+    }
+
     // ADMISSION : on ne commence un raffinement que si le crédit de la frame
     // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,
     // descendre ne coûte rien — ni crédit ni réseau : on passe sans débiter.
@@ -8904,8 +9098,15 @@ export class Globe {
         if (!this._dansLeChamp(k, camDir)) continue
         k.lastUsed = this.frame // protect loading/fresh children from LRU
         if (k.state === 'empty') this._request(k)
-        if (k.state !== 'ready' || !k.mesh) masque |= quadrantDe(k)
-        else prets++
+        if (k.state !== 'ready' || !k.mesh) {
+          masque |= quadrantDe(k)
+          // CIB : « le centre a-t-il totalement fini ? » — un enfant de la cible
+          // que cette image VEUT et qui n'est pas dessinable. C'est le seul
+          // compteur qui arme la barrière, et il est relevé DANS le parcours,
+          // au moment de la décision (le §3 de `/threejs-optimisation` : une
+          // sonde posée après la fonction lit un état écrasé).
+          if (this.continu && this._dansLaCible(k)) this._centreEnAttente++
+        } else prets++
       }
       // ⚠️ **AU REPOS, `kids` NE CONTIENT QUE LES ENFANTS DU CROP — Tâche N**,
       // et la couverture tient toujours : ce qui manque à la couverture est
@@ -9159,6 +9360,19 @@ export class Globe {
    */
   _enfantAcquis(z, x, y) {
     return this._horsCropSeul(z, x, y) || this.tiles.has(tileKey(z, x, y))
+  }
+
+  /** CIB : aucun des quatre enfants n'existe encore — le raffinement les crée TOUS. */
+  _aucunEnfant(t) {
+    const z = t.z + 1
+    const x = t.x * 2
+    const y = t.y * 2
+    return (
+      !this.tiles.has(tileKey(z, x, y)) &&
+      !this.tiles.has(tileKey(z, x + 1, y)) &&
+      !this.tiles.has(tileKey(z, x, y + 1)) &&
+      !this.tiles.has(tileKey(z, x + 1, y + 1))
+    )
   }
 
   /**
