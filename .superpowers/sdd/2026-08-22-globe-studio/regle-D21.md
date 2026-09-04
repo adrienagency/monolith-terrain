@@ -1,6 +1,8 @@
 # D21 — LE CROP EST UNE PIÈCE, PAS UN SEUIL D'ALTITUDE
 
-> ⛔ **AMENDÉE LE 2026-09-04 — SON ② EST ABROGÉ PAR [D23](regle-D23.md).**
+> ⛔ **AMENDÉE DEUX FOIS LE 2026-09-04.** ① ne compte plus **QUE DEUX
+> SORTIES** (le clic droit est retiré — voir le § ① et sa mesure) ; ② est
+> abrogé par [D23](regle-D23.md).
 > Le crop ne naît plus « dès Z7 » : il est **revenu à z10**, `SEUIL_BLOC_M` =
 > 32 274,3 m, mort à 40 342,8 m. Adrien : *« il y a beaucoup trop de bugs, on va
 > laisser un crop à partir de Z10 uniquement. Annule le crop à Z7. »*
@@ -10,7 +12,8 @@
 >
 > ✅ **Le reste de cette règle tient, et il faut le lire comme tel :**
 > **① reste entière** (la sortie du crop est une intention, pas un effet de bord
-> de l'altitude — les trois sorties, l'inclinaison et le cap qui ne tuent pas) ;
+> de l'altitude — l'inclinaison et le cap qui ne tuent pas), **mais ses sorties
+> sont passées de trois à deux** ;
 > **③ reste posé** (les rivières éteintes par défaut) ; et surtout la
 > **séparation des trois grandeurs** que ② a rendue nécessaire est **gardée**,
 > alors même que les deux paires de seuils coïncident de nouveau en valeur —
@@ -33,10 +36,51 @@ suffit : **incliner la caméra fait monter l'altitude**, et le crop meurt sans
 que personne ne l'ait demandé. C'est le défaut qu'Adrien nomme, et il cite deux
 chemins : l'inclinaison, et les boutons d'angle de caméra.
 
-**Les TROIS seules sorties, et rien d'autre :**
+**LES DEUX SEULES SORTIES, et rien d'autre — amendé le 2026-09-04 :**
 1. **le bouton « map monde »** de la barre du haut (`.ce-globebtn`, `ui/bars.js`) ;
-2. **un dézoom au clic droit maintenu** (le geste de zoom de D19/Google Earth) ;
-3. **un dézoom à la molette**.
+2. **un dézoom à la molette**.
+
+## ⛔ LA TROISIÈME SORTIE EST RETIRÉE — LE CLIC DROIT EST UN PAN DANS LE CROP
+
+> **Adrien, 2026-09-04 :** ‹ les sorties du crop sont désormais **deux** — le
+> dézoom à la molette et le bouton map monde. › ⛔ **Ne recodez pas le clic
+> droit : il reste un pan dans le crop, c'est acté.**
+
+**La raison est chiffrée, et elle est dans `rapport-REV.md`** (mesure de REV,
+huit chargements par ligne) :
+
+| où | `mouseButtons` | ce que fait le clic droit | mesuré |
+|---|---|---|---|
+| **dans le crop** (≈ 10 km) | `{LEFT: 0, MIDDLE: 2, RIGHT: 2}` | **un PAN** | `cropPose` **true→true 8/8**, altitude 10 457 → 8 589 m (elle *descend*), `\|Δ ln d\| = 0` |
+| **hors du crop** (≈ 250 km) | `{−1, −1, −1}` | un zoom (D19) | 251 956 → **726 014 m 8/8** — le geste marche… mais il n'y a plus de crop à tuer |
+
+⚡ **Ce que D21 ② faisait sans qu'on le dise :** en faisant naître le crop à
+600 km, il créait une bande de 568 km où l'on était DANS le crop et pourtant en
+régime `surface` — et c'est là, et là seulement, que le clic droit servait de
+sortie. **Annuler z7 (D23) supprime la bande, donc la sortie.**
+
+⚠️ **Le clic droit continue d'ARMER l'intention** (`intentionZoom(zoomDuGlisseDroit(dy))`)
+là où il est un zoom, c'est-à-dire hors du crop : c'est cette ligne qui reste,
+et elle ne contredit rien — elle n'a simplement plus de crop à tuer.
+
+## ⚡ ET LA MOLETTE DEVIENT UNE DES DEUX — IL A FALLU LA RENDRE UTILISABLE
+
+**Elle était une sortie sur le papier seulement.** Mesuré deux fois, par deux
+agents et deux dispositifs : **241 à 260 crans** (CHASSE) et **161 à 162 crans**
+(SORTIE, `.banc/SORTIE/avant-sortie-2.json`) — dont **23 crans morts d'affilée**
+(crans 21 → 43 : `d` collée à `maxDistance = 150`, **altitude figée à 616 m**).
+
+⛔ **La cause n'est PAS le pas de molette** : le plafond clippe le déplacement,
+le compteur de niveau encaisse l'intention (R23), et le franchissement qui
+libère la caméra **conserve l'altitude** — c'est sa définition.
+
+➡️ **Correctif (tâche SORTIE) : une POUSSÉE DE SORTIE**, armée par trois crans
+de dézoom d'affilée dans le crop (`monde/sortie-molette.js`,
+`modes.armerPousseeSortie`). Elle **ne décide de rien** : elle pompe l'intention
+jusqu'à ce que l'altitude franchisse `SEUIL_MORT_M`, et **c'est la loi de ① qui
+tue le crop**. Mesuré après, huit chargements : **8 à 9 crans**, confirmés au
+**3ᵉ 8/8** ; un cran isolé ne sort **jamais** (8/8) ; le pas de molette est
+inchangé au bit (D19 tient). Voir `rapport-SORTIE.md`.
 
 ⚠️ **Lecture de « bouton de scroll central »** : la **molette**, en dézoom —
 `déscroller` est du vocabulaire de molette, et le bouton du milieu vient d'être
@@ -78,5 +122,5 @@ Simple, et lié : elles coûtent un temps de chargement qu'Adrien a signalé.
 **D16 ter** (la vue de trois quarts arrive au bloc), **D19** (les contrôles de
 Google Earth : glissé = la Terre autour de son centre, molette = vers le centre
 de l'écran, clic droit = zoom, milieu/Ctrl/Maj = inclinaison et cap), **D13** (le
-pivot du crop est l'axe du bloc). ⚠️ **D21 ① et D19 se croisent au clic droit**
-et à la molette : ce sont les mêmes gestes, avec une conséquence de plus.
+pivot du crop est l'axe du bloc). ⚠️ **D21 ① et D19 se croisent à la molette**
+(et se croisaient au clic droit, jusqu'au retrait de cette sortie) : ce sont les mêmes gestes, avec une conséquence de plus.

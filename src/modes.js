@@ -307,6 +307,39 @@ export const ORB_ZOOM_LOG_PAR_DELTA = 0.0011
 export const ORB_CRAN_DELTA_Y = Math.log(2) / CRANS_PAR_NIVEAU / ORB_ZOOM_LOG_PAR_DELTA
 const ZOOM_IMPULSE = BUDGET_NIVEAU / (CRANS_PAR_NIVEAU * ZOOM_TAU) // ≈ 0,0289 log-dist/s par cran
 
+// ══════════ LA POUSSÉE DE SORTIE DU CROP — Tâche SORTIE, D21 ① ══════════════
+//
+// > **Adrien, 2026-09-04 :** les sorties du crop sont désormais DEUX — le dézoom
+// > à la molette et le bouton « map monde ». La molette DOIT donc sortir.
+//
+// ⛔ **MESURÉ AVANT DE TOUCHER À QUOI QUE CE SOIT** (`.banc/SORTIE/avant-*.json`,
+// un cran par lecture, 8 chargements) : **161 à 162 crans** pour tuer le crop
+// depuis 466 m, dont **23 morts d'affilée** (crans 21 à 43 : `d` collée à
+// `maxDistance = 150`, altitude figée à **616 m**, `_levelZoom` qui monte de
+// 0,01 à 0,68 sans qu'un mètre soit parcouru). Ce n'est PAS le pas de molette :
+// c'est le plafond `maxDistance` qui clippe le mouvement pendant que le compteur
+// encaisse l'intention (R23), et le franchissement qui CONSERVE l'altitude.
+//
+// ➡️ **D'où la direction B du brief, et pas la A.** Grossir le pas ne rachète
+// rien contre un plafond : au bout du niveau la caméra est immobile quelle que
+// soit la taille du cran, et le franchissement qui la libère ne gagne pas
+// d'altitude. La sortie est donc un GESTE À PART, armé par une intention
+// confirmée, qui **pompe l'intention** (le seul levier que le plafond ne clippe
+// pas) jusqu'à ce que la loi du crop, elle, tranche : `sortieArmee` est déjà
+// vraie dès le premier cran, il ne manquait que l'altitude.
+//
+// ⚠️ **LE PAS DE MOLETTE N'EST PAS TOUCHÉ D'UN BIT** — `ZOOM_IMPULSE`,
+// `ZOOM_TAU`, `CRANS_PAR_NIVEAU` sont ceux d'hier. D19 (noté 9,75) tient parce
+// que le zoom ordinaire n'a pas changé de loi : la poussée est un second geste,
+// pas un réglage du premier.
+/** Le taux de pompage de l'intention, en log-distance par seconde. Un niveau
+ *  (`ln 2`) toutes les 0,23 s : assez franc pour être une sortie, assez lent
+ *  pour que l'escalier ait le temps de franchir (il se garde lui-même). */
+export const TAUX_SORTIE_LOG_S = 6
+/** ⛔ La poussée ne dure JAMAIS plus que ça, même si le crop refuse de mourir :
+ *  une course qui tient la caméra sans fin serait pire que le défaut. */
+export const DUREE_SORTIE_MAX_S = 6
+
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
 // as a fixed DIRECTION so the new far-standoff arrival (_arrivalPose()
@@ -348,6 +381,7 @@ export class Modes {
     this._zoomPivot = null // world point the coast zooms toward (last valid)
     this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
     this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
+    this._sortieCourse = null // la poussée de sortie du crop — {restant, t, depart}, voir armerPousseeSortie
     this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
     this._fonduPose = null // le balayage nadir → oblique — voir _armerFonduPose
     // ⚡ **LA VUE DE TROIS QUARTS ATTEND LE BLOC — D16 ter, étape 5.**
@@ -1723,6 +1757,64 @@ export class Modes {
     return this._levelZoom
   }
 
+  // ══════════ LA POUSSÉE DE SORTIE — Tâche SORTIE ════════════════════════════
+  //
+  // Une course de dézoom FRANCHE, armée par `main.js` quand le geste a confirmé
+  // l'intention de sortir du crop (trois crans de dézoom d'affilée). Elle ne
+  // décide de RIEN sur le crop : elle pousse l'altitude, et c'est la loi de D21
+  // ① (`socleVisible`, `sortieArmee` + `SEUIL_MORT_M`) qui tranche, comme pour
+  // les 161 crans qu'elle remplace. C'est aussi `main.js` qui l'arrête, à la
+  // mort du crop — le seul endroit qui connaisse cette loi.
+  //
+  // @param {number} budgetLog log-distance à dépenser (l'appelant le dérive de
+  //   l'altitude à atteindre : `ln(cible / courante)`, plus sa marge).
+  armerPousseeSortie(budgetLog) {
+    if (this.mode !== 'surface' || !this._continu()) return false
+    if (!(Number.isFinite(budgetLog) && budgetLog > 0)) return false
+    if (this._sortieCourse) return false // déjà en route : on ne la relance pas
+    this._sortieCourse = { restant: budgetLog, t: 0, depart: this.controls.getDistance() }
+    return true
+  }
+
+  // ⚠️ **ET L'EXCÈS DE COMPTEUR EST RENDU, SINON LA SORTIE CONTINUE SEULE.** Le
+  // compteur survit aux images (R29 : « un niveau par appel, et le reste
+  // reste ») ; laissé plein après la mort du crop, il ferait franchir des
+  // niveaux tout seul jusqu'à la porte orbitale — la molette aurait alors DEUX
+  // sorties en une, dont une que personne n'a demandée. L'intention de sortie
+  // est consommée par la sortie, exactement comme `sortieArmee`.
+  annulerPousseeSortie() {
+    if (!this._sortieCourse) return false
+    this._sortieCourse = null
+    this._levelZoom = THREE.MathUtils.clamp(this._levelZoom, -BUDGET_NIVEAU, BUDGET_NIVEAU * 0.9)
+    return true
+  }
+
+  get pousseeSortieActive() { return !!this._sortieCourse }
+
+  // Une image de la poussée. ⚠️ **ELLE POMPE L'INTENTION, PAS LA DISTANCE** :
+  // c'est la leçon des 23 crans morts. Le plafond `maxDistance` clippe le
+  // déplacement — on le subit comme `_applyZoom` — mais le compteur, lui,
+  // encaisse le pas voulu (R23), et c'est lui qui fait franchir les niveaux,
+  // donc lui qui fait monter l'altitude.
+  _avancerPousseeSortie(dt) {
+    const s = this._sortieCourse
+    if (!s) return
+    s.t += dt
+    if (s.t > DUREE_SORTIE_MAX_S || s.restant <= 0) { this.annulerPousseeSortie(); return }
+    const c = this.controls
+    const pas = Math.min(s.restant, TAUX_SORTIE_LOG_S * dt)
+    s.restant -= pas
+    const dist = c.getDistance()
+    const newDist = THREE.MathUtils.clamp(dist * Math.exp(pas), c.minDistance, c.maxDistance)
+    this._levelZoom += pas // l'INTENTION, jamais le mouvement clippé
+    if (Math.abs(newDist - dist) > 1e-9) {
+      _zoomDir.copy(this.camera.position).sub(c.target).normalize()
+      this.camera.position.copy(c.target).addScaledVector(_zoomDir, newDist)
+      c.update()
+    }
+    this._franchirSiBesoin()
+  }
+
   _applyZoom(dt) {
     const c = this.controls
     const cam = this.camera
@@ -1949,6 +2041,11 @@ export class Modes {
       // repart. C'est une PAUSE, et Adrien n'en veut pas. `_franchirSiBesoin` se
       // garde lui-même contre un second franchissement pendant celui-ci.
       if (!this._diveTween && (!this.busy || this._continu()) && Math.abs(this._zoomVel) > ZOOM_STOP) this._applyZoom(dt)
+      // ⚠️ **APRÈS `_applyZoom`, ET SANS L'EXCLURE.** La poussée de sortie et
+      // l'élan de la molette vont dans le MÊME sens (l'utilisateur dézoome) :
+      // les additionner est ce que le geste dit. Elle se tait pendant le glissé
+      // de clic et le voyage, qui possèdent la caméra.
+      if (this._sortieCourse && !this._diveTween && !this.travel) this._avancerPousseeSortie(dt)
       // click-to-dive lean-in tween (first beat): ease 30% toward the point,
       // then load the finer level (see diveTo). ease-in-out quad.
       if (this._diveTween && !this.busy) {

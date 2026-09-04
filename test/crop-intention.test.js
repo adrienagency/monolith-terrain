@@ -15,8 +15,12 @@
 //      dézoom ne l'a armée, et il meurt au premier cran franc quand elle l'est.
 //      C'est la règle, jouée sur l'automate de production (`creerVeilleCrop`),
 //      pas sur la seule fonction pure.
-//   ② LES TROIS SORTIES, ET AUCUNE AUTRE — molette, clic droit, bouton monde ;
-//      ⛔ ni l'inclinaison, ni le cap, ni les boutons de caméra.
+//   ② LES **DEUX** SORTIES, ET AUCUNE AUTRE — molette et bouton monde ;
+//      ⛔ ni l'inclinaison, ni le cap, ni les boutons de caméra. ⚠️ **Le clic
+//      droit N'EN EST PLUS UNE** (amendement du 2026-09-04, tâche SORTIE) : le
+//      retour du crop à z10 (D23) a supprimé la bande de 568 km où il était un
+//      zoom sur le crop ; dedans, il est un PAN (`cropPose` **true→true 8/8**,
+//      REV). Adrien : ‹ ne recodez pas le clic droit, c'est acté ›.
 //   ③ LA NAISSANCE À z7 — le palier `DIVE_TIERS`, verrouillé contre sa source.
 //   ④ LE DÉPARTAGE — `arriveeBloc` (D16 ter) ne suit PAS la naissance du crop.
 //   ⑤ LE BRANCHEMENT — `main.js` n'est chargé par aucun test de ce dépôt (§0 du
@@ -48,6 +52,10 @@ import { gesteDuBouton, GESTE, REGIME } from '../src/monde/gestes-terre.js'
 
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
 const BARS = readFileSync(new URL('../src/ui/bars.js', import.meta.url), 'utf8')
+// ⚠️ **LA RÈGLE ELLE-MÊME, RELUE PAR LE TEST.** Le nombre de sorties a changé
+// deux fois en un jour ; le seul moyen que le code et la règle ne divergent pas
+// est que l'un lise l'autre.
+const D21_REGLE = readFileSync(new URL('../.superpowers/sdd/2026-08-22-globe-studio/regle-D21.md', import.meta.url), 'utf8')
 const BOUTONS = readFileSync(new URL('../src/boutons-camera.js', import.meta.url), 'utf8')
 const SHIBUSTART = readFileSync(new URL('../public/templates/defaults/shibustart.json', import.meta.url), 'utf8')
 
@@ -187,7 +195,7 @@ test('① quinquies L’INTENTION NE FAIT NAÎTRE PERSONNE — D21 : « la naiss
   assert.deepEqual(g.journal, [])
 })
 
-// ══════════ ② LES TROIS SORTIES, ET AUCUNE AUTRE ═══════════════════════════
+// ══════════ ② LES DEUX SORTIES, ET AUCUNE AUTRE ════════════════════════════
 
 test('② le BOUTON MONDE sort du crop, et il passe par le MODE, pas par l’altitude', async () => {
   // `.ce-globebtn` → `ctx.enterOrbit()` → `modes.enterOrbit` → `poserMode(false)`.
@@ -217,15 +225,30 @@ test('② bis LA MOLETTE EN DÉZOOM ARME, LE ZOOM AVANT DÉSARME — et c’est 
   assert.match(MAIN, /addEventListener\('wheel',\s*\(e\)\s*=>\s*intentionZoom\(e\.deltaY\)/)
 })
 
-test('② ter LE CLIC DROIT MAINTENU ARME, SUR LE PAS DE L’IMAGE', () => {
-  // le geste de zoom de D19 : `zoomDuGlisseDroit(dy)` rend un `deltaY`, positif
-  // en dézoom. ⚠️ Sur le PAS, pas sur le cumul : `dLogGlisse` est consommé et
-  // remis à zéro à chaque image, donc le lire ne dirait rien du sens du geste.
+test('② ter LE CLIC DROIT N’EST PLUS UNE SORTIE — il ARME encore, là où il zoome', () => {
+  // ⛔ **AMENDÉ LE 2026-09-04 (tâche SORTIE).** D21 ① listait le clic droit
+  // maintenu comme la deuxième sortie. Il ne l'est plus : mesuré par REV, huit
+  // chargements, **dans le crop il est un PAN** (`mouseButtons` `{0, 2, 2}`,
+  // `cropPose` **true→true 8/8**, altitude 10 457 → 8 589 m — elle DESCEND).
+  // Il n'était une sortie que grâce à la bande de 568 km ouverte par D21 ②, que
+  // D23 a refermée. Adrien : ‹ ne recodez pas le clic droit, c'est acté ›.
+  //
+  // ⚠️ **LA LIGNE RESTE, ET C'EST VOULU** : hors du crop le clic droit EST le
+  // zoom de D19, et il doit y armer l'intention comme la molette — une seule
+  // écriture du sens du dézoom. Elle n'a simplement plus de crop à tuer.
   assert.match(MAIN, /intentionZoom\(zoomDuGlisseDroit\(dy\)\)/)
   assert.ok(
     MAIN.indexOf('intentionZoom(zoomDuGlisseDroit(dy))') > MAIN.indexOf('gestesTerre.dLogGlisse +='),
     'l’intention doit être prise dans la branche GESTE.ZOOM du clic droit'
   )
+  // ⛔ et le prédicat pur confirme le retrait : dans le crop, le clic droit
+  // n'est même pas un zoom.
+  assert.equal(gesteDuBouton({ bouton: 2, regime: REGIME.CROP }), GESTE.INERTE)
+  // ✅ LA DEUXIÈME SORTIE EST LA MOLETTE, et elle a dû être rendue utilisable :
+  // 161 à 162 crans avant (`.banc/SORTIE/avant-sortie-2.json`), **8 à 9 après**.
+  // La loi de la confirmation vit dans `test/sortie-crop.test.js`.
+  assert.match(MAIN, /confirmerSortieMolette\(deltaY\)/)
+  assert.match(D21_REGLE, /LES DEUX SEULES SORTIES/)
 })
 
 test('② quater ⛔ NI L’INCLINAISON NI LE CAP NE SORTENT DU CROP — D19 intact', () => {
