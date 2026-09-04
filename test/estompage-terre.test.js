@@ -188,9 +188,15 @@ test('②d RÈGLE R1 — le module ne connaît ni fraction d’écran, ni débit
   for (const interdit of ['meanM', 'debitObserve', 'zoomEffectif', 'innerHeight', 'aspect', 'fractionEcran']) {
     assert.ok(!code.includes(interdit), `le module lit \`${interdit}\` — c'est la règle R1 qui tombe`)
   }
-  // le seul import autorisé est le producteur de seuils
+  // ⚠️ **DEUX IMPORTS AUTORISÉS, ET PAS UN DE PLUS.** Le producteur de seuils
+  // (les deux bornes de la bande), et `veille-repos.js` — dont ce module ne tire
+  // QU'UN COMPTE D'IMAGES, `IMAGES_CALME`, qui devient la durée du fondu de la
+  // porte du repos (§8, MIX). Ce n'est ni une fraction d'écran, ni un débit, ni
+  // un zoom : c'est un nombre d'images, la même unité que `periodeReprise`, et
+  // le LIRE là plutôt que le POSER ici est exactement ce que R1 demande — un
+  // chiffre avec sa source.
   const imports = [...code.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1])
-  assert.deepEqual(imports, ['./seuil-socle.js'])
+  assert.deepEqual(imports, ['./seuil-socle.js', './veille-repos.js'])
 })
 
 // ══════════ ③ L'ORDRE DES TROIS ALTITUDES ══════════════════════════════════

@@ -49,7 +49,7 @@ import {
 } from '../src/monde/veille-repos.js'
 import { creerVeilleEstompage, estompageTerre } from '../src/monde/estompage-terre.js'
 import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
-import { ALT_ESTOMPAGE_FIN_M } from '../src/monde/estompage-terre.js'
+import { ALT_ESTOMPAGE_FIN_M, IMAGES_FONDU_REPOS } from '../src/monde/estompage-terre.js'
 import { SEUIL_BLOC_M, SEUIL_BLOC_MORT_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
 
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
@@ -269,9 +269,17 @@ test('⑤ `poserRepos(true)` force UN — le crop seul', () => {
   assert.ok(loi > 0 && loi < 1, `l’altitude de test doit être DANS la bande (${loi})`)
   v.poserRepos(true)
   assert.equal(v.valeur, 1, 'le repos ne force pas le crop seul')
+  // ⚡ **LA SORTIE DU REPOS NE SAUTE PLUS, ELLE SE FOND — MIX, défaut ①.** Le
+  // premier armement reste FRANC (il n'y a rien à fondre : le crop vient
+  // d'apparaître, et `veille-repos.js` exige que la planète ne se montre pas
+  // à l'arrivée). Tout relais suivant court sur `IMAGES_FONDU_REPOS` images :
+  // c'est ce qui supprime le 1 → 0 → 1 en une image mesuré à chaque cran.
   v.poserRepos(false)
-  assert.equal(v.valeur, loi, 'la sortie du repos ne rend pas la main à la loi')
-  assert.deepEqual(vus, [loi, 1, loi])
+  assert.equal(v.valeur, 1, 'la sortie du repos ne doit PAS sauter — elle se fond')
+  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) v.avancerFondu()
+  assert.ok(Math.abs(v.valeur - loi) < 1e-12, 'le fondu achevé rend la main à la loi')
+  assert.deepEqual(vus.slice(0, 2), [loi, 1])
+  assert.ok(Math.abs(vus.at(-1) - loi) < 1e-12)
 })
 
 test('⑤ l’ORBITE prime sur le repos — la Terre y est le sujet', () => {

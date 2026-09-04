@@ -112,6 +112,11 @@ import {
   SEUIL_BLOC_MORT_M,
   altitudePourFraction,
 } from './seuil-socle.js'
+// ⚠️ **LE NOMBRE D'IMAGES DU FONDU DE REPOS N'EST PAS POSÉ ICI, IL EST LU** —
+// voir le §8. C'est l'hystérésis de `veille-repos.js`, celle qui DÉCIDE que la
+// vue est stabilisée ; le fondu qui obéit à cette décision dure exactement
+// aussi longtemps qu'elle a mis à la prendre.
+import { IMAGES_CALME } from './veille-repos.js'
 
 // ══════════ 4. LES CONSTANTES, ET LEUR SOURCE ══════════════════════════════
 
@@ -130,6 +135,44 @@ export const ALT_ESTOMPAGE_FIN_M = altitudePourFraction({
   largeurM: LARGEUR_SOCLE_M,
   fraction: FRACTION_ESTOMPAGE_PLEINE,
 })
+
+// ══════════ 8. LE FONDU DU REPOS — MIX, DÉFAUT ① D'ADRIEN ══════════════════
+//
+// > **Adrien, 2026-09-04 :** *« On a un scintillement, ou un affichage /
+// > désaffichage des différentes couches : celles qui correspondent à la Terre
+// > vue de l'espace, et celles qui correspondent à la Terre vue en mode crop. »*
+//
+// ⚡ **MESURÉ, PAS SUPPOSÉ — `.banc/MIX/avant.json`, Majorque, douze paliers de
+// 253 km à 9 km, 1 506 images relevées DANS `composer.render`.** À chaque cran
+// de zoom, `uEstompage` fait **1 → 0 → 1**, et chaque flanc tient dans **UNE
+// image** : la Terre autour du crop s'allume à pleine opacité puis s'éteint,
+// deux fois par cran, pendant 550 à 830 ms. C'est exactement l'« affichage /
+// désaffichage » qu'Adrien décrit — le §7 avait posé le repos comme un
+// INTERRUPTEUR, et un interrupteur sur une couche pleine page est un flash.
+//
+// ⛔ **LES DEUX AUTRES CAUSES POSSIBLES SONT RÉFUTÉES, ET PAR UNE MESURE.** Sur
+// 46 à 233 images consécutives À CHAQUE palier, caméra rigoureusement immobile
+// et `uEstompage` constant, le tampon de dessin a été relu image par image :
+// **zéro pixel sur 64 000 change de plus de 64 niveaux** (écart moyen 12,7
+// niveaux, un bruit global sans structure, identique à 253 km et à 9 km). Un
+// combat de profondeur (z-fighting) scintillerait AU REPOS et sur des pixels
+// isolés à forte amplitude : il n'y en a pas. Et aucun des états d'ordre —
+// `uCropOn`, `uHabOn`, les parois — ne bascule une seule fois au repos.
+// **La cause est donc le fondu, et lui seul.**
+//
+// ⚠️ **CE QUI NE CHANGE PAS : LA LOI.** `estompageTerre` garde ses deux bornes
+// dérivées, sa rampe logarithmique et son absence d'hystérésis (§3). Le fondu
+// ajouté ici ne porte QUE la porte du repos (§7) — celle qui vaut 0 ou 1 selon
+// un booléen, et qui n'a jamais eu de forme.
+//
+// ⚠️ **EN IMAGES, PAS EN MILLISECONDES**, comme `IMAGES_CALME` et
+// `periodeReprise` : le module est pur, il n'a pas d'horloge. Et la valeur
+// **n'est pas posée** : c'est `IMAGES_CALME` elle-même, l'hystérésis qui déclare
+// la vue stabilisée. Le fondu de sortie dure donc exactement le temps qu'il a
+// fallu pour décider qu'on était au repos — et une machine qui rame, qui a déjà
+// « besoin de plus de repos, pas de moins », obtient aussi un fondu plus long.
+// 30 images valent 0,5 s à 60 Hz, 1 s à 30 Hz.
+export const IMAGES_FONDU_REPOS = IMAGES_CALME
 
 // Le logarithme du rapport des deux bornes — le dénominateur de la rampe.
 // Calculé UNE fois : c'est une constante du module, pas un travail par image.
@@ -198,7 +241,7 @@ export function estompageTerre({ altitudeEllipsoideM, estompageAvant = 0 } = {})
  *
  * @param {{ appliquer: (estompage:number) => void }} arg
  */
-export function creerVeilleEstompage({ appliquer } = {}) {
+export function creerVeilleEstompage({ appliquer, imagesFondu = IMAGES_FONDU_REPOS } = {}) {
   if (typeof appliquer !== 'function') {
     throw new TypeError('creerVeilleEstompage : `appliquer` est obligatoire — un branchement muet est un branchement absent')
   }
@@ -231,12 +274,29 @@ export function creerVeilleEstompage({ appliquer } = {}) {
   // chaîne est posée — un seul point d'alimentation, comme pour `maj` et
   // `poserMode`.
   let auRepos = false
+  // ⚡ **LA PORTE DU REPOS, DEVENUE CONTINUE — §8.** `auRepos` est la CIBLE
+  // (un booléen), `porteRepos` est ce qui est réellement mélangé à l'image :
+  // il rejoint sa cible en `imagesFondu` images, jamais en une.
+  let porteRepos = 0
+  // ⚠️ **LE PREMIER RELAIS NE SE FOND PAS, ET C'EST MESURÉ AILLEURS.**
+  // `veille-repos.js` §« IL DÉMARRE AU REPOS » : au chargement, fondre le
+  // premier armement dessinerait la planète entière pendant la demi-seconde qui
+  // suit l'arrivée — « exactement l'image qu'Adrien refuse, au moment où elle se
+  // voit le plus ». Il n'y a d'ailleurs rien à fondre : le crop vient
+  // d'apparaître, il n'y avait pas d'image d'avant.
+  let premierRelais = true
   // ce qui est réellement POSÉ à l'écran
   let pose = 0
   let applications = 0
 
   function poser() {
-    const voulu = !modeSurface ? 0 : auRepos ? 1 : auSeuil
+    // smoothstep sur la porte : dérivée nulle aux deux bouts, comme la rampe du
+    // §3 — ni la valeur ni la VITESSE ne sautent aux raccords du fondu.
+    const g = porteRepos * porteRepos * (3 - 2 * porteRepos)
+    // HORS repos la loi seule ; au repos plein, 1. Entre les deux, un mélange —
+    // et à `auSeuil = 1` (sous `ALT_ESTOMPAGE_FIN_M`) le fondu est invisible
+    // par construction, ce qui est ce que la mesure relève déjà sous 19 364 m.
+    const voulu = !modeSurface ? 0 : auSeuil + (1 - auSeuil) * g
     if (voulu === pose) return pose
     pose = voulu
     applications++
@@ -262,6 +322,32 @@ export function creerVeilleEstompage({ appliquer } = {}) {
      */
     poserRepos(repos) {
       auRepos = !!repos
+      // ⚠️ **LE PREMIER RELAIS EST FRANC, LES SUIVANTS SE FONDENT** — voir la
+      // déclaration de `premierRelais`.
+      if (premierRelais) { premierRelais = false; porteRepos = auRepos ? 1 : 0 }
+      return poser()
+    },
+
+    /**
+     * ⚡ **UNE IMAGE DE FONDU — §8.** À appeler une fois par image, y compris
+     * pendant un cran de zoom.
+     *
+     * ⛔ **ET C'EST POUR ÇA QUE CE N'EST PAS `maj` QUI L'AVANCE.** `maj` est
+     * coupée par les deux gardes de `majSeuilSocle` (`modes.busy`, pas de bloc
+     * chargé) — c'est-à-dire **précisément sur les images du cran**, celles
+     * pendant lesquelles le fondu doit courir. Un fondu qui gèlerait là
+     * rendrait la marche qu'il existe pour supprimer.
+     *
+     * @returns {number} ce qui est posé à l'écran
+     */
+    avancerFondu() {
+      const cible = auRepos ? 1 : 0
+      if (porteRepos !== cible) {
+        const pas = imagesFondu > 0 ? 1 / imagesFondu : 1
+        porteRepos = cible > porteRepos
+          ? Math.min(cible, porteRepos + pas)
+          : Math.max(cible, porteRepos - pas)
+      }
       return poser()
     },
 
@@ -281,6 +367,19 @@ export function creerVeilleEstompage({ appliquer } = {}) {
     get auSeuil() { return auSeuil },
     /** Le repos est-il relayé ? — pour les sondes et les bancs (Tâche N). */
     get auRepos() { return auRepos },
+    /** La porte du repos, en clair : 0 = les alentours, 1 = le crop seul. */
+    get porteRepos() { return porteRepos },
+    /**
+     * ⚡ **LE FONDU A-T-IL FINI DE COURIR ? — §8, et c'est ce que le PARCOURS
+     * RÉDUIT attend.** `globe.poserCropSeul(true)` cesse de parcourir, donc de
+     * DESSINER, tout ce qui est hors du crop. Appliqué à l'instant où le repos
+     * est déclaré, il ferait disparaître d'un coup ce que le fondu est en train
+     * d'estomper doucement : le fondu ne se verrait jamais, et la marche
+     * reviendrait par l'autre porte. Mesuré avant correction, au même instant
+     * que la marche de `uEstompage` : **cache 1 105 → 989 tuiles et 297 → 287
+     * dessinées en UNE image.**
+     */
+    get fonduAcheve() { return auRepos ? porteRepos >= 1 : porteRepos <= 0 },
     /** Combien de fois l'estompage a été réellement réécrit. */
     get applications() { return applications },
   }
