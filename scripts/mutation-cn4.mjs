@@ -18,26 +18,24 @@ import { dirname, resolve } from 'node:path'
 const racine = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const md5 = (b) => createHash('md5').update(b).digest('hex')
 
-// La mutation du noteur (CN3 §7), mot pour mot : `_traverse` prescrit la CIBLE
-// au lieu du SERVI — le palier atomique est arraché, tout le reste reste debout.
+// ⚡ **LES DEUX MUTATIONS DE CN4 ONT ÉTÉ REMPLACÉES — D25.** Elles cassaient le
+// PALIER ATOMIQUE (`_zCropServi` figé, `_cropCouvert`), c’est-à-dire le mécanisme
+// d’une contrainte qu’Adrien a démentie et qui n’existe plus dans le produit :
+// leurs motifs seraient introuvables. La mutation utile est désormais l’INVERSE —
+// **remettre le palier** — et ce qu’elle doit faire rougir est la garde du
+// raffinement par tuile.
 const MUTATIONS = {
-  'palier-mort': {
+  'palier-rendu': {
     fichier: 'src/globe.js',
-    de: 'this._zCropServi || this._zCropEcran || ZOOM_SOCLE',
-    vers: 'this._zCropCible || this._zCropEcran || ZOOM_SOCLE',
-    quoi: '`_traverse` prescrit la CIBLE au lieu du SERVI — le palier atomique n’existe plus',
-  },
-  'couvert-permissif': {
-    fichier: 'src/globe.js',
-    de: '  _cropCouvert(L, camDir) {',
-    vers: '  _cropCouvert(L, camDir) { return true;',
-    quoi: '`_cropCouvert` dit toujours oui — le palier monte sans attendre la couverture',
+    de: 'this._zCropServi = this._zCropCible',
+    vers: 'this._zCropServi = this._zCropCible <= ZOOM_SOCLE ? this._zCropCible : Math.min(this._zCropCible, Math.max(ZOOM_SOCLE, this._zCropServi) + 1)',
+    quoi: 'le palier de CN2 est remis — la finesse servie remonte d’un cran par image après chaque pose de crop',
   },
 }
 
 const BANCS = [
   ['crop-nettete-ecran ③ (banc immédiat, CN1)', 'test/crop-nettete-ecran.test.js'],
-  ['crop-finesse-palier ⓐⓑⓒ (porte, CN4)', 'test/crop-finesse-palier.test.js'],
+  ['crop-finesse-palier ⓐⓑⓒ (porte, D25)', 'test/crop-finesse-palier.test.js'],
 ]
 
 function passe(fichier) {
