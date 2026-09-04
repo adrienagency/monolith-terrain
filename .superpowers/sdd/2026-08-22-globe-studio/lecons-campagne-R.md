@@ -173,3 +173,19 @@ la main qu'avec le rapport écrit. »*
 Et la raison qu'ils donnaient était bonne — *« je ne touche pas à `src/` pendant
 la mesure, Vite recharge la page à chaque édition »* — ce qui rend l'attente
 **dans la même exécution** d'autant plus nécessaire.
+
+---
+
+# ⛔ DEUX CONSIGNES DE BANC, PAYÉES LE 2026-09-03
+
+**① Ne jamais tuer tous les `chrome.exe` de la machine.** Le noteur GE3, pour
+relancer un banc planté, a fermé **tous** les Chrome à 23 h 39 — dont celui
+d'Adrien. Un banc sans tête tue **ses** processus (PID connu), rien d'autre. À
+écrire dans tout brief qui lance un navigateur.
+
+**② « Le globe tourne seul à ~2 °/s après 3 s » est à REVÉRIFIER avant d'être
+recopié.** GE1 l'a mesuré à **0,000° sur 90 images et sur 5 s**, à deux
+altitudes ; sa soustraction de dérive aurait *ajouté* l'erreur. PF4 a posé une
+cadence de repos qui suppose cette rotation. Les deux ne peuvent pas être vrais
+partout : **mesurer dans son propre banc, avec un témoin, plutôt que recopier
+le socle**. Tant que ce n'est pas tranché, aucun brief ne doit l'affirmer.

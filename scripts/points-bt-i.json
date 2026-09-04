@@ -1,0 +1,12 @@
+[
+  { "regime": "plateau", "nom": "Chesapeake chenal (BlueTopo)", "lat": 37.24512, "lon": -76.07313, "ref": -44.49,
+    "srcRef": "Point le plus BAS du pivot BlueTopo de la baie (265,5 M pixels source de 106 GeoTIFF NOAA a 4 m). C'est le chenal principal, dans l'axe de la baie. Ancre sur NOTRE donnee, pas sur une reference de memoire — lecon de B3, qui a paye deux seuils poses la ou la grandeur nommee n'existait pas." },
+  { "regime": "plateau", "nom": "Chesapeake embouchure (BlueTopo)", "lat": 37.02, "lon": -76.05, "ref": -14,
+    "srcRef": "Entree de la baie, entre les caps Charles et Henry. Regime de chenaux draques et de hauts-fonds : c'est la que 464 m de GEBCO ne peuvent RIEN dire et que 4 m disent tout." },
+  { "regime": "plateau", "nom": "Chesapeake hors zone (temoin)", "lat": 37.0, "lon": -74.5, "ref": -40,
+    "srcRef": "TEMOIN NEGATIF, a 130 km a l'est de la bbox cuite. BlueTopo n'y a PAS de zone : la valeur doit etre identique avant et apres, sinon la zone deborde." },
+  { "regime": "plateau", "nom": "Manche temoin Europe", "lat": 50.0, "lon": -1.5, "ref": -60,
+    "srcRef": "TEMOIN EUROPE. Zone fr-metro / EMODnet. Aucune tuile n'a ete touchee ici : la valeur doit etre identique au bit." },
+  { "regime": "lac", "nom": "Leman temoin lac", "lat": 46.45, "lon": 6.55, "ref": 63,
+    "srcRef": "TEMOIN LEMAN. Zone swisstopo z14, cuite par B3. Doit etre identique avant et apres." }
+]
