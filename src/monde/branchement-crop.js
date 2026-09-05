@@ -660,6 +660,20 @@ export function creerVeilleCrop({
   masquerSocle = null,
   reserverHauteurs = null,
   periodeReprise = 30,
+  // ══════════ D27 — L'ATTENTE DU SOCLE, EN IMAGES ═══════════════════════════
+  //
+  // `periodeSonde` : toutes les combien d'images la veille demande au globe si
+  // le socle du crop candidat est prêt (`globe.socleCropPret`) ; six images
+  // (100 ms à 60 Hz) parce que la sonde échantillonne 128 points de contour et
+  // 625 nœuds de champ, et qu'une tuile n'arrive pas plus vite que ça.
+  // `attenteSocleMax` : au-delà, on pose quand même — avec plaque provisoire et
+  // mer reprise toutes les `periodeReprise` images, le comportement d'avant D27.
+  // ⚠️ **EN IMAGES, PAS EN MILLISECONDES**, comme `periodeReprise`. Et `0` est
+  // un LEVIER DE BANC (règle D13) : il rejoue la pose immédiate d'avant D27 dans
+  // la même page — c'est ainsi que « socle vide » et « ancien crop » ont été
+  // comparés (`scripts/sonde-ca1.mjs --attente 0`).
+  periodeSonde = 6,
+  attenteSocleMax = 120,
   cropAuDepart = false,
   modeSurfaceAuDepart = true,
   // ══════════ LA MER ET LES EFFETS N'EXISTENT QU'EN MODE CROP — PF3 ═════════
@@ -708,48 +722,43 @@ export function creerVeilleCrop({
   // n'a jamais dépendu de l'altitude. C'est la troisième sortie de D21, et elle
   // était déjà une intention.
   let sortieArmee = false
-  // ══════════ VIE — LE DEHORS NE SE RALLUME QUE SOUS LA MOLETTE ═══════════
+  // ══════════ VIE puis D27 — LE DEHORS NE SE RALLUME QU'À LA SORTIE ════════
   //
-  // > **Adrien, 2026-09-05 :** *« quand on entre en mode crop on ne puisse plus
-  // > revoir la terre complète si la caméra remonte via un déplacement autre
-  // > qu'un scroll à la roulette, comme on avait dit auparavant. Notre
-  // > correction n'avait pas fonctionné. »*
   // > **Adrien, 2026-08-23 :** *« si je modifie la hauteur de la caméra SANS
   // > SCROLLER et en me déplaçant, il ne faut pas que le reste de ce qui est
   // > autour du socle réapparaisse. Si je dézoome EN SCROLLANT, alors là tu
   // > peux faire réapparaître le reste. »*
+  // > **Adrien, 2026-09-05 (D27) :** *« On ne peut pas lancer le crop avant
+  // > même d'afficher la terre ou la mer ? Ça évite d'afficher des éléments qui
+  // > sont hors crop. »*
   //
-  // ⚡ **MESURÉ, ET C'EST LE CHEMIN (b) — LE CROP VIT, LE DEHORS EST REDESSINÉ.**
-  // `.banc/VIE/avant-glisse-bas.json`, 8 chargements : un glissé gauche vers le
-  // nadir depuis la naissance du crop (25 – 31 km) monte l'altitude de cadrage
-  // à ~40 600 m **à crop vivant** (`pose` true→true 8/8) ; la veille du repos
-  // se réveille sur la distance, `poserRepos(false)` part, la porte du repos
-  // tombe à 0, et **l'estompage posé retombe sur la LOI d'altitude — qui vaut
-  // 0 au-dessus de `ALT_ESTOMPAGE_DEBUT_M` (40 343 m)** : la planète ENTIÈRE
-  // est dessinée autour du crop, ~150 images d'affilée. D21 ① tenait (le crop
-  // ne meurt pas) ; **c'est le dehors qui revenait, par la porte du repos.**
-  // PORTE ne pouvait pas le voir : son banc partait du fond du crop (460 m –
-  // 18 km), sous `ALT_ESTOMPAGE_FIN_M` (19 364 m), où la loi vaut 1 et masque
-  // la porte.
+  // ⚡ **VIE (2026-09-05, matin) avait lu la première citation comme une
+  // PERMISSION DU GESTE** : `armerSortie` (la molette en dézoom) levait un
+  // `dehorsPermis`, la porte du repos tombait dès la première image, et la
+  // planète se redessinait autour d'un crop VIVANT pendant que la poussée
+  // montait. C'est exactement ce qu'Adrien a filmé l'après-midi (D27) : mesuré
+  // par CA1 (`.banc/CA1/dezoom8.json`, 7 chargements sur 8), `dehorsPermis`
+  // à +37 – 50 ms, `_cropSeul` tombé, **52 000 px hors emprise (81 % de
+  // l'écran)** pendant 105 – 206 images, entre `WIDENING z12` et `z11`, le crop
+  // vivant de part et d'autre.
   //
-  // ➡️ **LA PORTE DU REPOS N'OBÉIT PLUS AU SEUL MOUVEMENT : IL FAUT EN PLUS
-  // UNE PERMISSION, ET SEULE LA MOLETTE EN DÉZOOM LA DONNE.** `armerSortie`
-  // (le dézoom à la molette, `intentionZoom` de `main.js`) la lève ; elle est
-  // **consommée par le retour au repos** (le geste est fini — le prochain
-  // glissé ne la retrouve pas), par un zoom avant (`desarmerSortie`), et par
-  // toute bascule du crop. Tant qu'elle est basse, un mouvement — glissé,
-  // inclinaison, bouton de caméra, recalage, balayage automatique — laisse le
-  // relais du repos à `true` : le dehors reste éteint et le quadtree ne
-  // parcourt que le crop, quelle que soit l'altitude atteinte.
+  // ➡️ **LECTURE RETENUE (déduction du brief CA2, cohérente avec les deux
+  // citations) : la permission de la molette vaut pour la SORTIE — quand le
+  // crop meurt — pas entre deux paliers d'un crop qui vit.** Tant que le crop
+  // est posé, le repos est relayé quoi qu'il arrive : la porte reste à 1, le
+  // quadtree ne parcourt que le crop, et RIEN de ce qui est hors emprise n'est
+  // dessiné. Le dehors ne se rallume qu'au moment où la sortie est PRONONCÉE,
+  // c'est-à-dire à la mort du crop (`retirer` : `pose` retombe, le relais
+  // retombe, l'estompage retombe sur la loi d'altitude — qui vaut 0 au-dessus de
+  // `SEUIL_MORT_M`). La molette garde son rôle de D21 ① : elle ARME l'intention
+  // qui autorise la mort ; elle ne dessine plus rien avant.
   //
-  // ⚠️ **CE N'EST PAS `sortieArmee`, ET LES DEUX NE SE REMPLACENT PAS.**
-  // `sortieArmee` est une INTENTION qui survit au repos (un cran isolé la laisse
-  // armée jusqu'au zoom avant suivant — c'est D21 ①, et un test le garde) ; la
-  // permission, elle, est un fait du GESTE EN COURS : elle meurt avec lui.
-  // Portée par `sortieArmee`, un cran isolé suivi d'un glissé, une minute plus
-  // tard, rallumerait la Terre sur le glissé.
-  let dehorsPermis = false
-  let auReposAvant = true
+  // ⚠️ **IL N'Y A DONC PLUS DE `dehorsPermis` D'ÉTAT.** Une permission qui ne
+  // vaudrait qu'une fois le crop mort ne gouvernerait plus aucun relais — le
+  // relais lit `pose`, et `pose` est déjà faux. Le getter `dehorsPermis` est
+  // gardé pour les sondes et les bancs, DÉRIVÉ : « le dehors a la permission
+  // de se rallumer » ≡ « il n'y a pas de crop ». Un état à côté serait le code
+  // mort que ce chantier a déjà trouvé six fois.
   let signature = null
   let refus = []
   // ⚠️ **LA PLAQUE EST-ELLE PROVISOIRE ? — SOC.** Posé par chaque appel du
@@ -793,6 +802,59 @@ export function creerVeilleCrop({
   // règle lui-même — il ne sait pas s'il y a une découpe.
   let auRepos = false
   let reposApplique = false
+  // ══════════ D27 — L'ATTENTE DU SOCLE ═════════════════════════════════════
+  //
+  // ⚡ **LE CROP D'ABORD, ET « D'ABORD » VEUT DIRE : AVEC SON SOCLE.** Mesuré par
+  // CA1 à chaque palier du dézoom : la découpe changeait dans l'image de la
+  // pose, ses parois restaient provisoires 30 – 60 images, sa mer refusait
+  // 5 – 8,6 s (`refus: fond+mer`). Adrien : « on affiche l'ancien crop complet
+  // (ou le nouveau socle vide, à trancher par la mesure) — jamais un état
+  // mixte ». Les deux ont été mesurés (rapport CA2, § le choix) ; ce qui est
+  // retenu : **à un changement d'échelle CONCENTRIQUE d'un crop posé, la chaîne
+  // n'est pas rejouée tant que le globe ne répond pas que le socle du candidat
+  // prendrait** (`globe.socleCropPret`, sondé toutes les `periodeSonde` images,
+  // hauteurs réservées à chaque sonde), et pendant ce temps l'ANCIEN crop reste
+  // à l'écran, complet — découpe, parois, mer. L'attente est bornée par
+  // `attenteSocleMax` : échue, on pose comme avant D27.
+  //
+  // ⚠️ **NI À LA NAISSANCE, NI À UN DÉMÉNAGEMENT.** Sans crop il n'y a rien à
+  // laisser à l'écran ; et un crop posé à l'autre bout du monde n'est pas un
+  // remplaçant de celui qu'on attend. Le critère est celui de `poserCrop` pour
+  // les ancres de l'échelle continue : le nouveau centre tombe DANS l'ancien
+  // crop, à la plus large des deux demi-largeurs.
+  //
+  // ⚠️ **ET UN GLOBE SANS `socleCropPret` N'EST PAS UNE PANNE** — même contrat
+  // que `poserFondCrop` : les globes de papier des tests ne portent que ce
+  // qu'ils exercent ; sans sonde, la pose est immédiate, comme avant.
+  //
+  // ══════════ ⚡ CE QUI EST ARRIVÉ À LA « LOI D'ALTITUDE QUI SAUTE » ═══════════
+  //
+  // ⛔ **CA1 A ÉCRIT QUE `altitudeCadrageM` CHANGEAIT D'UNITÉ À LA POSE ET QUE
+  // C'ÉTAIT LA QUINZIÈME CONFUSION D'ESPACES. MESURÉ ICI : C'EST FAUX.** Le banc
+  // relève désormais DEUX altitudes dans la même image (`scripts/sonde-ca1.mjs`,
+  // colonnes `alt` et `altGlobe`) :
+  //   · `alt` = `altitudeCadrageM()` = `camY / ((TERRAIN_SIZE / largeurBlocM()) ×
+  //     exagération)` — donc en unités du BLOC, celle que CA1 accuse ;
+  //   · `altGlobe` = `(|camGlobe.position| − R_GLOBE) × 63 710` — le rayon du
+  //     globe vaut **100 unités pour 6 371 000 m, soit 63 710 m par unité**
+  //     (`ORBITAL_M_PER_UNIT`, `geo.js:17`). **Elle ne dépend d'AUCUN bloc.**
+  // À l'image de `poserCrop` z12 (`.banc/CA1/dezoom-att0.json`, 3 chargements) :
+  // `alt` × **1,356**, `altGlobe` × **1,349** — **0,5 % d'écart**. Les deux
+  // espaces voient le MÊME saut : la caméra monte réellement de 35 % dans
+  // l'image du WIDENING (elle est REPOSÉE au nouvel étage, `_suivreEmprise` +
+  // `poseArrivee`), la loi ne change pas d'unité. Il n'y a donc pas de facteur de
+  // conversion à écrire avant la pose : il n'y a rien à convertir.
+  //
+  // ➡️ **CE QUI ÉTEINT LE SAUT EST DONC L'AUTRE MOITIÉ DU CORRECTIF, PAS UNE
+  // CONVERSION** : tant que le crop vit, le relais du repos tient la porte à 1 et
+  // `estompage-terre.js` pose `auSeuil + (1 − auSeuil) × g` avec `g = 1`, c'est-
+  // à-dire **1 quelle que soit l'altitude**. L'estompage est gelé pendant le
+  // palier — la seconde branche que D27 autorisait — et le saut de 35 % ne se
+  // voit plus : `horsPx` 0, `dessineesHors` 0, `mixte` 0, 3/3 (`dezoom-att0`).
+  let ctxPose = null // le lieu et l'échelle de la chaîne POSÉE
+  let attente = null // { signature, images, sondes, pret } pendant l'attente
+  let attentes = 0
+  let attentesEchues = 0
   // ══════════ D21 ② / D16 ter — L'ARRIVÉE AU BLOC, SÉPARÉE DE LA NAISSANCE ══
   //
   // ⚠️ **MESURÉ, ET C'EST LE DÉPARTAGE QUE LE BRIEF C1 DEMANDE.** `repos` (donc
@@ -830,18 +892,16 @@ export function creerVeilleCrop({
     // `if (nom === 'crop') continue` de `reprendre` et le `habillagePose = null`
     // de `retirer`. ⚠️ **L'INVARIANT QUI LE REMPLACE EST ÉCRIT ICI** : hors
     // surface, il n'y a pas de crop, donc rien à relayer.
-    // ⚡ **VIE — LE RETOUR AU REPOS CONSOMME LA PERMISSION.** Sur le FRONT
-    // montant seulement : une permission donnée pendant que la vue est encore
-    // posée (le cran de molette arrive au DOM avant la première image du
-    // glissement) doit survivre jusqu'au geste qu'elle autorise.
-    if (auRepos && !auReposAvant) dehorsPermis = false
-    auReposAvant = auRepos
-    // ⚡ **VIE — SANS PERMISSION, LE MOUVEMENT NE RALLUME PAS LE DEHORS.** Voir
-    // la déclaration de `dehorsPermis` : c'est la citation d'Adrien, et la mesure.
+    // ⚡ **D27 — TANT QUE LE CROP VIT, LE REPOS EST RELAYÉ.** Ni le mouvement
+    // (Tâche N), ni la molette (VIE) ne font plus tomber la porte : voir le pavé
+    // « VIE puis D27 » à la déclaration de `sortieArmee`. Le relais ne tombe
+    // qu'avec `pose` — la mort du crop, c'est-à-dire la sortie prononcée. La
+    // veille du repos reste nourrie (`decider`) : c'est elle qui dit à
+    // `arriveeBloc` que la vue est stabilisée (D16 ter), et les bancs la lisent.
     // ⚠️ **ET SANS VEILLE DE REPOS, RIEN N'EST RELAYÉ** — le comportement
-    // d'avant la Tâche N, gardé par `test/veille-repos.test.js` ⑥ : la
-    // permission ne peut pas inventer un repos là où personne ne le mesure.
-    const voulu = !!(pose && (auRepos || (repos && !dehorsPermis)))
+    // d'avant la Tâche N, gardé par `test/veille-repos.test.js` ⑥ : le relais
+    // n'existe que là où le repos est branché, exactement comme avant.
+    const voulu = !!(pose && repos)
     if (voulu !== reposApplique) {
       reposApplique = voulu
       basculesRepos++
@@ -907,7 +967,28 @@ export function creerVeilleCrop({
     depuisPose = 0
     habillagePose = instantaneHabillage(ctx.habillage)
     formePosee = formeDuCrop(ctx)
+    ctxPose = { lat: ctx.centre.lat, lon: ctx.centre.lon, zoom: ctx.zoom, tuilesParBloc: ctx.tuilesParBloc }
     suivreMer(r.mer, jeton)
+  }
+
+  /**
+   * Le contexte candidat est-il un changement d'échelle (ou de cadrage)
+   * CONCENTRIQUE du crop posé — un palier — et non un déménagement ? — D27.
+   * Même critère que `poserCrop` pour les ancres : le nouveau centre tombe dans
+   * l'ancien crop, à la plus large des deux demi-largeurs. La demi-largeur en
+   * degrés de longitude vaut `360 × tuilesParBloc / 2^zoom / 2` ; en latitude un
+   * degré est plus court (Mercator), la borne est donc GÉNÉREUSE — un palier
+   * pris pour un déménagement coûterait une pose sans socle, l'inverse ne
+   * coûte qu'une sonde de plus.
+   */
+  function palierConcentrique(ctx) {
+    if (!ctxPose || !ctx?.centre) return false
+    const demi = (z, n) => (360 * n) / 2 ** z / 2
+    const marge = Math.max(demi(ctxPose.zoom, ctxPose.tuilesParBloc), demi(ctx.zoom, ctx.tuilesParBloc))
+    if (!Number.isFinite(marge)) return false
+    let dLon = Math.abs(ctx.centre.lon - ctxPose.lon)
+    if (dLon > 180) dLon = 360 - dLon
+    return dLon <= marge && Math.abs(ctx.centre.lat - ctxPose.lat) <= marge
   }
 
   /**
@@ -1021,7 +1102,8 @@ export function creerVeilleCrop({
     // ⚠️ **L'INTENTION EST CONSOMMÉE.** La laisser armée ferait mourir le crop
     // suivant sur son premier soubresaut d'altitude, sans nouveau geste.
     sortieArmee = false
-    dehorsPermis = false // VIE : la mort du crop consomme aussi la permission
+    attente = null // D27 : rien à attendre pour un crop qui n'est plus
+    ctxPose = null
     // ⛔ **IL Y AVAIT ICI UN `habillagePose = null`, ET C'ÉTAIT DU CODE MORT —
     // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
     // raisonnement écrit à côté était plausible (« `retirerCrop` appelle
@@ -1100,9 +1182,31 @@ export function creerVeilleCrop({
         // ⚠️ **UN DÉMÉNAGEMENT N'EST PAS UNE NAISSANCE** : le compteur de
         // bascules sert à mesurer le clignotement, pas les déplacements.
         const naissance = !pose
+        // ══════ D27 — LE CROP D'ABORD : ON ATTEND SON SOCLE ═══════════════
+        //
+        // À un palier d'un crop posé, l'ancien crop reste à l'écran — complet —
+        // tant que le globe ne dit pas que le socle du candidat prendrait. Voir
+        // le pavé « L'ATTENTE DU SOCLE ». La sonde tombe à la PREMIÈRE image de
+        // l'attente puis toutes les `periodeSonde` images ; les hauteurs sont
+        // réservées à chaque sonde, parce que `hauteursDeFlux` et cette
+        // réservation alternent (`main.js`, `reserverHauteurs`) et qu'une
+        // réservation perdue laisserait les parois refuser pour toujours.
+        if (!naissance && attenteSocleMax > 0 && typeof g.socleCropPret === 'function' && palierConcentrique(ctx)) {
+          if (!attente || attente.signature !== s) { attente = { signature: s, images: 0, sondes: 0, pret: false }; attentes++ }
+          else attente.images++
+          if (!attente.pret && attente.images % Math.max(1, periodeSonde) === 0) {
+            reserverHauteurs?.(ctx)
+            attente.sondes++
+            const r = g.socleCropPret(ctx)
+            attente.pret = !!(r && typeof r === 'object' ? r.pret : r)
+          }
+          if (!attente.pret && attente.images < attenteSocleMax) return true
+          if (!attente.pret) attentesEchues++
+          attente = null
+        }
         if (naissance) bascules++
         // on vient d'entrer : aucune intention de sortie ne traîne
-        if (naissance) { sortieArmee = false; dehorsPermis = false }
+        if (naissance) sortieArmee = false
         pose = true
         signature = s
         poserTout(g, ctx)
@@ -1111,6 +1215,8 @@ export function creerVeilleCrop({
         if (naissance) surBascule?.(true)
         return true
       }
+      // le contexte est revenu à la chaîne posée : une attente qui traînait n'a plus d'objet
+      attente = null
       depuisPose++
       if (refus.length && depuisPose >= periodeReprise) reprendre(g, ctx)
       // ⚠️ **APRÈS LA REPRISE, ET PAS AVANT.** La reprise peut reposer
@@ -1186,7 +1292,11 @@ export function creerVeilleCrop({
      * ce que `main.js` doit donner à `arriveeSurLeBloc`, pas `repos` tout seul :
      * depuis D21 le crop naît dix-huit fois plus haut que le bloc.
      */
-    get arriveeBloc() { return reposApplique && auBloc },
+    // ⚡ **D27 : `auRepos` EST REDEVENU EXPLICITE ICI.** Depuis la Tâche N le
+    // relais valait « crop posé ET vue au repos » ; VIE puis D27 l'ont ramené à
+    // « crop posé » (le dehors ne dépend plus du repos). La vue de trois quarts,
+    // elle, attend toujours la vue stabilisée — c'est la lettre de D16 ter.
+    get arriveeBloc() { return reposApplique && auRepos && auBloc },
     /** L'automate d'altitude de l'arrivée au bloc, seul — pour les sondes. */
     get auBloc() { return auBloc },
     /** D21 ① — l'intention de sortie est-elle armée ? */
@@ -1199,21 +1309,34 @@ export function creerVeilleCrop({
      */
     armerSortie() {
       sortieArmee = true
-      // ⚡ **VIE — ET C'EST LA SEULE PORTE PAR LAQUELLE LE DEHORS SE RALLUME.**
-      // Un dézoom à la molette est le geste qu'Adrien autorise : « si je dézoome
-      // en scrollant, alors là tu peux faire réapparaître le reste ».
-      dehorsPermis = true
+      // ⚡ **D27 — ET ELLE NE RALLUME RIEN.** VIE faisait tomber ici la porte du
+      // repos (« si je dézoome en scrollant, tu peux faire réapparaître le
+      // reste ») ; la permission vaut pour la SORTIE, pas entre deux paliers
+      // d'un crop vivant — voir le pavé « VIE puis D27 ». Le dehors se rallume
+      // à la mort du crop, que cette intention autorise.
       return sortieArmee
     },
-    /** VIE — le dehors a-t-il la permission de se rallumer sur le mouvement en
-     *  cours ? Vrai entre un dézoom à la molette et le retour au repos. */
-    get dehorsPermis() { return dehorsPermis },
+    /** Le dehors a-t-il la permission de se rallumer ? — D27 : DÉRIVÉ, sans
+     *  état. Oui exactement quand il n'y a plus de crop (la sortie prononcée). */
+    get dehorsPermis() { return !pose },
+    /** D27 — la veille attend-elle le socle d'un crop candidat ? */
+    get attenteSocle() { return !!attente },
+    /** D27 — le détail de l'attente en cours, pour les sondes et les bancs. */
+    get attente() { return attente ? { ...attente } : null },
+    /** D27 — combien d'attentes de socle ont été ouvertes depuis le chargement. */
+    get attentes() { return attentes },
+    /** D27 — combien ont été échues (posées sans socle, comme avant D27). */
+    get attentesEchues() { return attentesEchues },
+    /** D27 — le plafond de l'attente, en images. ⚡ Levier de banc : `0` rejoue
+     *  la pose immédiate d'avant D27 (`scripts/sonde-ca1.mjs --attente 0`). */
+    get attenteSocleMax() { return attenteSocleMax },
+    set attenteSocleMax(v) { attenteSocleMax = Number.isFinite(v) && v >= 0 ? v : attenteSocleMax },
     /**
      * ⚡ **ET LE DÉSARMEMENT, SUR UN ZOOM AVANT.** Le critère de C1 l'exige
      * ligne par ligne : « dans le crop, zoom avant (molette ou clic droit) → le
      * crop vit ». Sans ça, un aller-retour molette laisserait une mine amorcée.
      */
-    desarmerSortie() { sortieArmee = false; dehorsPermis = false; return sortieArmee },
+    desarmerSortie() { sortieArmee = false; return sortieArmee },
     /** Combien de fois le repos relayé a basculé : le compteur de battement. */
     get basculesRepos() { return basculesRepos },
     /** Les maillons qui ont refusé et que la reprise redemande. */
