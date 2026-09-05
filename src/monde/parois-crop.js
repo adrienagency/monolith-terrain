@@ -259,6 +259,7 @@
 
 import { arcCoin } from '../fenetre-clip.js' // pur : aucune importation
 import { latLonDeLocal, localCrop } from './crop-sphere.js'
+import { biseauSocleActif } from '../flags.js' // pur : aucune importation, sûr sous node
 
 /** Le pas de l'anneau, ramené au demi-côté 1. `plinth.js` : TERRAIN_SIZE / 256. */
 export const PAS_CONTOUR = 2 / 256
@@ -296,6 +297,47 @@ export const FRACTION_ARRONDI = 0.9 / 56
 
 /** Les segments de l'arc du congé. `plinth.js` : `SOCLE_ARRONDI_SEG = 3`. */
 export const ARRONDI_SEG = 3
+
+// ══════════ L'INTERRUPTEUR DU BISEAU — BIS, 2026-09-05 ══════════════════════
+//
+// > **Adrien, 2026-09-05** : *« Jupe de la mer non ok, je pense qu'il y a un
+// > problème avec les biseaux de bords. Pour l'instant on peut les supprimer
+// > pour éviter la problématique. »* — *« On va retirer le retrait du biseau
+// > qui pose plus de problèmes qu'autre chose. »*
+//
+// `FRACTION_CHANFREIN` et `FRACTION_ARRONDI` restent les RÉGLAGES (le §5 bis
+// dit d'où ils viennent) ; ce que le solide APPLIQUE passe par ces deux
+// lectures. Éteint (`FLAGS.biseauSocle`, le défaut) : chanfrein 0, congé 0 —
+// le profil retombe à trois rangs, le mur est vertical de la surface au fond,
+// à `d = 0` sur toute sa hauteur, et le socle a EXACTEMENT l'emprise du relief.
+// Allumé : les fractions, au bit près (`test/biseau-socle.test.js`).
+//
+// ⚠️ **CE QUI N'EST PAS ÉTEINT AVEC LUI : la bande d'effacement des jupes
+// (P14).** Sans chanfrein, le mur est à l'aplomb du bord des tuiles, donc dans
+// le MÊME plan que leurs jupes — c'est l'état d'avant P13, « 7 traînées sur
+// 10 au socle » (jupes et mur en conflit de profondeur). Le mur part de la
+// surface dessinée (P11), la jupe de bord n'a donc aucun jour à combler : on
+// continue de l'effacer, sur une bande de la largeur qu'avait le chanfrein
+// (`BANDE_JUPE_MUR`), pour que l'effacement de P14 rende le même compte.
+
+/** Le chanfrein APPLIQUÉ, en fraction de la largeur — 0 quand le biseau est éteint. */
+export function fractionChanfreinCrop(biseau = biseauSocleActif()) {
+  return biseau ? FRACTION_CHANFREIN : 0
+}
+
+/** Le congé APPLIQUÉ, en fraction de la largeur — 0 quand le biseau est éteint. */
+export function fractionArrondiCrop(biseau = biseauSocleActif()) {
+  return biseau ? FRACTION_ARRONDI : 0
+}
+
+/**
+ * La bande d'effacement des jupes de bord quand le mur est VERTICAL (biseau
+ * éteint), en FRACTION DU DEMI-CÔTÉ — la monnaie de `jupeHorsDuMur`. C'est la
+ * largeur qu'avait le chanfrein dans cette monnaie (`2 × 0,16 / 56`), gardée
+ * telle quelle pour que l'escalier mesuré par P14 (les deux marches d'anneau)
+ * soit atteint de la même façon.
+ */
+export const BANDE_JUPE_MUR = 2 * FRACTION_CHANFREIN
 
 /**
  * Le garde-fou de `buildSlabWalls` : ni le chanfrein ni le congé ne mangent
@@ -671,8 +713,8 @@ export function construireSolideCrop({
   couvertureMin = 1,
   aoForce = FORCE_AO,
   aoBande = null,
-  fractionChanfrein = FRACTION_CHANFREIN,
-  fractionArrondi = FRACTION_ARRONDI,
+  fractionChanfrein = fractionChanfreinCrop(),
+  fractionArrondi = fractionArrondiCrop(),
   arrondiSeg = ARRONDI_SEG,
 } = {}) {
   if (!repere || !Number.isFinite(repere.demi)) {
@@ -805,8 +847,8 @@ export function construireSolideCrop({
   // un bloc écrasé, et le test ⑬f mesure de combien il est loin de mordre plutôt
   // que de l'affirmer.
   const mur = Math.max(0, hautMax - baseY)
-  const frCh = Number.isFinite(fractionChanfrein) ? Math.max(0, fractionChanfrein) : FRACTION_CHANFREIN
-  const frRd = Number.isFinite(fractionArrondi) ? Math.max(0, fractionArrondi) : FRACTION_ARRONDI
+  const frCh = Number.isFinite(fractionChanfrein) ? Math.max(0, fractionChanfrein) : fractionChanfreinCrop()
+  const frRd = Number.isFinite(fractionArrondi) ? Math.max(0, fractionArrondi) : fractionArrondiCrop()
   const ch = Math.min(frCh * largeur, mur * PART_MUR_MAX)
   const rd = Math.min(frRd * largeur, mur * PART_MUR_MAX)
   const segArc = rd > 0 ? Math.max(1, Math.round(Number.isFinite(arrondiSeg) ? arrondiSeg : ARRONDI_SEG)) : 0
@@ -1043,6 +1085,11 @@ export function construireSolideCrop({
     bande,
     chanfrein: ch,
     arrondi: rd,
+    // La bande d'effacement des jupes de bord (P14), en FRACTION DU DEMI-CÔTÉ :
+    // le chanfrein quand il y en a un (le dépôt d'avant, au bit près), la bande
+    // fixe `BANDE_JUPE_MUR` quand le mur est vertical — voir l'encart de
+    // l'interrupteur, plus haut. `globe.js` la lit dans `_retraitJupeCrop`.
+    retraitJupe: largeur > 0 ? (ch > 0 ? ch / (largeur / 2) : BANDE_JUPE_MUR) : 0,
     rangs: R,
     rangArc: rangArc0,
     triArc: triArc0,

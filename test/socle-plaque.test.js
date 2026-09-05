@@ -193,7 +193,9 @@ test('② sans hauteurs réservées, `construireParoisCrop` REFUSE et pose quand
   assert.ok(g.group.children.includes(g._parois), 'et elle est dans le groupe du globe')
   // les quatre grandeurs que la mer et les jupes lisent existent, comme pour la définitive
   assert.ok(Number.isFinite(g._baseYCrop) && g._baseYCrop < 0, `baseY ${g._baseYCrop}`)
-  assert.ok(Number.isFinite(g._retraitBaseCrop) && g._retraitBaseCrop > 0)
+  // BIS : biseau éteint (le défaut), le mur est vertical et sa base ne rentre
+  // pas — `0`, fini. Il ne vaut `> 0` que l'interrupteur rallumé.
+  assert.ok(Number.isFinite(g._retraitBaseCrop) && g._retraitBaseCrop >= 0)
   assert.ok(Number.isFinite(g._plancherJupeCrop))
   assert.ok(Number.isFinite(g._retraitJupeCrop) && g._retraitJupeCrop > 0)
   // et elle a la taille du crop : sa boîte horizontale vaut la largeur du repère

@@ -63,6 +63,16 @@ import { gridTemplate } from '../src/grid-template.js'
 import { blockExtentMeters } from '../src/landmarks.js'
 import { empriseSocle, ZOOM_SOCLE, SEUIL_BLOC_M } from '../src/monde/seuil-socle.js'
 import { tuilesEmprise } from '../src/monde/flux-terrain.js'
+import { FLAGS } from '../src/flags.js'
+
+// ⚠️ **BIS, 2026-09-05 — CES TESTS DÉCRIVENT LE RÉGIME « BISEAU ALLUMÉ ».**
+// Adrien a décidé d'éteindre les biseaux du socle et leur retrait
+// (`FLAGS.biseauSocle = false` par défaut) ; le code et ses lois restent, et
+// c'est ici qu'on les tient. On rallume donc l'interrupteur pour ce fichier —
+// un processus par fichier de test, rien ne fuit. Le défaut ÉTEINT est couvert
+// par `test/biseau-socle.test.js`, qui prouve aussi que « rallumé » rend le
+// solide d'avant au bit près.
+FLAGS.biseauSocle = true
 
 // Le réglage de PRODUCTION du coin, lu là où il vit vraiment :
 // `main.js:566` `slabCorner = 0,04` (fraction de la largeur du bloc) et

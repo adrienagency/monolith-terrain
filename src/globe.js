@@ -8414,7 +8414,15 @@ export class Globe {
     // ⚠️ **MÊME MONNAIE QUE `_retraitBaseCrop` ET QUE `mer-sphere.js`** : une
     // FRACTION DU DEMI-CÔTÉ, parce que c'est celle où `jupeHorsDuMur` compare —
     // les coordonnées locales du crop valent ±1 sur l'emprise.
-    this._retraitJupeCrop = solide.largeur > 0 ? solide.chanfrein / (solide.largeur / 2) : 0
+    // ⚠️ **BIS, 2026-09-05 — LA BANDE VIENT DU SOLIDE.** `solide.retraitJupe`
+    // vaut le chanfrein en fraction du demi-côté quand il y en a un (le dépôt
+    // d'avant, au bit près) et `BANDE_JUPE_MUR` quand le biseau est éteint et
+    // que le mur, vertical, est dans le plan des jupes — voir l'encart de
+    // l'interrupteur dans `parois-crop.js`. Le repli garde l'ancienne formule
+    // pour un solide de papier qui ne porterait pas le champ.
+    this._retraitJupeCrop = Number.isFinite(solide.retraitJupe)
+      ? solide.retraitJupe
+      : (solide.largeur > 0 ? solide.chanfrein / (solide.largeur / 2) : 0)
     // ⚠️ **ET LES JUPES DES TUILES SE RETAILLENT DESSUS — Tâche P7.** C'est ici
     // et pas dans `_buildMesh` parce que l'ordre l'impose : les parois exigent
     // des tuiles bâties (`couverture`), donc les tuiles du premier bloc sont

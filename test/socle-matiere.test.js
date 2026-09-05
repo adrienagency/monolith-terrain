@@ -25,6 +25,16 @@ import { exposantCoin, plansFenetre, debordementCoin, dansFenetre, pointCoin } f
 import { microRoughnessField, MICRO_ROUGH_CREUX } from '../src/material-textures.js'
 import { buildRegionSkirt } from '../src/region-skirt.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
+import { FLAGS } from '../src/flags.js'
+
+// ⚠️ **BIS, 2026-09-05 — CES TESTS DÉCRIVENT LE RÉGIME « BISEAU ALLUMÉ ».**
+// Adrien a décidé d'éteindre les biseaux du socle et leur retrait
+// (`FLAGS.biseauSocle = false` par défaut) ; le code et ses lois restent, et
+// c'est ici qu'on les tient. On rallume donc l'interrupteur pour ce fichier —
+// un processus par fichier de test, rien ne fuit. Le défaut ÉTEINT est couvert
+// par `test/biseau-socle.test.js`, qui prouve aussi que « rallumé » rend le
+// solide d'avant au bit près.
+FLAGS.biseauSocle = true
 
 const HALF = TERRAIN_SIZE / 2
 const plat = () => 0
