@@ -190,9 +190,24 @@ const IDENTITE = [0, 0, 0, 1]
  * @param {number} o.lon longitude de la même origine
  * @param {number} o.extentMeters l'emprise RÉELLE du bloc affiché, en mètres
  * @param {number} o.span `TERRAIN_SIZE`, en unités de bloc
+ * @param {number} [o.altitudeAncreM] l'altitude du plan `y = 0` du bloc — la
+ *   MOYENNE du relief (`altitudeAncreBlocM()` dans `main.js`), pas la mer
+ * @param {number} [o.exageration] l'exagération du globe, pour ce même rayon
  * @returns {{position: number[], quaternion: number[], echelle: number}}
+ *
+ * ⛔ **L'ANCRE ÉTAIT À LA MER, ET LE CIEL AVEC — Tâche NUA (2026-09-05).**
+ * `poseFond` prend `altitudeAncreM` ; sans lui, le rayon est `R_GLOBE` — le
+ * niveau de la mer. Or le plan `y = 0` du bloc est la MOYENNE du relief
+ * (`fenetre.moyenneM`, `main.js` §R15), et c'est là que `majCameraFond` pose
+ * la caméra. Le groupe des nuages était donc **`moyenneM` trop bas** : 751 m
+ * à z13 en Provence, 1 104 m à z9, ~440 m à La Réunion — et la caméra relue en
+ * bloc (`positionCameraEnBloc`) **8,0 unités trop haut à z13** (mesuré :
+ * `uCamBloc.y = camera.position.y + 8,006`, avec `751 × 0,010 671 = 8,014`).
+ * C'est le « 4 % d'écart, deux chemins » que R20 §2 avait relevé (74,52 contre
+ * 72,72 à La Réunion) sans l'expliquer : `1,80 = 440 m × 0,004 09`. Le test
+ * ⑧ de `nuages-globe.test.js` tient les deux.
  */
-export function ancrageNuages({ lat, lon, extentMeters, span }) {
+export function ancrageNuages({ lat, lon, extentMeters, span, altitudeAncreM = 0, exageration = 1 }) {
   const p = poseFond({
     lat,
     lon,
@@ -201,6 +216,8 @@ export function ancrageNuages({ lat, lon, extentMeters, span }) {
     origineBloc: [0, 0, 0],
     extentMeters,
     span,
+    altitudeAncreM,
+    exageration,
   })
   return { position: p.position, quaternion: p.quaternion, echelle: p.k }
 }

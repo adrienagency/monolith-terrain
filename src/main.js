@@ -66,6 +66,7 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
 import { ancrageCartouche, baseCartoucheEnBloc, poseDepuisParois } from './monde/cartouche-globe.js'
 import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
+import { PLAFOND_NUAGES_M } from './monde/nuages-metres.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
@@ -732,7 +733,15 @@ const params = {
   // volumetric cloud deck — user-tuned base settings, active on every template
   cloudsEnabled: false,
   cloudOpacity: 2.25, // densité — réglages par défaut fournis par Adrien (captures)
-  cloudAltitude: 1, // PLAFOND de la colonne de nuages, en unités monde
+  // PLAFOND de la colonne de nuages, en MÈTRES au-dessus de la mer — Tâche NUA.
+  // C'est la loi sur tout terrain réel ; `clouds2.js` la convertit en unités de
+  // bloc par `(plafond − moyenneM) × 56 / largeurBlocM × exagération`
+  // (0,010 671 u/m à z13, 0,000 667 u/m à z9 — `monde/nuages-metres.js`).
+  cloudAltitudeM: PLAFOND_NUAGES_M,
+  // ⚠️ L'ANCIEN PLAFOND EN UNITÉS DE BLOC ne sert plus qu'au terrain
+  // PROCÉDURAL (pas de mètres). Sur un MNT réel il valait 21 346 m à z9 et
+  // 2 016 m à z13 — sous les crêtes (N1 de la vidéo du 2026-09-04).
+  cloudAltitude: 1,
   cloudDrift: 1.6,
   cloudScale: 5, // finesse du grain interne
   cloudCoverage: 1.12, // trouées : 0.8 = masses pleines, 2.6 = dentelle
@@ -5139,6 +5148,13 @@ class PasseFond extends RenderPass {
 // **Le critère n'est donc pas « y a-t-il deux passes » mais « la seconde
 // dessine-t-elle quelque chose »**, et la réponse ne dépend que de `terre=unique`.
 const fusionDesPasses = frontiereActive && terreUniqueBranchee
+// N2 — EN CROP, LE VOLUME DE NUAGES EST BORNÉ À L'EMPRISE DU SOCLE : le dehors
+// est éteint (`_cropSeul`), un nuage qui déborde flotterait sur rien. Le socle
+// fait `TERRAIN_SIZE` unités de bloc de côté (c'est la similitude
+// d'`ancrageNuages` : `span = TERRAIN_SIZE` pour `largeurBlocM()` mètres), donc
+// la borne vaut `TERRAIN_SIZE / 2 = 28`, fondu sur 3 unités vers l'intérieur.
+// Hors fusion la borne est 0 : le nuanceur ne change pas d'un bit.
+clouds.setBorne(fusionDesPasses ? TERRAIN_SIZE / 2 : 0)
 if (frontiereActive) {
   const passeFond = new PasseFond(sceneGlobe, camGlobe)
   passeFond.skipShadowMapUpdate = true
@@ -5546,13 +5562,22 @@ function majCartoucheGlobe() {
 // conversions à écrire, pas de constante à recopier dans le nuanceur, et aucun
 // réglage sauvegardé à ré-échelonner.
 //
-// ⛔ **ET SANS ELLE, LA COUCHE DE NUAGES EST EN ORBITE BASSE.** Le curseur
-// « Altitude » vaut 13,5 unités de bloc au démarrage ; portées telles quelles
-// en unités de globe elles font **860 085 m** — deux fois l'altitude de la
-// station spatiale, et le ciel quitte l'écran par le haut. Multipliées par
-// `k`, elles font **6 594 m**, un plafond de cumulus. `1/k` vaut 130,43 à
-// La Réunion et dépasse 3 700 aux zooms continentaux
-// (`monde/nuages-globe.js` §2, et le test tue la mutation qui met 1).
+// ⛔ **ET SANS ELLE, LA COUCHE DE NUAGES EST EN ORBITE BASSE.** Un plafond de
+// 13,5 unités de bloc porté tel quel en unités de globe fait **860 085 m** —
+// deux fois l'altitude de la station spatiale, et le ciel quitte l'écran par
+// le haut. Multiplié par `k`, il fait **6 594 m**. `1/k` vaut 130,43 à La
+// Réunion et dépasse 3 700 aux zooms continentaux (`monde/nuages-globe.js`
+// §2, et le test tue la mutation qui met 1).
+//
+// ⚡ **MAIS L'HOMOTHÉTIE PORTE AUSSI LA VERTICALE, ET C'ÉTAIT N1 DE LA VIDÉO DU
+// 2026-09-04 (Tâche NUA) :** un plafond exprimé en unités de BLOC rétrécit avec
+// le socle — 21 346 m à z9, 2 016 m à z13, sous les crêtes à z14 (quatorzième
+// confusion d'espaces). Ce n'est PAS ici qu'on le corrige : `k` est juste, la
+// similitude est juste ; c'est le plafond qui doit être en MÈTRES avant
+// d'entrer dans l'espace de bloc. `clouds2.js` le convertit par
+// `(cloudAltitudeM − moyenneM) × 56 / largeurBlocM × exagération` — facteur
+// **0,010 671 unité/m à z13** (bloc de 10 496 m, exagération 2) et
+// **0,000 667 unité/m à z9** (bloc de 167 933 m) ; `monde/nuages-metres.js`.
 let _ancreNuages = null
 function majNuagesGlobe() {
   if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
@@ -5569,7 +5594,16 @@ function majNuagesGlobe() {
   if (!ancre) { _ancreNuages = null; return }
   const largeur = largeurBlocM()
   if (!(largeur > 0)) { _ancreNuages = null; return }
-  const a = ancrageNuages({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  // ⛔ L'ANCRE EST À LA MOYENNE DU RELIEF, COMME LA CAMÉRA (`majCameraFond`),
+  // PAS À LA MER — Tâche NUA. Sans ces deux champs le ciel était posé
+  // `moyenneM` trop bas (751 m à z13, 1 104 m à z9) et la caméra relue en bloc
+  // d'autant trop haut : le « 4 % d'écart » de R20 §2. Même exagération que
+  // l'ancre de la caméra : celle du globe (voir la note de `majCameraFond`).
+  const a = ancrageNuages({
+    lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE,
+    altitudeAncreM: altitudeAncreBlocM(),
+    exageration: globe?.exaggeration > 0 ? globe.exaggeration : 0,
+  })
   groupeNuages.position.set(a.position[0], a.position[1], a.position[2])
   groupeNuages.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
   groupeNuages.scale.setScalar(a.echelle)
@@ -8624,6 +8658,7 @@ function shuffleLook() {
     cloudOpacity: +rnd(0.8, 1.8).toFixed(2),
     cloudContrast: +rnd(0.7, 1.6).toFixed(2),
     cloudAltitude: +rnd(3.5, 7).toFixed(1),
+    cloudAltitudeM: Math.round(rnd(4000, 7500) / 100) * 100, // mètres — Tâche NUA
     cloudAltSpread: +rnd(0.6, 1).toFixed(2),
     cloudScale: +rnd(3, 5).toFixed(1),
     windDir: Math.round(rnd(0, 359)),
