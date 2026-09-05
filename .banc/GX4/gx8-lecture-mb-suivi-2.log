@@ -1,0 +1,8 @@
+  37  headT=0.732  tracé= 16865 (bis  16865)  bruit=0/0  alt=4788  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(736,492) CENTRE  cam/sol=4256 m
+  38  headT=0.751  tracé= 16491 (bis  16198)  bruit=0/0  alt=4746  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(743,484) CENTRE  cam/sol=4598 m
+  39  headT=0.770  tracé= 15321 (bis  15321)  bruit=0/0  alt=4714  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(742,491) CENTRE  cam/sol=4585 m
+
+══ VERDICT gx8-mb-v2 · suivi ══
+  images sans tracé : 0/40 (k=)
+  médiane : 14893 px · min 2091 · bruit médian 0 · headT 0.022 → 0.770 (monotone true)
+  tête dans le tiers central : 40/40 · caméra sous le sol dessiné : 0/40

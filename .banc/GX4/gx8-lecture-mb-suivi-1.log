@@ -1,0 +1,49 @@
+studio fermé : .studio-close
+clic={"x":116,"y":155,"cls":"ce-pillbtn accent","texte":"▶ Lecture"}
+  avant={"headT":0,"lecture":false,"follow":true,"drone":false,"mode":"surface","alt":26484,"vis":true,"k":0.011432947399236948,"parent":"Scene","refus":0,"demZoom":11,"camSolM":null}
+  après={"headT":0.0035033333333002194,"lecture":true,"follow":true,"drone":true,"mode":"surface","alt":4518,"vis":true,"k":0.011432947399236948,"parent":"Scene","refus":0,"demZoom":11,"tete":{"px":718,"py":523,"tiersCentral":true,"devant":true},"camSolM":4241}
+   0  headT=0.022  tracé=  2159 (bis   1742)  bruit=0/421  alt=4683  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(742,491) CENTRE  cam/sol=4251 m
+   1  headT=0.041  tracé= 17776 (bis  17776)  bruit=0/0  alt=1299  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(703,547) CENTRE  cam/sol=743 m
+   2  headT=0.061  tracé= 18305 (bis  18365)  bruit=0/0  alt=1621  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(806,466) CENTRE  cam/sol=1241 m
+   3  headT=0.080  tracé=  8596 (bis   8528)  bruit=60/0  alt=1984  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(761,473) CENTRE  cam/sol=1804 m
+   4  headT=0.099  tracé=  3504 (bis   3503)  bruit=412/0  alt=5603  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(707,515) CENTRE  cam/sol=4910 m
+   5  headT=0.118  tracé=  4563 (bis   4563)  bruit=0/0  alt=5531  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(717,529) CENTRE  cam/sol=4723 m
+   6  headT=0.138  tracé=  4092 (bis   4547)  bruit=0/0  alt=5450  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(694,530) CENTRE  cam/sol=4569 m
+   7  headT=0.157  tracé= 24306 (bis  24304)  bruit=134/0  alt=1969  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(691,578) CENTRE  cam/sol=1531 m
+   8  headT=0.176  tracé= 24954 (bis  24954)  bruit=131/131  alt=1851  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(650,581) CENTRE  cam/sol=1024 m
+   9  headT=0.195  tracé= 19007 (bis  19007)  bruit=92/92  alt=1900  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(660,555) CENTRE  cam/sol=1271 m
+  10  headT=0.214  tracé= 17563 (bis  17800)  bruit=0/0  alt=1890  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(680,572) CENTRE  cam/sol=1316 m
+  11  headT=0.233  tracé=  5869 (bis   5869)  bruit=0/0  alt=5425  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(709,535) CENTRE  cam/sol=5398 m
+  12  headT=0.252  tracé=  5501 (bis   5501)  bruit=0/0  alt=5364  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(699,541) CENTRE  cam/sol=5151 m
+  13  headT=0.271  tracé=  5489 (bis   5489)  bruit=0/0  alt=5268  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(709,549) CENTRE  cam/sol=4742 m
+  14  headT=0.291  tracé=  5039 (bis   5039)  bruit=0/0  alt=5122  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(718,543) CENTRE  cam/sol=4495 m
+  15  headT=0.310  tracé=  4935 (bis   4935)  bruit=0/0  alt=5044  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(713,521) CENTRE  cam/sol=4307 m
+  16  headT=0.329  tracé=  5029 (bis   5029)  bruit=0/0  alt=5036  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(754,502) CENTRE  cam/sol=3926 m
+  17  headT=0.348  tracé= 20183 (bis  20108)  bruit=0/0  alt=1604  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(662,561) CENTRE  cam/sol=1473 m
+  18  headT=0.367  tracé=  5548 (bis   5548)  bruit=0/0  alt=5202  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(729,508) CENTRE  cam/sol=4877 m
+  19  headT=0.386  tracé= 22000 (bis  22149)  bruit=0/0  alt=1870  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(680,505) CENTRE  cam/sol=1837 m
+  20  headT=0.405  tracé=  6452 (bis   6452)  bruit=0/0  alt=5025  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(698,539) CENTRE  cam/sol=4911 m
+  21  headT=0.425  tracé=  6668 (bis   6668)  bruit=0/0  alt=5024  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(699,529) CENTRE  cam/sol=4798 m
+  22  headT=0.444  tracé= 14940 (bis  14843)  bruit=0/94  alt=1418  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(754,565) CENTRE  cam/sol=876 m
+  23  headT=0.463  tracé=  5748 (bis   6072)  bruit=0/321  alt=5187  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(742,499) CENTRE  cam/sol=4110 m
+  24  headT=0.482  tracé= 14632 (bis  14632)  bruit=0/0  alt=1830  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(663,516) CENTRE  cam/sol=1407 m
+  25  headT=0.501  tracé=  7190 (bis   7190)  bruit=0/0  alt=4949  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(700,523) CENTRE  cam/sol=5136 m
+  26  headT=0.521  tracé=  8733 (bis   8733)  bruit=0/0  alt=5000  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(709,512) CENTRE  cam/sol=5023 m
+  27  headT=0.540  tracé= 11627 (bis  11627)  bruit=0/0  alt=5137  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(713,479) CENTRE  cam/sol=4795 m
+  28  headT=0.559  tracé= 14360 (bis  14360)  bruit=0/0  alt=5361  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(725,486) CENTRE  cam/sol=5253 m
+  29  headT=0.579  tracé= 17025 (bis  17025)  bruit=0/0  alt=5491  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(688,510) CENTRE  cam/sol=5683 m
+  30  headT=0.598  tracé= 17427 (bis  17427)  bruit=0/0  alt=5487  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(699,496) CENTRE  cam/sol=5162 m
+  31  headT=0.617  tracé= 15950 (bis  15950)  bruit=0/0  alt=5422  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(755,501) CENTRE  cam/sol=5064 m
+  32  headT=0.636  tracé= 17233 (bis  17233)  bruit=0/0  alt=5324  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(744,508) CENTRE  cam/sol=4959 m
+  33  headT=0.655  tracé= 17159 (bis  17159)  bruit=0/0  alt=5151  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(746,490) CENTRE  cam/sol=5061 m
+  34  headT=0.674  tracé= 41953 (bis  41953)  bruit=0/0  alt=1610  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(693,510) CENTRE  cam/sol=1852 m
+  35  headT=0.693  tracé= 18457 (bis  18457)  bruit=0/0  alt=4917  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(711,492) CENTRE  cam/sol=4456 m
+  36  headT=0.712  tracé= 17194 (bis  17194)  bruit=0/0  alt=4844  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(735,490) CENTRE  cam/sol=4652 m
+  37  headT=0.731  tracé= 16864 (bis  16864)  bruit=0/0  alt=4789  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(736,492) CENTRE  cam/sol=4263 m
+  38  headT=0.750  tracé= 16598 (bis  16598)  bruit=0/0  alt=4746  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(742,484) CENTRE  cam/sol=4595 m
+  39  headT=0.770  tracé= 15338 (bis  15657)  bruit=0/0  alt=4714  lecture=true follow=true drone=true vis=true mode=surface z11  tête=(743,491) CENTRE  cam/sol=4587 m
+
+══ VERDICT gx8-mb-v1 · suivi ══
+  images sans tracé : 0/40 (k=)
+  médiane : 14940 px · min 2159 · bruit médian 0 · headT 0.022 → 0.770 (monotone true)
+  tête dans le tiers central : 40/40 · caméra sous le sol dessiné : 0/40
