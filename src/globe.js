@@ -4046,6 +4046,25 @@ async function fetchTile(z, x, y, plan) {
  * deux conventions de demi-pixel à faire coïncider, et le §1 de
  * `/threejs-optimisation` dit exactement ce qu'il faut en penser.
  */
+/**
+ * Les hauteurs aux (G+1)² nœuds du maillage d'une tuile — TRO.
+ *
+ * ⚠️ **EXACTEMENT `sampleHeights` AUX FRACTIONS `i/G`**, en doubles : la grille
+ * remplace les hauteurs AU BIT dans `_buildMesh`, et un maillage rebâti depuis
+ * elle est identique à celui bâti depuis `t.heights`
+ * (`test/fond-grille-tro.test.js` ①).
+ *
+ * @param {Float32Array} heights
+ * @param {number} G segments (`segmentsTuile`)
+ * @param {number} size taille de tuile en pixels
+ * @returns {Float64Array} (G+1)², ligne 0 = nord
+ */
+export function echantillonnerGrille(heights, G, size = 256) {
+  const grille = new Float64Array((G + 1) * (G + 1))
+  for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) grille[j * (G + 1) + i] = sampleHeights(heights, i / G, j / G, size)
+  return grille
+}
+
 export function sampleHeights(heights, u, v, size = 256) {
   // bilinear sample, u/v in [0,1], row 0 = north. Pixel CENTERS sit at
   // (i + 0.5)/size — the same convention the GPU uses when the fragment shader
@@ -7643,8 +7662,25 @@ export class Globe {
    */
   _refaireMaillagesDuFond() {
     let n = 0
+    // 🔴 TRO — la calotte du fond, en mercator : hors d'elle `echantillonnerFond`
+    // rend `null` et le maillage ne changerait pas ; on ne rebâtit que dedans,
+    // plus toute tuile bâtie sur un fond d'AVANT (elle porte encore sa mer).
+    const f = this._fondCrop
+    const calotte = f?.repere ? { cx: f.repere.cx, cy: f.repere.cy, demi: f.repere.demi * (f.portee || 1) } : null
+    const cleVoulue = f ? (this._cleFondPosee || cleFond(f)) : ''
     for (const t of this.tiles.values()) {
-      if (t.state !== 'ready' || !t.heights || !t.mesh) continue
+      if (t.state !== 'ready' || !t.mesh) continue
+      // ⛔ **`t.heights || t.grille`, ET PLUS `t.heights` SEUL — TRO.** Voir
+      // l'encart de `_buildMesh` : les tuiles que le crop dessine ne sont pas
+      // réservées, leurs hauteurs sont relâchées, et sans la grille elles
+      // gardaient la mer du fond d'avant (ou 0 m) — les marches et les
+      // rectangles rouges de La Réunion. Mesuré : 12 tuiles sur 36.
+      if (!t.heights && !t.grille) continue
+      const cleBatie = t.mesh.userData.fondCle ?? ''
+      // déjà bâtie sur CE fond : même clé, même surface (`cleFond`)
+      if (cleBatie === cleVoulue) continue
+      // sans fond ni avant ni après hors de la calotte : rien ne changerait
+      if (cleBatie === '' && calotte && !tuileDansCrop(t.z, t.x, t.y, calotte)) continue
       this.group.remove(t.mesh)
       t.mesh.geometry.dispose()
       libererMateriauTuile(this, t.mesh) // PF4 : jamais le matériau partagé
@@ -9637,10 +9673,33 @@ export class Globe {
     // cette méthode avec un `this` qui n'est pas un globe — même raison que le
     // `?.` de `gardeHauteurs`, en bas de cette fonction.
     const fond = this._fondCrop ?? null
+    // ══════ LA GRILLE DES NŒUDS EST RETENUE — TRO, les rectangles rouges ═══
+    //
+    // ⛔ **UNE TUILE SANS `t.heights` NE POUVAIT PAS ÊTRE REBÂTIE SUR LE FOND, ET
+    // C'ÉTAIT LE TROU.** Mesuré (La Réunion, `scripts/sonde-tro.mjs`, crop z12
+    // au repos, 36 tuiles dessinées) : **12 tuiles bâties sur un AUTRE fond que
+    // celui posé**, dont **4 avec la mer à 0 m** là où le champ dit −1 320 à
+    // −1 718 m — bâties pendant la descente, AVANT le fond, et jamais rebâties
+    // parce que `_refaireMaillagesDuFond` exigeait `t.heights`, relâché ici
+    // même dès le maillage. La réservation (`gardeHauteurs`) ne couvre que le
+    // zoom du socle ; les tuiles que le crop DESSINE sont un ou deux niveaux
+    // plus fines, donc jamais réservées. À l'écran : une nappe en marches
+    // d'escalier, et la jupe de 1,5 km × exagération de chaque plateau vue de
+    // trois quarts — le rectangle rouge dans la mer (`q_038`).
+    //
+    // ➡️ On retient les (G+1)² hauteurs ÉCHANTILLONNÉES AUX NŒUDS — tout ce que
+    // ce maillage lit de `t.heights` (les positions, les normales à ±1/G, la
+    // jupe, l'origine à (½,½) : que des nœuds). 625 doubles à z ≥ 6, 5 Kio par
+    // tuile, contre 256 Kio à 1 Mio pour `t.heights`. Les hauteurs restent la
+    // vérité quand elles sont là (une tuile rechargée ne relit pas une grille
+    // périmée) ; la grille ne sert qu'à REBÂTIR sans elles.
+    const grille = t.heights ? echantillonnerGrille(t.heights, G, t.size) : t.grille
+    if (!grille) throw new Error(`_buildMesh ${t.key} : ni hauteurs ni grille`)
+    t.grille = grille
     const posAt = (u, v, out) => {
       const { lat, lon } = tileToLatLon(t.x + u, t.y + v, t.z)
       const h = altitudeMaillage(
-        sampleHeights(t.heights, u, v, t.size),
+        grille[Math.round(v * G) * (G + 1) + Math.round(u * G)],
         fond ? echantillonnerFond(fond, lat, lon) : null,
       )
       return latLonToSphere(lat, lon, R_GLOBE + h * dispScale, out)
@@ -9813,6 +9872,10 @@ export class Globe {
     if (!this._matricesAuto) { mesh.updateMatrix(); mesh.matrixAutoUpdate = false }
     mesh.visible = false
     mesh.name = t.key
+    // 🔴 TRO — sur quel fond ce maillage a été bâti (`''` = aucun) : c'est ce
+    // que `_refaireMaillagesDuFond` lit pour rebâtir une tuile HORS de la
+    // nouvelle calotte qui porte encore la mer d'un fond d'avant.
+    mesh.userData.fondCle = fond ? (this._cleFondPosee || cleFond(fond)) : ''
     t.mesh = mesh
     this.group.add(mesh)
     // le bloc est peut-être DÉJÀ là (déplacement de fenêtre, tuile de remplacement)
@@ -10842,6 +10905,7 @@ export class Globe {
       t.texture?.dispose()
       t.texture = null
       t.heights = null
+      t.grille = null // TRO : une grille sans hauteurs neuves serait périmée
       t.size = 0
       // ⚠️ LE PLAN SE REDEMANDE AUSSI. Entre-temps la sonde a pu répondre, ou
       // la session a pu se replier sur AWS : rejouer l'ancien plan rechargerait
