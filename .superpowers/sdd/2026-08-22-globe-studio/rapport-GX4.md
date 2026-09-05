@@ -65,7 +65,7 @@ Ensemble du chantier, `git diff --stat bf54801..HEAD -- src/` :
 | … sommets enterrés > 5 m | **673** | **0** | `sousSol5: 0` |
 | … sommets sous la surface | — | **0** | `sousSol: 0` |
 | Camargue, 401 sommets sous la mer | à prouver | **0** | `.banc/GX4/gx7-drapage-camargue.log` (`sousSol: 0`, `sousSol5: 0`) |
-| 0 px hors socle à z13 | **358 px** | **à reprendre** — 205 px (cran 1), 225 px (cran 2), cran 0 aberrant | `.banc/GX4/gx7-horscrop.log` |
+| 0 px hors socle à z13 | **358 px** | **0 px de ruban** — 227 px hors du POLYGONE, dont 131 sur une tuile du socle et 96 posés par une étiquette ancrée dans le socle ; le polygone exclut 8,7 % du socle lui-même | `.banc/GX4/gx8-bord.log`, `gx8-vide.log`, `gx8-etiquette3.log` |
 | lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 5–7 img/40 sans tracé | **à re-mesurer après GX6** | logs `apres4-lecture-*` (antérieurs à GX5/GX6) |
 | position horizontale ≤ 2,3 px / ≤ 14 m | — | **à re-mesurer** | `apres-position.log` |
 | `boats` prouvé par pixels | — | **à re-mesurer** | `banc-gx4-bateaux.mjs` |
@@ -84,6 +84,56 @@ Le détail du drapage Mont-Blanc, tel que rendu par le banc du noteur
 Le même banc donne aussi l'écart au **bloc** (`"bloc"` : moy −4,41 · min −71,05
 · max +58,22). C'est justement la mesure que GX3 prenait pour la bonne : le
 bloc n'est PAS la surface dessinée, et c'est là que se logeaient les −176 m.
+
+## Le « 0 px hors socle » : ce que le polygone du noteur mesure vraiment
+
+Le banc du noteur projette **les quatre coins** du socle et compte les pixels de
+tracé hors du quadrilatère obtenu. Sur HEAD il en compte encore 227 à z13. On ne
+l'a pas réécrit — on a recopié son `dedans()` **au caractère**
+(`scripts/banc-gx8-bord.mjs`) et on lui a posé deux questions.
+
+### ① Le socle ne tient pas dans son propre polygone
+
+On échantillonne la **surface dessinée** du socle (grille 96 × 96, hauteur lue
+par `c._sol`, c'est-à-dire `hauteurMaillee` sur les tuiles allumées) et on la
+compte contre ce même polygone :
+
+| cran | points de la surface dessinée à l'écran | dedans | **HORS** | dépassement |
+|---|---|---|---|---|
+| z11 (41 km) | 644 | 0 | **644 (100 %)** | empreinte dégénérée : deux coins passent derrière la caméra, à **−191 880 px** |
+| z12 (20 km) | 2 890 | 2 645 | **245 (8,5 %)** | jusqu'à 3 542 px au-dessus du plus haut sommet du polygone |
+| z13 (10 km) | 7 267 | 6 637 | **630 (8,7 %)** | jusqu'à 979 px |
+
+Un quadrilatère plat passant par quatre coins ne peut pas contenir un relief de
+3 000 m. **« Hors polygone » n'est donc pas « hors socle »**, et le seuil « 0 »
+est inatteignable par construction — un tracé parfait le manquerait aussi. Le
+cran z11 le rend criant : le banc y annonçait « 100 % dehors » depuis GX3.
+
+### ② Ce qui reste n'est pas du ruban
+
+Chaque pixel de tracé hors polygone reçoit un rayon depuis la caméra du globe :
+
+| cran | hors polygone | sur une tuile **du socle** | sur `crop-*` | sur une tuile **hors socle** | ne touchant rien |
+|---|---|---|---|---|---|
+| z11 | 20 176 | 20 175 | 1 | **0** | 0 |
+| z12 | 415 | 415 | 0 | **0** | 0 |
+| z13 | 227 | 131 | 0 | **0** | 96 |
+
+**Zéro pixel de tracé sur une tuile hors socle, aux trois crans.** Les 96 de z13
+sont attribués **par différence** (`scripts/banc-gx8-vide.mjs`, la méthode du
+noteur) : on éteint un enfant du groupe GPX à la fois et on recompte le jeu de
+pixels visé. Un seul enfant les porte — **91 sur 91** disparaissent ; les cinq
+autres n'en retirent que 3, le bruit. C'est une **étiquette de texte**, ancrée
+en `(15,49 · −27,7)` ; le rayon tiré à son ancre frappe la tuile de socle
+`13/4254/2913`, et le sprite est dessiné **16 px au-dessus de son ancre**
+(`yb = v.y + 1,25`, le décalage voulu du libellé) — au-dessus de la ligne de
+crête, donc sur le ciel. Ce n'est pas un débordement : c'est un nom qui flotte
+au-dessus du sommet qu'il nomme.
+
+La sonde du bord (`scripts/banc-gx8-etiquette.mjs`) le confirme des deux côtés :
+le repère de crop tenu par le poseur est **identique** à celui du globe aux
+trois crans (et l'uniforme partagé aussi), et **0 ponctuel visible sur 11 n'est
+hors du socle vivant**.
 
 ## La preuve de morsure — 10 mutations sur 10
 
@@ -150,10 +200,25 @@ test, jamais la ligne de `main.js`. Elle EXÉCUTE maintenant cette ligne.
 - « Une garde verte prouve que le chemin est exécuté. » **Réfuté par le noteur
   lui-même** : 5 gardes sur 7 restaient vertes sous mutation. Une garde ne vaut
   que si elle EXÉCUTE le chemin du produit, et la mutation le prouve.
+- « Les 96 px restants viennent d'un repère de crop FIGÉ : `sol-globe.js` copie
+  `{cx, cy, demi}` par VALEUR là où les uniformes sont partagés par référence —
+  c'est le même défaut que GX5, du côté processeur cette fois. » **Réfuté par la
+  mesure** : le repère du poseur est identique à celui du globe aux trois crans,
+  et aucun ponctuel visible n'est hors du socle vivant. Le copié-par-valeur est
+  réel dans le code, mais le re-drapage refait le poseur : il ne produit aucun
+  écart au repos. La cause est ailleurs — une étiquette qui flotte au-dessus de
+  sa crête. J'allais éditer `src/` sur une hypothèse plausible et fausse.
+- « `Raycaster` nomme l'objet qui pose un pixel. » **Réfuté** : three.js
+  raycaste les objets **invisibles** aussi. Le premier passage désignait un
+  `Line` de marqueur de village éteint depuis toujours. L'attribution ne vaut
+  que **par différence** — allumé / éteint / rallumé.
+- « `poseur.versLatLon` convertit bloc → lat/lon. » **Réfuté** : c'est un
+  ARGUMENT de `creerPoseurGlobe`, pas une clé de `etat`. L'appeler rendait
+  `undefined`, et ma sonde répondait « dans le socle » pour tout point : une
+  colonne vide qui avait l'air verte. Exactement la faute de GX5 (`aCrop` contre
+  `aMerc`), dans un banc au lieu d'un nuanceur.
 
 ## Reste à faire (ce tour)
 
-- reprendre `banc-gx3-horscrop.mjs` à z13 : 205/225 px dehors, et un cran 0 dont
-  l'empreinte relevée est aberrante — savoir si c'est le produit ou le banc ;
 - relancer la lecture AU CLIC (40 × 3 × 2) **après** GX6, position, bateaux, coût ;
 - `npm run audit:tests`.
