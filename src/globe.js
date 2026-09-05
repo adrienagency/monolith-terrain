@@ -819,6 +819,23 @@ void main() {
     float sigma2 = varianceCoxMunk(uMerVentMs);
     float glitter = glitterSoleil(dot(N, H), max(dot(V, H), 0.0), nDotV, sigma2) * max(dot(L, hautMonde), 0.0);
     col += uSunColor * glitter * uMerSoleilFx * vRichesse * mix(0.05, 1.0, uMerJour);
+    // ══════ LE MIROITEMENT DES VAGUES DE COTE — Tache BAT, ET IL RESTE ═════
+    // ⛔ CETTE LIGNE EST CE QU ADRIEN APPELLE « LA BATHYMETRIE », ET EAU L AVAIT
+    // RETIREE. Mesure (banc-bat.mjs, Minorque 39,78/4,10, z12, A/B dans la meme
+    // page, temoin 1,79 -> 1,79) : le gradient d ecran par blocs de 8 px tombe
+    // de 6,4 a 1,8 des que ce terme manque, et de rien d autre — ni le Fresnel
+    // de Schlick, ni le ciel reflechi, ni la lueur, ni la crete moutonnante
+    // (chacun teste seul). Le Beckmann de Cox & Munk est NORMALISE : au pic il
+    // rend F * D / (4 N.V), soit ~0,15 a 10 m/s, quatre fois moins que ce
+    // pow(N.H, 110) — et il n allume que le reflet du soleil. Or ce sont les
+    // pentes des vagues de cote (shoreSurf, la houle qui se leve sur le haut
+    // fond) que ce lobe large accroche : la mer scintille sur le plateau et
+    // s eteint sur la fosse, et c est ainsi que le fond se LIT a travers la
+    // nappe. Sans lui, il ne reste que la teinte de profondeur — une bathy z8
+    // agrandie seize fois : « des dalles de flou completes dans la mer ».
+    // Les deux termes s ajoutent : le Beckmann garde la trainee du soleil
+    // (rapport-EAU.md), celui-ci garde le fond lisible. (Pas d accent : GLSL.)
+    col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
     // ③ la lueur sous-surface des cretes a contre-jour (Sea of Thieves 2018,
     //    Atlas 2019) : turquoise du glacis, dans les cretes, quand on regarde
     //    vers le soleil. Ce qui est reflechi (fres) n entre pas dans l eau.
