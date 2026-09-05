@@ -533,6 +533,36 @@ const DRAPE_LIFT = 0.012
 // SOMMETS du tracé — tête de course, curseur, profil, étiquettes.
 // Hors globe (`?terre=deux`), `DRAPE_LIFT` reste, au bit près.
 const MARGE_SOL_M = 2
+
+// ══════════ LE TRACÉ PASSE APRÈS LE VOILE NUAGEUX — GX6 ① ═══════════════════
+//
+// ⛔ **DEUX À TROIS IMAGES SUR QUARANTE, EN VOL DE POURSUITE, N'AVAIENT PAS UN
+// PIXEL DE TRACÉ** (banc du noteur, Mont-Blanc, phase `suivi` : k = 14, 15, 16,
+// caméra à ~5 000 m). Attribution mesurée image par image
+// (`scripts/banc-gx6-cause.mjs`, chaque reprise comptée PAR DIFFÉRENCE comme le
+// noteur) :
+//   · nuages RETIRÉS de la scène → **5 664 px de tracé reviennent** ;
+//   · `uCropOn = 0` (l'écrêtage au bord du socle) → 0 px : ce n'est PAS lui ;
+//   · groupe GPX à `renderOrder = 50` → **5 181 px** : c'est l'ORDRE.
+//
+// La couverture volumétrique (`clouds2.js`) est dessinée à `renderOrder = 30`,
+// transparente, **sans test de profondeur** — délibérément : « c'est la marche
+// elle-même qui gère l'occlusion, via `terrainH()` ». Elle marche donc contre
+// le CHAMP DE HAUTEURS DU RELIEF, qui ne connaît que le sol. Un ruban posé 2 m
+// au-dessus de ce sol est, pour elle, derrière lui : elle le peint
+// intégralement, et la lecture s'arrête sur un aplat blanc.
+//
+// Le 30 des nuages dit « au-dessus de tout ce qui est POSÉ SUR LE RELIEF »
+// (mer animée 18, eau OSM drapée 26). Le tracé n'est pas une couche de carte :
+// c'est le SUJET de la lecture. Il passe donc après le voile — comme un
+// cartouche, pas comme un lac. `+34 = 30 + 4` : le voile, plus la place des
+// quatre pièces du tracé (halo 4, ruban 6, ligne 6, sillage 7) dans leur ordre
+// relatif inchangé, et sans empiéter sur les cartouches (`ancrage-cartouche`).
+// ⚠️ Seules les pièces TRANSPARENTES sont concernées : three.js vide toute la
+// file opaque avant la file transparente, quel que soit le `renderOrder` — les
+// étiquettes et les arches (opaques) restent sous le voile, comme le relief
+// qu'elles annotent.
+const ORDRE_VOILE = 34
 // Le ruban (voir ruban-trace.js). Le PAS est ce qui l'empêche de traverser le
 // relief : 0,07 unité, soit plus fin que la maille du terrain la plus dense
 // (~0,11 pour un bloc de 56 unités en 512 segments), donc la corde entre deux
@@ -1333,7 +1363,7 @@ export class GpxLayer {
 
     this.rubanMat = mat
     this.ruban = new THREE.Mesh(geo, mat)
-    this.ruban.renderOrder = 6 + ro
+    this.ruban.renderOrder = 6 + ORDRE_VOILE + ro
     this.ruban.frustumCulled = false
     this.group.add(this.ruban)
 
@@ -1469,7 +1499,7 @@ export class GpxLayer {
     this.sillageMat = mat
     this.sillage = new THREE.Mesh(geo, mat)
     // au-dessus du ruban : additif, il ne masque rien de toute façon
-    this.sillage.renderOrder = 7 + ro
+    this.sillage.renderOrder = 7 + ORDRE_VOILE + ro
     this.sillage.frustumCulled = false
     this.sillage.visible = false
     this.group.add(this.sillage)
@@ -1508,7 +1538,7 @@ export class GpxLayer {
     this._coupeALaFenetre(this.lineMat)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
-    this.line.renderOrder = 6 + ro
+    this.line.renderOrder = 6 + ORDRE_VOILE + ro
     this.group.add(this.line)
 
     // glow: a second, wider, additive, low-opacity halo behind the main line
@@ -1530,7 +1560,7 @@ export class GpxLayer {
       this._coupeALaFenetre(this.glowMat)
       this.glowLine = new Line2(glowGeo, this.glowMat)
       this.glowLine.computeLineDistances()
-      this.glowLine.renderOrder = 4 + ro
+      this.glowLine.renderOrder = 4 + ORDRE_VOILE + ro
       this.group.add(this.glowLine)
     }
 

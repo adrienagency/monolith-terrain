@@ -379,3 +379,33 @@ test('④ M4 — la fabrique déposée suit le calque AJOUTÉ ENSUITE : son ruba
   }
   assert.ok(min >= -0.5, `le second ruban passe sous la surface dessinée (${min.toFixed(2)} m)`)
 })
+
+// ───────────────────────── ⑤ le tracé passe APRÈS le voile nuageux (GX6 ①)
+
+// ⛔ **2 à 3 images sur 40 en vol de poursuite n'avaient pas UN pixel de tracé**
+// (banc du noteur, Mont-Blanc). Attribution mesurée
+// (`scripts/banc-gx6-cause.mjs`, chaque reprise comptée par différence) :
+// nuages retirés → 5 664 px reviennent ; `uCropOn = 0` → 0 px ; groupe GPX à
+// `renderOrder = 50` → 5 181 px. La couverture volumétrique est dessinée à 30,
+// transparente et SANS test de profondeur (elle gère son occlusion en marchant
+// contre le champ de hauteurs du RELIEF, qui ignore le ruban) : tout ce qui est
+// transparent et ordonné avant elle est repeint.
+// Cette garde EXÉCUTE le calque et lit le `renderOrder` du ruban réellement
+// construit, confronté au 30 lu dans `clouds2.js` — le couplage est entre deux
+// fichiers, donc c'est la valeur de l'autre qui est extraite, pas la nôtre.
+test('⑤ le ruban et son sillage sont dessinés APRÈS le voile nuageux (sinon la lecture s’arrête sur un aplat blanc)', () => {
+  const src = readFileSync(new URL('../src/clouds2.js', import.meta.url), 'utf8')
+  const m = src.match(/mesh\.renderOrder\s*=\s*(\d+)/)
+  assert.ok(m, 'clouds2.js n’ordonne plus son maillage : relire cette garde')
+  const voile = +m[1]
+  const l = calque(fauxGlobe())
+  const pieces = [['ruban', l.ruban], ['sillage', l.sillage], ['ligne', l.line], ['halo', l.glowLine]].filter(([, o]) => o)
+  assert.ok(pieces.length >= 2, `trop peu de pièces de tracé construites (${pieces.length})`)
+  for (const [nom, o] of pieces) {
+    assert.ok(o.material?.transparent, `${nom} n’est plus transparent : il ne passe plus par la file où le voile le repeint, relire cette garde`)
+    assert.ok(o.renderOrder > voile,
+      `le ${nom} est dessiné à ${o.renderOrder}, AVANT le voile nuageux (${voile}) : la couverture le repeint et l’image de lecture est vide`)
+  }
+  // et l'ordre RELATIF des pièces est celui d'avant : halo < ruban ≤ ligne < sillage
+  assert.ok(l.sillage.renderOrder > l.ruban.renderOrder, 'le sillage doit rester au-dessus du ruban')
+})

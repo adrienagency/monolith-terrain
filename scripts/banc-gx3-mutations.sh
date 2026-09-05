@@ -4,8 +4,8 @@
 # rougissent, et combien de tests. Une mutation que rien ne rougit est un trou.
 set -u
 cd "$(dirname "$0")/.."
-TESTS="test/gpx-chemin-ruban.test.js test/gpx-scene-globe.test.js test/gpx-adoption-scene.test.js test/gpx-pose-globe.test.js test/visibilite-surface.test.js test/gpx-layers.test.js test/gpx.test.js test/sol-globe.test.js"
-FICHIERS="src/main.js src/gpx.js src/gpx-layers.js src/monde/sol-globe.js"
+TESTS="test/gpx-chemin-ruban.test.js test/drone-cam.test.js test/butee-sol.test.js test/gpx-scene-globe.test.js test/gpx-adoption-scene.test.js test/gpx-pose-globe.test.js test/visibilite-surface.test.js test/gpx-layers.test.js test/gpx.test.js test/sol-globe.test.js"
+FICHIERS="src/main.js src/gpx.js src/gpx-layers.js src/monde/sol-globe.js src/drone-cam.js"
 md5 () { for f in $FICHIERS; do md5sum "$f"; done; }
 AVANT=$(md5)
 resume () { # $1 = nom
@@ -45,5 +45,18 @@ resume "M6" ; restaure
 echo "── M7 : le sol lu sur le bloc au lieu du globe (_sol ignore le poseur)"
 sed -i 's/^    return this\._poseur ? this\._poseur\.hauteur(x, z) : (this\.terrain?\.sample?\.(x, z) ?? 0)$/    return this.terrain?.sample?.(x, z) ?? 0/' src/gpx.js
 resume "M7" ; restaure
+
+echo "── M8 : le ruban repasse AVANT le voile nuageux (renderOrder 6, GX6 ①)"
+sed -i 's/^    this\.ruban\.renderOrder = 6 + ORDRE_VOILE + ro$/    this.ruban.renderOrder = 6 + ro/' src/gpx.js
+resume "M8" ; restaure
+
+echo "── M9 : le recalage de la visée retiré (la tête peut rester derrière la caméra, GX6 ②)"
+sed -i 's/^    if (_look\.lengthSq() > 1e-12 \&\& _look\.dot(_fwd) <= 0) this\._viseDisp\.copy(head)$/    \/\/ mutation M9/' src/drone-cam.js
+resume "M9" ; restaure
+
+echo "── M10 : le redressement au sol recombat le vol de poursuite (GX6 ③)"
+sed -i 's|^  if (drone\.active \&\& params\.gpxFollow \&\& gpxLayer\.isPlaying()) return$|  // mutation M10|' src/main.js
+resume "M10" ; restaure
+
 git diff --stat -- src/ | tail -1
 echo "diff src vide : $([ -z "$(git diff -- src/)" ] && echo OUI || echo NON)"

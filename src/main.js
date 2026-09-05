@@ -14264,6 +14264,32 @@ function updateCameraMotion(dt) {
 // que celle de la rotation rigide elle-même.
 function redresserSurLeSol() {
   if (!terrain?.sample) return
+  // ⛔ **PAS PENDANT LE VOL DE POURSUITE — GX6 ③.** Ce redressement repose la
+  // caméra sur la sphère autour de `controls.target`, à distance constante,
+  // **sans la ré-viser** : en orbite c'est sans conséquence (`controls.update()`
+  // ré-oriente à l'image suivante), pendant un vol de poursuite c'est le
+  // désastre. Mesuré (`scripts/banc-gx6-qui.mjs`, puis `banc-gx6-pile.mjs` qui
+  // piège les écritures de `camera.position` et garde la pile d'appel) :
+  //   · après `drone.updateAt`, caméra (−23,64 · 6,35 · −16,22), avant·tête
+  //     **0,999** — le drone fait son travail ;
+  //   · au relevé, caméra (0,92 · 2,98 · 9,74) — **39 unités plus loin**, posée
+  //     par cette fonction, orientation inchangée, donc **176,5° de sa propre
+  //     cible** et avant·tête **−0,13** ; la tête sort du cadre à ndc y ≈ +26
+  //     et l'image de lecture n'a **pas un pixel de tracé** (Chamonix, 4 images
+  //     sur 40, k = 0…3).
+  // `followPivot` et `controls.update` ne sont appelés ni l'un ni l'autre de
+  // tout le vol (0 appel contre 330 `updateAt`) : c'est bien cette écriture-ci.
+  //
+  // Le vol a DÉJÀ sa garde au sol, et elle est double : `_desired.y` relevé à
+  // `sol + clearance` AVANT l'amortissement, puis une butée dure sur la pose
+  // réalisée (`drone-cam.js`, `_applyPose`). Le banc du noteur le confirme à
+  // chaque tracé et à chaque phase : **caméra sous le sol dessiné 0/40**. Deux
+  // butées qui se disputent la même caméra, ce n'est pas deux fois plus de
+  // sécurité — c'est celle qui écrit en dernier qui gagne, et celle-ci ne vise
+  // pas. Même arbitrage, mot pour mot, que la correction de pivot juste en
+  // dessous : « pendant un balayage de pose, la machine pose elle-même caméra
+  // ET cible : une correction les combattrait ».
+  if (drone.active && params.gpxFollow && gpxLayer.isPlaying()) return
   const d = controls.getDistance()
   if (!(d > 0)) return
   const phi = controls.getPolarAngle()
