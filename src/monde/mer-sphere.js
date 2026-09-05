@@ -118,6 +118,7 @@
 // chiffre est dans le compte rendu.
 
 import { latLonDeLocal } from './crop-sphere.js'
+import { biseauSocleActif } from '../flags.js' // pur : aucune importation, sûr sous node
 import { MERCATOR_LAT_MAX } from './seuil-socle.js'
 import { repereLocalCrop, surSphere, contourCrop, PAS_CONTOUR } from './parois-crop.js'
 import {
@@ -626,7 +627,7 @@ export function construireJupeMer({
   forme = { coin: 0, expo: 2 },
   basY,
   hauteur = 0,
-  retrait = RETRAIT_EAU_CROP,
+  retrait = retraitEauCrop(),
   retraitBas = undefined,
   pas = PAS_CONTOUR,
 } = {}) {
@@ -1001,6 +1002,27 @@ export const RETRAIT_EAU_CROP = (0.16 + 0.06) / (COTE_CROP_UNITES / 2)
  */
 export const MARGE_EAU_CROP = 0.06 / (COTE_CROP_UNITES / 2)
 
+/**
+ * Le retrait APPLIQUÉ à la nappe et au rideau — l'interrupteur du biseau (BIS).
+ *
+ * > **Adrien, 2026-09-05** : *« On va retirer le retrait du biseau qui pose
+ * > plus de problèmes qu'autre chose. »*
+ *
+ * Allumé (`FLAGS.biseauSocle`) : `RETRAIT_EAU_CROP`, chanfrein + marge, le
+ * dépôt d'avant au bit près. Éteint (le défaut) : **la marge seule** — le
+ * chanfrein n'existe plus (`parois-crop.js`, `fractionChanfreinCrop`), le mur
+ * est à `d = 0`, et l'eau se tient à `SOCLE_MARGE_EAU` en dedans de lui.
+ * ⚠️ **PAS ZÉRO, ET CE N'EST PAS UN RESTE DE BISEAU** : à retrait nul le
+ * rideau d'eau serait dans le PLAN du mur (conflit de profondeur sur tout le
+ * périmètre, « on voit l'eau à travers le bloc »), et `bordDeMer` rendrait un
+ * fondu de largeur nulle — un `smoothstep(a, a, x)` que GLSL ne définit pas.
+ * La marge est la définition de « où finit le bloc pour l'eau » que
+ * `plinth.js` a écrite pour cette raison-là ; elle survit au biseau.
+ */
+export function retraitEauCrop(biseau = biseauSocleActif()) {
+  return biseau ? RETRAIT_EAU_CROP : MARGE_EAU_CROP
+}
+
 // ⛔ **`FRACTION_BANDE_BORD` A ÉTÉ RETIRÉE, ET C'EST LE DÉFAUT ② QUI L'EMPORTE.**
 // Elle valait 0,5 et disait « le fondu court sur la moitié de l'anneau
 // EXTÉRIEUR ». Depuis que la nappe s'arrête à l'emprise du socle, il n'y a plus
@@ -1063,8 +1085,10 @@ export const MARGE_EAU_CROP = 0.06 / (COTE_CROP_UNITES / 2)
  *   la frontière du crop (0 = la frontière, négatif = DEDANS)
  */
 export function bordDeMer() {
-  const fin = -RETRAIT_EAU_CROP
-  return { debut: fin - RETRAIT_EAU_CROP, fin }
+  // `retraitEauCrop()` : chanfrein + marge biseau allumé, la marge seule éteint
+  const retrait = retraitEauCrop()
+  const fin = -retrait
+  return { debut: fin - retrait, fin }
 }
 
 // ══════════ ⑧ LA COUPE PLATE À LA JUPE — D24 ═══════════════════════════════

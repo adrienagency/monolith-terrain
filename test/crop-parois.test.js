@@ -61,6 +61,7 @@ import {
   FRACTION_PROFONDEUR,
   FRACTION_CHANFREIN,
   FRACTION_ARRONDI,
+  BANDE_JUPE_MUR,
   ARRONDI_SEG,
   PART_MUR_MAX,
   PAS_CONTOUR,
@@ -85,6 +86,16 @@ import { RETRAIT_EAU_CROP } from '../src/monde/mer-sphere.js'
 import { COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
 import * as THREE from 'three'
 import { tileToLatLon, R_GLOBE, EARTH_RADIUS_M } from '../src/geo.js'
+import { FLAGS } from '../src/flags.js'
+
+// ⚠️ **BIS, 2026-09-05 — CES TESTS DÉCRIVENT LE RÉGIME « BISEAU ALLUMÉ ».**
+// Adrien a décidé d'éteindre les biseaux du socle et leur retrait
+// (`FLAGS.biseauSocle = false` par défaut) ; le code et ses lois restent, et
+// c'est ici qu'on les tient. On rallume donc l'interrupteur pour ce fichier —
+// un processus par fichier de test, rien ne fuit. Le défaut ÉTEINT est couvert
+// par `test/biseau-socle.test.js`, qui prouve aussi que « rallumé » rend le
+// solide d'avant au bit près.
+FLAGS.biseauSocle = true
 
 // Les réglages par défaut du produit — `main.js:588` et `main.js:590`, les mêmes
 // que ceux dont `test/crop-sphere.test.js` se sert.
@@ -1871,7 +1882,13 @@ test('P14 · `construireParoisCrop` POSE le retrait, et dans la MONNAIE du demi-
   const gros = bati({ fractionChanfrein: FRACTION_CHANFREIN * 2 })
   assert.ok(Math.abs(gros.retrait / d.retrait - 2) < 1e-9, `doublé : ${gros.retrait / d.retrait}`)
   const vif = bati({ fractionChanfrein: 0 })
-  assert.equal(vif.retrait, 0, 'sans chanfrein, le mur ne rentre pas : rien à couper')
+  // ⚠️ **BIS, 2026-09-05 — SANS CHANFREIN, ON COUPE QUAND MÊME.** Ce test
+  // exigeait `0` (« le mur ne rentre pas : rien à couper »). Faux depuis que le
+  // mur vertical est le RÉGIME PAR DÉFAUT : à `d = 0` il est dans le plan des
+  // jupes de bord, et c'est l'état d'avant P13 — 7 traînées sur 10. La bande
+  // vaut alors `BANDE_JUPE_MUR`, la largeur qu'avait le chanfrein.
+  assert.equal(vif.retrait, BANDE_JUPE_MUR, 'sans chanfrein, la bande de P14 vaut BANDE_JUPE_MUR')
+  assert.ok(Math.abs(BANDE_JUPE_MUR - 2 * FRACTION_CHANFREIN) < 1e-15)
   // et le retrait DISPARAÎT avec les parois
   const faux2 = { _parois: {}, _retraitJupeCrop: 0.5, _retaillerJupes: () => 0, group: new THREE.Group() }
   faux2._parois = { geometry: { dispose() {} }, material: { dispose() {} } }

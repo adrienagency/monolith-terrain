@@ -5,6 +5,16 @@ import { createHash } from 'node:crypto'
 import { bordsExterieurs, masqueDepuisContour } from '../src/damier-bords.js'
 import { computeSlab, buildSlabWalls } from '../src/plinth.js'
 import { BlockGrid } from '../src/block-grid.js'
+import { FLAGS } from '../src/flags.js'
+
+// ⚠️ **BIS, 2026-09-05 — CES TESTS DÉCRIVENT LE RÉGIME « BISEAU ALLUMÉ ».**
+// Adrien a décidé d'éteindre les biseaux du socle et leur retrait
+// (`FLAGS.biseauSocle = false` par défaut) ; le code et ses lois restent, et
+// c'est ici qu'on les tient. On rallume donc l'interrupteur pour ce fichier —
+// un processus par fichier de test, rien ne fuit. Le défaut ÉTEINT est couvert
+// par `test/biseau-socle.test.js`, qui prouve aussi que « rallumé » rend le
+// solide d'avant au bit près.
+FLAGS.biseauSocle = true
 
 // convention d'axes de computeSlab : z=-HALF est le NORD, z=+HALF le SUD,
 // x=+HALF l'EST, x=-HALF l'OUEST. j croît vers le sud (z croissant).

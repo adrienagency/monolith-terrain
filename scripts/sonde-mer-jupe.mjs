@@ -55,6 +55,8 @@ const DEMENAGE = opt('--demenage', '0,20,-20').split(',').map(Number)
 const ELEV = Number(opt('--elevation', '34'))
 const AZIM = Number(opt('--azimut', '45'))
 const COUT = opt('--cout', '1') !== '0'
+// BIS : une chaîne de requête collée à l'adresse (`?biseau=1` rallume le biseau)
+const ADRESSE = opt('--adresse', '')
 const W = 1280, H = 800
 const CX = W / 2, CY = H / 2
 
@@ -77,7 +79,7 @@ async function pageNeuve() {
 
 async function neuf() {
   // ⛔ AUCUN HASH : voir l'en-tête.
-  await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 90000 })
+  await page.goto(`http://127.0.0.1:${PORT}/${ADRESSE}`, { waitUntil: 'domcontentloaded', timeout: 90000 })
   await page.waitForFunction('!!(window.__exp && window.__exp.globe && window.__exp.modes)', { timeout: 120000 })
   await page.waitForFunction("!!document.getElementById('loading')?.classList.contains('hidden')", { timeout: 180000 })
   for (let k = 0; k < 8; k++) {

@@ -9,6 +9,7 @@ import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
 import { TEXTURE_BUILDERS, microRoughnessTextures, rugositeRecentree } from './material-textures.js'
 import { exposantCoin, arcCoin } from './fenetre-clip.js' // module sans dépendance : pas de cycle
 import { masqueDepuisContour } from './damier-bords.js' // idem : pur, aucune importation
+import { biseauSocleActif } from './flags.js' // pur : aucune importation, sûr sous node
 
 const HALF = TERRAIN_SIZE / 2
 const UVSCALE = 6 // world units per texture tile on the socle walls
@@ -77,15 +78,15 @@ export const SOCLE_CHANFREIN = 0.16 // largeur ET profondeur du liseré, en unit
 export const SOCLE_MARGE_EAU = 0.06 // de quoi l'eau reste EN DEDANS du mur
 
 /** Le rayon du mur du socle sous le chanfrein — la vraie silhouette du bloc. */
-export function rayonMurSocle(chanfrein = SOCLE_CHANFREIN) {
+export function rayonMurSocle(chanfrein = chanfreinSocle()) {
   return HALF - Math.max(0, chanfrein)
 }
 /** Où l'eau doit s'arrêter pour rester dans le bloc, quoi qu'il arrive. */
-export function rayonEauDansSocle(chanfrein = SOCLE_CHANFREIN) {
+export function rayonEauDansSocle(chanfrein = chanfreinSocle()) {
   return rayonMurSocle(chanfrein) - SOCLE_MARGE_EAU
 }
 /** Le rayon de coin correspondant : rentrer d'une distance d réduit d'autant. */
-export function rayonCoinEau(coinSocle, chanfrein = SOCLE_CHANFREIN) {
+export function rayonCoinEau(coinSocle, chanfrein = chanfreinSocle()) {
   return Math.max(0.05, coinSocle - Math.max(0, chanfrein) - SOCLE_MARGE_EAU)
 }
 
@@ -94,6 +95,27 @@ export const SOCLE_ARRONDI_SEG = 3 // segments de l'arc. 3 suffit AVEC les
 // normales lisses : c'est la normale qui fait l'arrondi, la silhouette ne se
 // lit qu'au contre-jour. Chaque segment de plus coûte 2 triangles par point
 // d'anneau, et l'anneau en compte près de trois mille.
+
+// ══════════ L'INTERRUPTEUR DU BISEAU — BIS, 2026-09-05 ══════════════════════
+//
+// > **Adrien** : *« Pour l'instant on peut les supprimer pour éviter la
+// > problématique. »* — *« On va retirer le retrait du biseau. »*
+//
+// `SOCLE_CHANFREIN` et `SOCLE_ARRONDI` restent les RÉGLAGES du biseau ; ce qui
+// est APPLIQUÉ passe par ces deux lectures. Éteint (`FLAGS.biseauSocle`), les
+// deux valent 0 : arête vive en haut, arête vive en bas, mur à `HALF` — et
+// l'eau à `HALF − SOCLE_MARGE_EAU`, parce que la marge n'est PAS le biseau
+// (voir « OÙ EST LA PEAU DU BLOC » ci-dessus : sans elle, le flanc d'eau et le
+// mur sont coplanaires). Allumé : les constantes, au bit près.
+/** Le chanfrein APPLIQUÉ au socle, en unités monde — 0 quand le biseau est éteint. */
+export function chanfreinSocle(biseau = biseauSocleActif()) {
+  return biseau ? SOCLE_CHANFREIN : 0
+}
+/** Le congé APPLIQUÉ au socle, en unités monde — 0 quand le biseau est éteint. */
+export function arrondiSocle(biseau = biseauSocleActif()) {
+  return biseau ? SOCLE_ARRONDI : 0
+}
+
 export const SOCLE_AO_BANDE = 0.12 // hauteur de la cuisson, en fraction du mur
 export const SOCLE_AO_FORCE = 0.2 // assombrissement au contact. Au-delà de ces
 // deux valeurs on ne cuit plus un contact, on peint une vignette.
@@ -229,7 +251,7 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
 // tracés, c'est deux occasions de diverger — un masque décalé d'un sommet ne se
 // voit pas en test unitaire, il se voit à l'écran. `masqueArrondi` gagne quand
 // les deux sont donnés.
-export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE, aoBande = null, arrondi = SOCLE_ARRONDI, arrondiSeg = SOCLE_ARRONDI_SEG, masqueArrondi = null, bords = null } = {}) {
+export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = chanfreinSocle(), aoForce = SOCLE_AO_FORCE, aoBande = null, arrondi = arrondiSocle(), arrondiSeg = SOCLE_ARRONDI_SEG, masqueArrondi = null, bords = null } = {}) {
   const slab = computeSlab(sample, depth, resolution, cornerR, cornerExp)
   const ring = slab.ring
   const baseY = baseYFloor != null ? Math.min(baseYFloor, slab.baseY) : slab.baseY

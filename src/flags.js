@@ -323,6 +323,28 @@ export const FLAGS = {
   //
   // `?soleil=heure` l'essaie, `?soleil=camera` (ou `?soleil=0`) le coupe.
   soleilHeureMonde: true,
+
+  // LE BISEAU DU SOCLE — chanfrein haut, congé bas, et le RETRAIT qu'ils
+  // imposent à la mer et aux jupes de tuiles. Mission B du 2026-09-05 (BIS).
+  //
+  // > **Adrien, 2026-09-05** : *« Jupe de la mer non ok, je pense qu'il y a un
+  // > problème avec les biseaux de bords. Pour l'instant on peut les supprimer
+  // > pour éviter la problématique. »* — *« On va retirer le retrait du biseau
+  // > qui pose plus de problèmes qu'autre chose. »*
+  //
+  // ⛔ **OFF PAR DÉCISION, PAS PAR PRUDENCE — ET LE CODE RESTE.** Éteint :
+  // arête franche à angle droit (chanfrein 0, congé 0), socle = exactement
+  // l'emprise du relief, mer et rideau d'eau au bord moins la seule MARGE
+  // (`SOCLE_MARGE_EAU`, qui n'est pas le biseau : c'est ce qui empêche le
+  // rideau d'eau d'être coplanaire au mur). Allumé : le régime d'avant au bit
+  // près — `test/biseau-socle.test.js` le prouve solide contre solide.
+  //
+  // Quatre lecteurs, tous par `biseauSocleActif()` : `plinth.js` (le socle du
+  // mode plat), `monde/parois-crop.js` (le solide du crop), `monde/mer-sphere.js`
+  // (le retrait de la nappe et du rideau), et `globe.js` par le solide qu'il
+  // reçoit (`solide.retraitJupe`). `?biseau=1` le rallume sans toucher au code,
+  // `?biseau=0` le coupe si le défaut remontait un jour.
+  biseauSocle: false,
 }
 
 // LA PLANÈTE ÉCLAIRÉE — règle D15, Tâche R6. ⚠️ **ELLE EXIGE `terre unique`**,
@@ -525,6 +547,15 @@ export function exagContinueActive() {
   if (v === 'paliers' || v === '0') return false
   if (v === 'continu' || v === '1') return true
   return FLAGS.exagContinue
+}
+
+// LE BISEAU DU SOCLE — voir le drapeau. Même patron d'échappatoire que les
+// autres ; `recherche` est la couture de test de `paramAdresse`.
+export function biseauSocleActif(recherche) {
+  const v = paramAdresse('biseau', recherche)
+  if (v === '0' || v === 'vif' || v === 'off') return false
+  if (v === '1' || v === 'on') return true
+  return FLAGS.biseauSocle
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse. Isolé dans une fonction

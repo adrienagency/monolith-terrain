@@ -24,6 +24,16 @@ import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { BlockGrid } from '../src/block-grid.js'
 import { lacsMemoEcrire } from '../src/dem-memo.js'
+import { FLAGS } from '../src/flags.js'
+
+// ⚠️ **BIS, 2026-09-05 — CES TESTS DÉCRIVENT LE RÉGIME « BISEAU ALLUMÉ ».**
+// Adrien a décidé d'éteindre les biseaux du socle et leur retrait
+// (`FLAGS.biseauSocle = false` par défaut) ; le code et ses lois restent, et
+// c'est ici qu'on les tient. On rallume donc l'interrupteur pour ce fichier —
+// un processus par fichier de test, rien ne fuit. Le défaut ÉTEINT est couvert
+// par `test/biseau-socle.test.js`, qui prouve aussi que « rallumé » rend le
+// solide d'avant au bit près.
+FLAGS.biseauSocle = true
 
 // L'alias que Vite pose (vite.config.js) : la copie vendorée fait foi ici — la
 // source LIVE d'ocean-lab peut ne pas être clonée sur la machine qui teste.
