@@ -64,7 +64,8 @@ Ensemble du chantier, `git diff --stat bf54801..HEAD -- src/` :
 | … max | +160 m | **+2,01 m** | idem |
 | … sommets enterrés > 5 m | **673** | **0** | `sousSol5: 0` |
 | … sommets sous la surface | — | **0** | `sousSol: 0` |
-| Camargue, 401 sommets sous la mer | à prouver | **0** | `.banc/GX4/gx7-drapage-camargue.log` (`sousSol: 0`, `sousSol5: 0`) |
+| **Chamonix**, 401 sommets sous la surface | **138 / 401** | **0** (moy +2,00 · min +2,00 · max +2,00) | `.banc/GX4/gx7-drapage-chamonix.log` |
+| **Camargue**, 501 sommets sous le plan de mer | **106 / 501** | **0** (moy +1,85 · min +1,71 · max +2,00) | `.banc/GX4/gx7-drapage-camargue.log` |
 | 0 px hors socle à z13 | **358 px** | **0 px de ruban** — 227 px hors du POLYGONE, dont 131 sur une tuile du socle et 96 posés par une étiquette ancrée dans le socle ; le polygone exclut 8,7 % du socle lui-même | `.banc/GX4/gx8-bord.log`, `gx8-vide.log`, `gx8-etiquette3.log` |
 | lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 1/40 à 0 px (2ᵉ vol MB) ; Chamonix « ruban absent » | **0/40 sur les six vols — 240 images, zéro sans tracé** | `.banc/GX4/gx8-lecture-*.log` |
 | … tête jamais derrière la caméra | 1 image tête derrière | **40/40 au tiers central** (MB, deux vols) ; caméra sous le sol 0/40 partout | idem |
