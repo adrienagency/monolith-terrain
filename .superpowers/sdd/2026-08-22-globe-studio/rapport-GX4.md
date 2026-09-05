@@ -66,7 +66,8 @@ Ensemble du chantier, `git diff --stat bf54801..HEAD -- src/` :
 | … sommets sous la surface | — | **0** | `sousSol: 0` |
 | Camargue, 401 sommets sous la mer | à prouver | **0** | `.banc/GX4/gx7-drapage-camargue.log` (`sousSol: 0`, `sousSol5: 0`) |
 | 0 px hors socle à z13 | **358 px** | **0 px de ruban** — 227 px hors du POLYGONE, dont 131 sur une tuile du socle et 96 posés par une étiquette ancrée dans le socle ; le polygone exclut 8,7 % du socle lui-même | `.banc/GX4/gx8-bord.log`, `gx8-vide.log`, `gx8-etiquette3.log` |
-| lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 5–7 img/40 sans tracé | **à re-mesurer après GX6** | logs `apres4-lecture-*` (antérieurs à GX5/GX6) |
+| lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 1/40 à 0 px (2ᵉ vol MB) ; Chamonix « ruban absent » | **0/40 sur les six vols — 240 images, zéro sans tracé** | `.banc/GX4/gx8-lecture-*.log` |
+| … tête jamais derrière la caméra | 1 image tête derrière | **40/40 au tiers central** (MB, deux vols) ; caméra sous le sol 0/40 partout | idem |
 | position horizontale ≤ 2,3 px / ≤ 14 m | — | **à re-mesurer** | `apres-position.log` |
 | `boats` prouvé par pixels | — | **à re-mesurer** | `banc-gx4-bateaux.mjs` |
 | coût 15,9–16,0 ms | — | **à re-mesurer** | `apres4-cout.log` |
@@ -134,6 +135,39 @@ La sonde du bord (`scripts/banc-gx8-etiquette.mjs`) le confirme des deux côtés
 le repère de crop tenu par le poseur est **identique** à celui du globe aux
 trois crans (et l'uniforme partagé aussi), et **0 ponctuel visible sur 11 n'est
 hors du socle vivant**.
+
+## La lecture — six vols au clic, 240 images relevées, zéro sans tracé
+
+`scripts/banc-gx3-lecture.mjs`, le banc du noteur : clic souris sur
+« ▶ Lecture » du panneau Parcours (pas `dispatchEvent` sur `.cb-play`, qui est
+hors écran), studio fermé, temps gelé aux relevés, deux relevés concordants par
+image, témoin A/A.
+
+| vol | images sans tracé | médiane · min | tête au tiers central | caméra sous le sol | ce que le noteur mesurait |
+|---|---|---|---|---|---|
+| MB 90 km, poursuite, 1ᵉʳ vol | **0 / 40** | 14 940 · **2 159 px** | **40 / 40** | 0 / 40 | 0/40, mais **min 174 px** |
+| MB 90 km, poursuite, 2ᵉ vol | **0 / 40** | 14 893 · **2 091 px** | **40 / 40** | 0 / 40 | ⛔ **1/40 à 0 px**, tête DERRIÈRE la caméra |
+| Chamonix 4 km, poursuite | **0 / 40** | 2 390 · 2 390 px | 5 / 40 (le finale) | 0 / 40 | ⛔ **191 px d'étiquettes seules, ruban absent** |
+| Camargue 5 km, poursuite | **0 / 40** | 3 724 · 3 724 px | **40 / 40** | 0 / 40 | min **83 px = le bruit du témoin** (sous le plan de mer) |
+| MB, figée | **0 / 40** | 848 · 331 px | 20 / 40 | 0 / 40 | 0/40 |
+| Chamonix, figée | **0 / 40** | 402 · 207 px | 35 / 40 | 0 / 40 | ⛔ **plat à 242 px** — « les seuls pixels du calque sont les étiquettes » |
+| Camargue, figée | **0 / 40** | 1 109 · 452 px | 28 / 40 | 0 / 40 | 0/40, monotone |
+
+**Les deux reproches de fond du noteur tombent, et ils ne tombent pas par la
+lettre.** Il avait écrit « 0/40 par la lettre, mais le ruban est invisible » :
+c'est le compte qui le dit maintenant. À Chamonix figée, il restait **plat à
+242 px** de headT 0,14 à 0,46 ; sur HEAD il **croît** avec le dévoilement —
+207 → 724 → 843 → 979 px. Et le second vol du Mont-Blanc, celui qui perdait le
+tracé une image sur quarante avec la tête hors du cadre, ne le perd plus : le
+minimum passe de **0 px** à **2 091 px**, et la tête est au tiers central 40 fois
+sur 40 (contre 39/40).
+
+⚠️ Deux chiffres restent bas et ne sont **pas** le tracé : « tête au tiers
+central 5/40 » à Chamonix en poursuite, et 20/40 au Mont-Blanc figé. Le premier
+est le **finale** — la lecture d'un 4 km dure cinq relevés, les 35 suivants
+regardent la pose de fin de course, exactement comme chez le noteur (« 5/5 en
+lecture ; 0/35 après le finale »). Le second est la phase figée, où la caméra ne
+suit rien par construction. Aucun des deux ne compte une image sans ruban.
 
 ## La preuve de morsure — 10 mutations sur 10
 
