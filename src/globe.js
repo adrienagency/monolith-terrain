@@ -169,6 +169,9 @@ import { hauteursTerrarium } from './monde/decodeur-terrarium.js'
 // qu'une seule écriture du peigné, de l'humidité, du pivot et du voile aérien.
 // `test/crop-naturel.test.js` interdit qu'une de ces formules soit réécrite ici.
 import { GLSL_NATUREL, NATUREL_MONDE, GAIN_PEIGNE_MONDE, GAIN_OMBRE_MONDE } from './monde/naturel-crop.js'
+// Tâche BLA — la conversion vers le domaine de référence du mode Naturel, et
+// la distance du voile en mètres. Deux fonctions PURES, vérifiables sous node.
+import { facteursHNormRef, facteurDistanceVoile } from './rampe-fixe.js'
 // ══════ LA COUCHE APPARENCE — Tâche P3 ══════════════════════════════
 // `FX_GLSL` était déjà partagé entre `terrain.js` et les vignettes du panneau ;
 // le crop en est le troisième lecteur. `GLSL_MELANGE` ferme une dette plus
@@ -259,6 +262,15 @@ import {
 // d'`eau-refraction.js` porte la mesure du repère de normale — **le facteur 16,4
 // sur le Fresnel** — et l'ordre de composite qui manquait.
 import { GLSL_REFRACTION, REFRACTION_NEUTRE } from './monde/eau-refraction.js'
+// ══════════ LA LUMIÈRE DE LA MER — Tâche EAU ═══════════════════════════════
+//
+// > **Adrien, 2026-09-05 :** « redonner un vrai effet "eau" à la mer […]
+// > base-toi sur ce qui fait qu'une mer ressemble vraiment à une mer ».
+//
+// Même patron : la loi vit une seule fois dans un module PUR, `MER_FRAG`
+// injecte le texte. L'en-tête d'`eau-lumiere.js` porte les quatre mécanismes et
+// leurs sources (Schlick, Cox & Munk, Tessendorf, Sea of Thieves / Atlas).
+import { GLSL_EAU_LUMIERE, ventDeHoule } from './monde/eau-lumiere.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -346,10 +358,16 @@ varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
+// LA HAUTEUR DE HOULE NORMALISEE — Tache EAU. 0 au creux et sur l eau plate, 1 a
+// une crete d amplitude nominale. C est le « wave peak mask » de Sea of Thieves
+// (Ang 2018) : la lueur sous-surface vit dans les cretes, la ou la lumiere
+// traverse le moins d eau. (Aucun accent grave dans ce bloc : template literal.)
+varying float vHouleH;
 
 void main() {
   vec3 p = position;
   vJupe = aJupe;
+  vHouleH = 0.0;
   // le BAS du rideau tient au fond du bloc et ne suit aucune vague : c est lui
   // qui soude la nappe a la levre de la paroi, laquelle plonge au fond marin.
   bool basDuRideau = aJupe > 0.5;
@@ -482,6 +500,13 @@ void main() {
     p.z += disp.z;
     p.y += dy;
   }
+  // la hauteur, rapportee a la somme des amplitudes du spectre dans la MEME
+  // monnaie que disp (uWaveA[i].w * lenScale * waveH, voir oceanGerstner) ; les
+  // seize trains ne sont jamais tous en phase, d ou la demi-somme.
+  float ampMax = 0.0;
+  for (int i = 0; i < 16; i++) ampMax += uWaveA[i].w;
+  ampMax *= uMerLambda * uMerHoule * uMerCalmeVue * uMerUnite * fade;
+  vHouleH = clamp(dy / max(0.5 * ampMax, 1e-9), 0.0, 1.0);
 
   vCrete = crete;
   vNormMer = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
@@ -570,6 +595,16 @@ uniform float uMerRefract;
 // ciel sur toute la nappe au lieu de 1,07. uMerVersMonde est la rotation du
 // crop, posee depuis la matrice monde de la mer.
 uniform mat3 uMerVersMonde;
+// ══════ LA LUMIERE DE LA MER — Tache EAU ═════════════════════════════════
+// uMerVraieEau : 1 = la loi de cette tache, 0 = l image d AVANT au bit pres.
+// Le zero existe pour l A/B dans la MEME image (captures, cout GPU) et pour
+// rien d autre : aucun reglage d interface ne le touche.
+// uMerVent : la direction dominante de la houle (unites locales xz), lue sur
+// le spectre par majReglagesMer — les cascades de clapot defilent avec elle.
+// uMerVentMs : le vent (m/s) derive de la houle — la variance de Cox & Munk.
+uniform float uMerVraieEau;
+uniform vec2 uMerVent;
+uniform float uMerVentMs;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
@@ -580,11 +615,13 @@ varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
+varying float vHouleH;
 ${GLSL_BORD_CROP}
 ${GLSL_ECUME}
 ${GLSL_LAME_EAU}
 ${GLSL_JUPE_MER}
 ${GLSL_REFRACTION}
+${GLSL_EAU_LUMIERE}
 
 float bruitMer(vec2 q) {
   vec2 i = floor(q);
@@ -706,6 +743,21 @@ void main() {
   vec2 rp = vLocal / max(uMerUnite, 1e-9) * ${CLAPOT_NORMALE.freq.toFixed(1)};
   float r1 = bruitMer(rp + vec2(uMerTemps * 0.9, 0.0));
   float r2 = bruitMer(rp * 1.9 - vec2(0.0, uMerTemps * 1.2));
+  bool vraieEau = uMerVraieEau > 0.5;
+  if (vraieEau) {
+    // ══════ LA TROISIEME ET LA QUATRIEME CASCADE DE CLAPOT — Tache EAU ═════
+    // Finch (GPU Gems 1, ch. 1) : la geometrie porte quelques trains, la
+    // « texture fine » porte le realisme. Sea of Thieves : trois cascades de
+    // normales, de la grosse a la capillaire. Les facteurs 4.7 et 7.3 n ont
+    // aucun diviseur commun avec 1.0 et 1.9 (Ryan 2025 : « if a common factor
+    // for any two values of L exists, then the tiling will be visible »), et
+    // les deux defilent AVEC le vent, pas sur des axes fixes.
+    vec2 vent = normalize(uMerVent + vec2(1e-6, 0.0));
+    float r3 = bruitMer(rp * 4.7 + vent * (uMerTemps * 2.3));
+    float r4 = bruitMer(rp * 7.3 - vec2(-vent.y, vent.x) * (uMerTemps * 1.7) + vent * (uMerTemps * 0.6));
+    r1 = mix(r1, r3, 0.35);
+    r2 = mix(r2, r4, 0.35);
+  }
   // ══════ DEUX REPERES, DEUX USAGES — Tache R2 ════════════════════════════
   // nLocal : le repere de la NAPPE. Sa paire horizontale xz est EXACTEMENT ce
   // que le socle appelle N.xz — chez lui le haut du monde EST celui de la mer.
@@ -721,7 +773,15 @@ void main() {
   // la mer du crop ne venait donc pas du soleil. uSoleilDir est le meme soleil
   // que celui des tuiles depuis P3 — pas un second, LE meme uniforme.
   vec3 L = normalize(uEclairageOn > 0.5 ? uSoleilDir : uSunDir);
-  float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
+  float nDotV = max(dot(N, V), 0.0);
+  // ══════ LE FRESNEL — Tache EAU ═══════════════════════════════════════════
+  // AVANT : min((1 - N.V)^5, 0.5), puis mix(col, uSky, fres * 0.35) — 0 au
+  // nadir, 0,175 au rasant : la mer n etait jamais un miroir. APRES : Schlick
+  // avec F0 = 0,02 (n = 1,333), 0,02 au nadir et 1 au rasant, la loi de
+  // Tessendorf (2001, fig. 21). L opacite garde son plancher fres * 0.5 : avec
+  // Schlick il monte au rasant, ce qui est le bon sens (on ne voit plus le fond
+  // sous une mer qui reflete le ciel).
+  float fres = vraieEau ? schlickEau(nDotV) : min(pow(1.0 - nDotV, 5.0), 0.5);
   // ⚠️ APRES fres, COMME DANS ocean.js : le plancher de Fresnel en fait partie.
   float opac = opaciteEau(dLagon, uMerTransp, fres);
   // ══════ LE COMPOSITE REFRACTE — Tache R2, ET C EST L ORDRE QUI COMPTE ════
@@ -741,10 +801,34 @@ void main() {
   vec2 refOff = decalageRefraction(nLocal.xz, uMerRefract, fonduRive);
   vec3 travers = texture2D(uMerScene, uvRefractee(uvEcran, refOff)).rgb;
   col = composeLameEau(travers, col, opac);
-  col = mix(col, uSky, fres * 0.35);
   vec3 H = normalize(L + V);
-  // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
-  col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
+  if (vraieEau) {
+    // ══════ LE REFLET DU CIEL, LE MIROITEMENT, LA LUEUR — Tache EAU ════════
+    // ① le ciel reflechi est un DEGRADE horizon -> zenith, indexe sur
+    //    l elevation du rayon reflechi dans le repere du bloc (uMerVersMonde
+    //    porte le haut local) ; la mer vue au rasant reflete l horizon clair,
+    //    vue a 45 degres le ciel haut. Pondere par Schlick — pas par 0,35.
+    vec3 hautMonde = normalize(uMerVersMonde * vec3(0.0, 1.0, 0.0));
+    vec3 R = reflect(-V, N);
+    vec3 ciel = cielReflechi(uSky, dot(R, hautMonde)) * mix(0.25, 1.0, uMerJour);
+    col = mix(col, ciel, fres);
+    // ② le miroitement du soleil : Beckmann sur la variance de Cox & Munk
+    //    (1954), F(V.H) * D / (4 N.V). La trainee s allonge vers l observateur
+    //    par la geometrie de H, sans terme ad hoc ; uMerSoleilFx est la tirette
+    //    « soleil sur l eau » du socle, uMerBrillance n est plus lue ici.
+    float sigma2 = varianceCoxMunk(uMerVentMs);
+    float glitter = glitterSoleil(dot(N, H), max(dot(V, H), 0.0), nDotV, sigma2) * max(dot(L, hautMonde), 0.0);
+    col += uSunColor * glitter * uMerSoleilFx * vRichesse * mix(0.05, 1.0, uMerJour);
+    // ③ la lueur sous-surface des cretes a contre-jour (Sea of Thieves 2018,
+    //    Atlas 2019) : turquoise du glacis, dans les cretes, quand on regarde
+    //    vers le soleil. Ce qui est reflechi (fres) n entre pas dans l eau.
+    float lueur = lueurSousSurface(vHouleH, vCrete, dot(L, -V), fres) * max(dot(L, hautMonde), 0.0);
+    col += uMerPeu * uSunColor * lueur * vRichesse * uMerJour;
+  } else {
+    col = mix(col, uSky, fres * 0.35);
+    // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
+    col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
+  }
 
   // ══════ L'ÉCUME — ET ELLE NE COÛTE RIEN AU-DELÀ DE LA BANDE ═══════════════
   if (vRichesse > 0.0) {
@@ -775,7 +859,11 @@ void main() {
     // atteint zero et fait sortir le vertex), la ou uMerCalmeVue/Surf sont les
     // deux echelles de LOOK d ocean.js. Deux echelles, deux roles, toutes deux
     // presentes — c est exactement ce qui manquait.
-    float ecume = clamp(ecumeMer(vCrete, fonduRive, n1, n2, tavelure, uMerTemps,
+    // ⚠️ LA CRETE REMISE A L ECHELLE — Tache EAU : seule la part la plus cambree
+    // moutonne (Monahan 1980 : ~1 % de la surface a 10 m/s). Le ressac et le
+    // lisere lisent fonduRive, pas la crete : ils ne bougent pas.
+    float creteEcume = vraieEau ? creteMoutonnante(vCrete) : vCrete;
+    float ecume = clamp(ecumeMer(creteEcume, fonduRive, n1, n2, tavelure, uMerTemps,
       uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf) * vRichesse, 0.0, 1.0);
     // ⚠️ blanchirEcume PORTE LA NUIT — Tache P6. La ligne d avant ecrivait
     // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
@@ -871,6 +959,10 @@ const CACHE_MAX = 600 // ready tiles kept before LRU eviction
 // demandé, au prix d'une facture que personne n'a arbitrée. **La production
 // garde donc exactement le budget que la Tâche 4 sexies lui a mesuré.**
 const CACHE_MAX_CONTINU = 1700
+// les hauteurs des N dernières tuiles maillées restent lisibles — Tâche FLU,
+// voir `_retenirHauteurs` : c'est ce qui permet au socle de se poser sur le
+// relief du PARENT à la plongée au lieu de cuire un relief procédural
+export const HAUTEURS_RECENTES_MAX = 24
 
 // ⚠️ LE PLAFOND DE LA **FILE**, ET CE N'EST PAS LE PLAFOND DE REQUÊTES
 // SIMULTANÉES (plan « globe continu », Tâche 4 bis). Celui-là existe déjà et ne
@@ -920,16 +1012,24 @@ export const PLAFOND_FILE = 256
 const PLANCHER_DIST_M = 1
 const PLANCHER_DIST = PLANCHER_DIST_M * (R_GLOBE / EARTH_RADIUS_M)
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
-// ⚠️ **CULL ④ — DE COMBIEN DE NIVEAUX L'EMPRISE PEUT DÉPASSER LE SOCLE et rester
-// « le bloc ».** L'effacement latéral des jupes (P14) a été mesuré sur le socle
-// (3 tuiles à `ZOOM_SOCLE`) ; sa bande vaut une FRACTION du demi-côté, donc elle
-// grandit avec l'emprise. À 1,5 niveau, l'emprise vaut au plus 2,8 fois le socle
-// et la bande reste de l'ordre du chanfrein mesuré ; au-delà (z9 = 181 km, z8 =
-// 363 km, z4 = 6 376 km) c'est une fenêtre continentale, et la bande efface des
-// jupes que plus aucun mur ne couvre. Le repère de P14 lui-même est à
-// `ZOOM_SOCLE − 1` (`test/crop-parois.test.js`, `P14_ZOOM = 12`) : la tolérance
-// le contient, et c'est délibéré — son banc est le domaine à préserver.
-const TOLERANCE_BLOC = 1.5
+// ⛔ **CULL ④ AVAIT POSÉ ICI `TOLERANCE_BLOC = 1.5` — RETIRÉE PAR SOC ①, ET LA
+// MESURE DIT POURQUOI.** L'effacement latéral des jupes (P14) n'était actif que
+// pour `rep.zoom ≥ ZOOM_SOCLE − 1,5`, c'est-à-dire z12 et z13. **Au z11 de la
+// vidéo d'Adrien (crop de 42 km), il était donc ÉTEINT, et les jupes des tuiles
+// traversaient le mur** : relevé au banc (`scripts/sonde-soc.mjs`, Provence
+// 44,2149 / 5,797, z11, vue de trois quarts, grain éteint), **15 308 px de
+// traînées sur 365 colonnes** entre la capture et la même capture sans jupes,
+// contre **589 px** entre deux captures identiques (les nuages) ; l'effacement
+// forcé (`jupeDomaine = false`) rend **532 px**, le niveau du témoin. Ce sont
+// les « traits de quadtree dans le socle ».
+//
+// Le vrai domaine de l'effacement n'est pas un zoom : c'est **« un mur couvre
+// la bande »**. `_effacementLateralActif` le lit maintenant sur les parois
+// elles-mêmes (leur repère, étiqueté à la construction, contre `_crop`), et
+// les parois suivent le crop dans la même image depuis SOC ②③ (la plaque
+// provisoire, `construireParoisCrop`). CULL avait raison sur le défaut — une
+// bande effacée sans mur derrière ouvre des trous — et la tolérance en niveaux
+// n'en était qu'une approximation, qui laissait passer z11.
 // ⚠️ **CULL ⑤ — LA MARGE DU PLAFOND D'ÉCRAN, EN NIVEAUX.** Voir `_zoomCropEcran`
 // : le critère est pris au centre du crop, la vue d'arrivée est oblique, et sans
 // marge l'arrivée perdait un niveau (z12 au lieu de z13).
@@ -1524,6 +1624,20 @@ uniform float uHazeAmt;        // perspective aerienne (Imhof) — force globale
 uniform float uHazeAlt;
 uniform float uHazeDist;
 uniform vec3 uHazeColor;
+// ══════ LE DOMAINE DE REFERENCE DU MODE NATUREL — Tache BLA ══════════════
+// hNormRelief est normalise sur [uReliefBas ; uLandMax], le domaine VIVANT du
+// crop, qui s'effondre au zoom fin (z9 : 3 772 m d'amplitude, z13 : 1 085 m,
+// meme lieu). uTreeLine et uHazeAlt sont des reglages du domaine de REFERENCE
+// (le carre de 40 km de la rampe fixe, cote socle) : sans conversion, le voile
+// d'altitude repeignait tout le fond de vallee en gris-blanc a chaque cran.
+// a = ampVivant / ampRef, b = (basVivant - basRef) / ampRef (rampe-fixe.js) ;
+// (1, 0) est l'identite au bit, et c'est la valeur de repos.
+uniform float uHNormRefA;
+uniform float uHNormRefB;
+// la distance du voile en METRES : length(qCrop) x uCropDemiM / 80 000 m
+// (DISTANCE_VOILE_M, mesure dans rampe-fixe.js). 1 = la grandeur d'avant
+// (demi-cotes de crop), le depot au bit.
+uniform float uFdFacteur;
 
 // ══════ LA PHOTO AERIENNE — Tache R9 ═══════════════════════════════════════
 //
@@ -2260,7 +2374,11 @@ void main() {
     float rampTMonde = natRampTMonde(h);
     rampT = mix(rampT, rampTMonde, uRecollage);
     rampT = mix(rampTMonde, rampT, dedansCrop);
-    float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
+    // ⛔ hNorm DE REFERENCE POUR LA LIMITE DES ARBRES — Tache BLA. hNormRelief
+    // reste l'echelle du socle (⑤d) ; natHNormRef la ramene au domaine dans
+    // lequel uTreeLine a ete pose. Voir la declaration de uHNormRefA.
+    float hNormNat = natHNormRef(hNormRelief, uHNormRefA, uHNormRefB);
+    float wetY = natHumiditeY(anl.b, anl.a, hNormNat, uWetK, uExpoK, uHemi, uTreeLine);
     col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
   }
 
@@ -2299,8 +2417,13 @@ void main() {
   // de l'« aplat vert olive uniforme, sans relief » de la capture 2.
   float hazeIci = uHazeAmt * dedansCrop;
   if (uRampCropOn > 0.5 && uHazeAmt > 0.001 && !sousEau) {
-    float fd = clamp(length(qCrop), 0.0, 1.0);
-    float veil = natVoile(hNormRelief, fd, hazeIci, uHazeAlt, uHazeDist);
+    // ⚠️ EN METRES — Tache BLA : length(qCrop) est en demi-cotes de crop,
+    // uFdFacteur = uCropDemiM / DISTANCE_VOILE_M (80 km) le ramene a une
+    // distance au sol. Espace du CROP (uCropDemiM = largeurCropM / 2), pas
+    // celui du globe (R_GLOBE = 100) ni celui de la camera d'effets.
+    float fd = clamp(length(qCrop) * uFdFacteur, 0.0, 1.0);
+    // et l'altitude du voile lit le domaine de REFERENCE (Tache BLA)
+    float veil = natVoile(natHNormRef(hNormRelief, uHNormRefA, uHNormRefB), fd, hazeIci, uHazeAlt, uHazeDist);
     col = natBrume(col, natLuminance(col), veil, uHazeColor, hazeIci);
   }
 
@@ -4581,6 +4704,12 @@ export class Globe {
       uHazeAlt: { value: NATUREL_MONDE.hazeAlt },
       uHazeDist: { value: NATUREL_MONDE.hazeDist },
       uHazeColor: { value: new THREE.Color(NATUREL_MONDE.hazeColor) },
+      // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+      // (1, 0) et 1 : l'identité au bit. `_majGradeBloc` les écrit sous
+      // habillage, `retirerHabillage` les rend. Voir la déclaration GLSL.
+      uHNormRefA: { value: 1 },
+      uHNormRefB: { value: 0 },
+      uFdFacteur: { value: 1 },
       // ══════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═══════════════════════════════
       //
       // ⚠️ **LES DÉFAUTS SONT CEUX DU MODULE, PAS DES NOMBRES RECOPIÉS ICI** —
@@ -5663,6 +5792,12 @@ export class Globe {
     // celui dans lequel son curseur est exprime.
     socleBasM = null,
     socleAmpM = null,
+    // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+    // le carré de 40 km de la rampe fixe (`main.js`, `domaineRef()`), EN
+    // MÈTRES : c'est le domaine dans lequel `treeLine` et `hazeAlt` sont posés.
+    // Absents (option de re-normalisation cochée, banc, test) → identité.
+    refBasM = null,
+    refAmpM = null,
     hazeAmt = NATUREL_MONDE.hazeAmt,
     hazeAlt = NATUREL_MONDE.hazeAlt,
     hazeDist = NATUREL_MONDE.hazeDist,
@@ -5835,6 +5970,11 @@ export class Globe {
       span: gridSpanBloc,
     })
     u.uCropDemiM.value = demiSolM
+    // ══════ LA DISTANCE DU VOILE, EN MÈTRES — Tâche BLA ═════════════════════
+    // Le même nombre que la ligne d'au-dessus, rapporté à DISTANCE_VOILE_M
+    // (80 km = la demi-emprise la plus large, z9) : la vue large garde le voile
+    // d'aujourd'hui, les vues fines en ont moins. Sans crop, `demiSolM = 0` → 1.
+    u.uFdFacteur.value = facteurDistanceVoile(demiSolM)
     u.uGridStepM.value = pasGrilleM ?? HABILLAGE_MONDE.gridPasM
     u.uGridOpacity.value = pasGrilleM ? (Number(gridOpacite) || 0) : HABILLAGE_MONDE.gridOpacite
     u.uGridColor.value.set(gridCouleur ?? HABILLAGE_MONDE.gridCouleur)
@@ -5948,6 +6088,11 @@ export class Globe {
       contrasteAutoSocle: contrasteAutoSocle ?? null,
       socleBasM,
       socleAmpM,
+      // Tâche BLA — le domaine de référence suit le même écrivain unique :
+      // `_majGradeBloc` le confronte au domaine vivant, ici ET à chaque
+      // glissement de `[uReliefBas ; uLandMax]`.
+      refBasM: Number.isFinite(refBasM) ? refBasM : null,
+      refAmpM: Number.isFinite(refAmpM) ? refAmpM : null,
     }
     this._majGradeBloc()
     u.uHazeAmt.value = hazeAmt
@@ -6296,6 +6441,12 @@ export class Globe {
     u.uHazeAlt.value = NATUREL_MONDE.hazeAlt
     u.uHazeDist.value = NATUREL_MONDE.hazeDist
     u.uHazeColor.value.set(NATUREL_MONDE.hazeColor)
+    // Tâche BLA — le domaine de référence part avec le crop : identité au bit.
+    // `_gradeSocle` est lâché quelques lignes plus haut, donc `_majGradeBloc`
+    // ne les réécrira pas ; c'est le repos du constructeur, pas un second jeu.
+    u.uHNormRefA.value = 1
+    u.uHNormRefB.value = 0
+    u.uFdFacteur.value = 1
     // ══════ L'ÉCLAIRAGE ET LA PAROI — Tâche P3 ═══════════════════════════════
     //
     // ⚠️ **RENDUS AUSSI, POUR LA RAISON QUE CE BLOC PORTE DÉJÀ POUR LES DIX
@@ -6574,6 +6725,17 @@ export class Globe {
     })
     u.uHeightPivot.value = g.heightPivot
     u.uHeightContrast.value = g.heightContrast
+    // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════════
+    // Même écrivain, même cadence, même raison que les deux lignes au-dessus :
+    // la conversion dépend du domaine VIVANT, qui glisse par image. Le facteur
+    // `a` vaut ampVivant / ampRef — mesuré 2,58 à z9 et 0,74 à z13 au lieu de la
+    // vidéo d'Adrien (rampe-fixe.js). Sans référence : (1, 0), l'identité.
+    const f = facteursHNormRef(
+      Number.isFinite(s.refBasM) && Number.isFinite(s.refAmpM) ? { basM: s.refBasM, ampM: s.refAmpM } : null,
+      { basM: u.uReliefBas.value, ampM: u.uLandMax.value - u.uReliefBas.value }
+    )
+    u.uHNormRefA.value = f.a
+    u.uHNormRefB.value = f.b
   }
 
   /**
@@ -7016,6 +7178,16 @@ export class Globe {
         // différents — voir la mesure dans `MER_FRAG` et dans
         // `monde/eau-refraction.js`.
         uMerVersMonde: { value: new THREE.Matrix3() },
+        // ══════ LA LUMIÈRE DE LA MER — Tâche EAU ════════════════════════════
+        //
+        // ⚠️ **POSÉ À 1, ET C'EST LA LIVRAISON, PAS UN RÉGLAGE** — même règle
+        // que `uMerParFragment` : le zéro rend l'image d'avant AU BIT PRÈS dans
+        // la même page, pour l'A/B des captures et du coût. Le vent et sa
+        // direction naissent au neutre (est, brise de `ventDeHoule(houle)`) et
+        // sont posés par image par `majReglagesMer`, lus sur le spectre vivant.
+        uMerVraieEau: { value: 1 },
+        uMerVent: { value: new THREE.Vector2(1, 0) },
+        uMerVentMs: { value: ventDeHoule(houle) },
       },
       // ⚠️ **`uCropCoin` / `uCropCoinN` SONT DÉJÀ CÉDÉS PLUS HAUT** (les mêmes
       // objets que les tuiles) : le sommet lit donc la MÊME superellipse que le
@@ -7641,6 +7813,26 @@ export class Globe {
       u.uWaveA.value = sp.a
       u.uWaveB.value = sp.b
     }
+    // ══════ LE VENT DE LA MER — Tâche EAU ═══════════════════════════════════
+    //
+    // ⚠️ **LU, PAS CHOISI.** La direction dominante est la somme des directions
+    // des seize trains pondérée par leur part d'énergie (`b[i].z`, le poids de
+    // cambrure du spectre) ; le vent en m/s vient de la houle du socle par
+    // `ventDeHoule` (en-tête d'`eau-lumiere.js`). Sans spectre, la direction
+    // reste celle de la naissance.
+    const A = u.uWaveA?.value, B = u.uWaveB?.value
+    if (Array.isArray(A) && Array.isArray(B) && A.length && B.length) {
+      let vx = 0, vz = 0
+      const n = Math.min(A.length, B.length, 16)
+      for (let i = 0; i < n; i++) {
+        const w = Number.isFinite(B[i]?.z) ? B[i].z : 0
+        vx += (A[i]?.x ?? 0) * w
+        vz += (A[i]?.y ?? 0) * w
+      }
+      const l = Math.hypot(vx, vz)
+      if (l > 1e-9) u.uMerVent.value.set(vx / l, vz / l)
+    }
+    u.uMerVentMs.value = ventDeHoule(etat.houle)
 
     // ══════ L'ÉCHELLE DE LONGUEUR DE HOULE — Tâche P6, réserve n° 3 de P5 ═══
     //
@@ -7799,6 +7991,60 @@ export class Globe {
     })
   }
 
+  /** Les tuiles dont le MAILLAGE est là, du plus fin au plus grossier — SOC. */
+  tuilesAvecMaillage() {
+    const out = []
+    for (const t of this.tiles.values()) if (t.mesh?.geometry?.attributes?.position) out.push(t)
+    out.sort((a, b) => b.z - a.z)
+    return out
+  }
+
+  /**
+   * LA HAUTEUR QUE LE GPU DESSINE, LUE DANS LE MAILLAGE LUI-MÊME — SOC ②③④.
+   *
+   * ⚡ **`hauteurDessinee` REPRODUIT la loi du maillage depuis `t.heights` ; ici
+   * on LIT le maillage.** La différence n'est pas la loi (`interpolerMaille`,
+   * la même diagonale, les mêmes nœuds), c'est la DISPONIBILITÉ : `t.heights`
+   * n'existe que sous réservation (`gardeHauteurs`), donc **après un aller
+   * réseau** à chaque pose de crop ; le maillage, lui, est là pour toute tuile
+   * dessinée, racines z2 comprises. C'est ce qui permet de bâtir les parois
+   * dans la MÊME image que la découpe (la plaque provisoire), au lieu de
+   * laisser la plaque du repère d'avant autour d'un relief deux fois plus
+   * petit — le « bout de terre qui flotte au milieu du socle vide » d'Adrien.
+   *
+   * ⚠️ **LA HAUTEUR SE DÉDUIT DU RAYON, DANS LA MONNAIE DE `_buildMesh`** :
+   * `posAt` pose chaque sommet à `R_GLOBE + h × echelle`, sommets en RTC
+   * (`mesh.position` porte l'origine). On inverse exactement cela ; le facteur
+   * `(R_GLOBE / EARTH_RADIUS_M) × exaggeration` est celui de la construction.
+   * `test/socle-plaque.test.js` ① confronte cette lecture à `hauteurDessinee`
+   * sur une tuile qui porte les deux.
+   *
+   * ⚠️ **`null` TRAVERSE**, comme pour ses deux sœurs : sans maillage qui couvre
+   * le point, le refus de couverture des parois reste aussi mordant.
+   *
+   * @param {number} lat
+   * @param {number} lon
+   * @param {Array} [candidates] la liste pré-filtrée (`tuilesAvecMaillage`)
+   * @returns {number|null} mètres
+   */
+  hauteurMaillee(lat, lon, candidates = null) {
+    const best = this._tuileLaPlusFine(lat, lon, candidates || this.tuilesAvecMaillage())
+    if (!best) return null
+    const t = best.t
+    const attr = t.mesh?.geometry?.attributes?.position
+    if (!attr) return null
+    const G = segmentsTuile(t.z)
+    if (attr.count < (G + 1) * (G + 1)) return null
+    const a = attr.array
+    const o = t.mesh.position
+    const echelle = (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
+    if (!(echelle > 0)) return null
+    return interpolerMaille(best.tx, best.ty, G, (i, j) => {
+      const k = (j * (G + 1) + i) * 3
+      return (Math.hypot(a[k] + o.x, a[k + 1] + o.y, a[k + 2] + o.z) - R_GLOBE) / echelle
+    })
+  }
+
   /**
    * La tuile la plus FINE qui couvre un point — **une seule écriture**.
    *
@@ -7809,6 +8055,17 @@ export class Globe {
    */
   _tuileLaPlusFine(lat, lon, candidates = null) {
     const liste = candidates || this.tuilesAvecHauteurs()
+    // ══════ LE `break` — Tâche FLU, poste ③ (réserve 1 de D16-b) ═════════════
+    //
+    // ⚠️ **LE PARCOURS COMPLET COÛTAIT 1 698 ms DE FIL PRINCIPAL À z6** (3,27 µs
+    // par sommet × 519 404 sommets) pour un résultat connu dès la première tuile
+    // qui couvre : `tuilesAvecHauteurs()` trie déjà du plus fin au plus grossier,
+    // et rien après la première ne peut être plus fin. Mais `candidates` est un
+    // paramètre public et `test/crop-parois.test.js` exige que « l'ordre de la
+    // liste ne fasse rien » : le raccourci ne s'applique qu'aux listes que
+    // `tuilesAvecHauteurs()` a ÉTIQUETÉES (`trieeFinAbord`), jamais par
+    // supposition. `test/tuile-la-plus-fine.test.js` mord dans les deux sens.
+    const triee = liste.trieeFinAbord === true
     const mx = mercX(lon)
     const my = mercY(lat)
     let best = null
@@ -7828,15 +8085,21 @@ export class Globe {
       const ty = my * n - t.y
       if (tx < 0 || tx >= 1 || ty < 0 || ty >= 1) continue
       if (!best || t.z > best.t.z) best = { t, tx, ty }
+      if (triee) break // la première qui couvre est la plus fine : le reste est du travail perdu
     }
     return best
   }
 
-  /** Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier. */
+  /**
+   * Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier.
+   * ⚠️ **ÉTIQUETÉE `trieeFinAbord`** : c'est ce qui autorise `_tuileLaPlusFine` à
+   * s'arrêter à la première tuile qui couvre (Tâche FLU).
+   */
   tuilesAvecHauteurs() {
     const out = []
     for (const t of this.tiles.values()) if (t.heights) out.push(t)
     out.sort((a, b) => b.z - a.z)
+    out.trieeFinAbord = true
     return out
   }
 
@@ -7887,7 +8150,10 @@ export class Globe {
     // ⚠️ **ON PASSE `hauteurSurface` TELLE QUELLE, `null` COMPRIS.** L'ancienne
     // version rattrapait le `null` en `0` — le niveau de la mer — et fabriquait
     // une encoche muette. La décision et son motif sont au §7 de `parois-crop.js`.
-    const solide = construireSolideCrop({
+    // ⚠️ **`batir` EST UNE FERMETURE SUR LES ARGUMENTS DE L'APPEL** : la plaque
+    // provisoire (SOC) rejoue exactement le même solide, avec une autre source
+    // de hauteur — même forme, même profondeur, même chanfrein.
+    const batir = (hauteur) => construireSolideCrop({
       couvertureMin,
       repere: this._crop,
       forme: {
@@ -7910,7 +8176,7 @@ export class Globe {
       // porte la mesure : 18,94 m d'écart moyen absolu le long de l'anneau, ±10
       // pixels à l'écran, dans les DEUX SENS — la paroi dépassait la surface
       // ici, la surface pendait par-dessus l'arête là.
-      hauteur: (lat, lon) => this.hauteurDessinee(lat, lon, liste),
+      hauteur,
       rayon: R_GLOBE,
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
       profondeur,
@@ -7929,12 +8195,94 @@ export class Globe {
       // aussi de repli, et un infini y produirait des sommets `NaN`.
       plancherMer: this._fondCrop ? -Math.max(this._fondCrop.profMaxM, 0) : 0,
     })
+    const solide = batir((lat, lon) => this.hauteurDessinee(lat, lon, liste))
 
-    // ⚠️ **LE REFUS NE TOUCHE PAS AUX PAROIS DÉJÀ POSÉES.** C'est ce qui le rend
-    // acceptable : le bloc précédent reste à l'écran jusqu'à ce que la donnée
-    // arrive, et l'appelant n'a rien à défaire.
-    if (solide.refus) return { mesh: null, solide, couverture: solide.couverture, refus: solide.refus }
+    // ══════ LA PLAQUE PROVISOIRE — SOC ②③④ ═══════════════════════════════════
+    //
+    // > **Adrien, 2026-09-05 :** *« Je n'ai pas un bout de terre qui flotte au
+    // > milieu du socle vide. »* · *« Lorsque je passe d'un niveau inférieur à
+    // > un niveau supérieur, la terre se met immédiatement à la taille du crop,
+    // > elle n'est pas minuscule avant de charger à la bonne taille. »*
+    //
+    // ⛔ **LE REFUS NE TOUCHAIT PAS AUX PAROIS DÉJÀ POSÉES — ET C'ÉTAIT LE
+    // DÉFAUT.** « Le bloc précédent reste à l'écran jusqu'à ce que la donnée
+    // arrive » était juste tant que le bloc précédent avait la MÊME emprise.
+    // Mais `poserCrop` change `uCropDemi` dans la même image que la pose : la
+    // découpe des tuiles est aussitôt à la nouvelle largeur (moitié de l'ancienne
+    // à chaque niveau), pendant que la plaque, bâtie sur le repère d'avant,
+    // attend que les hauteurs RÉSERVÉES arrivent du réseau — jusqu'à 6 s dans la
+    // vidéo d'Adrien (`m_078` → `m_090`, « REFINING z13 »), 0,5 à 2,5 s à
+    // l'arrivée d'un `flyTo` au banc (`.banc/SOC/avant-z1[123]/journal.json` :
+    // 30 à 150 images de refus, couverture 0 puis 0,933). Pendant ce temps : un
+    // relief deux fois plus petit que sa plaque (②), qui « grandit » quand la
+    // plaque est enfin rebâtie (③), et en vol une bande de terre estompée entre
+    // le relief et l'arête d'avant (④). **Trois symptômes, une cause.**
+    //
+    // ➡️ Quand la couverture par les hauteurs refuse, on bâtit **la même paroi
+    // depuis le MAILLAGE DESSINÉ** (`hauteurMaillee`) : il est là pour toute
+    // tuile à l'écran, racines comprises, donc la plaque suit la découpe dans la
+    // MÊME image. Le refus est rendu tel quel — la reprise rebâtira la paroi
+    // définitive (P11, hauteurs réservées) quand elles seront là, et le mesh
+    // provisoire est remplacé à ce moment-là. Une plaque provisoire déjà posée
+    // pour CE repère n'est pas rebâtie à chaque reprise.
+    //
+    // ⚠️ **PAR LE PROTOTYPE, ET C'EST OBLIGATOIRE** — même raison que
+    // `_effacementLateralActif` : les globes de papier des tests empruntent
+    // `construireParoisCrop` par `Globe.prototype…call(faux)` et ne portent que
+    // les membres qu'ils exercent.
+    if (solide.refus) {
+      const prov = Globe.prototype._paroisProvisoires.call(this, batir)
+      return { mesh: prov, solide, couverture: solide.couverture, refus: solide.refus, provisoire: !!prov }
+    }
+    const mesh = Globe.prototype._poserSolideParois.call(this, solide, false)
+    return { mesh, solide, couverture: solide.couverture, refus: null, provisoire: false }
+  }
 
+  /**
+   * La plaque provisoire — voir `construireParoisCrop`. Rend le mesh posé, ou
+   * `null` si même le maillage ne couvre pas l'anneau (avant les racines).
+   *
+   * @param {(hauteur: Function, liste: Array) => object} batir le constructeur du
+   *   solide avec les arguments de l'appel — la MÊME forme, la même profondeur
+   */
+  _paroisProvisoires(batir) {
+    const rep = this._crop
+    const p = this._parois
+    const r = p?.userData?.repere
+    if (p && p.userData?.provisoire && r && r.cx === rep.cx && r.cy === rep.cy && r.demi === rep.demi) return p
+    // ⚠️ `plaqueProvisoire = false` : levier de BANC (règle D13) qui rejoue le
+    // dépôt d'avant SOC — le refus sans plaque — pour l'A/B à témoin nul dans
+    // une seule page (`scripts/sonde-soc.mjs --provisoire 0`).
+    if (this.plaqueProvisoire === false) return null
+    // par le prototype : les globes de papier (voir `construireParoisCrop`)
+    // ⚠️ **FILTRÉE SUR LA BOÎTE DU CROP, ET C'EST UN COÛT MESURÉ** : sans le
+    // filtre, `_tuileLaPlusFine` parcourt tout le cache (jusqu'à 1 700 tuiles)
+    // pour chacun des ~1 140 points du solide — 75 ms relevés à la pose du z11
+    // (`.banc/SOC/apres-z11/journal.json`). Les ancêtres grossiers passent le
+    // filtre (leur boîte CONTIENT le crop), donc la couverture ne perd rien.
+    // ⚠️ **LA BOÎTE EST DILATÉE D'UN CHEVEU** : `tuileDansCrop` est STRICT, et un
+    // point de l'anneau posé exactement sur le bord est/sud du crop tombe à
+    // `tx = 1` de la tuile du dedans, c'est-à-dire DANS la voisine — que le
+    // filtre strict écarterait. Mesuré au banc (`test/socle-plaque.test.js` ②) :
+    // sans la dilatation, la couverture n'est pas 1 et la plaque ne vient pas.
+    const boite = { cx: rep.cx, cy: rep.cy, demi: rep.demi * (1 + 1e-6) }
+    const liste = Globe.prototype.tuilesAvecMaillage.call(this).filter((t) => tuileDansCrop(t.z, t.x, t.y, boite))
+    if (!liste.length) return null
+    const solide = batir((lat, lon) => Globe.prototype.hauteurMaillee.call(this, lat, lon, liste))
+    if (!solide || solide.refus) return null
+    return Globe.prototype._poserSolideParois.call(this, solide, true)
+  }
+
+  /**
+   * Pose le solide des parois dans le groupe du globe — le mesh, son repère
+   * étiqueté, et les quatre grandeurs dérivées que le rideau d'eau et les jupes
+   * lisent. **Une seule écriture** pour la paroi définitive et la provisoire.
+   *
+   * @param {object} solide ce que rend `construireSolideCrop`, sans refus
+   * @param {boolean} provisoire bâtie depuis le maillage (SOC), pas les hauteurs
+   * @returns {object} le mesh
+   */
+  _poserSolideParois(solide, provisoire) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(solide.positions, 3))
     // l'occlusion de contact, cuite par sommet. ⚠️ NOM PROPRE, pas `color` : le
@@ -7961,7 +8309,8 @@ export class Globe {
     plate.computeBoundingSphere()
     geo.dispose()
 
-    this.retirerParoisCrop()
+    // une seule retaille des jupes, sur la paroi neuve (voir `retirerParoisCrop`)
+    Globe.prototype.retirerParoisCrop.call(this, { retailler: false })
     const mesh = new THREE.Mesh(plate, this._materiauParois())
     mesh.name = 'crop-parois'
     // le repère local du crop : (est, haut, sud) posé à l'origine du crop. C'est
@@ -7979,6 +8328,13 @@ export class Globe {
     // Sans cette ligne, un socle éteint reviendrait au premier déplacement,
     // parce que ce mesh-ci vient de naître. Voir `_paroisVisibles`.
     mesh.visible = this._paroisVisibles
+    // ⚠️ **LE REPÈRE EST ÉTIQUETÉ SUR LE MESH — SOC.** Deux lecteurs : la plaque
+    // provisoire (« déjà bâtie pour CE repère ? ») et `_effacementLateralActif`
+    // (« un mur couvre-t-il la bande de CE crop ? »). Une copie, pas une
+    // référence : `_crop` est remplacé à chaque pose, et c'est précisément le
+    // désaccord entre les deux qu'on veut pouvoir lire.
+    mesh.userData.repere = { cx: this._crop.cx, cy: this._crop.cy, demi: this._crop.demi, zoom: this._crop.zoom }
+    mesh.userData.provisoire = !!provisoire
     this._parois = mesh
     // ⚠️ **LE FOND DU BLOC EST RETENU POUR LE RIDEAU D'EAU — Tâche P4.** Le
     // ruban de mer descend jusqu'à LUI, pas jusqu'à une profondeur à part : deux
@@ -8029,7 +8385,7 @@ export class Globe {
     // toujours plus vieilles que son fond. `_retaillerJupe` est idempotente et
     // recalcule depuis l'anneau de bord — la rappeler ne creuse rien.
     this._retaillerJupes()
-    return { mesh, solide, couverture: solide.couverture, refus: null }
+    return mesh
   }
 
   /**
@@ -8047,8 +8403,15 @@ export class Globe {
     if (this._parois) this._parois.visible = this._paroisVisibles
   }
 
-  /** Retire les parois — le crop redevient une peau flottante. */
-  retirerParoisCrop() {
+  /**
+   * Retire les parois — le crop redevient une peau flottante.
+   *
+   * @param {{retailler?: boolean}} [arg] `retailler: false` quand une paroi
+   *   neuve est posée dans la foulée (`_poserSolideParois`) : la retaille des
+   *   jupes est faite UNE fois, sur la paroi neuve, pas deux — la passe
+   *   intermédiaire (« plus de mur, jupes pleines ») ne serait jamais dessinée.
+   */
+  retirerParoisCrop({ retailler = true } = {}) {
     if (!this._parois) return
     this.group.remove(this._parois)
     this._parois.geometry.dispose()
@@ -8160,11 +8523,34 @@ export class Globe {
   _effacementLateralActif() {
     const rep = this._crop
     if (!rep) return false
-    // ⚠️ `jupeDomaine = false` : levier de BANC (CULL ④) qui rejoue le dépôt —
-    // l'effacement partout, quelle que soit la largeur de l'emprise.
+    // ⚠️ `jupeDomaine = false` : levier de BANC (CULL ④) qui rejoue l'effacement
+    // partout, mur ou pas — c'est l'A/B qui a désigné les traînées de SOC ①.
     if (this.jupeDomaine === false) return true
-    if (!Number.isFinite(rep.zoom)) return true
-    return rep.zoom >= ZOOM_SOCLE - TOLERANCE_BLOC
+    // ══════ SOC ① — LE DOMAINE, C'EST LE MUR ═══════════════════════════════
+    //
+    // > **Adrien, 2026-09-05 :** *« Je ne vois plus de traits de quadtree dans
+    // > le socle. »*
+    //
+    // ⚡ La bande de P14 n'a de sens que si un mur la couvre : elle efface la
+    // jupe des sommets que le mur, rentré du chanfrein, ne couvre plus. Le seul
+    // témoin fiable de « un mur couvre la bande » est le mur lui-même, bâti
+    // pour CE repère — pas un seuil de zoom (voir l'encart de l'ancienne
+    // `TOLERANCE_BLOC`, en tête de fichier). Sans parois : rien à effacer.
+    // Parois d'un AUTRE repère (une pose neuve, avant la plaque provisoire) :
+    // rien non plus — la bande serait au bord d'une emprise sans mur, le trou
+    // de CULL ④.
+    const p = this._parois
+    // ⚠️ **`undefined`, PAS `null`, DIT « GLOBE DE PAPIER ».** Le constructeur pose
+    // `_parois = null` et `retirerParoisCrop` l'y remet : en production le membre
+    // existe toujours. Un globe de papier qui ne le porte pas (les tests P14 de
+    // `crop-parois.test.js`) rejoue le dépôt d'avant — l'effacement actif.
+    if (p === undefined) return true
+    if (!p) return false
+    const r = p.userData?.repere
+    // un mur sans étiquette : les globes de papier des tests (`_parois: {}`),
+    // qui rejouent le dépôt d'avant — la production étiquette toujours.
+    if (!r) return true
+    return r.cx === rep.cx && r.cy === rep.cy && r.demi === rep.demi
   }
 
   _retaillerJupe(t) {
@@ -9457,7 +9843,38 @@ export class Globe {
     // lève `Cannot read properties of undefined`, et ce test vérifie la
     // précision des sommets à l'échelle planétaire : il ne doit pas payer pour
     // une réservation de hauteurs.
-    if (!this.gardeHauteurs?.has(t.key)) t.heights = null
+    // (même `?.`-prudence que ci-dessus : le `this` emprunté des tests n'a pas de file)
+    if (!this.gardeHauteurs?.has(t.key)) {
+      if (typeof this._retenirHauteurs === 'function') this._retenirHauteurs(t)
+      else t.heights = null
+    }
+  }
+
+  // ══════════ LES HAUTEURS RÉCENTES — Tâche FLU, « afficher le parent » ═══════
+  //
+  // ⛔ **AU MOMENT DE LA PLONGÉE, LE SOCLE NE TROUVAIT AUCUNE HAUTEUR À LIRE, ET
+  // CUISAIT UN RELIEF PROCÉDURAL DE 591 361 SOMMETS QUE PERSONNE NE VERRAIT.**
+  // Mesuré (`.banc/sonde-descente-x4.log`, CPU ×4) : `remplirDepuisFlux → null`
+  // au premier `rebuild` de la plongée, puis `terrain.rebuild` **2 908 ms** dans
+  // une tâche de **4 072 ms** — c'est `noise` à 1 407 ms de temps propre dans le
+  // profil de PA, un fbm/ridged par sommet sur un bloc remplacé quelques
+  // centaines de millisecondes plus tard par les tuiles. Les PARENTS de
+  // l'emprise (z8–z11) venaient pourtant d'être dessinés pendant la descente :
+  // leurs hauteurs avaient été relâchées à la ligne ci-dessus, dès le maillage.
+  //
+  // On garde donc les hauteurs des `HAUTEURS_RECENTES_MAX` dernières tuiles
+  // maillées — une file bornée, **24 × 1 Mo au pire** (512² × 4 octets), contre
+  // 435 Mo si on gardait tout (commentaire ci-dessus). À la plongée, ce sont
+  // exactement les tuiles qu'on vient de traverser : `remplirHauteurs` les
+  // trouve, le socle se pose sur le relief du parent, et le fin l'affine.
+  // `gardeHauteurs` prime : une tuile réservée par le flux n'est jamais vidée ici.
+  _retenirHauteurs(t) {
+    const file = (this._hauteursRecentes ||= [])
+    file.push(t)
+    while (file.length > HAUTEURS_RECENTES_MAX) {
+      const v = file.shift()
+      if (v !== t && !this.gardeHauteurs?.has(v.key)) v.heights = null
+    }
   }
 
   // --------------------------------------------------------------- per-frame

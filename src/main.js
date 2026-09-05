@@ -42,13 +42,14 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
+import { worldToLatLon, latLonToWorld, demSpan, parseLatLon, sphereToLatLon, R_GLOBE, EARTH_RADIUS_M, ORBITAL_M_PER_UNIT, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
+import { COTE_REF_M, fenetreRef, centrerFenetreRef, statsFenetre, transpose, facteursHNormRef, facteurDistanceVoile } from './rampe-fixe.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage, exigerPose } from './camera-poses.js'
 import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
@@ -63,8 +64,9 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
-import { ancrageCartouche, baseCartoucheEnBloc } from './monde/cartouche-globe.js'
+import { ancrageCartouche, baseCartoucheEnBloc, poseDepuisParois } from './monde/cartouche-globe.js'
 import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
+import { PLAFOND_NUAGES_M } from './monde/nuages-metres.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
@@ -85,6 +87,7 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
+import { creerCacheToile } from './monde/rect-toile.js'
 // ══════ LES BOUTONS DU BAS — Tâche R1 ② ═══════════════════════════════
 //
 // > **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
@@ -168,7 +171,7 @@ import { EXAGERATION_UNIQUE } from './monde/zoom-continu.js'
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
 // aucun. Voir `terrain.adopterFenetre`.
-import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre-bornee.js'
+import { construireFenetre, majHauteurs, recadrerFenetre, normaliserEmprise } from './monde/fenetre-bornee.js'
 // ⚠️ **LE FLUX EST LE CACHE DU QUADTREE, PAS UN SECOND CHARGEUR** (Tâche 6
 // quinquies) : `creerFlux` ne demande RIEN à sa naissance, et `remplirBorne`
 // borne le remplissage au débit RÉELLEMENT observé (règle R3, Tâche 4 ter).
@@ -421,6 +424,18 @@ const params = {
   // la main à l'auto. Les valeurs ci-dessous ne servent plus que de repli
   // (terrain procédural, DEM illisible).
   shadeAuto: true,
+  // ══════ LA RE-NORMALISATION DE LA TEINTE — OPTION, ÉTEINTE PAR DÉFAUT ═════
+  //
+  // > **Adrien, 2026-09-04 :** « On peut créer une option activer / désactiver ?
+  // > Par défaut on désactive. »
+  //
+  // ⚡ **PAR DÉFAUT `false` : LA RAMPE EST FIXE**, une couleur = une altitude à
+  // toutes les échelles (`src/rampe-fixe.js`). Cochée, elle rend le
+  // comportement d'avant **au bit près** — la rampe se re-normalise sur le MNT
+  // chargé à chaque cran. ⛔ Ce n'est PAS le curseur « Teinte hypsométrique » :
+  // celui-là (`mapTint`) reste, et à 0 il éteint toute la couleur d'altitude.
+  // Ici on n'éteint que la RE-NORMALISATION, pas la couleur.
+  rampeRenormalise: false,
   mapTint: 1.0,
   heightContrast: 5.1,
   heightPivot: 0.53,
@@ -718,7 +733,15 @@ const params = {
   // volumetric cloud deck — user-tuned base settings, active on every template
   cloudsEnabled: false,
   cloudOpacity: 2.25, // densité — réglages par défaut fournis par Adrien (captures)
-  cloudAltitude: 1, // PLAFOND de la colonne de nuages, en unités monde
+  // PLAFOND de la colonne de nuages, en MÈTRES au-dessus de la mer — Tâche NUA.
+  // C'est la loi sur tout terrain réel ; `clouds2.js` la convertit en unités de
+  // bloc par `(plafond − moyenneM) × 56 / largeurBlocM × exagération`
+  // (0,010 671 u/m à z13, 0,000 667 u/m à z9 — `monde/nuages-metres.js`).
+  cloudAltitudeM: PLAFOND_NUAGES_M,
+  // ⚠️ L'ANCIEN PLAFOND EN UNITÉS DE BLOC ne sert plus qu'au terrain
+  // PROCÉDURAL (pas de mètres). Sur un MNT réel il valait 21 346 m à z9 et
+  // 2 016 m à z13 — sous les crêtes (N1 de la vidéo du 2026-09-04).
+  cloudAltitude: 1,
   cloudDrift: 1.6,
   cloudScale: 5, // finesse du grain interne
   cloudCoverage: 1.12, // trouées : 0.8 = masses pleines, 2.6 = dentelle
@@ -1199,6 +1222,14 @@ const renderer = new THREE.WebGLRenderer({
 // le rabotage muet de Chrome frappe d'abord au démarrage, sur le plein écran.
 container.appendChild(renderer.domElement)
 applyRenderSize({ renderer, pixelRatio: params.pixelRatio })
+// ══════════ LA BOÎTE DE LA TOILE, LUE UNE FOIS — Tâche FLU ═══════════════════
+//
+// ⛔ **`getBoundingClientRect()` et `clientHeight` forcent une mise en page à
+// chaque lecture dès que le DOM a bougé**, et il bouge à chaque image. Deux
+// lecteurs par image (`projectionSaisie`, `contexteCrop`) valaient 9,6 % du
+// glissé et 15 % du crop à CPU ×4 — la mesure et le raisonnement sont en tête
+// de `monde/rect-toile.js`. Tout lecteur de la boîte de la toile passe par ici.
+const cacheToile = creerCacheToile(renderer.domElement)
 renderer.shadowMap.enabled = true
 // VSM so the shadow blur radius is a real, adjustable softness control
 renderer.shadowMap.type = THREE.VSMShadowMap
@@ -4256,13 +4287,19 @@ function entrerEnVol() {
   realWater?.setCoastMask(null, false)
   coastMaskImage = null
   traffic.setZone(null)
-  // ⚠️ **LE CARTOUCHE SE CACHE, IL NE SE RECHARGE PAS.** `groundInfo.load`
-  // interroge un géocodeur : l'appeler sans lat/lon partirait chercher le nom de
-  // « NaN, NaN ». Et le laisser tel quel graverait sur le socle le nom et la
-  // plage d'altitude du palier qu'on vient de quitter — juste sur un cran (le
-  // lieu ne bouge pas), FAUX sur une plongée vers un autre continent.
-  // `fetchAndBuildDem` le rallume à l'atterrissage, à côté de `chargeCartouche`.
-  groundInfo.setVisible(false)
+  // ══════════ LE CARTOUCHE DIT CE QU'IL SAIT, TOUT DE SUITE — Tâche CAR ═════
+  //
+  // ⚠️ **IL SE CACHAIT ICI, ET C'ÉTAIT UN CLAQUEMENT PAR CRAN** (VID2 N4 : caché
+  // 1,1 à 1,8 s à chaque palier, sonde rAF) — pour ne pas graver le lieu qu'on
+  // quitte. Mais le lieu d'arrivée est CONNU à cette ligne (`loadSurface` vient
+  // d'écrire `params.demLat/demLon`), et l'emprise du palier se calcule sans
+  // rien charger (`empriseBlocMNT`). On ne cache donc plus : `loadSurface` a
+  // regravé les coordonnées justes et la barre d'échelle AVANT d'appeler ici
+  // (`groundInfo.annonce`, le seul appelant de cette fonction), et
+  // `chargeCartouche` complète (altitudes, nom, anecdote) à l'atterrissage.
+  // ⚠️ Hors mode sphère, `majCartoucheGlobe` ne gouverne pas la visibilité :
+  // on garde l'extinction d'avant, `fetchAndBuildDem` rallume.
+  if (!fusionDesPasses) groundInfo.setVisible(false)
   // ══════════ ET LE DAMIER PART AVEC LE MNT ═════════════════════════════════
   //
   // ⚠️ **`test/damier-uniformes.test.js` A ATTRAPÉ CETTE LIGNE MANQUANTE À LA
@@ -4310,7 +4347,7 @@ async function loadRealTerrain(opts = {}) {
     // se lit comme une carte cassée, et ce serait une régression apportée par
     // une optimisation. `_amorce` est retombé à faux, donc ce rebuild est plein.
     // Il coûte ~370 ms, sur un chemin où le chargement a DÉJÀ échoué.
-    try { terrain.rebuild(params) } catch (e) { console.error('repli procédural impossible:', e) }
+    try { terrain.rebuild(params, { repliProcedural: true }) } catch (e) { console.error('repli procédural impossible:', e) }
     // ⚠️ ET LE DAMIER PART AVEC. Les dalles voisines portent le relief RÉEL du
     // chargement précédent : les laisser autour d'un centre redevenu procédural
     // donne une carte coupée en deux à la jointure — plage hypsométrique, mer
@@ -4370,7 +4407,7 @@ function regenerateTerrain({ sansRideau = false } = {}) {
   // payé trois fois sur ce projet — même à 0 ms, ça reste un setTimeout.
   const delai = Math.max(0, 50 - (performance.now() - loadingVisibleDepuis))
   return new Promise((resolve) =>
-    setTimeout(() => {
+    setTimeout(async () => {
       terrain.rebuild(params)
       // ══════════ LE GRAIN DES DEUX FINESSES, CUIT SOUS LE VOILE ═════════════
       //
@@ -4396,6 +4433,20 @@ function regenerateTerrain({ sansRideau = false } = {}) {
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
+      // ══════════ LA CHAÎNE EST COUPÉE EN DEUX TÂCHES — Tâche FLU, poste ④ ═════
+      //
+      // ⛔ **TOUT CE QUI SUIT TOURNAIT DANS LA MÊME TÂCHE QUE `rebuild`**, et la
+      // tâche entière était la plus longue de la descente : **1 593 ms à CPU ×4**
+      // à l'arrivée du MNT (`.banc/sonde-descente-x4.log` : rebuild 514 +
+      // rugosité 381 + socle 107 + eau 202 + calques…), après que la première
+      // partie a déjà été ramenée de 2 908 à ~400 ms. Le relief, le socle et
+      // la matière sont posés ENSEMBLE ci-dessus — ce sont eux qui doivent être
+      // cohérents à l'image ; l'eau, les calques drapés, les étiquettes et les
+      // nuages suivent à la tâche suivante. Une image entre les deux, pendant
+      // laquelle l'eau et les calques sont ceux d'avant ; contre un gel deux
+      // fois plus long. `setTimeout` et PAS `requestAnimationFrame` — même
+      // raison qu'en tête : un onglet caché ne rend jamais la main à un rAF.
+      await new Promise((r) => setTimeout(r, 0))
       realWater?.rebuild(optionsDeMer()) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
       // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
@@ -4500,6 +4551,20 @@ function largeurBlocM() {
   const f = terrain.fenetreBornee
   if (f?.largeurM > 0) return f.largeurM
   return dem?.extentMeters || 0
+}
+
+// La largeur du bloc du palier DEMANDÉ (`params.demZoom`, `demLat/demLon`),
+// avant que la fenêtre soit recadrée ou que le MNT arrive : c'est la même
+// emprise que `empriseBlocMNT` sert à `cadrageFenetre`, mesurée comme
+// `normaliserEmprise` le fait (largeur en degrés × cos de la latitude du
+// centre). Sert au cartouche provisoire d'`entrerEnVol` (Tâche CAR).
+function largeurBlocEstimeeM() {
+  if (!Number.isFinite(params.demLat) || !Number.isFinite(params.demLon) || !(params.demZoom > 0)) return null
+  try {
+    return normaliserEmprise(empriseBlocMNT({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })).largeurM
+  } catch {
+    return null
+  }
 }
 
 // ══════════ L'ALTITUDE DU PLAN `y = 0` DU BLOC — Tâche R15 ══════════════════
@@ -4683,13 +4748,45 @@ const tuilesLisiblesDuSocle = (flux) => revisionFlux(flux)
 // SIGNATURE (`revisionFlux`), pas un compte. Un sentinelle numérique à côté
 // d'une chaîne se lit comme un bogue au premier coup d'œil suivant.
 let _socleLisibles = null
+// ══════════ LE RAFFINEMENT, ESPACÉ ET EN DEUX IMAGES — Tâche FLU, poste ④ ════
+//
+// ⛔ **CHAQUE TUILE QUI ATTERRISSAIT REJOUAIT LA CHAÎNE ENTIÈRE DANS L'IMAGE**,
+// et c'est la tâche qu'Adrien ressent. Mesuré sur la descente vers Chamonix, CPU
+// ×4 (`.banc/sonde-descente-x4.log`) : **treize** raffinements en neuf secondes,
+// chacun `rafraichirFenetre` **330 à 810 ms** + `plinth.rebuild` **100 à 250 ms**
+// dans la MÊME tâche — soit des gels de 450 à 1 060 ms, treize fois.
+//
+// Deux gestes, aucun ne change un octet du résultat final :
+//   · **espacer** — une tuile de plus dans les `RAFFINEMENT_SOCLE_MS` qui suivent
+//     un raffinement attend le suivant. Le PREMIER raffinement d'un niveau part
+//     sans délai (c'est lui qui affiche le parent pendant que le fin arrive), le
+//     dernier part toujours (`lisibles` reste différent tant qu'on n'a pas relu) ;
+//   · **le socle une image plus tard** — `plinth.rebuild` lit `terrain.sample`,
+//     qui est posé ; le repousser à l'image suivante coupe la tâche en deux.
+//     ⚠️ Pendant cette image-là, le haut des parois est celui du raffinement
+//     précédent : un écart de quelques mètres au bord, une image durant — contre
+//     un gel de 250 ms à chaque tuile.
+const RAFFINEMENT_SOCLE_MS = 350
+// la hauteur, en mètres, de la nappe PLATE posée en attendant la première tuile
+// (voir `hauteursDeFlux`) : au-dessus de `seaEps` (≈ 0,6 m), donc de la terre
+const HAUTEUR_ATTENTE_M = 1
+let _socleRaffineDepuis = -Infinity
+let _socleAttendPlinthe = false
 function socleRaffine() {
   if (!params.globeContinu || !fluxSocle || !terrain.fenetreBornee) return
+  if (_socleAttendPlinthe) {
+    _socleAttendPlinthe = false
+    plinth.rebuild(terrain, params)
+    return
+  }
   const lisibles = tuilesLisiblesDuSocle(fluxSocle)
   if (lisibles === _socleLisibles) return
+  const t = performance.now()
+  if (t - _socleRaffineDepuis < RAFFINEMENT_SOCLE_MS) return
   _socleLisibles = lisibles
+  _socleRaffineDepuis = t
   if (!terrain.rafraichirFenetre(params)) return
-  plinth.rebuild(terrain, params)
+  _socleAttendPlinthe = true
 }
 
 // ⚠️ **LE CROCHET NE SE POSE QUE SI LE DRAPEAU EST OUVERT, ET C'EST LA GARDE
@@ -4760,7 +4857,32 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
   // ⚠️ **`majHauteurs` NE RECONSTRUIT RIEN** : une passe par TUILE (jamais par
   // pixel — l'interface par pixel coûtait +3,5 ms par reconstruction), puis les
   // `y` et les normales réécrits EN PLACE. 3,5 ms à n = 384, mesuré in situ.
-  majHauteurs(fenetre, flux)
+  // ⚠️ **`normales: false` QUAND LE GRAIN VA SUIVRE — Tâche FLU.** `_ecrireRelief`
+  // ajoute le grain FBM aux `y` puis refait les normales sur la surface FINALE
+  // (`normalesAFaire`) : les calculer ici aussi, c'est deux `gridNormals` par
+  // raffinement. La question est posée à `terrain` avec le MÊME prédicat que
+  // celui de `_ecrireRelief` (`grainSuivra`), et le compte rendu le dit
+  // (`normalesManquantes`) pour que l'écrivain ne puisse pas l'oublier.
+  const grainSuivra = terrain.grainSuivra(params)
+  majHauteurs(fenetre, flux, { normales: !grainSuivra })
+  // ══════════ LA NAPPE D'ATTENTE — Tâche FLU ═════════════════════════════════
+  //
+  // ⛔ **AUCUNE TUILE À LIRE PENDANT UNE PLONGÉE = UN RELIEF PROCÉDURAL DE
+  // 591 361 SOMMETS, 2 908 ms À CPU ×4, QUE PERSONNE NE VOIT.** `entrerEnVol`
+  // pose `dem = null` et reconstruit ; les tuiles viennent d'être demandées
+  // TROIS LIGNES PLUS HAUT et aucune n'est là. `_remplirDepuisFlux` rendait
+  // alors `null` et `terrain.rebuild` retombait sur le sampler procédural — le
+  // `noise` à 1 407 ms du profil de PA. Depuis que le globe garde les hauteurs
+  // récentes (`_retenirHauteurs`), les parents de l'emprise répondent presque
+  // toujours ; à froid, on pose une nappe PLATE à `HAUTEUR_ATTENTE_M` (au-dessus
+  // de la ligne d'eau et de son épaulement de 0,6 m : de la terre) et on le DIT
+  // (`vide`) — le premier raffinement la recouvre.
+  let vide = false
+  if (fenetre.remplis === 0 && params.source === 'real' && !terrain.dem) {
+    fenetre.hauteursM.fill(HAUTEUR_ATTENTE_M)
+    majHauteurs(fenetre, fenetre.hauteursM) // recopie sur place, `y` et normales
+    vide = true
+  }
   // ⚠️ **LE COMPTEUR SE RECALE ICI, ET PAS AILLEURS.** Un cran change d'emprise
   // donc de tuiles réclamées : laissé sur la valeur d'avant, le raffinement
   // pourrait retomber sur le même compte et ne jamais repartir — un socle qui
@@ -4796,6 +4918,9 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
     zoomDemande: borne.zoomDemande,
     debitObserveMbs: borne.debitObserveMbs,
     zoomCouvert,
+    // les normales n'ont PAS été écrites : `_ecrireRelief` doit les faire (FLU)
+    normalesManquantes: grainSuivra && !vide,
+    vide,
   }
 }
 
@@ -5043,6 +5168,13 @@ const gpxPoseGlobe = {
     if (this.fabricant) gestionnaire.poserFabricantDePoseur(this.fabricant)
   },
 }
+// N2 — EN CROP, LE VOLUME DE NUAGES EST BORNÉ À L'EMPRISE DU SOCLE : le dehors
+// est éteint (`_cropSeul`), un nuage qui déborde flotterait sur rien. Le socle
+// fait `TERRAIN_SIZE` unités de bloc de côté (c'est la similitude
+// d'`ancrageNuages` : `span = TERRAIN_SIZE` pour `largeurBlocM()` mètres), donc
+// la borne vaut `TERRAIN_SIZE / 2 = 28`, fondu sur 3 unités vers l'intérieur.
+// Hors fusion la borne est 0 : le nuanceur ne change pas d'un bit.
+clouds.setBorne(fusionDesPasses ? TERRAIN_SIZE / 2 : 0)
 if (frontiereActive) {
   const passeFond = new PasseFond(sceneGlobe, camGlobe)
   passeFond.skipShadowMapUpdate = true
@@ -5374,8 +5506,51 @@ const _IDENTITE = [0, 0, 0, 1]
 // l'origine du bloc rend le repère de `crop-parois` à l'epsilon du double,
 // position ET quaternion (le relevé est dans `monde/cartouche-globe.js` §1).
 function echelleCartouche() {
+  const p = poseDesParois()
+  if (p) return p.echelle
   const largeur = largeurBlocM()
   return largeur > 0 ? facteurEchelle({ extentMeters: largeur, span: TERRAIN_SIZE }) : 0
+}
+//
+// ══════ ET LA TAILLE EST CELLE DES PAROIS, PAS DE L'EMPRISE DEMANDÉE — CAR ═══
+//
+// ⛔ **VID2 N5 : le cartouche faisait 2× (jusqu'à 4×) le socle pendant
+// WIDENING.** `largeurBlocM()` lit la fenêtre bornée, recadrée sur le NOUVEAU
+// palier dès `entrerEnVol` ; les parois du crop, elles, gardent l'ancienne
+// taille jusqu'à ce que le globe les repose. Mesuré à la sonde rAF : rapport
+// cartouche/parois **1,994 à z10, 1,998 à z11, 2,000 à z12, 4,000** en
+// WIDENING z12 → z10 — et le cartouche VISIBLE à 4× pendant 1,2 s.
+//
+// Le cartouche est du mobilier posé AUTOUR des parois : sa vérité, c'est
+// elles. On lit donc leur repère et leur largeur — `crop-parois` est posé par
+// le globe avec position, quaternion et une boîte englobante en unités de
+// globe — et on en tire la similitude : `echelle = largeur / TERRAIN_SIZE`.
+// C'est la même transformation que `ancrageCartouche`, prise par l'autre bout
+// (§1 de `monde/cartouche-globe.js` : identiques à l'epsilon du double au
+// repos). Sans parois (premières images, retour d'orbite) on retombe sur la
+// loi, comme avant.
+//
+// ⚠️ **LA BOÎTE EST CALCULÉE UNE FOIS PAR MAILLAGE** — `computeBoundingBox`
+// parcourt tous les sommets, et les parois ne changent pas de forme sans
+// changer d'objet (`poserParoisCrop` en crée un neuf).
+let _paroisMesurees = null
+function poseDesParois() {
+  const m = globe?._parois
+  if (!m?.geometry) return null
+  if (_paroisMesurees?.mesh !== m) {
+    const g = m.geometry
+    if (!g.boundingBox) g.computeBoundingBox()
+    const b = g.boundingBox
+    // largeur locale × échelle du maillage (1 après `decompose`, mais on la lit)
+    const largeur = (b.max.x - b.min.x) * (m.scale?.x || 1)
+    _paroisMesurees = { mesh: m, largeur }
+  }
+  return poseDepuisParois({
+    position: [m.position.x, m.position.y, m.position.z],
+    quaternion: [m.quaternion.x, m.quaternion.y, m.quaternion.z, m.quaternion.w],
+    largeur: _paroisMesurees.largeur,
+    span: TERRAIN_SIZE,
+  })
 }
 //
 // ══════ ET LA VISIBILITÉ SE DÉCIDE ICI, SOUS LE MODE SPHÈRE ════════════════
@@ -5393,21 +5568,30 @@ function echelleCartouche() {
 // suite et les quatre sites gardent la main, seuls.
 function majCartoucheGlobe() {
   if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
-  // ⚠️ **`dem` EST DANS LE PRÉDICAT, ET IL PORTE LE VOL.** `entrerEnVol` le met
-  // à `null` : sans lui, le cartouche du palier qu'on quitte resterait gravé
-  // pendant toute la descente, ce que la note d'`entrerEnVol` interdit.
-  const voulu = !!params.groundInfo && !!dem && cartoucheAffiche()
+  // ⚠️ **`dem` N'EST PLUS DANS LE PRÉDICAT — Tâche CAR (VID2 N4).** Il y était
+  // pour que le cartouche du palier qu'on quitte ne reste pas gravé pendant le
+  // vol ; mais `entrerEnVol` regrave maintenant le lieu d'arrivée dans la même
+  // image (`groundInfo.annonce`), donc il n'y a plus de mensonge à cacher — et
+  // le cacher coûtait **1,1 à 1,8 s de disparition à chaque cran** (sonde rAF).
+  // Un cartouche qui reste, avec un contenu juste, vaut mieux qu'un cartouche
+  // qui claque.
+  const voulu = !!params.groundInfo && cartoucheAffiche()
   if (voulu !== groundInfo.group.visible) groundInfo.setVisible(voulu)
   // ⚠️ **SORTIE SÈCHE QUAND LE CARTOUCHE EST CACHÉ.** Ce dépôt a déjà eu un
   // indicateur qui tournait 38 secondes à cause de reconstructions empilées :
   // celui-ci n'est qu'arithmétique, mais il n'a aucune raison de tourner en
   // orbite, et la garde est ce qui l'empêche d'y revenir par inadvertance.
   if (!voulu) return
-  const ancre = latLonOrigineBloc()
-  if (!ancre) return
-  const largeur = largeurBlocM()
-  if (!(largeur > 0)) return
-  const a = ancrageCartouche({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  // les parois d'abord (VID2 N5, voir `poseDesParois`) ; la loi sinon
+  const parois = poseDesParois()
+  const a = parois || (() => {
+    const ancre = latLonOrigineBloc()
+    if (!ancre) return null
+    const largeur = largeurBlocM()
+    if (!(largeur > 0)) return null
+    return ancrageCartouche({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  })()
+  if (!a) return
   groupeCartouche.position.set(a.position[0], a.position[1], a.position[2])
   groupeCartouche.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
   groupeCartouche.scale.setScalar(a.echelle)
@@ -5422,13 +5606,22 @@ function majCartoucheGlobe() {
 // conversions à écrire, pas de constante à recopier dans le nuanceur, et aucun
 // réglage sauvegardé à ré-échelonner.
 //
-// ⛔ **ET SANS ELLE, LA COUCHE DE NUAGES EST EN ORBITE BASSE.** Le curseur
-// « Altitude » vaut 13,5 unités de bloc au démarrage ; portées telles quelles
-// en unités de globe elles font **860 085 m** — deux fois l'altitude de la
-// station spatiale, et le ciel quitte l'écran par le haut. Multipliées par
-// `k`, elles font **6 594 m**, un plafond de cumulus. `1/k` vaut 130,43 à
-// La Réunion et dépasse 3 700 aux zooms continentaux
-// (`monde/nuages-globe.js` §2, et le test tue la mutation qui met 1).
+// ⛔ **ET SANS ELLE, LA COUCHE DE NUAGES EST EN ORBITE BASSE.** Un plafond de
+// 13,5 unités de bloc porté tel quel en unités de globe fait **860 085 m** —
+// deux fois l'altitude de la station spatiale, et le ciel quitte l'écran par
+// le haut. Multiplié par `k`, il fait **6 594 m**. `1/k` vaut 130,43 à La
+// Réunion et dépasse 3 700 aux zooms continentaux (`monde/nuages-globe.js`
+// §2, et le test tue la mutation qui met 1).
+//
+// ⚡ **MAIS L'HOMOTHÉTIE PORTE AUSSI LA VERTICALE, ET C'ÉTAIT N1 DE LA VIDÉO DU
+// 2026-09-04 (Tâche NUA) :** un plafond exprimé en unités de BLOC rétrécit avec
+// le socle — 21 346 m à z9, 2 016 m à z13, sous les crêtes à z14 (quatorzième
+// confusion d'espaces). Ce n'est PAS ici qu'on le corrige : `k` est juste, la
+// similitude est juste ; c'est le plafond qui doit être en MÈTRES avant
+// d'entrer dans l'espace de bloc. `clouds2.js` le convertit par
+// `(cloudAltitudeM − moyenneM) × 56 / largeurBlocM × exagération` — facteur
+// **0,010 671 unité/m à z13** (bloc de 10 496 m, exagération 2) et
+// **0,000 667 unité/m à z9** (bloc de 167 933 m) ; `monde/nuages-metres.js`.
 let _ancreNuages = null
 function majNuagesGlobe() {
   if (!fusionDesPasses) return // hors mode sphère le groupe est l'identité dans `scene`
@@ -5445,7 +5638,16 @@ function majNuagesGlobe() {
   if (!ancre) { _ancreNuages = null; return }
   const largeur = largeurBlocM()
   if (!(largeur > 0)) { _ancreNuages = null; return }
-  const a = ancrageNuages({ lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE })
+  // ⛔ L'ANCRE EST À LA MOYENNE DU RELIEF, COMME LA CAMÉRA (`majCameraFond`),
+  // PAS À LA MER — Tâche NUA. Sans ces deux champs le ciel était posé
+  // `moyenneM` trop bas (751 m à z13, 1 104 m à z9) et la caméra relue en bloc
+  // d'autant trop haut : le « 4 % d'écart » de R20 §2. Même exagération que
+  // l'ancre de la caméra : celle du globe (voir la note de `majCameraFond`).
+  const a = ancrageNuages({
+    lat: ancre.lat, lon: ancre.lon, extentMeters: largeur, span: TERRAIN_SIZE,
+    altitudeAncreM: altitudeAncreBlocM(),
+    exageration: globe?.exaggeration > 0 ? globe.exaggeration : 0,
+  })
   groupeNuages.position.set(a.position[0], a.position[1], a.position[2])
   groupeNuages.quaternion.set(a.quaternion[0], a.quaternion[1], a.quaternion[2], a.quaternion[3])
   groupeNuages.scale.setScalar(a.echelle)
@@ -6565,10 +6767,21 @@ function contexteCrop() {
       // socle normalise (`uHeightRange`). Prendre la fenêtre du bloc ici
       // convertirait le geste dans un domaine où il n'a pas été fait — la
       // classe de défaut n° 1 du chantier, prise par l'autre bout.
-      pivotAutoSocle: shadeGrade?.heightPivot ?? null,
-      contrasteAutoSocle: shadeGrade?.heightContrast ?? null,
+      // ⚠️ **DANS LE DOMAINE VIVANT, PAS DANS CELUI DE LA RÉFÉRENCE** — Tâche
+      // RAMP. `pivotSocle` ci-dessus est l'UNIFORME, donc transposé ; comparer
+      // les deux dans deux domaines différents rendrait un « geste d'Adrien »
+      // fantôme de plusieurs centaines de mètres. `shadeGradeVivant` fait la
+      // même transposition, avec les mêmes domaines.
+      pivotAutoSocle: shadeGradeVivant()?.heightPivot ?? null,
+      contrasteAutoSocle: shadeGradeVivant()?.heightContrast ?? null,
       socleBasM: Number.isFinite(dem?.minM) ? dem.minM : null,
       socleAmpM: Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null,
+      // ══════ LE DOMAINE DE RÉFÉRENCE DU NATUREL — Tâche BLA ═══════════════
+      // Le carré de 40 km de la rampe fixe, EN MÈTRES : c'est là que `treeLine`
+      // et `hazeAlt` ont un sens. `domaineRef()` rend `null` sous l'option de
+      // re-normalisation — le globe lit alors `hNorm` tel quel, comme avant.
+      refBasM: domaineRef()?.basM ?? null,
+      refAmpM: domaineRef()?.ampM ?? null,
       hazeAmt: terrain.mapUniforms.uHazeAmt.value,
       hazeAlt: terrain.mapUniforms.uHazeAlt.value,
       hazeDist: terrain.mapUniforms.uHazeDist.value,
@@ -6792,7 +7005,15 @@ function contexteCrop() {
       // appliqué au démarrage repose `params.fov`. « 33 n'existe nulle part dans
       // le dépôt » était vrai de la SOURCE et faux de l'application.
       fovDeg: camGlobe?.fov ?? camera.fov,
-      hauteurPx: renderer.domElement?.clientHeight || undefined,
+      // ⛔ **`renderer.domElement.clientHeight` LU ICI À CHAQUE IMAGE ÉTAIT LE
+      // PREMIER POSTE JS DU CROP — Tâche FLU.** Une lecture de `clientHeight`
+      // force la mise en page quand le DOM a bougé, et il bouge à chaque image :
+      // 1 188 ms de temps propre sur 10,2 s à CPU ×4 (15 % du fil), attribués à
+      // `contexteCrop` par le profileur alors que le reste de la fonction coûte
+      // 0,024 ms. Le brief prescrivait une mémoïsation du contexte ; c'était
+      // cette ligne. Le cache est invalidé par `ResizeObserver`/`resize`, et
+      // rend la MÊME grandeur (`clientHeight || undefined`) — `rect-toile.js`.
+      hauteurPx: cacheToile.hauteurClient(),
     },
   }
 
@@ -7259,11 +7480,23 @@ modes = new Modes({
     async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')
       demBusy = true
+      // ⚡ **LE GRAIN PART CUIRE DANS LE WORKER MAINTENANT — Tâche FLU.** Les
+      // tuiles mettent des secondes à arriver ; le Worker met ~0,8 s à cuire le
+      // champ de res 768. Quand `terrain.rebuild` en aura besoin, il sera en
+      // cache — sinon il cuit en ligne, comme avant (`prechauffeGrainHorsFil`).
+      terrain.prechauffeGrainHorsFil(params)
       try {
         params.demLat = lat
         params.demLon = lon
         if (zoom) params.demZoom = zoom
         params.demLocation = 'Custom'
+        // ══════ LE CARTOUCHE PREND LE LIEU À L'INSTANT OÙ IL EST DEMANDÉ — CAR ══
+        // Coordonnées et barre d'échelle sont connues ICI ; le reste arrive avec
+        // le MNT et le réseau (`chargeCartouche`). Regravé dans la même image,
+        // AVANT le vol comme avant le chargement bloquant : plus d'ancien lieu
+        // gravé sous un nouveau bloc (VID2 N3 — 2 à 3,3 s par cran, 426 ms de
+        // « Réunion » à Provence, sonde rAF).
+        groundInfo.annonce(lat, lon, { extentMeters: largeurBlocEstimeeM() })
         // ⚠️ `centreSur` : c'est LE point d'entrée de « on va quelque part ».
         // Les trois appelants de `loadSurface` portent tous un lieu VOULU — la
         // plongée depuis l'orbite (une recherche), l'escalier de zoom, et le
@@ -7644,11 +7877,132 @@ function syncHazeColor() {
   blockGrid?.restyle(params)
 }
 
+// ══════════ LA RAMPE FIXE — Tâche RAMP ═════════════════════════════════════
+//
+// ⚠️ **`params.heightPivot` ET `params.heightContrast` SONT EXPRIMÉS DANS LE
+// DOMAINE DE RÉFÉRENCE, PAS DANS CELUI DU MNT CHARGÉ.** C'est ce qui garde leur
+// sens aux curseurs et aux gabarits pendant que le MNT, lui, change d'amplitude
+// à chaque cran. La conversion vers le domaine vivant du nuanceur est faite ici
+// et NULLE PART AILLEURS — le §« la référence » de `src/rampe-fixe.js` porte la
+// dérivation et ses chiffres.
+let rampeRef = null
+
+// le domaine du MNT chargé, celui que `uHeightRange` porte
+function domaineVivant() {
+  if (params.source !== 'real' || !dem) return null
+  if (!Number.isFinite(dem.minM) || !(dem.maxM > dem.minM)) return null
+  return { basM: dem.minM, ampM: dem.maxM - dem.minM }
+}
+
+// ⛔ **L'OPTION COCHÉE REND `null`, DONC L'IDENTITÉ** : `transpose` rend alors
+// le réglage TEL QUEL, le même nombre, et le dépôt d'avant est retrouvé au bit.
+function domaineRef() {
+  return params.rampeRenormalise ? null : rampeRef
+}
+
+/**
+ * Pose (ou actualise) le domaine de référence à partir du MNT chargé, et rend
+ * ses statistiques — ou `null` s'il n'y a rien à refaire.
+ *
+ * ⚠️ **ON NE POSE UNE RÉFÉRENCE QUE SI LE CARRÉ DE 40 km TIENT DANS LE MNT.**
+ * Plus fin, il n'y a plus de quoi mesurer le lieu, seulement le bout de lieu
+ * qu'on regarde : on garde alors la référence, et c'est exactement cela, « la
+ * rampe cesse de se re-normaliser ». La seule exception est la toute première
+ * arrivée (`!rampeRef`), où il vaut mieux une référence étroite que pas de
+ * couleur du tout — c'est la dernière dépendance au chemin qui reste, et elle
+ * est chiffrée dans `rapport-RAMP.md`.
+ *
+ * ⚠️ **MÉMOÏSÉ SUR L'OBJET `dem`**, comme `dem._elevHist` juste en dessous :
+ * `applyAutoShade` et `currentReliefGrade` le demandent tous les deux, et le
+ * balayage coûte une passe sur ~2,3 millions de texels.
+ */
+function majRampeRef() {
+  if (params.source !== 'real' || !dem?.data?.length) return null
+  if (dem._refStats !== undefined) {
+    if (dem._refStats) rampeRef = dem._refDomaine
+    return dem._refStats
+  }
+  const n = Math.round(Math.sqrt(dem.data.length))
+  const fen0 = fenetreRef(n, dem.extentMeters)
+  if (!fen0.couvre && rampeRef) { dem._refStats = null; return null }
+  // ══════ LE CARRÉ EST CENTRÉ SUR LE LIEU, PAS SUR LE MNT — Tâche BLA ══════
+  // Le bloc central est aligné sur les tuiles : à z9 son centre est à 20 km
+  // du lieu, et la référence changeait de 280 m de plafond entre z9 et z11
+  // (`centrerFenetreRef`, rampe-fixe.js, porte le relevé). `dem.lat / dem.lon`
+  // est le centre DEMANDÉ ; `latLonToWorld` le rend en unités monde sur
+  // `demSpan` — la fraction du MNT, sans redire la conversion des tuiles.
+  const centre = latLonToWorld(dem, dem.lat, dem.lon)
+  const span = demSpan(dem)
+  const fen = centrerFenetreRef(fen0, n, centre.x / span + 0.5, centre.z / span + 0.5)
+  const st = statsFenetre(dem.data, n, fen)
+  if (!st || !(st.maxM > st.minM)) { dem._refStats = null; return null }
+  dem._refStats = st
+  dem._refDomaine = {
+    basM: st.minM,
+    ampM: st.maxM - st.minM,
+    // le rapport de relief de `gradeForDem` se lit sur la MÊME emprise que
+    // l'amplitude, sinon `mapTint` et `slopeTint` sauteraient d'un cran à l'autre
+    extentM: Math.min(dem.extentMeters, COTE_REF_M),
+  }
+  rampeRef = dem._refDomaine
+  return st
+}
+
+// pousse les deux uniformes de rampe depuis les réglages de RÉFÉRENCE
+//
+// ⚠️ **APPELÉE PAR `terrain.js` À CHAQUE POSE D'AMPLITUDE** (`_surAmplitude`,
+// quatre sites), donc potentiellement PAR IMAGE en mode continu. D'où le test
+// d'égalité : sans lui, `diffuseDuCentre` repasserait sur 24 dalles à chaque
+// image pour n'y rien changer.
+function appliqueRampeFixe() {
+  if (!_colorReady) return
+  const t = transpose(
+    { heightPivot: params.heightPivot, heightContrast: params.heightContrast },
+    domaineRef(),
+    domaineVivant()
+  )
+  // ⛔ **PAS D'ALIAS `const mu = terrain.mapUniforms`** : la propriété ① de
+  // `test/damier-uniformes.test.js` le lit comme une CESSION EN BLOC de la
+  // poignée des uniformes du bloc central, et elle a raison — un alias échappe
+  // au péage qui vérifie qu'on prévient bien les dalles voisines. Il a rougi ici.
+  // ══════ LE MODE NATUREL SUIT LA MÊME RÉFÉRENCE — Tâche BLA ═════════════
+  // `uTreeLine` et `uHazeAlt` lisent `hNorm`, normalisé sur `uHeightRange` :
+  // RAMP n'avait transposé que le pivot et le contraste. Ici on pose la
+  // conversion affine `hNorm` vivant → référence (les deux coefficients) et la
+  // borne de distance du voile en mètres (rampe-fixe.js porte la dérivation).
+  const f = facteursHNormRef(domaineRef(), domaineVivant())
+  const fd = facteurDistanceVoile(params.source === 'real' && dem ? dem.extentMeters / 2 : NaN)
+  if (terrain.mapUniforms.uHeightContrast.value === t.heightContrast
+    && terrain.mapUniforms.uHeightPivot.value === t.heightPivot
+    && terrain.mapUniforms.uHNormRefA.value === f.a
+    && terrain.mapUniforms.uHNormRefB.value === f.b
+    && terrain.mapUniforms.uFdFacteur.value === fd) return
+  terrain.mapUniforms.uHeightContrast.value = t.heightContrast
+  terrain.mapUniforms.uHeightPivot.value = t.heightPivot
+  terrain.mapUniforms.uHNormRefA.value = f.a
+  terrain.mapUniforms.uHNormRefB.value = f.b
+  terrain.mapUniforms.uFdFacteur.value = fd
+  // ⚠️ **ET LES DALLES VOISINES** — le péage de `test/damier-uniformes.test.js`,
+  // et il a mordu ici avant que je l'écrive. Cette fonction tourne à CHAQUE
+  // chargement de relief, y compris quand il n'y a rien à regrader : sans la
+  // diffusion, le damier gardait la transposition du MNT précédent et la couture
+  // se voyait pile sur la jointure. 8,0 µs pour 24 dalles, mesuré (voir
+  // `applyGridContour`).
+  blockGrid?.diffuseDuCentre()
+}
+
+// le grade auto, redit dans le domaine VIVANT — c'est celui-là que le bloc du
+// globe compare au curseur (`gradeBlocEffectif`, `pivotAutoSocle`), et les deux
+// doivent vivre dans le MÊME domaine, sinon on réinvente le désaccord de R31 §⑥.
+function shadeGradeVivant() {
+  if (!shadeGrade) return null
+  return transpose(shadeGrade, domaineRef(), domaineVivant())
+}
+
 function applyStyle(s) {
   Object.assign(params, s)
   terrain.mapUniforms.uTint.value = s.mapTint
-  terrain.mapUniforms.uHeightContrast.value = s.heightContrast
-  terrain.mapUniforms.uHeightPivot.value = s.heightPivot
+  appliqueRampeFixe()
   terrain.mapUniforms.uSlopeTint.value = s.slopeTint
   // ⚠️ ET LES DALLES VOISINES — sournois, celui-là : `applyAutoShade` (juste en
   // dessous) recalcule ces quatre valeurs à CHAQUE chargement de relief, donc
@@ -7672,23 +8026,66 @@ let shadeGrade = null
 
 function currentReliefGrade() {
   if (params.source !== 'real' || !dem) return null
-  // l'histogramme coûte une passe sur ~590 k pixels : calculé UNE fois par DEM
-  if (!dem._elevHist) dem._elevHist = elevationHistogram(dem.data, dem.minM, dem.maxM)
-  return gradeForDem({ minM: dem.minM, maxM: dem.maxM, meanM: dem.meanM, histogram: dem._elevHist, extentM: dem.extentMeters })
+  // ⛔ **L'OPTION COCHÉE : LE CHEMIN DU DÉPÔT, LIGNE POUR LIGNE.** Le grade se
+  // relit sur le MNT CHARGÉ, donc il se re-normalise à chaque cran — c'est
+  // précisément le comportement qu'Adrien a voulu garder derrière une case.
+  if (params.rampeRenormalise) {
+    // l'histogramme coûte une passe sur ~590 k pixels : calculé UNE fois par DEM
+    if (!dem._elevHist) dem._elevHist = elevationHistogram(dem.data, dem.minM, dem.maxM)
+    return gradeForDem({ minM: dem.minM, maxM: dem.maxM, meanM: dem.meanM, histogram: dem._elevHist, extentM: dem.extentMeters })
+  }
+  // ⚡ **SINON ON GRADE SUR LA FENÊTRE DE RÉFÉRENCE**, le carré de 40 km centré
+  // sur la carte : le MÊME sol à tous les crans, donc le même grade.
+  const st = majRampeRef()
+  if (!st) return null
+  return gradeForDem({
+    minM: st.minM, maxM: st.maxM, meanM: st.meanM,
+    histogram: st.histogram, extentM: rampeRef.extentM,
+  })
 }
 
 // `force` : le toggle qu'on rallume — tout redevient auto, y compris les
 // curseurs que l'utilisateur avait figés.
 function applyAutoShade({ force = false } = {}) {
   if (force) for (const k of SHADE_KEYS) shadeDirty[k] = false
-  if (!params.shadeAuto) return null
-  const g = currentReliefGrade()
-  if (!g) return null
+  // ⚠️ **LA RÉFÉRENCE SE POSE MÊME QUAND L'AUTO EST ÉTEINT.** Sans cette ligne,
+  // une carte ouverte en « Ombrage manuel » n'aurait aucun domaine de référence,
+  // `transpose` rendrait l'identité, et la rampe se re-normaliserait comme
+  // avant — l'option par défaut serait morte pour ces cartes-là.
+  if (!params.rampeRenormalise) majRampeRef()
+  const g = params.shadeAuto ? currentReliefGrade() : null
+  if (!g) {
+    // ⚡ **ET LES UNIFORMES SE REPOSENT QUAND MÊME.** Le réglage n'a pas bougé,
+    // mais le DOMAINE VIVANT, lui, vient de changer : sans cette repose, la loi
+    // en mètres suivrait le nouveau MNT — c'est-à-dire le défaut, réinventé un
+    // étage plus bas. C'est le cas de tous les crans plus fins que 40 km.
+    appliqueRampeFixe()
+    return null
+  }
   shadeGrade = g
   const next = {}
   for (const k of SHADE_KEYS) next[k] = shadeDirty[k] ? params[k] : g[k]
   applyStyle(next)
   return g
+}
+
+// l'option, depuis le panneau : on rebascule le domaine et on repose tout
+function setRampeRenormalise(v) {
+  params.rampeRenormalise = !!v
+  // ⚠️ Le grade auto a été calculé dans l'AUTRE domaine : il est périmé, et le
+  // garder ferait sauter la teinte au moment du clic. On le refait.
+  if (dem) { dem._refStats = undefined; dem._elevHist = null }
+  // ⛔ **ON NE JETTE PAS `rampeRef` EN COCHANT LA CASE, ET C'EST UN DÉFAUT QUE
+  // LA SONDE A TROUVÉ.** Je l'avais écrit `rampeRef = null` — logique en
+  // apparence : l'option cochée n'en a pas besoin. Mais la référence ne se
+  // repose QUE sur un MNT d'au moins 40 km : décocher la case six crans plus bas
+  // ne la retrouvait plus, et la rampe redevenait libre en silence. Mesuré sur
+  // `.banc/RAMP-GABARITS-C6` : cinq gabarits sur six rendaient « avant » et
+  // « après » IDENTIQUES — c'est-à-dire le correctif éteint sans le dire.
+  // `domaineRef()` suffit à ignorer la référence tant que la case est cochée.
+  applyAutoShade()
+  appliqueRampeFixe()
+  refreshAll()
 }
 
 // un curseur d'Ombrage bougé à la main gèle CE réglage-là (les trois autres
@@ -8323,6 +8720,7 @@ function shuffleLook() {
     cloudOpacity: +rnd(0.8, 1.8).toFixed(2),
     cloudContrast: +rnd(0.7, 1.6).toFixed(2),
     cloudAltitude: +rnd(3.5, 7).toFixed(1),
+    cloudAltitudeM: Math.round(rnd(4000, 7500) / 100) * 100, // mètres — Tâche NUA
     cloudAltSpread: +rnd(0.6, 1).toFixed(2),
     cloudScale: +rnd(3, 5).toFixed(1),
     windDir: Math.round(rnd(0, 359)),
@@ -8397,6 +8795,11 @@ const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainT
 // à partir d'ici terrain ET blockGrid existent : la couleur de brume peut être
 // poussée (voir syncHazeColor et le drapeau _colorReady)
 _colorReady = true
+// ⚡ **LE RENDEZ-VOUS DE LA RAMPE AVEC L'AMPLITUDE** — Tâche RAMP. `terrain.js`
+// pose `uHeightRange` en quatre endroits ; à chacun, le réglage de rampe doit
+// être re-transposé DANS LE MÊME TOUR, sinon l'image porte la loi de
+// l'amplitude précédente. C'est le second défaut du brief, celui des ~300 ms.
+terrain._surAmplitude = appliqueRampeFixe
 syncHazeColor()
 
 // ═══════ UNE SEULE MER, UNE SEULE JUPE, POUR TOUT LE CARRÉ DU DAMIER ════════
@@ -12643,6 +13046,12 @@ const panelCtx = {
   markShadeDirty, // un curseur repris à la main → ce réglage ne suivra plus
   setShadeAuto: (v) => { params.shadeAuto = v; if (v) applyAutoShade({ force: true }) },
   shadeFrozenCount: () => SHADE_KEYS.filter((k) => shadeDirty[k]).length,
+  // --- LA RAMPE FIXE (Tâche RAMP) : le curseur écrit dans le domaine de
+  // RÉFÉRENCE, le nuanceur reçoit la transposition. ⚠️ Sans ce détour, les deux
+  // curseurs de rampe court-circuiteraient `appliqueRampeFixe` (le panneau
+  // écrit `u()[uni].value` EN DIRECT) et retomberaient dans le domaine vivant.
+  poseRampeReglage: (key, v) => { params[key] = v; appliqueRampeFixe() },
+  setRampeRenormalise,
   applyGridContour,
   applyMonochrome,
   resetLook,
@@ -13430,6 +13839,9 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+  // LE CONTEXTE DU CROP, pour les bancs (FLU) : c'est le premier poste JS nommé
+  // du profil dans le crop, et une sonde doit pouvoir le chronométrer seul.
+  contexteCrop,
   // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Exposée pour la même raison que le
   // reste de `__exp` : c'est le SEUL moyen de vérifier cette tâche, `main.js`
   // n'étant chargé par aucun test. `majCameraFond` est appelable à la main pour
@@ -13917,6 +14329,10 @@ const saisieTerre = {
   residuDeg: 0, // le résidu de la dernière itération (sonde)
 }
 window.__exp.saisieTerre = saisieTerre
+// Tâche RAMP — les sondes ont besoin du domaine de référence et du bouton
+window.__exp.appliqueRampeFixe = appliqueRampeFixe
+window.__exp.setRampeRenormalise = setRampeRenormalise
+Object.defineProperty(window.__exp, 'rampeRef', { get: () => rampeRef })
 
 // La caméra qui REND, en espace globe : `camGlobe` sous la frontière de rendu ;
 // en orbite, la caméra principale (les deux espaces y coïncident). Sans
@@ -13952,7 +14368,11 @@ function lirePoseReelle() {
   return _poseReelle
 }
 function projectionSaisie(px, py) {
-  const r = renderer.domElement.getBoundingClientRect()
+  // ⚠️ **LA BOÎTE VIENT DU CACHE, PAS DE `getBoundingClientRect()`** — Tâche FLU.
+  // Lue ici à chaque échantillon de pointeur ET à chaque image d'un glissé,
+  // elle forçait une mise en page synchrone à chaque fois : 9,6 % du fil
+  // principal pendant un glissé en orbite, CPU ×4 (`monde/rect-toile.js`).
+  const r = cacheToile.rect()
   return { fovDeg: camera.fov, aspect: camera.aspect, largeurPx: r.width, hauteurPx: r.height, px: px - r.left, py: py - r.top }
 }
 // Le point de la sphère sous un pointeur — au limbe si le pointeur est dans le
@@ -15411,6 +15831,11 @@ setTimeout(() => {
   if (RETOUR_PAIEMENT.cas) return
   hub.show()
 }, 900)
+
+// le grain du bloc, cuit d'avance pendant que l'application est encore sur
+// l'écran d'accueil (Tâche FLU) — les réglages du gabarit d'ouverture sont posés
+// depuis longtemps à deux secondes ; s'ils changent ensuite, la plongée relance
+setTimeout(() => { try { terrain.prechauffeGrainHorsFil(params) } catch {} }, 2000)
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now

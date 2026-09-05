@@ -5,7 +5,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { gatherGroundInfo } from './ground-info.js'
+import { gatherGroundInfo, infoImmediate } from './ground-info.js'
 import { rectFenetre, statsRect } from './dem-emprise.js'
 import { ecartTextes, centreDuCarre, cleDuCarre } from './damier-carre.js'
 
@@ -506,6 +506,60 @@ export class GroundInfoLayer {
   // mobilier, il reste dans le socle. Il sert à savoir DE QUOI PARLER : la
   // plage d'altitude sous la dalle visible, et non celle de l'emprise entière,
   // qui est neuf fois plus grande et donc presque toujours plus large.
+  //
+  // ══════════ ET IL DESSINE D'ABORD CE QU'IL SAIT — Tâche CAR (VID2 N3) ═════
+  //
+  // ⛔ **L'`await` DU RÉSEAU ÉTAIT LE MENSONGE.** Mesuré à la sonde rAF sur le vol
+  // de la vidéo : après un cran, les anciennes coordonnées restaient gravées
+  // **2,0 à 3,3 s** (47 à 78 images) sous un bloc qui avait déjà changé de
+  // lieu, et « Réunion 21,26°S » restait affiché à Provence **426 ms**. Le
+  // groupe était visible ; seul le contenu attendait Nominatim.
+  //
+  // D'où deux temps : ① tout de suite, `infoImmediate` (coordonnées, échelle,
+  // altitudes si le MNT est là, nom si le mémo web le connaît) ; ② quand le
+  // réseau répond, le cartouche complet. Entre les deux il n'y a JAMAIS un
+  // ancien lieu à l'écran — c'est ce que garantit `annonce`, appelée dès que le
+  // lieu est demandé, avant même le MNT.
+  //
+  // ⚠️ **LE PREMIER TEMPS N'ATTEND PAS LES POLICES** : `document.fonts.check`
+  // dit si elles sont là ; si ce n'est pas le cas (tout premier chargement), on
+  // ne dessine rien de provisoire — il n'y a alors aucun ancien cartouche à
+  // remplacer, et le second temps dessine avec les bonnes polices comme avant.
+  _policesPretes() {
+    const f = typeof document !== 'undefined' ? document.fonts : null
+    if (!f?.check) return false
+    try {
+      return f.check('400 40px Rosarivo') && f.check('500 30px "Bricolage Grotesque"')
+    } catch {
+      return false
+    }
+  }
+
+  // Le lieu vient d'être DEMANDÉ : on sait ses coordonnées, rien d'autre encore
+  // (l'emprise si l'appelant la connaît). Efface l'ancien cartouche et grave ce
+  // qu'on sait, dans la même image. Toute requête `load` en vol pour un autre
+  // lieu est périmée à l'instant.
+  // @returns {boolean} vrai si un cartouche provisoire a été dessiné
+  annonce(lat, lon, { extentMeters = null, fenetre = null } = {}) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false
+    ++this.reqId
+    this.lastFenetre = fenetre ? { x: fenetre.x, z: fenetre.z } : null
+    const deja = this.lastInfo
+    // le même lieu, déjà complet : rien à effacer, on ne clignote pas
+    const info = infoImmediate({ lat, lon, extentMeters })
+    // le même lieu, et rien de plus à dire : on ne regrave pas
+    if (deja && deja.coord === info.coord && !(info.name && !deja.name) && !(info.scale && !deja.scale)) return false
+    if (!this._policesPretes()) {
+      // pas de polices : on ne peut pas graver, mais on ne laisse pas l'ancien
+      // lieu à l'écran non plus
+      if (deja && deja.coord !== info.coord) { this._clear(); this.lastInfo = null }
+      return false
+    }
+    this.render(info)
+    this._applyRace()
+    return true
+  }
+
   async load(lat, lon, dem, fenetre = null) {
     const id = ++this.reqId
     this.lastFenetre = fenetre ? { x: fenetre.x, z: fenetre.z } : null
@@ -513,6 +567,16 @@ export class GroundInfoLayer {
     if (dem?.empriseCote > 1) {
       const r = rectFenetre(dem, fenetre?.x || 0, fenetre?.z || 0, TERRAIN_SIZE)
       stats = statsRect(dem, r.px0, r.py0, r.cotePx)
+    }
+    // ① tout de suite : ce qu'on sait sans le réseau, y compris la plage
+    // d'altitude du MNT qui vient d'arriver
+    if (this._policesPretes() && this.enabled) {
+      const cote = dem?.empriseCote > 1 ? dem.empriseCote : 1
+      const tot = infoImmediate({ lat, lon, extentMeters: dem?.extentMeters > 0 ? dem.extentMeters / cote : null, stats: stats || dem })
+      if (!(this.lastInfo && !this.lastInfo.provisoire && this.lastInfo.coord === tot.coord && this.lastInfo.elevation === tot.elevation)) {
+        this.render(tot)
+        this._applyRace()
+      }
     }
     try {
       // ensure the cartouche fonts are ready before drawing to canvas, else the
@@ -522,6 +586,7 @@ export class GroundInfoLayer {
         document.fonts?.load('400 40px Rosarivo'),
         document.fonts?.load('500 30px "Bricolage Grotesque"'),
       ])
+      // ② le réseau
       const info = await gatherGroundInfo({ lat, lon, dem, stats })
       if (id !== this.reqId) return // superseded
       // On GARDE l'info, on ne fait pas que la dessiner : l'écran d'affiche a

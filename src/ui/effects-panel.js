@@ -184,8 +184,8 @@ export function buildEffectsPanel(ctx) {
   // sans repli, le slider crashe au boot (toFixed sur undefined, vécu)
   const cloudLive = (label, key, min, max, step, dflt = 0) =>
     slider({ label, min, max, step, get: () => params[key] ?? dflt, set: (v) => { params[key] = v } })
-  const cloudBaked = (label, key, min, max, step) => {
-    const s = cloudLive(label, key, min, max, step)
+  const cloudBaked = (label, key, min, max, step, dflt = 0) => {
+    const s = cloudLive(label, key, min, max, step, dflt)
     s.querySelector('input').addEventListener('change', rebuildClouds)
     return s
   }
@@ -217,7 +217,10 @@ export function buildEffectsPanel(ctx) {
     cloudLive('Luminosité', 'cloudBrightness', 0.5, 5, 0.1),
     cloudLive('Contraste', 'cloudContrast', 0.4, 2.5, 0.05),
     cloudLive('Translucidité', 'cloudSSS', 0, 2, 0.05),
-    cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
+    // EN MÈTRES au-dessus de la mer — Tâche NUA. L'ancienne tirette en unités
+    // de bloc descendait avec le zoom (21 346 m à z9, 2 016 m à z13 : sous les
+    // crêtes) ; elle ne sert plus qu'au terrain procédural, sans mètres.
+    cloudBaked('Altitude (m)', 'cloudAltitudeM', 1000, 9000, 100, 6000),
     cloudBaked('Étalement en altitude', 'cloudAltSpread', 0, 1, 0.05),
     cloudLive('Vitesse de dérive', 'cloudDrift', 0, 4, 0.1),
     // ⛔ **CURSEUR MORT, MESURÉ — Tâche R20.** `cloudDriftVar` est déclaré dans

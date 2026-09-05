@@ -85,6 +85,8 @@ import {
 } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 import { REFRACTION_NEUTRE, refractionDuSocle } from '../src/monde/eau-refraction.js'
+// ⚡ **Tâche EAU** : le vent de la mer, dérivé de la houle — ⑱a à ⑱c.
+import { ventDeHoule } from '../src/monde/eau-lumiere.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
 // lignes suffisent. Sans ce hook, `Globe.prototype.poserMer` ne peut être
@@ -1771,8 +1773,12 @@ test('⑫h `construireParoisCrop` RETIENT le fond du bloc pour la mer', () => {
   assert.ok(Number.isFinite(solide.baseY) && solide.baseY < 0, `baseY ${solide.baseY}`)
   const src = readFileSync(SRC_GLOBE, 'utf8')
   assert.match(src, /this\._baseYCrop = solide\.baseY/)
-  // et il n'est posé qu'APRÈS le refus : une paroi refusée n'écrit rien
-  const iRefus = src.indexOf('if (solide.refus) return { mesh: null, solide')
+  // et il n'est posé qu'APRÈS le refus : une paroi refusée n'écrit rien —
+  // ⚠️ SOC : sauf par la plaque PROVISOIRE, qui passe par `_poserSolideParois`
+  // comme la définitive et retient SON fond, pour que le rideau d'eau ait un
+  // bas dans la même image que la découpe. La pose vit dans `_poserSolideParois`,
+  // après le refus de `construireParoisCrop`.
+  const iRefus = src.indexOf('if (solide.refus) {')
   const iPose = src.indexOf('this._baseYCrop = solide.baseY')
   assert.ok(iRefus > 0 && iPose > iRefus)
 })
@@ -2990,5 +2996,58 @@ test('⑯f `_majBandeHouleMer` LIT les uniformes vivants, et la bande suit la ho
     // ⛔ **ET SANS MER POSÉE, ELLE N ÉCRIT NULLE PART** — même garde que
     // `_majBordMer` et `majReglagesMer`.
     assert.equal(Globe.prototype._majBandeHouleMer.call({ _mer: null }), null)
+  })
+})
+
+// ══════════ ⑱ LA LUMIÈRE DE LA MER — Tâche EAU ══════════════════════════════
+//
+// La loi vit dans `src/monde/eau-lumiere.js` et son propre test l'exécute. Ici,
+// ce qui appartient à `poserMer` et `majReglagesMer` : les trois uniformes de la
+// tâche sont POSÉS, avec les bonnes valeurs, et le vent SUIT le spectre vivant.
+// ⚠️ ON EXÉCUTE — une assertion qui lit un fichier ne prouve pas qu'il pose.
+
+test('⑱a `poserMer` POSE `uMerVraieEau` à 1 — la livraison, pas un réglage — et un vent au neutre', () => {
+  return merPosee().then(({ u }) => {
+    assert.equal(u.uMerVraieEau.value, 1, 'la vraie eau est la livraison')
+    assert.ok(u.uMerVent.value.x === 1 && u.uMerVent.value.y === 0, 'le vent naît à l est')
+    // le vent en m/s est DÉRIVÉ de la houle posée, par la loi du module
+    assert.equal(u.uMerVentMs.value, ventDeHoule(u.uMerHoule.value))
+    assert.ok(u.uMerVentMs.value >= 2 && u.uMerVentMs.value <= 14, 'dans la plage de Cox & Munk')
+  })
+})
+
+test('⑱b `majReglagesMer` LIT la direction dominante sur le spectre, pondérée par l énergie', () => {
+  return merPosee().then(({ g, u }) => {
+    // deux trains : l un vers (1, 0) avec tout le poids, l autre vers (0, 1) sans
+    const a = [{ x: 1, y: 0, z: 1, w: 1 }, { x: 0, y: 1, z: 1, w: 1 }]
+    const b = [{ x: 0, y: 1, z: 1, w: 0 }, { x: 0, y: 1, z: 0, w: 0 }]
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: { a, b } })
+    assert.ok(Math.abs(u.uMerVent.value.x - 1) < 1e-12 && Math.abs(u.uMerVent.value.y) < 1e-12)
+    // les poids inversés : la direction bascule — une concordance au neutre n est pas un branchement
+    b[0].z = 0; b[1].z = 1
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: { a, b } })
+    assert.ok(Math.abs(u.uMerVent.value.x) < 1e-12 && Math.abs(u.uMerVent.value.y - 1) < 1e-12)
+    // à poids égaux : la diagonale, NORMALISÉE
+    b[0].z = 1
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: { a, b } })
+    assert.ok(Math.abs(Math.hypot(u.uMerVent.value.x, u.uMerVent.value.y) - 1) < 1e-12, 'unitaire')
+    assert.ok(Math.abs(u.uMerVent.value.x - u.uMerVent.value.y) < 1e-12)
+    // un spectre muet (poids nuls) ne remplace RIEN
+    b[0].z = 0; b[1].z = 0
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, spectre: { a, b } })
+    assert.ok(Math.abs(u.uMerVent.value.x - u.uMerVent.value.y) < 1e-12, 'la direction d avant reste')
+  })
+})
+
+test('⑱c le vent en m/s SUIT la houle du socle, par image, et retombe au neutre sans état', () => {
+  return merPosee().then(({ g, u }) => {
+    const etat = { ...ETAT_MER_NEUTRE, houle: 2 }
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, etat })
+    assert.equal(u.uMerVentMs.value, ventDeHoule(2))
+    assert.equal(u.uMerVentMs.value, 10)
+    Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1 })
+    assert.equal(u.uMerVentMs.value, ventDeHoule(ETAT_MER_NEUTRE.houle))
+    // ⛔ et sans mer posée, rien n est écrit (même garde que le reste)
+    assert.equal(Globe.prototype.majReglagesMer.call({ _mer: null }), null)
   })
 })

@@ -276,6 +276,11 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'contrasteAutoSocle',
   'socleBasM',
   'socleAmpM',
+  // Tâche BLA — le domaine de référence du Naturel (le carré de 40 km). Il ne
+  // change qu'au premier MNT assez large et sous l'option de re-normalisation,
+  // mais un champ absent d'ici n'est jamais comparé, donc jamais reposé.
+  'refBasM',
+  'refAmpM',
   'hazeAmt',
   'hazeAlt',
   'hazeDist',
@@ -534,7 +539,12 @@ const POSEURS = {
     const r = globe.construireParoisCrop(parois || undefined)
     // ⚠️ `null` SIGNIFIE « PAS DE CROP », et c'est un refus comme un autre —
     // `construireParoisCrop` sort à sa première ligne quand `_crop` est nul.
-    return { refus: r ? (r.refus ?? null) : 'crop' }
+    // ⚠️ **`provisoire` — SOC.** Un refus de couverture peut s'accompagner d'une
+    // plaque PROVISOIRE (bâtie depuis le maillage dessiné) : le refus reste,
+    // la reprise rebâtira la définitive, et `reprendre` doit alors rejouer la
+    // mer, dont le rideau descend jusqu'au fond de la plaque qui vient d'être
+    // remplacée.
+    return { refus: r ? (r.refus ?? null) : 'crop', provisoire: !!(r && r.provisoire) }
   },
   habillage({ globe, habillage }) {
     globe.poserHabillage(habillage || {})
@@ -583,13 +593,15 @@ export function poserChaineCrop(arg = {}) {
     throw new TypeError('poserChaineCrop : il faut un globe — une chaîne muette est une chaîne absente')
   }
   const refus = []
+  const provisoires = []
   let mer = Promise.resolve(null)
   for (const nom of MAILLONS) {
     const r = POSEURS[nom](arg)
     if (r.refus) refus.push(nom)
+    if (r.provisoire) provisoires.push(nom)
     if (r.promesse) mer = r.promesse
   }
-  return { refus, mer }
+  return { refus, mer, provisoires }
 }
 
 /**
@@ -698,6 +710,10 @@ export function creerVeilleCrop({
   let sortieArmee = false
   let signature = null
   let refus = []
+  // ⚠️ **LA PLAQUE EST-ELLE PROVISOIRE ? — SOC.** Posé par chaque appel du
+  // maillon `parois` ; lu par `reprendre`, qui rejoue la mer quand la
+  // définitive remplace la provisoire (voir là-bas).
+  let paroisProvisoires = false
   let bascules = 0
   let depuisPose = 0
   // ⚠️ **CE QU'ON A POSÉ, PAS CE QU'ON A VU** — voir `habillageDifferent`.
@@ -834,6 +850,7 @@ export function creerVeilleCrop({
     jeton++
     const r = poserChaineCrop({ globe: g, ...ctx })
     refus = r.refus
+    paroisProvisoires = r.provisoires.includes('parois')
     depuisPose = 0
     habillagePose = instantaneHabillage(ctx.habillage)
     formePosee = formeDuCrop(ctx)
@@ -876,6 +893,7 @@ export function creerVeilleCrop({
     // ⚠️ **ET LES PAROIS AVEC, SINON LE BLOC EST À DEUX FORMES** : la surface
     // serait arrondie et son flanc resterait carré — pire que les deux carrés.
     const p = POSEURS.parois({ globe: g, ...ctx })
+    paroisProvisoires = !!p.provisoire
     formePosee = formeDuCrop(ctx)
     reformages++
     // un refus des parois retourne dans la file de reprise, comme partout
@@ -900,9 +918,20 @@ export function creerVeilleCrop({
     const restant = []
     // ⚠️ **LE FOND ENTRAÎNE SES LECTEURS — Tâche J bis, voir `LECTEURS_DU_FOND`.**
     let fondNeuf = false
+    // ⚠️ **LA PLAQUE DÉFINITIVE ENTRAÎNE LA MER — SOC.** Tant que la plaque est
+    // provisoire, le rideau d'eau descend jusqu'à SON fond ; quand la définitive
+    // la remplace, son fond bouge (d'autres hauteurs, un autre point le plus
+    // bas) et un rideau laissé sur l'ancien fond flotterait au-dessus du bloc ou
+    // le traverserait. On rejoue donc la mer une fois, à ce moment-là — pas à
+    // chaque reprise.
+    let merAvecPlaque = false
     for (const nom of refus) {
       const r = POSEURS[nom]({ globe: g, ...ctx })
       if (nom === 'fond' && !r.refus && r.neuf) fondNeuf = true
+      if (nom === 'parois') {
+        if (!r.refus && paroisProvisoires) merAvecPlaque = true
+        paroisProvisoires = !!r.provisoire
+      }
       if (nom === 'mer') { const j = ++jeton; suivreMer(r.promesse, j); continue }
       if (r.refus) restant.push(nom)
     }
@@ -913,8 +942,19 @@ export function creerVeilleCrop({
         // de mille — les rejouer pour rien serait payer deux fois la reprise.
         if (refus.includes(nom)) continue
         const r = POSEURS[nom]({ globe: g, ...ctx })
+        if (nom === 'parois') {
+          if (!r.refus && paroisProvisoires) merAvecPlaque = true
+          paroisProvisoires = !!r.provisoire
+        }
         if (r.refus) restant.push(nom)
       }
+    }
+    // même règle que ci-dessus : une mer déjà rejouée dans cette reprise ne
+    // l'est pas deux fois
+    if (merAvecPlaque && !refus.includes('mer')) {
+      const r = POSEURS.mer({ globe: g, ...ctx })
+      const j = ++jeton
+      suivreMer(r.promesse, j)
     }
     refus = restant
   }

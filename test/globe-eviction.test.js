@@ -131,7 +131,7 @@ function serve() {
   }
 }
 
-const { Globe, _resetTileMemo } = await import('../src/globe.js')
+const { Globe, _resetTileMemo, HAUTEURS_RECENTES_MAX } = await import('../src/globe.js')
 const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
 const { _resetDemSource } = await import('../src/dem-source.js')
 
@@ -807,11 +807,16 @@ test('les hauteurs ne survivent pas au maillage : le tampon de construction est 
     if (t.heights) retenues++
   }
   assert.ok(pretes > 100, `${pretes} tuiles prêtes : le vol n'a rien construit, le test ne mesure rien`)
-  assert.equal(
-    retenues,
-    0,
-    `${retenues} tuiles sur ${pretes} retiennent leurs hauteurs — ${((retenues * 256 * 256 * 4) / 1048576).toFixed(1)} Mo pour personne`
+  // ⚠️ **PLUS ZÉRO, MAIS BORNÉ — Tâche FLU.** Le globe garde les hauteurs des
+  // `HAUTEURS_RECENTES_MAX` dernières tuiles maillées (24 Mo au pire), pour que
+  // le socle se pose sur le relief du PARENT à la plongée au lieu de cuire un
+  // relief procédural de 2,9 s (`globe.js`, `_retenirHauteurs`). Ce qui reste
+  // interdit, c'est ce que ce test a toujours interdit : retenir TOUT le cache.
+  assert.ok(
+    retenues <= HAUTEURS_RECENTES_MAX,
+    `${retenues} tuiles sur ${pretes} retiennent leurs hauteurs (borne ${HAUTEURS_RECENTES_MAX}) — ${((retenues * 256 * 256 * 4) / 1048576).toFixed(1)} Mo pour personne`
   )
+  assert.ok(retenues > 0, 'aucune hauteur récente gardée : la plongée recuirait le relief procédural')
   // …et le maillage, lui, EXISTE : on n'a pas gagné la mémoire en ne bâtissant rien
   assert.ok(mesures.visiblesFinal > 12, `${mesures.visiblesFinal} tuiles dessinées : rien n'a été bâti`)
   globe.dispose()

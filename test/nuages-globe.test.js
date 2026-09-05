@@ -228,7 +228,9 @@ test('⑤ le ciel est ADOPTÉ par la scène du globe — sinon rien n’est dess
 test('⑤ l’ancrage du ciel se REPOSE à chaque image, par la loi et pas à la main', () => {
   const corps = MAIN.slice(MAIN.indexOf('function majNuagesGlobe'))
   assert.ok(corps.length > 0, 'majNuagesGlobe n’existe pas')
-  const bloc = corps.slice(0, 2600)
+  // 3 400 : la note NUA sur l'ancre (moyenne du relief, pas la mer) a allongé
+  // le corps de ~600 caractères
+  const bloc = corps.slice(0, 3400)
   assert.ok(/ancrageNuages\(\{/.test(bloc), 'la loi n’est pas appelée : le repère est refait à la main')
   assert.ok(/groupeNuages\.scale\.setScalar\(/.test(bloc),
     'l’échelle n’est pas posée : la couche de nuages serait à 860 km')
@@ -274,6 +276,7 @@ test('⑤ hors mode sphère, la caméra de bloc est servie TELLE QUELLE', () => 
 // options une par une.
 
 import { cloudCountForTier, CLOUD_COUNT_MAX, CLOUD_HARD_MAX } from '../src/clouds-sim.js'
+import * as MODULE_METRES from '../src/monde/nuages-metres.js'
 
 const DEPART = JSON.parse(
   readFileSync(new URL('../public/templates/defaults/shibustart.json', import.meta.url), 'utf8')
@@ -306,6 +309,10 @@ test('⑥ le ciel d’ouverture porte les trois valeurs de l’arbitrage', () =>
 })
 
 test('⑥ le ciel CHEVAUCHE les sommets — ni enterré, ni détaché', () => {
+  // ⚠️ **Tâche NUA (2026-09-05)** : sur un MNT réel le plafond vient désormais
+  // de `cloudAltitudeM` (mètres) — `test/nuages-metres.test.js`. Les valeurs
+  // en unités de bloc ci-dessous restent la loi du terrain PROCÉDURAL, et ce
+  // test garde ce chemin-là.
   // La base de la colonne peuplée vaut `plafond × (1 − étalement)`
   // (`clouds2.js`, `build`). Le relief de La Réunion monte à **8,875** unités
   // de bloc (relevé du 2026-08-31 : `uTerrainMin` −10,447 + `uTerrainRange`
@@ -431,9 +438,15 @@ test('⑦ le plancher lit le niveau de la mer du TERRAIN, pas une constante', ()
   // chaque construction.
   assert.ok(CLOUDS2.includes('const eau = this.terrain?.mapUniforms?.uSeaY?.value'),
     'le niveau de la mer n’est plus lu sur le terrain')
-  assert.ok(CLOUDS2.includes('Math.max(baseVoulue, eau + 0.5)'),
+  // ⚠️ Depuis la Tâche NUA (plafond en mètres), la loi vit dans
+  // `monde/nuages-metres.js` (`colonneNuages`) et `build` l'appelle : on la
+  // vérifie EXÉCUTÉE, et le câblage LU.
+  assert.ok(CLOUDS2.includes('colonneNuages({ ceilY, spread, eau })'),
     'le plancher marin a disparu de build()')
-  assert.ok(CLOUDS2.includes('const topY = baseY + epaisseur'),
+  const { colonneNuages } = MODULE_METRES
+  const c = colonneNuages({ ceilY: 13.5, spread: 0.45, eau: 13.0489 })
+  assert.equal(c.baseY, 13.0489 + 0.5, 'le plancher marin ne relève plus la base')
+  assert.ok(Math.abs(c.topY - c.baseY - 13.5 * 0.45) < 1e-12,
     'le plafond ne suit plus la base : la colonne peut s’écraser en galette')
 })
 
@@ -443,4 +456,51 @@ test('⑦ sans terrain, la loi rend la colonne d’avant — pas NaN', () => {
   assert.equal(nu.topY, 13.5)
   const nul = colonne(13.5, 0.45, NaN)
   assert.equal(nul.baseY, 13.5 * 0.55, 'un niveau de mer non fini doit être ignoré')
+})
+
+// ═══════════════ ⑧ L'ANCRE EST À LA MOYENNE DU RELIEF, PAS À LA MER — NUA
+//
+// ⛔ Mesuré le 2026-09-05 (`scripts/diag-nua-presence.mjs`, Provence z13) :
+// `uCamBloc.y = camera.position.y + 8,006`, et `751 m × 0,010 671 = 8,014`.
+// L'ancre du ciel était posée à `R_GLOBE` — la mer — quand la caméra de fond
+// est posée à `altitudeAncreBlocM()` — la moyenne. Le ciel était `moyenneM`
+// trop bas, la caméra relue en bloc d'autant trop haut. C'est le « 4 % d'écart,
+// deux chemins » de R20 §2 (74,52 contre 72,72 : 1,80 = 440 m × 0,004 09).
+
+test('⑧ ⛔ l’ancre monte de `moyenneM × exagération` — la mutation « à la mer » tue', () => {
+  const mer = ancrageNuages(RELEVE)
+  const moyenne = ancrageNuages({ ...RELEVE, altitudeAncreM: 751, exageration: 2 })
+  const rMer = Math.hypot(...mer.position)
+  const rMoy = Math.hypot(...moyenne.position)
+  proche(rMer, R_GLOBE, 1e-9, 'ancre à la mer')
+  // 751 m × 2 en unités de globe : 1 502 / 63 710 = 0,023576
+  proche(rMoy - rMer, (751 * 2) / ORBITAL_M_PER_UNIT, 1e-9, 'montée de l’ancre')
+  assert.ok(rMoy > rMer, 'l’ancre est restée à la mer')
+  // et l'échelle horizontale, elle, ne bouge pas
+  assert.equal(moyenne.echelle, mer.echelle)
+})
+
+test('⑧ la caméra relue en bloc retombe sur `camera.position.y` quand l’ancre est juste', () => {
+  // Une caméra posée à (moyenne + h) mètres d'altitude, à la verticale de
+  // l'origine : relue avec l'ancre À LA MOYENNE elle vaut h en bloc ; relue
+  // avec l'ancre À LA MER elle vaut h + moyenne — le décalage mesuré.
+  const moyenneM = 751, exag = 2, hM = 4749 // la caméra de z13 à 5 500 m
+  const A = ancrageNuages({ ...RELEVE, altitudeAncreM: moyenneM, exageration: exag })
+  const B = ancrageNuages(RELEVE) // à la mer
+  const haut = A.position.map((v) => v / Math.hypot(...A.position))
+  const rCam = R_GLOBE + ((moyenneM + hM) * exag) / ORBITAL_M_PER_UNIT
+  const cam = haut.map((v) => v * rCam)
+  const yJuste = positionCameraEnBloc(cam, A)[1]
+  const yFaux = positionCameraEnBloc(cam, B)[1]
+  const echelle = (56 / RELEVE.extentMeters) * exag // unités de bloc par mètre
+  proche(yJuste, hM * echelle, 1e-6, 'caméra en bloc, ancre à la moyenne')
+  proche(yFaux - yJuste, moyenneM * echelle, 1e-6, 'le décalage vaut moyenneM × échelle')
+})
+
+test('⑧ `majNuagesGlobe` passe l’altitude de l’ancre et l’exagération du globe', () => {
+  const i = MAIN.indexOf('function majNuagesGlobe()')
+  const corps = MAIN.slice(i, MAIN.indexOf('_ancreNuages = a', i))
+  assert.ok(corps.includes('altitudeAncreM: altitudeAncreBlocM()'), 'l’ancre du ciel est retombée à la mer')
+  assert.ok(corps.includes('exageration: globe?.exaggeration > 0 ? globe.exaggeration : 0'),
+    'l’ancre du ciel ne porte plus l’exagération du globe')
 })

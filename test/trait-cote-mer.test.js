@@ -131,7 +131,8 @@ test('④ les cinq consommateurs du fragment lisent la valeur PAR FRAGMENT', () 
     'vProfondeur est encore lu après le bloc de calcul')
   assert.match(apres, /float dLagon = clamp\(profondeurEau/, 'le glacis de lagon ne lit pas la valeur par fragment')
   assert.match(apres, /decalageRefraction\(nLocal\.xz, uMerRefract, fonduRive\)/, 'la réfraction ne lit pas la valeur par fragment')
-  assert.match(apres, /ecumeMer\(vCrete, fonduRive,/, 'l’écume ne lit pas la valeur par fragment')
+  // `creteEcume` = la crête remise à l'échelle par la Tâche EAU ; `fonduRive` reste la valeur par fragment
+  assert.match(apres, /ecumeMer\(creteEcume, fonduRive,/, 'l’écume ne lit pas la valeur par fragment')
   assert.equal((apres.match(/smoothstep\(0\.0, uMerSeuilEau, profondeurEau\)/g) || []).length, 2,
     'les DEUX alphas doivent lire la valeur par fragment')
   // et le discard de terre aussi

@@ -157,6 +157,46 @@ export async function wikipediaAnecdote({ lat, lon }) {
 const webCache = new Map()
 const webKey = (lat, lon) => `${lat.toFixed(2)},${lon.toFixed(2)}`
 
+// ══════════ CE QU'ON SAIT TOUT DE SUITE, SANS LE RÉSEAU — Tâche CAR ═════════
+//
+// ⛔ **LE CARTOUCHE MENTAIT APRÈS CHAQUE PALIER, ET LA CAUSE EST UN `await`.**
+// VID2 (N3) : la carte à 44,3167 sous un cartouche à 44,3434 pendant 1,5 à
+// 4,9 s ; « Réunion 21,26°S » affiché à Provence pendant 74–600 ms. Le groupe
+// se remontrait dès l'arrivée du MNT, mais `load` attendait Nominatim ET
+// Wikipédia avant de redessiner : les anciennes mailles restaient gravées tout
+// le temps du réseau.
+//
+// Or **les coordonnées sont connues à l'instant où le lieu est demandé** ; la
+// barre d'échelle dès que l'emprise l'est ; la plage d'altitude dès que le MNT
+// est là. Seuls le nom et l'anecdote viennent du réseau — et le nom aussi est
+// connu tout de suite quand le mémo web a déjà vu cette maille de 0,01°.
+// `infoImmediate` rend donc ce qu'on sait, MAINTENANT, avec les mêmes champs
+// que `gatherGroundInfo`, et rien qui vienne d'un autre lieu. Pure et testée.
+//
+// ⚠️ **`name` VIDE, PAS « UNCHARTED SECTOR »** : le repli n'a de sens qu'une
+// fois le réseau interrogé ; avant, ce n'est pas « inconnu », c'est « pas
+// encore ». Le titre vide se dessine comme une ligne vide, et `load` le remplit.
+export function lieuConnu(lat, lon) {
+  return webCache.get(webKey(lat, lon)) || null
+}
+
+export function infoImmediate({ lat, lon, extentMeters = null, stats = null }) {
+  const web = lieuConnu(lat, lon)
+  return {
+    coord: formatCoord(lat, lon),
+    coordDMS: `${toDMS(lat, true)}  ${toDMS(lon, false)}`,
+    elevation: stats && Number.isFinite(stats.minM) ? formatElevation(stats.minM, stats.maxM, stats.meanM) : '',
+    scale: extentMeters > 0 ? scaleBar(extentMeters) : '',
+    name: web?.name || web?.title || '',
+    country: web?.country || '',
+    title: web?.title || '',
+    description: web?.description || '',
+    anecdote: web?.anecdote || '',
+    // ⚠️ marqué : `load` sait ainsi qu'il complète, et les bancs le lisent
+    provisoire: !web,
+  }
+}
+
 // Assemble the ground-info payload for a location. Never throws — every source
 // degrades to a sane fallback so the cartouche always has something to show.
 // `stats` : le min/max/moyenne DE CE QU'ON REGARDE (dem-emprise.statsRect), ou

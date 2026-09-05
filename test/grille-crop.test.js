@@ -316,6 +316,8 @@ function globeStub(crop = RELEVE.crop) {
       uLandMax: val(RAMPE_MONDE.terreHaut),
       uHazeAmt: val(0), uHazeAlt: val(0), uHazeDist: val(0),
       uHazeColor: val(couleurStub('#ffffff')),
+      // Tâche BLA — écrits par `_majGradeBloc` et `poserHabillage`
+      uHNormRefA: val(1), uHNormRefB: val(0), uFdFacteur: val(1),
       uEclairageOn: val(0),
       // R21 — l'appoint et l'ombrage des pentes, posés par `poserHabillage`
       // eux aussi. Absents d'ici, ils faisaient tomber SIX tests de grille à la

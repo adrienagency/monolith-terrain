@@ -121,7 +121,9 @@ export const TEMPLATE_KEYS = [
   // clouds — cloudsV2 choisit le moteur (entités instanciées vs champ global),
   // windDir/windSpeed poussent le ciel (et l'orographie en phase 2)
   'windDir', 'windSpeed',
-  'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudDrift', 'cloudScale', 'cloudCoverage',
+  // cloudAltitudeM : le plafond en MÈTRES (Tâche NUA) ; cloudAltitude, en
+  // unités de bloc, reste lu par le terrain procédural et les vieux gabarits
+  'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudAltitudeM', 'cloudDrift', 'cloudScale', 'cloudCoverage',
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
   // Route (GPX) styling — not the track itself, see note above. A template
   // saved before the start/finish markers became one toggle may still carry

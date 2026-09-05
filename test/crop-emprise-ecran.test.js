@@ -221,24 +221,42 @@ test('④ `_zoomCropEcran` ne touche ni au cache ni au réseau', async () => {
 // non pas au bloc, où P14 l'a mesuré, mais à une fenêtre CONTINENTALE de
 // plusieurs milliers de kilomètres.
 //
-// ⛔ Mutation : `TOLERANCE_BLOC` porté à 12 (soit « toujours actif ») fait
-// rougir ce test.
-test('⑤ l’effacement latéral est actif AU BLOC et éteint en vue continentale', async () => {
+// ⛔ **SOC ① A REMPLACÉ LE DOMAINE EN NIVEAUX PAR LE MUR LUI-MÊME.** La tolérance
+// de CULL (`TOLERANCE_BLOC = 1,5`) éteignait l'effacement à z11 — le crop de la
+// vidéo d'Adrien (42 km) — et les jupes y traversaient le mur : 15 308 px de
+// traînées, mesurés au banc (`scripts/sonde-soc.mjs`). Le domaine juste est
+// « un mur bâti pour CE repère couvre la bande » : les parois portent leur
+// repère (`userData.repere`), et c'est lui qu'on compare à `_crop`.
+//
+// ⛔ Mutation : remplacer la comparaison de repères par `return !!p` (« un mur,
+// n'importe lequel ») fait rougir l'étape « repère changé » ; la retirer tout
+// entière (`return true`) fait rougir « sans mur ».
+test('⑤ l’effacement latéral suit LE MUR : actif avec des parois de CE repère, éteint sinon — à tout zoom', async () => {
   const g = neuf()
-  // le domaine de P14 : le socle, et son propre repère de banc à ZOOM_SOCLE − 1
-  for (const demZoom of [ZOOM_SOCLE, ZOOM_SOCLE - 1]) {
+  // sans mur, rien à effacer — quel que soit le zoom, socle compris
+  for (const demZoom of [ZOOM_SOCLE, ZOOM_SOCLE - 1, 11, 9, 7, 4]) {
     poser(g, demZoom)
-    assert.equal(g._effacementLateralActif(), true, `l’effacement doit rester actif à zoom ${demZoom} — c’est le banc de P14`)
+    assert.equal(g._effacementLateralActif(), false, `sans parois, l’effacement doit être éteint à zoom ${demZoom}`)
   }
-  // les emprises MESURÉES pendant la descente (diag-cull, Majorque) : 181 km à
-  // 6 376 km de large. Aucun mur n’y couvre la bande effacée.
-  for (const demZoom of [9, 8, 7, 6, 5, 4]) {
-    poser(g, demZoom)
-    assert.equal(g._effacementLateralActif(), false, `l’effacement doit être éteint à zoom ${demZoom} (fenêtre continentale)`)
+  // avec un mur bâti pour CE repère : actif — au bloc comme en vue
+  // continentale (181 km à 6 376 km, les emprises mesurées par diag-cull), car
+  // depuis SOC la plaque provisoire suit la découpe dans la même image
+  for (const demZoom of [ZOOM_SOCLE, ZOOM_SOCLE - 1, 11, 9, 7, 4]) {
+    const rep = poser(g, demZoom)
+    g._parois = { userData: { repere: { cx: rep.cx, cy: rep.cy, demi: rep.demi, zoom: rep.zoom } } }
+    assert.equal(g._effacementLateralActif(), true, `avec un mur de ce repère, l’effacement doit être actif à zoom ${demZoom}`)
   }
-  // un repère bâti à la main (globe de papier) reste le dépôt d’avant
-  g._crop = { cx: 0.5, cy: 0.5, demi: 0.01 }
-  assert.equal(g._effacementLateralActif(), true, 'un repère sans `zoom` doit rejouer le dépôt')
+  // le repère change (une pose neuve), le mur est encore celui d'avant : éteint
+  poser(g, 12)
+  assert.equal(g._effacementLateralActif(), false, 'un mur d’un AUTRE repère ne couvre pas la bande : éteint')
+  // un mur sans étiquette (globe de papier) rejoue le dépôt d'avant
+  g._parois = {}
+  assert.equal(g._effacementLateralActif(), true, 'un mur sans étiquette rejoue le dépôt')
+  // le levier de banc de CULL : partout, mur ou pas
+  g._parois = null
+  g.jupeDomaine = false
+  assert.equal(g._effacementLateralActif(), true, '`jupeDomaine = false` force l’effacement partout')
+  delete g.jupeDomaine
   g._crop = null
   assert.equal(g._effacementLateralActif(), false, 'sans crop, il n’y a rien à effacer')
 })
