@@ -1,0 +1,10 @@
+  35  headT=0.184  tracé=   363 (bis    363)  bruit=0/0  alt=3818  lecture=false follow=false drone=false vis=true mode=surface z11  tête=(277,958) hors tiers  cam/sol=3428 m
+  36  headT=0.190  tracé=   363 (bis    363)  bruit=0/0  alt=3818  lecture=false follow=false drone=false vis=true mode=surface z11  tête=(320,892) hors tiers  cam/sol=3428 m
+  37  headT=0.195  tracé=   363 (bis    363)  bruit=0/0  alt=3818  lecture=false follow=false drone=false vis=true mode=surface z11  tête=(380,857) hors tiers  cam/sol=3428 m
+  38  headT=0.200  tracé=   363 (bis    363)  bruit=0/0  alt=3818  lecture=false follow=false drone=false vis=true mode=surface z11  tête=(450,869) hors tiers  cam/sol=3428 m
+  39  headT=0.205  tracé=   891 (bis    891)  bruit=0/0  alt=3818  lecture=false follow=false drone=false vis=true mode=surface z11  tête=(511,831) hors tiers  cam/sol=3428 m
+
+══ VERDICT gx8-mb · figee ══
+  images sans tracé : 0/40 (k=)
+  médiane : 848 px · min 331 · bruit médian 0 · headT 0.008 → 0.205 (monotone true)
+  tête dans le tiers central : 20/40 · caméra sous le sol dessiné : 0/40
