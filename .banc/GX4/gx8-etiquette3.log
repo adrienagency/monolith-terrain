@@ -1,0 +1,16 @@
+       #11 Sprite ro=20 ponctuel=true ancre=[6.53,-24.78] dansSocle=true vif=true sprite@[940,-59] ancre@[937,-30] solSousLAncre=13/4253/2912
+       #12 Sprite ro=20 ponctuel=true ancre=[10.18,-5.23] dansSocle=true vif=true sprite@[1198,443] ancre@[1190,474] solSousLAncre=13/4254/2914
+       #13 Sprite ro=20 ponctuel=true ancre=[-3.87,23.74] dansSocle=true vif=true sprite@[110,2792] ancre@[139,2770] solSousLAncre=13/4252/2917
+  cran 2
+     repère de crop  — poseur (FIGÉ) {"cx":0.51922607421875,"cy":0.35577392578125,"demi":0.00018310546875}
+                       globe  (VIF)  {"cx":0.51922607421875,"cy":0.35577392578125,"demi":0.00018310546875}
+                       uniforme partagé {"x":0.51922607421875,"y":0.35577392578125} demi=0.00018310546875
+                       figé == vif ? true   ·   uniforme == vif ? true
+     forme de crop   — poseur {"coin":0.08,"expo":4.4} · globe {"coin":0.08,"expo":4.4}
+     ponctuels 11 · désaccord produit/socle vivant 0 · VISIBLES HORS DU SOCLE VIVANT 0
+       #1 Mesh ro=40 ponctuel=false ancre=null dansSocle=null vif=null sprite@[720,2332] ancre@null solSousLAncre=null
+       #5 Sprite ro=20 ponctuel=true ancre=[0.72,-4.79] dansSocle=true vif=true sprite@[945,405] ancre@[943,421] solSousLAncre=13/4253/2914
+       #7 Sprite ro=20 ponctuel=true ancre=[15.49,-27.7] dansSocle=true vif=true sprite@[1204,59] ancre@[1200,75] solSousLAncre=13/4254/2913
+       #8 Sprite ro=20 ponctuel=true ancre=[6.06,6.29] dansSocle=true vif=true sprite@[1116,609] ancre@[1112,625] solSousLAncre=13/4253/2914
+       #10 Sprite ro=20 ponctuel=true ancre=[-9.39,11.95] dansSocle=true vif=true sprite@[697,607] ancre@[697,625] solSousLAncre=13/4252/2915
+       #12 Sprite ro=20 ponctuel=true ancre=[11.03,-1.13] dansSocle=true vif=true sprite@[1213,458] ancre@[1209,474] solSousLAncre=13/4254/2914

@@ -1,0 +1,14 @@
+studio fermé : .studio-close
+  cran 0  tracé=20176 px (bruit 0)
+     ① LE SOCLE DANS SON PROPRE POLYGONE : 644 points de la SURFACE DESSINÉE à l'écran → dedans 0 · HORS 644 (100 %) ; jusqu'à 0 px au-dessus du plus haut sommet du polygone
+     ② LES PIXELS DE TRACÉ HORS POLYGONE (20176) : sur une tuile DU SOCLE 20175 · sur une pièce crop-* 1 · sur une tuile HORS socle 0 · ne touchant rien 0
+        pièces du tracé sur les pixels « rien » : {}
+  cran 1  tracé=10758 px (bruit 0)
+     ① LE SOCLE DANS SON PROPRE POLYGONE : 2890 points de la SURFACE DESSINÉE à l'écran → dedans 2645 · HORS 245 (8.5 %) ; jusqu'à 3542 px au-dessus du plus haut sommet du polygone
+     ② LES PIXELS DE TRACÉ HORS POLYGONE (415) : sur une tuile DU SOCLE 415 · sur une pièce crop-* 0 · sur une tuile HORS socle 0 · ne touchant rien 0
+        pièces du tracé sur les pixels « rien » : {}
+  cran 2  tracé=5336 px (bruit 0)
+     ① LE SOCLE DANS SON PROPRE POLYGONE : 7267 points de la SURFACE DESSINÉE à l'écran → dedans 6637 · HORS 630 (8.7 %) ; jusqu'à 979 px au-dessus du plus haut sommet du polygone
+     ② LES PIXELS DE TRACÉ HORS POLYGONE (227) : sur une tuile DU SOCLE 131 · sur une pièce crop-* 0 · sur une tuile HORS socle 0 · ne touchant rien 96
+        pièces du tracé sur les pixels « rien » : {"Line":96}
+        exemples : [{"x":1167,"y":76,"piece":"Line"},{"x":1177,"y":76,"piece":"Line"},{"x":1180,"y":76,"piece":"Line"},{"x":1181,"y":76,"piece":"Line"}]

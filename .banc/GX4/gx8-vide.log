@@ -1,0 +1,10 @@
+studio fermé : .studio-close
+  cran 2 · tracé 5387 px (bruit 0) · PIXELS VISÉS (hors polygone ET sans tuile derrière) : 91  boîte=[1169,73,1203,77]
+  enfants visibles du groupe GPX : [{"i":1,"type":"Mesh","nom":"","vis":true,"ro":40},{"i":5,"type":"Sprite","nom":"","vis":true,"ro":20},{"i":7,"type":"Sprite","nom":"","vis":true,"ro":20},{"i":8,"type":"Sprite","nom":"","vis":true,"ro":20},{"i":10,"type":"Sprite","nom":"","vis":true,"ro":20},{"i":12,"type":"Sprite","nom":"","vis":true,"ro":20}]
+    · éteint #1 Mesh  (ro 40) → tracé 336 px ; pixels visés restants 91/91
+    · éteint #5 Sprite  (ro 20) → tracé 18361 px ; pixels visés restants 88/91   ⬅ C EST LUI
+    · éteint #7 Sprite  (ro 20) → tracé 6611 px ; pixels visés restants 0/91   ⬅ C EST LUI
+    · éteint #8 Sprite  (ro 20) → tracé 6739 px ; pixels visés restants 88/91   ⬅ C EST LUI
+    · éteint #10 Sprite  (ro 20) → tracé 6821 px ; pixels visés restants 88/91   ⬅ C EST LUI
+    · éteint #12 Sprite  (ro 20) → tracé 6813 px ; pixels visés restants 88/91   ⬅ C EST LUI
+  restauré : tracé 6831 px (départ 5387)
