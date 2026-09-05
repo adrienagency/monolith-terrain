@@ -261,9 +261,28 @@ elle ne rallume rien tant qu'un palier est en cours — je ne conçois pas).
   cadrage en unités du bloc ; la sonde projette tout dans l'espace du globe avec
   `camGlobe` (facteurs écrits en commentaire dans `sonde-ca1.mjs`).
 
-## § COÛT — la référence pour le noteur
+## § COÛT — la référence pour le noteur (même geste, 3 chargements chacun)
 
-Voir la section « coût » en fin de rapport (bancs `nu3`, `nu-x4`, `z10x3`).
+⚠️ La sonde de pixels coûte 8 – 12 ms par image (un rendu + `readPixels`) : le
+coût se lit sur les bancs **nus** (`--pixels 0`, `--screencast 0`), pas sur
+`dezoom8`. « geste » = les 8 s qui suivent le premier cran.
+
+| banc | `dt` p50 / p99 sur la passe | `dt` p50 / p99 pendant le geste | requêtes (geste + re-zoom) | pose z12 / z11 | mer posée | palier net | provisoires |
+|---|---|---|---|---|---|---|---|
+| `nu3` (CPU ×1) | 16,2 – 16,3 / 22 – 24 ms | **3,1 – 3,9 / 182 – 190 ms** | **310 – 313** | +702 – 750 / +1 030 – 1 170 | +3 990 – 4 704 | **+5 163 – 5 631** | 60 img 3/3 |
+| `nu-x4` (CPU ×4) | 20,2 – 21,6 / 127 – 158 ms | **18 – 21 / 1 038 – 1 184 ms** | 290 – 304 | +2 223 – 2 775 / +3 496 – 3 930 | +12 091 – 13 247 | **+14 645 – 15 868** | **0** 3/3 (les hauteurs arrivent avant la pose) |
+| `dezoom8` (pixels, ×1) | 11 – 18 / 26 – 48 ms | 8 – 21 / 104 – 305 ms | 285 – 326 | +643 – 811 / +979 – 1 243 | +5 021 – 8 586 | +6 045 – 8 981 | 30 – 60 img |
+
+Seuils pour le noteur : `dtGesteP50` ≤ 4 ms (×1) et ≤ 21 ms (×4), `dtGesteP99`
+≤ 190 ms (×1) et ≤ 1 184 ms (×4), requêtes ≤ 313 (×1), palier net ≤ 5 631 ms
+(×1) et ≤ 15 868 ms (×4) — **pas de régression sur le pire des 3**. ⚠️ Le p99
+du geste est le rechargement du bloc (une image de 180 ms à ×1, 1,1 s à ×4) :
+c'est le terrain de `wt-fan`, pas un plafond à durcir ici.
+
+**`z10x3` (rafales jusqu'à z10)** : le crop **meurt 3/3** pendant le WIDENING
+(poussée au-delà de 40 343 m), renaît au re-zoom ; 76 – 96 images de planète
+autour AVANT la mort (le même défaut, écourté par la sortie), requêtes 657 – 726
+(la sortie recharge tout). **Aucun `busy` bloqué** — voir « cru puis réfuté » 5.
 
 ## ⛔ CE QUE J'AI CRU, PUIS RÉFUTÉ
 
@@ -285,9 +304,11 @@ Voir la section « coût » en fin de rapport (bancs `nu3`, `nu-x4`, `z10x3`).
    Faux : `refus: fond+mer` pendant 5 021 – 8 586 ms à chaque palier, sur les
    7 passes. Le blanc dans la découpe de `01-pose-z12.jpg` est l'absence de mer.
 5. **« `busy` peut rester bloqué après un WIDENING z10 »** (essai 2 : 80 s à
-   `busy` sur z10, crop vivant à 44 km). Vu une fois ; le banc `z10x3` rejoue
-   trois fois le geste qui y mène — voir § coût. Je ne le présente pas comme
-   établi tant qu'il n'est pas reproduit.
+   `busy` sur z10, crop vivant à 44 km, pendant une mise au point). ⛔ **Non
+   reproduit** : `z10x3` rejoue trois fois la rafale qui y mène, `busyBloque`
+   0/3, le crop meurt 3/3 comme la porte le veut. Je le laisse écrit comme un
+   « vu une fois » (la trace est `.banc/CA1/essai2.json`, image 9 066 ms), pas
+   comme un défaut.
 6. **« Un comptage de couleur sur les captures suffirait. »** ⛔ Le papier est
    beige comme les plaines de l'île ; seul le rendu du globe seul sur magenta
    sépare « dessiné » de « fond ». Témoin à 0 sur 8 chargements avant chaque
@@ -306,5 +327,6 @@ Voir la section « coût » en fin de rapport (bancs `nu3`, `nu-x4`, `z10x3`).
   synthèse + les captures), `scripts/lit-ca1.mjs` (une passe, image par image),
   `scripts/diag-ca1.mjs` (le diagnostic du cran), `test/crop-avant-tout.test.js`,
   `traces-CA1/` (6 captures + bilan).
+- `npm test` (après les bancs, hors contention) : **5 118 tests · 5 115 réussis · 3 échecs — exactement ①②③ de `crop-avant-tout`**, rien d'autre ne rougit. `audit:tests` 286 = 286.
 - Fins de ligne : CR = 0 sur `package.json`, le test et les quatre scripts
   (comptés en binaire).
