@@ -69,10 +69,11 @@ Ensemble du chantier, `git diff --stat bf54801..HEAD -- src/` :
 | 0 px hors socle à z13 | **358 px** | **0 px de ruban** — 227 px hors du POLYGONE, dont 131 sur une tuile du socle et 96 posés par une étiquette ancrée dans le socle ; le polygone exclut 8,7 % du socle lui-même | `.banc/GX4/gx8-bord.log`, `gx8-vide.log`, `gx8-etiquette3.log` |
 | lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 1/40 à 0 px (2ᵉ vol MB) ; Chamonix « ruban absent » | **0/40 sur les six vols — 240 images, zéro sans tracé** | `.banc/GX4/gx8-lecture-*.log` |
 | … tête jamais derrière la caméra | 1 image tête derrière | **40/40 au tiers central** (MB, deux vols) ; caméra sous le sol 0/40 partout | idem |
-| position horizontale ≤ 2,3 px / ≤ 14 m | — | **à re-mesurer** | `apres-position.log` |
-| `boats` prouvé par pixels | — | **à re-mesurer** | `banc-gx4-bateaux.mjs` |
-| coût 15,9–16,0 ms | — | **à re-mesurer** | `apres4-cout.log` |
-| `npm test` | — | **5 105 pass · 0 fail** (30,7 s) | `.banc/GX4/gx7-npm-test.log` |
+| position horizontale ≤ 2,3 px / ≤ 14 m | ≤ 2,3 px / ≤ 14 m | **0 m** d'écart lat/lon sur 20 lignes ; rayon du sommet **identique au bit** à celui du noteur, 20/20 | `.banc/GX4/gx8-position-comparaison.log` |
+| `boats` prouvé par pixels | passe **éteinte**, 0 px, projeté à (586, 2114) hors écran | **2 725 px**, témoin 0, parent = `sceneGlobe` que `PasseFond` dessine | `.banc/GX4/gx8-bateaux.log` |
+| coût — pas de régression | 15,9 / 16,0 / 15,9 ms | **17,0 / 17,0 / 17,1 ms** — écart allumé/éteint **nul**, 0 requête | `.banc/GX4/gx8-cout.log` |
+| `npm test` ≥ 5 081 · 0 | base `bf54801` : **5 081 · 0 fail · 2 ignorés** | **5 105 · 0 fail · 0 ignoré** (+24 tests) | `.banc/GX4/gx8-npm-test.log`, `gx8-npm-test-base.log` |
+| `npm run audit:tests` | — | **284 listés · 284 sur disque · aucun écart** | `.banc/GX4/gx8-audit-tests.log` |
 | les 7 mutations mordent | **5 sur 7 NE MORDAIENT PAS** | **10 sur 10 mordent** | `.banc/GX4/gx7-mutations.log` |
 
 Le détail du drapage Mont-Blanc, tel que rendu par le banc du noteur
@@ -215,6 +216,71 @@ test, jamais la ligne de `main.js`. Elle EXÉCUTE maintenant cette ligne.
    de tracé ; `uCropOn = 0` en rend **0**) → `ORDRE_VOILE = 34` ;
    ② `redresserSurLeSol` déplaçait la caméra de 39 unités **sans la ré-viser**
    (176,5° de sa propre cible, avant·tête −0,13) → la butée rend la main au vol.
+
+## La position, les bateaux, le coût, la suite
+
+### La position — le produit n'a pas bougé d'un ulp
+
+`scripts/banc-gx3-position.mjs`, 5 points × 4 zooms. Sa colonne de console
+affiche une distance **à l'écran**, qui mélange l'écart horizontal et l'écart de
+rayon. Lue telle quelle, elle semble s'être dégradée aux cols (z10 col 1 :
+3,3 px chez le noteur, **74,6 px** chez moi). Le JSON du banc tranche, en
+confrontant son propre relevé de GX3 (`mb-position.json`) au mien
+(`gx8-mb-position.json`) :
+
+| grandeur | verdict |
+|---|---|
+| `ecartLatLonM` — l'écart **horizontal** | **0 m sur les 40 lignes** (20 du noteur, 20 du jour) |
+| `rayonProduit` — où le produit pose le sommet | **identique au bit, 20 lignes sur 20** |
+| `hDess` — la **vérité que le banc se donne** (`globe.hauteurDessinee`) | a bougé sur **4 lignes sur 20**, jusqu'à **−300,9 m** (z10 col 1) |
+
+Autrement dit : **ce n'est pas le produit qui a bougé, c'est la règle.**
+`hauteurDessinee` choisit « la tuile la plus fine qui a encore ses hauteurs »
+— exactement la fonction que GX4 ① a désignée comme lisant les hauteurs
+réservées au lieu des tuiles dessinées. Elle n'est pas stable d'un lancement à
+l'autre, donc la colonne « sommet du produit » ne mesure pas le produit seul. La
+surface **rendue**, elle, se mesure au rayon (`banc-gx3-drapage.mjs`) : +2,00 m
+de moyenne, min +2,00, 0 sommet enterré.
+
+### Les bateaux — par les pixels, plus par la structure
+
+Le noteur avait prouvé le défaut par la **structure** :
+`boats.group.parent === __exp.scene`, dont la seule passe est
+`RenderPass(enabled: false)` ; un bateau semé n'atteignait pas l'écran, et sa
+position projetée était (586, 2114), hors écran. Sur HEAD, par les **pixels** :
+
+- `parentEstSceneGlobe: true`, et cette scène (`8bbd119f`) est celle que
+  `PasseFond(enabled: true)` dessine ;
+- le groupe pose **2 725 px**, témoin A/A **0** ;
+- sa boîte `[494–639 × 340–409]` contient la position attendue `(566, 390)`.
+
+### Le coût
+
+| | image médiane | p95 | max | requêtes |
+|---|---|---|---|---|
+| allumé | 17,0 ms | 17,8 | 18,7 | +0 |
+| éteint | 17,0 ms | 17,6 | 17,8 | +0 |
+| rallumé | 17,1 ms | 17,8 | 17,9 | +0 |
+
+Géométrie du calque : 20 objets, 2,33 Mo, 25 500 sommets de ruban.
+**L'écart allumé / éteint est nul** — c'est le critère (« pas de régression »).
+⚠️ Le niveau absolu est 1,1 ms au-dessus des 15,9 ms du noteur : la machine a
+enchaîné des bancs pendant des heures et porte des serveurs de développement
+d'autres chantiers. La comparaison qui vaut est allumé/éteint au même instant
+sur la même machine, et elle donne 0.
+
+### La suite
+
+| | tests | pass | fail | ignorés |
+|---|---|---|---|---|
+| base `bf54801` (`git merge-base HEAD regroupement`) | 5 081 | 5 079 | **0** | **2** |
+| HEAD | **5 105** | **5 105** | **0** | **0** |
+
+**+24 tests, +26 verts, 0 rouge, et les deux ignorés levés.** La base a été
+mesurée dans un arbre de travail jetable avec une **jonction** vers
+`node_modules` — aucun `npm install`, et la jonction retirée avant de détruire
+l'arbre pour ne pas emporter le vrai dossier.
+`npm run audit:tests` : **284 listés · 284 sur disque · aucun écart.**
 
 ## Ce que j'ai cru, puis réfuté
 
