@@ -88,6 +88,7 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
 import { creerCacheToile } from './monde/rect-toile.js'
+import { attenteRaffinement } from './monde/cadence-raffinement.js'
 // ══════ LES BOUTONS DU BAS — Tâche R1 ② ═══════════════════════════════
 //
 // > **Adrien, 2026-08-23 :** « Il me manque les boutons du bas en UI, ils ont
@@ -4766,26 +4767,40 @@ let _socleLisibles = null
 //     ⚠️ Pendant cette image-là, le haut des parois est celui du raffinement
 //     précédent : un écart de quelques mètres au bord, une image durant — contre
 //     un gel de 250 ms à chaque tuile.
-const RAFFINEMENT_SOCLE_MS = 350
+// ⛔ **L'ÉCART FIXE DE 350 ms (`RAFFINEMENT_SOCLE_MS`, Tâche FLU) EST PARTI DANS
+// `monde/cadence-raffinement.js`, ET IL N'EST PLUS FIXE — Tâche GEL.** C'était
+// « le logiciel se fige à z7 » : mesuré à CPU ×4 / DPR 2 (`.banc/GEL/`), le fil
+// principal était occupé à **97–99 %** pendant tout un palier — 13 à 26
+// `rafraichirFenetre` (591 361 sommets chacun) plus autant de `plinth.rebuild`,
+// à chaque tuile qui atterrit, avec un écart de 350 ms entre deux départs quand
+// chacun coûte 300 à 1 200 ms. Sur un iMac 2015 la molette est avalée et rien ne
+// bouge plus : c'est la vidéo d'Adrien. L'écart suit désormais le COÛT MESURÉ
+// du dernier raffinement (nappe + socle), pour qu'il ne prenne jamais plus d'un
+// quart du fil — à coût nul, la loi est celle de FLU au bit près. Rien n'est
+// sauté : une révision due part dès que l'attente est écoulée.
 // la hauteur, en mètres, de la nappe PLATE posée en attendant la première tuile
 // (voir `hauteursDeFlux`) : au-dessus de `seaEps` (≈ 0,6 m), donc de la terre
 const HAUTEUR_ATTENTE_M = 1
 let _socleRaffineDepuis = -Infinity
 let _socleAttendPlinthe = false
+let _socleDernierCoutMs = 0 // nappe + socle du dernier raffinement, en ms de fil
 function socleRaffine() {
   if (!params.globeContinu || !fluxSocle || !terrain.fenetreBornee) return
   if (_socleAttendPlinthe) {
     _socleAttendPlinthe = false
+    const t0 = performance.now()
     plinth.rebuild(terrain, params)
+    _socleDernierCoutMs += performance.now() - t0
     return
   }
   const lisibles = tuilesLisiblesDuSocle(fluxSocle)
   if (lisibles === _socleLisibles) return
   const t = performance.now()
-  if (t - _socleRaffineDepuis < RAFFINEMENT_SOCLE_MS) return
+  if (t - _socleRaffineDepuis < attenteRaffinement({ dernierCoutMs: _socleDernierCoutMs })) return
   _socleLisibles = lisibles
   _socleRaffineDepuis = t
   if (!terrain.rafraichirFenetre(params)) return
+  _socleDernierCoutMs = performance.now() - t
   _socleAttendPlinthe = true
 }
 
