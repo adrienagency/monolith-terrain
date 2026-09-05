@@ -1,0 +1,159 @@
+# GX4 — second tour du tracé GPX (branche `gpx-correctif-2`)
+
+> État : **v1, écrite en premier, complétée par commits successifs.** Cinq
+> sessions précédentes ont été coupées par des limites d'usage AVANT d'écrire
+> ce fichier, alors que six commits de travail existaient. Il est donc écrit
+> d'abord, à partir des commits et des journaux `.banc/GX4/`, puis enrichi.
+
+Base de la branche : `bf54801` (`git merge-base HEAD regroupement`).
+`regroupement` a beaucoup avancé de son côté (gel du double-clic, transport de
+la pose, crop d'abord) : **rien n'est fusionné ici**, on donne les lignes.
+
+---
+
+## EN TÊTE — les lignes touchées
+
+`src/globe.js` : **AUCUNE LIGNE TOUCHÉE.** Le tracé lit le globe, il ne le
+modifie pas ; les uniformes de crop sont partagés *par référence*, pas copiés.
+
+Ensemble du chantier, `git diff --stat bf54801..HEAD -- src/` :
+
+| fichier | lignes |
+|---|---|
+| `src/gpx.js` | +466 |
+| `src/main.js` | +194 |
+| `src/monde/sol-globe.js` | +184 |
+| `src/monde/similitude-groupe.js` | +58 (nouveau) |
+| `src/gpx-layers.js` | +37 |
+| `src/drone-cam.js` | +19 |
+| **total** | **910 insertions, 48 suppressions, 6 fichiers** |
+
+### `src/main.js` — points d'insertion (numérotation d'arrivée)
+
+| ligne | ce qui s'y passe |
+|---|---|
+| 111 | import de `visibiliteSurface` |
+| 5152–5171 | l'empreinte des tuiles **dessinées** relevée dans la passe de fusion |
+| 5259, 5266–5291 | la même empreinte suivie quand les passes fusionnent |
+| 5884–5904 | `poserVisibiliteSocle` — le crop vivant transmis au calque GPX |
+| **8952–9017** | **le cœur** : `gpxLayer` reçoit le poseur de sol du globe, `poserScene(sceneGlobe)`, la caméra du globe, et le re-drapage sur changement d'empreinte stabilisé à 350 ms |
+| 10841–10860 | `regionFrameScale` — échelle du repère de région |
+| 10862 | `syncBoats` : `boats.group` adopté par `sceneGlobe` |
+| 14267–14292 | `redresserSurLeSol` — **ne touche à rien pendant un vol de poursuite** (GX6 ③) |
+| 15504–15506, 15557 | appels dans `tick()` |
+
+### `src/gpx.js` — points d'insertion (numérotation d'arrivée)
+
+| ligne | ce qui s'y passe |
+|---|---|
+| 18 | import |
+| 506–565 | `DRAPE_LIFT`, `MARGE_SOL_M = 2`, et **`GLSL_BORD_CROP`** : le morceau de nuanceur qui lit `aMerc`, le rapporte à `uCropCentre`/`uCropDemi`, replie l'antiméridien et `discard` au bord — gaîné par `uCropOn` |
+| 661–682 | le poseur de sol et la scène déposés sur le calque |
+| **905–1119** | **le cœur** : `_versScene`, `_sol` (lu sur le globe hors bloc), `aMerc` par sommet sur le ruban ET le sillage, ponctuels cachés hors socle, `ORDRE_VOILE = 34` |
+| 1130–1595 (essaim) | rebranchements de la construction du ruban, du sillage, de la tête, du curseur et du profil sur `_versScene`/`_sol` |
+| 1758–1854 | tête, curseur, profil à la marge du sol dessiné |
+
+---
+
+## Le critère du noteur (`rapport-GX3.md`, 7,5/10) — avant / après
+
+| critère | avant (GX3) | après (HEAD `297dfbd`) | source |
+|---|---|---|---|
+| écart vertical / surface **rendue**, 2 335 sommets Mont-Blanc — moy ≤ +3 m | **+9,5 m** | **+2,00 m** | `.banc/GX4/gx7-drapage-mb-B.log` |
+| … min ≥ −1 m | **−176 m** | **+2,00 m** | idem |
+| … max | +160 m | **+2,01 m** | idem |
+| … sommets enterrés > 5 m | **673** | **0** | `sousSol5: 0` |
+| … sommets sous la surface | — | **0** | `sousSol: 0` |
+| Camargue, 401 sommets sous la mer | à prouver | **0** | `.banc/GX4/gx7-drapage-camargue.log` (`sousSol: 0`, `sousSol5: 0`) |
+| 0 px hors socle à z13 | **358 px** | **à reprendre** — 205 px (cran 1), 225 px (cran 2), cran 0 aberrant | `.banc/GX4/gx7-horscrop.log` |
+| lecture au clic : 40 img × 3 tracés × 2 vols, 0 image sans ruban | 5–7 img/40 sans tracé | **à re-mesurer après GX6** | logs `apres4-lecture-*` (antérieurs à GX5/GX6) |
+| position horizontale ≤ 2,3 px / ≤ 14 m | — | **à re-mesurer** | `apres-position.log` |
+| `boats` prouvé par pixels | — | **à re-mesurer** | `banc-gx4-bateaux.mjs` |
+| coût 15,9–16,0 ms | — | **à re-mesurer** | `apres4-cout.log` |
+| `npm test` | — | **5 105 pass · 0 fail** (30,7 s) | `.banc/GX4/gx7-npm-test.log` |
+| les 7 mutations mordent | **5 sur 7 NE MORDAIENT PAS** | **10 sur 10 mordent** | `.banc/GX4/gx7-mutations.log` |
+
+Le détail du drapage Mont-Blanc, tel que rendu par le banc du noteur
+(`scripts/banc-gx3-drapage.mjs`), sur la **surface que le GPU dessine** :
+
+```
+"rendu": { "n": 2335, "moy": 2, "min": 2, "max": 2.01, "p05": 2, "p95": 2 }
+"sousSol": 0, "sousSol5": 0, "dessus50": 0
+```
+
+Le même banc donne aussi l'écart au **bloc** (`"bloc"` : moy −4,41 · min −71,05
+· max +58,22). C'est justement la mesure que GX3 prenait pour la bonne : le
+bloc n'est PAS la surface dessinée, et c'est là que se logeaient les −176 m.
+
+## La preuve de morsure — 10 mutations sur 10
+
+`scripts/banc-gx3-mutations.sh` (M1…M10). Chaque mutation est appliquée, la
+suite tourne, le fichier est restauré, et **le md5 avant/restauré est comparé**.
+Journal : `.banc/GX4/gx7-mutations.log`, qui se termine par `diff src vide : OUI`.
+
+| # | mutation | fail | garde qui devient rouge |
+|---|---|---|---|
+| témoin | produit intact | **0** | — |
+| M1 | la similitude retirée | 5 | ①②③④ |
+| M2 | `gpxLayer.poserScene(sceneGlobe)` retirée de `main.js` | **1** | ④ M2 — la ligne d'adoption de `main.js`, EXÉCUTÉE |
+| M3 | visibilité rebranchée sur `vue.socle` | 1 | ③ le compte des lecteurs |
+| M4 | fabrique de poseur non transmise au calque ajouté ensuite | 1 | ④ M4 |
+| M5 | le ruban ne passe plus par `_versScene` | 4 | ①②③④ |
+| M6 | la caméra du globe n'est plus déposée | 1 | ④ M6 |
+| M7 | le sol lu sur le bloc au lieu du globe | 5 | ①①③③④ |
+| M8 | le ruban repasse AVANT le voile nuageux (renderOrder 6) | 1 | ⑤ ordre après le voile |
+| M9 | le recalage de la visée retiré | 1 | DroneCam : la tête jamais derrière la caméra |
+| M10 | le redressement au sol recombat le vol | 1 | ④ le redressement ne touche PAS au vol |
+
+**M2 est le cas emblématique.** Le noteur de GX3 avait mesuré que commenter
+`poserScene(sceneGlobe)` laissait *tout vert* : la garde regardait un objet de
+test, jamais la ligne de `main.js`. Elle EXÉCUTE maintenant cette ligne.
+
+## Les cinq causes trouvées, chacune attribuée par une mesure
+
+1. **Le drapage lisait les hauteurs réservées z11, pas les tuiles allumées**
+   (`60751d9`). Le poseur lit `hauteurMaillee` sur les tuiles que le socle
+   dessine. C'est là que meurent les −176 m et les 673 sommets enterrés.
+2. **Le bord du socle ne suivait pas le crop vivant** (`ce75b5d`). `aMerc` par
+   sommet + uniformes du globe **partagés par référence** : un socle recentré
+   en vol ne rejette plus le ruban.
+3. **Un repli à plat pendant un recentrage** (`242da26`). Le poseur plat ne vaut
+   plus que sans AUCUNE surface. Sans cela le ruban tombait à 6 371 km — 0 pixel.
+4. **L'écrêtage était MORT : le nuanceur lisait `aCrop`, la géométrie posait
+   `aMerc`** (`994a8d3`). WebGL ne signale pas un attribut non lié : il rend
+   `(0,0)`, soit le CENTRE du socle — donc `distanceBordCrop < 0` partout, donc
+   **aucun fragment n'était jamais écarté**. Le `discard` tournait à vide à
+   chaque image. Seconde moitié : même bien lié, un mercator ABSOLU reste dans
+   `[-1,1]` ; il faut le rapporter au centre COURANT.
+5. **Les images sans ruban n'étaient ni le drapage ni l'écrêtage** (`297dfbd`) :
+   ① le voile nuageux repeignait le ruban (retirer les nuages rend **5 664 px**
+   de tracé ; `uCropOn = 0` en rend **0**) → `ORDRE_VOILE = 34` ;
+   ② `redresserSurLeSol` déplaçait la caméra de 39 unités **sans la ré-viser**
+   (176,5° de sa propre cible, avant·tête −0,13) → la butée rend la main au vol.
+
+## Ce que j'ai cru, puis réfuté
+
+- « Le ruban est mal drapé parce que le DEM est faux. » **Réfuté** : le DEM est
+  bon, c'est la SURFACE LUE qui était la mauvaise (hauteurs réservées z11 contre
+  tuiles dessinées). Deux surfaces, deux chiffres — `"rendu"` et `"bloc"` dans
+  le même journal.
+- « L'écrêtage marche, le banc du tour précédent le dit. » **Réfuté** : le banc
+  avait été réécrit ; celui du noteur comptait toujours 154 à 358 px dehors. Un
+  banc réécrit n'est plus le juge.
+- « Les images sans tracé viennent de l'écrêtage au bord du socle. » **Réfuté
+  par différence** : `uCropOn = 0` ne rend aucun pixel de tracé. Ce sont les
+  nuages (5 664 px) et la caméra (4 images sur 40 à Chamonix).
+- « `_aim` recale la visée, c'est donc lui la cause du décadrage. » **Réfuté** :
+  c'est un invariant de dernier recours ; la cause est `redresserSurLeSol`,
+  attribuée par pile d'appel (`banc-gx6-pile.mjs`) — 0 appel à `followPivot` et
+  `controls.update` contre 330 `updateAt`.
+- « Une garde verte prouve que le chemin est exécuté. » **Réfuté par le noteur
+  lui-même** : 5 gardes sur 7 restaient vertes sous mutation. Une garde ne vaut
+  que si elle EXÉCUTE le chemin du produit, et la mutation le prouve.
+
+## Reste à faire (ce tour)
+
+- reprendre `banc-gx3-horscrop.mjs` à z13 : 205/225 px dehors, et un cran 0 dont
+  l'empreinte relevée est aberrante — savoir si c'est le produit ou le banc ;
+- relancer la lecture AU CLIC (40 × 3 × 2) **après** GX6, position, bateaux, coût ;
+- `npm run audit:tests`.
