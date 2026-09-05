@@ -335,7 +335,11 @@ test('⑤ bis le pivot de zoom est lu sur la surface DESSINÉE, et les deux but�
   const redresse = SRC_MAIN.slice(SRC_MAIN.indexOf('function redresserSurLeSol()'))
   assert.match(redresse.slice(0, redresse.indexOf('\n}\n')), /sol: solDessine/)
   // et la caméra suit le repère AVANT la lecture du sol
-  assert.ok(SRC_MAIN.indexOf('modes.suivreRepere?.()') < SRC_MAIN.indexOf('const solButee = solDessine'), 'le transport doit précéder les butées')
+  // ⚠️ MUTATION (OBL-2) : `indexOf` rend −1 quand l’appel est ABSENT, et −1 < tout — la garde
+  // « précède » passait avec le transport retiré. On exige d’abord la présence.
+  const iTransport = SRC_MAIN.indexOf('modes.suivreRepere?.()')
+  assert.ok(iTransport >= 0, 'main.js n’appelle plus modes.suivreRepere() avant les butées')
+  assert.ok(iTransport < SRC_MAIN.indexOf('const solButee = solDessine'), 'le transport doit précéder les butées')
   // `solDessine` : la loi de `appliquerHauteurs`, mot pour mot
   assert.match(SRC_MAIN, /return h == null \? terrain\.sample\(x, z\) : \(h - f\.moyenneM\) \* f\.echelleVerticale/)
 })
