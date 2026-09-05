@@ -197,8 +197,11 @@ test('④ `poserCropSeul(true)` n’est POSÉ qu’une fois le fondu achevé', (
   // le crop naît, la vue est au repos : premier relais franc, coupe immédiate
   v.maj(ALT_CROP_NE, 100)
   assert.deepEqual(journal, [true], 'le premier repos doit couper tout de suite')
-  // le geste commence
+  // le geste commence — ⚡ VIE : c'est un DÉZOOM À LA MOLETTE, le seul geste
+  // qui rallume le dehors (Adrien, 2026-09-05) ; le cran arme au DOM avant
+  // la première image
   journal.length = 0
+  v.armerSortie()
   repos.auRepos = false
   v.maj(ALT_CROP_NE, 200)
   assert.deepEqual(journal, [false], 'le dehors doit se redessiner dès la première image du geste')
