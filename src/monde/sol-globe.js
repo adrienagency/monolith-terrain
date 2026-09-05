@@ -74,7 +74,7 @@
 // puisse dire à quel point la couverture a manqué au lieu de le deviner.
 
 import { R_GLOBE, EARTH_RADIUS_M, latLonToSphere, worldToLatLon } from '../geo.js'
-import { localCrop, distanceCrop, tuileDansCrop } from './crop-sphere.js'
+import { localCrop, distanceCrop, tuileDansCrop, mercX, mercY } from './crop-sphere.js'
 
 /**
  * Le poseur du BLOC — celui du dépôt, écrit ici pour qu'il n'y ait qu'UNE
@@ -133,6 +133,7 @@ export function creerPoseurGlobe({
   rayon = R_GLOBE,
   repereCrop = null,
   formeCrop = null,
+  uniformsCrop = null,
   signature = null,
 }) {
   if (!(echelleBloc > 0)) throw new Error('sol-globe : echelleBloc doit être > 0')
@@ -161,6 +162,18 @@ export function creerPoseurGlobe({
   // l'`aCrop` de la mer, pas une seconde loi.
   etat.repereCrop = repereCrop
   etat.formeCrop = formeCrop
+  // ⚡ **LES UNIFORMES DU CROP, PARTAGÉS PAR RÉFÉRENCE** (`uCropCentre`,
+  // `uCropDemi`, `uCropCoin`, `uCropCoinN` du globe) : le socle BOUGE pendant
+  // un vol de poursuite (le bloc se recentre sur la tête), et un bord cuit dans
+  // la géométrie par rapport au repère d'AVANT rejetait tout le ruban jusqu'au
+  // re-drapage suivant — mesuré : 4 à 8 images sur 40 sans tracé, par paires.
+  // Le sommet porte donc son MERCATOR (`versMercator`), et c'est le nuanceur
+  // qui le rapporte au centre courant, comme le fragment de tuile.
+  etat.uniformsCrop = uniformsCrop
+  etat.versMercator = (x, z) => {
+    const p = versLatLon(x, z)
+    return p ? [mercX(p.lon), mercY(p.lat)] : null
+  }
   etat.versCrop = (x, z) => {
     if (!repereCrop) return null
     const p = versLatLon(x, z)
@@ -290,9 +303,20 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
   // Le repli garde l'ancien chemin (`hauteurDessinee`, hauteurs réservées) puis
   // le bloc : jamais zéro (voir l'en-tête).
   const dessinees = tuilesDessineesDansSocle(globe)
-  const hauteurM = dessinees.length
+  const brute = dessinees.length
     ? (lat, lon) => globe.hauteurMaillee(lat, lon, dessinees) ?? globe.hauteurDessinee(lat, lon, liste)
     : (lat, lon) => globe.hauteurDessinee(lat, lon, liste)
+  // ⚠️ **LA MER EST UNE SURFACE DESSINÉE AUSSI.** Avec un fond posé
+  // (`_fondCrop`), le maillage des tuiles DESCEND sous le niveau de la mer
+  // (Camargue : −8 m) et la nappe `crop-mer` est dessinée par-dessus, à
+  // l'altitude 0 (`R_GLOBE`). Un ruban drapé sur le fond passait SOUS l'eau :
+  // GX3 ③ « Camargue −7,1 m, 106 sommets sous le plan de mer », et le tracé
+  // invisible au premier relevé de lecture. Le sol du ruban est donc la plus
+  // haute des deux surfaces : le fond, ou la mer. Sans fond, `altitudeMaillage`
+  // écrête déjà à 0 (« oceans stay on the sphere ») : rien ne change.
+  const hauteurM = globe._fondCrop
+    ? (lat, lon) => { const h = brute(lat, lon); return h == null ? h : Math.max(h, 0) }
+    : brute
   const u = globe.uniforms
   return creerPoseurGlobe({
     sample,
@@ -303,6 +327,9 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
     exagerationGlobe: globe.exaggeration ?? 1,
     repereCrop: globe._crop ? { cx: globe._crop.cx, cy: globe._crop.cy, demi: globe._crop.demi } : null,
     formeCrop: u?.uCropCoin && u?.uCropCoinN ? { coin: u.uCropCoin.value, expo: u.uCropCoinN.value } : null,
+    uniformsCrop: u?.uCropCentre && u?.uCropDemi && u?.uCropCoin && u?.uCropCoinN
+      ? { uCropCentre: u.uCropCentre, uCropDemi: u.uCropDemi, uCropCoin: u.uCropCoin, uCropCoinN: u.uCropCoinN }
+      : null,
     signature: signatureDessineeCrop(globe),
   })
 }

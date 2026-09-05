@@ -121,7 +121,7 @@ function fauxGlobe() {
   const crop = { cx: (origine.x + 1.5) / n, cy: (origine.y + 1.5) / n, demi: 1.5 / n }
   return {
     tiles, exaggeration: EXAG, _crop: crop,
-    uniforms: { uCropCoin: { value: 0 }, uCropCoinN: { value: 2 } },
+    uniforms: { uCropCentre: { value: { x: crop.cx, y: crop.cy } }, uCropDemi: { value: crop.demi }, uCropCoin: { value: 0 }, uCropCoinN: { value: 2 } },
     tuilesAvecHauteurs() { const out = [...tiles.values()]; out.trieeFinAbord = true; return out },
     tuilesAvecMaillage() { return [...tiles.values()] },
     // ⚠️ la hauteur RÉSERVÉE (le chemin d'avant GX4) répond autre chose que le
@@ -215,34 +215,36 @@ test('① les SOMMETS DU TRACÉ (tête, curseur, profil) sont à la marge dériv
 
 // ─────────────────────────────────────────────── ② le bord du socle
 
-test('② le ruban porte le bord du socle : `aCrop` par sommet, ±1 sur la frontière, et le tracé DÉBORDE bien (sinon la garde ne garde rien)', () => {
+test('② le ruban porte le bord du socle : `aMerc` par sommet, rapporté au centre COURANT du crop, et le tracé DÉBORDE bien (sinon la garde ne garde rien)', () => {
   const globe = fauxGlobe()
   const l = calque(globe)
-  const q = l.ruban.geometry.attributes.aCrop
-  assert.ok(q, 'le ruban n’a pas d’attribut `aCrop` : rien ne l’écrête au bord du socle, il est dessiné dans le vide')
+  const q = l.ruban.geometry.attributes.aMerc
+  assert.ok(q, 'le ruban n’a pas d’attribut `aMerc` : rien ne l’écrête au bord du socle, il est dessiné dans le vide')
   const p = l.ruban.geometry.attributes.position.array
   let dehors = 0, dedans = 0
   for (let i = 0; i < q.count; i++) {
-    const u = q.array[i * 2], v = q.array[i * 2 + 1]
+    // ce que le nuanceur calcule : (mercator − centre) / demi
+    let du = q.array[i * 2] - globe._crop.cx; du -= Math.floor(du + 0.5)
+    const u = du / globe._crop.demi, v = (q.array[i * 2 + 1] - globe._crop.cy) / globe._crop.demi
     // la même loi que le nuanceur des tuiles (`distanceCrop`, crop-sphere.js)
     const d = distanceCrop(u, v, { coin: 0, expo: 2 })
     if (d > 0) dehors++; else dedans++
     // et l'attribut dit vrai : recalculé depuis la position sur la sphère
     const ll = sphereToLatLon(new THREE.Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]))
     const loc = localCrop(ll.lat, ll.lon, globe._crop)
-    assert.ok(Math.abs(loc.u - u) < 2e-3 && Math.abs(loc.v - v) < 2e-3, `aCrop du sommet ${i} ne correspond pas à sa position (${u.toFixed(4)},${v.toFixed(4)} vs ${loc.u.toFixed(4)},${loc.v.toFixed(4)})`)
+    assert.ok(Math.abs(loc.u - u) < 2e-3 && Math.abs(loc.v - v) < 2e-3, `aMerc du sommet ${i} ne correspond pas à sa position (${u.toFixed(4)},${v.toFixed(4)} vs ${loc.u.toFixed(4)},${loc.v.toFixed(4)})`)
   }
   assert.ok(dehors > 100 && dedans > 1000, `le tracé de test doit déborder du socle (dedans ${dedans}, dehors ${dehors})`)
-  assert.ok(l.sillage?.geometry.attributes.aCrop, 'le sillage n’a pas de bord de socle')
+  assert.ok(l.sillage?.geometry.attributes.aMerc, 'le sillage n’a pas de bord de socle')
   assert.equal(l.rubanMat.customProgramCacheKey(), 'ruban-trace-socle', 'le programme du ruban n’est pas la variante qui rejette au bord')
 })
 
-test('② hors globe (`?terre=deux`), rien de tout ça n’existe : pas d’aCrop, même clé de programme qu’avant', () => {
+test('② hors globe (`?terre=deux`), rien de tout ça n’existe : pas d’aMerc, même clé de programme qu’avant', () => {
   const scene = new THREE.Scene()
   const l = new GpxLayer({ scene, camera: new THREE.PerspectiveCamera(), terrain: { sample: () => 0.5 }, params, getDem: () => dem })
   l.setTrack(POINTS, 'Chemin')
   l.rebuild()
-  assert.equal(l.ruban.geometry.attributes.aCrop, undefined)
+  assert.equal(l.ruban.geometry.attributes.aMerc, undefined)
   assert.equal(l.rubanMat.customProgramCacheKey(), 'ruban-trace')
   const a = l.ruban.geometry.attributes.position.array
   for (let i = 0; i < a.length; i += 3) assert.ok(Math.hypot(a[i], a[i + 1], a[i + 2]) < TERRAIN_SIZE, 'hors globe, le ruban a quitté le bloc')

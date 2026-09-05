@@ -995,13 +995,23 @@ export class GpxLayer {
   // fragment. Le tracé s'arrête donc EXACTEMENT où les tuiles s'arrêtent, par
   // construction et non par mesure. Rend `null` hors globe ou sans crop : la
   // géométrie de `?terre=deux` ne change pas d'un octet.
+  //
+  // ⚡ **LE SOMMET PORTE SON MERCATOR, PAS SA COORDONNÉE DE CROP** (`aMerc`) :
+  // le socle se recentre pendant un vol de poursuite, et un `aCrop` cuit par
+  // rapport au repère d'avant rejetait TOUT le ruban jusqu'au re-drapage — 4 à
+  // 8 images sur 40 sans tracé, par paires (banc de lecture, phase suivi). Le
+  // nuanceur rapporte le mercator au centre COURANT (`uCropCentre`,
+  // `uCropDemi` partagés par référence avec le globe) : le bord suit le socle
+  // dans la même image, sans reconstruction. Précision `Float32` du mercator
+  // normalisé (~0,52 · ~0,35) : 6·10⁻⁸ de la planète, soit **2,4 m** au bord —
+  // sous le mètre-par-pixel de tout cadrage où le bord se voit.
   _attributBordSocle(positions) {
     const p = this._poseur
-    if (!p?.globe || !p.versCrop || !p.repereCrop) return null
+    if (!p?.globe || !p.versMercator || !p.repereCrop || !p.uniformsCrop) return null
     const n = positions.length / 3
     const out = new Float32Array(n * 2)
     for (let i = 0; i < n; i++) {
-      const q = p.versCrop(positions[i * 3], positions[i * 3 + 2])
+      const q = p.versMercator(positions[i * 3], positions[i * 3 + 2])
       out[i * 2] = q ? q[0] : 0
       out[i * 2 + 1] = q ? q[1] : 0
     }
@@ -1210,7 +1220,7 @@ export class GpxLayer {
     // scène qui est rendue. Identité hors globe — la géométrie de `?terre=deux`
     // ne change pas d'un flottant.
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this._versScene(r.positions)), 3))
-    if (aCrop) geo.setAttribute('aCrop', new THREE.BufferAttribute(aCrop, 2))
+    if (aCrop) geo.setAttribute('aMerc', new THREE.BufferAttribute(aCrop, 2))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(r.couleurs), 3))
     // la position le long du tracé, par sommet : c'est elle qui permet un
     // dévoilement CONTINU (voir _applyReveal)
@@ -1334,7 +1344,7 @@ export class GpxLayer {
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this._versScene(s.positions)), 3))
     geo.setAttribute('aDist', new THREE.BufferAttribute(new Float32Array(s.distances), 1))
     geo.setAttribute('aTrav', new THREE.BufferAttribute(new Float32Array(s.transverses), 1))
-    if (aCrop) geo.setAttribute('aCrop', new THREE.BufferAttribute(aCrop, 2))
+    if (aCrop) geo.setAttribute('aMerc', new THREE.BufferAttribute(aCrop, 2))
     geo.setIndex(s.indices)
     geo.computeBoundingSphere()
 
