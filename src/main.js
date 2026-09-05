@@ -168,6 +168,7 @@ import { BLOCK_TILES } from './landmarks.js'
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
 import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCran, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
 import { EXAGERATION_UNIQUE } from './monde/zoom-continu.js'
+import { temoinPoseExplicite, armerPoseExplicite, reprisePoseParLaMachine, doitRedresserHerite, retourNadirPermis } from './monde/pose-explicite.js'
 // LA FENÊTRE BORNÉE — Tâche 6 ter. ⚠️ Importée ICI et pas dans `terrain.js` :
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
@@ -2195,6 +2196,10 @@ const EASINGS = {
 const tween = {
   active: false,
   orbit: false, // true = rotation orbitale (slerp direction) plutôt qu'un lerp droit
+  // ⚡ **UN VOL DEMANDÉ PAR L'UTILISATEUR** (bouton de caméra) — tâche CAM. Le
+  // témoin `temoinPose` (monde/pose-explicite.js) se pose à son départ ; D16 ter
+  // ne redresse ni pendant (`volExplicite()`), ni après (`temoinPose.posee`).
+  explicite: false,
   t: 0,
   p0: new THREE.Vector3(),
   p1: new THREE.Vector3(),
@@ -2263,7 +2268,18 @@ function flyTo(pos, target, opts = {}) {
   tween.t = 0
   tween.active = true
   tween.orbit = !!opts.orbit // rotation orbitale (iso) vs déplacement droit
+  tween.explicite = !!opts.explicite
+  if (tween.explicite) {
+    armerPoseExplicite(temoinPose)
+    // un balayage de pose déjà armé (retour au nadir, bascule de trois quarts)
+    // écrirait la caméra APRÈS le tween dans la même image et gagnerait : le
+    // vol demandé possède la caméra, le balayage est rendu
+    if (modes?._fonduPose) modes._fonduPose = null
+  }
 }
+// le témoin de la pose choisie, et le vol qui l'a posée (voir monde/pose-explicite.js)
+const temoinPose = temoinPoseExplicite()
+const volExplicite = () => !!(tween.active && tween.explicite)
 
 // clicking a PK marker or a named summit orbits the camera just ABOVE the peak
 // and frames it — a high, slightly-offset vantage looking down at the top
@@ -12702,7 +12718,9 @@ function applyIsoView(i) {
   const v = ISO_VIEWS[isoIndex]
   const dist = controls.maxDistance * v.k
   const pos = v.target.clone().addScaledVector(v.dir.clone().normalize(), dist)
-  flyTo(pos, v.target.clone(), { orbit: true })
+  // `explicite` : la vue est un CHOIX de l'utilisateur, D16 ter ne la redresse
+  // pas (tâche CAM — « les positions 1, 2, 3, 4 […] reviennent en arrière »)
+  flyTo(pos, v.target.clone(), { orbit: true, explicite: true })
   isoBtn?.setBadge(v.name)
 }
 
@@ -13768,7 +13786,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, cadreLeDamier, quitteCadrageDamier, modeBoutonCamera, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
+window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, cadreLeDamier, quitteCadrageDamier, modeBoutonCamera, temoinPose, volExplicite, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
   // ⚠️ **LA BIBLIOTHÈQUE ELLE-MÊME, pour les sondes (R34).** Une sonde qui doit
   // injecter une mire dans la scène ou relire le tampon de profondeur a besoin
   // des MÊMES classes que le rendu — une seconde copie de three importée par la
@@ -14814,15 +14832,26 @@ function appliquerInclinaison(dInclinaisonDeg, dCapDeg) {
 // et `inclinaisonManuelle` en est le témoin.
 const SEUIL_HERITE_DEG = 1
 function redresserSiHerite(regime) {
-  if (regime !== REGIME.SURFACE || gestesTerre.inclinaisonManuelle) return
-  if (!modes || modes.busy || modes.travel || modes._fonduPose || modes._diveTween || (tween && tween.active)) return
+  if (!modes) return
   // ⚡ **D21 ② — `auBloc`, PAS `pose`.** Ce redressement est celui de D16 ter
   // (« la vue de trois quarts arrive au bloc, pas avant ») : sa condition est
   // « je ne suis PAS au bloc », pas « le crop n'existe pas ». Sur `pose`, il se
   // tairait dès 600 km et l'inclinaison héritée du vol de présentation resterait
   // posée sur toute la descente — le défaut bimodal que GE2 tour 2 a payé.
-  if (veilleCrop?.auBloc) return
-  if (THREE.MathUtils.radToDeg(controls.getPolarAngle()) <= SEUIL_HERITE_DEG) return
+  // ⚡ **ET PAS APRÈS UN CHOIX EXPLICITE DE POSE — tâche CAM.** Une vue iso
+  // demandée au bouton n'est pas « héritée » : `temoinPose.posee` la protège
+  // jusqu'à ce que la machine reprenne la pose (crop, orbite). La décision est
+  // pure et testée : `doitRedresserHerite` (monde/pose-explicite.js).
+  const redresser = doitRedresserHerite({
+    regime,
+    inclinaisonManuelle: gestesTerre.inclinaisonManuelle,
+    poseExplicite: temoinPose.posee,
+    pilote: !!(modes.busy || modes.travel || modes._fonduPose || modes._diveTween || (tween && tween.active)),
+    auBloc: !!veilleCrop?.auBloc,
+    polarDeg: THREE.MathUtils.radToDeg(controls.getPolarAngle()),
+    seuilDeg: SEUIL_HERITE_DEG,
+  })
+  if (!redresser) return
   // « toute porte qui confie la caméra rend D'ABORD ce que le cadrage a emprunté »
   // (test/damier-cadre.test.js) : le balayage est un pilote, il rend avant.
   quitteCadrageDamier()
@@ -14836,6 +14865,7 @@ function redresserSiHerite(regime) {
 function appliquerGestesTerre(dt) {
   const regime = regimeGeste()
   if (regime !== REGIME.SURFACE) gestesTerre.inclinaisonManuelle = false // sur le crop et en orbite, c'est la machine qui pose
+  reprisePoseParLaMachine(temoinPose, { regime, volExplicite: volExplicite() }) // …et la pose choisie tombe au même endroit, sauf pendant son vol
   if (!regime || regime === REGIME.CROP) {
     if (gestesTerre.actif !== GESTE.INERTE) relacherGeste(null)
     gestesTerre.crans = 0
@@ -15171,6 +15201,12 @@ function tick() {
   // décroche totalement" field bug, and it clobbered EVERY camera rig alike,
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
+  // ⚡ **LE FRONT DESCENDANT NE REND PAS LE NADIR PENDANT UN VOL DEMANDÉ — tâche
+  // CAM.** Le vol iso sort lui-même la caméra du bloc ; `modes.update` vient
+  // d'armer « quitter le bloc rend la vue au nadir » (D16 ter, symétrique) et ce
+  // balayage écrit après le tween dans la même image — il gagnait, et la vue 1
+  // filait droit au gros plan. Le vol possède la caméra : le balayage est rendu.
+  if (modes._fonduPose && !retourNadirPermis({ volExplicite: volExplicite() })) modes._fonduPose = null
   // ══════ ET ON REDRESSE *APRÈS* LE ZOOM AUSSI — Tâche R29 bis ═══════════
   //
   // ⛔ **LA RÉSERVE N° 1 DE R23, FERMÉE, ET C'ÉTAIT UN ORDRE D'APPEL.** Elle
