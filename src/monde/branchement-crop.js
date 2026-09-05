@@ -708,6 +708,48 @@ export function creerVeilleCrop({
   // n'a jamais dépendu de l'altitude. C'est la troisième sortie de D21, et elle
   // était déjà une intention.
   let sortieArmee = false
+  // ══════════ VIE — LE DEHORS NE SE RALLUME QUE SOUS LA MOLETTE ═══════════
+  //
+  // > **Adrien, 2026-09-05 :** *« quand on entre en mode crop on ne puisse plus
+  // > revoir la terre complète si la caméra remonte via un déplacement autre
+  // > qu'un scroll à la roulette, comme on avait dit auparavant. Notre
+  // > correction n'avait pas fonctionné. »*
+  // > **Adrien, 2026-08-23 :** *« si je modifie la hauteur de la caméra SANS
+  // > SCROLLER et en me déplaçant, il ne faut pas que le reste de ce qui est
+  // > autour du socle réapparaisse. Si je dézoome EN SCROLLANT, alors là tu
+  // > peux faire réapparaître le reste. »*
+  //
+  // ⚡ **MESURÉ, ET C'EST LE CHEMIN (b) — LE CROP VIT, LE DEHORS EST REDESSINÉ.**
+  // `.banc/VIE/avant-glisse-bas.json`, 8 chargements : un glissé gauche vers le
+  // nadir depuis la naissance du crop (25 – 31 km) monte l'altitude de cadrage
+  // à ~40 600 m **à crop vivant** (`pose` true→true 8/8) ; la veille du repos
+  // se réveille sur la distance, `poserRepos(false)` part, la porte du repos
+  // tombe à 0, et **l'estompage posé retombe sur la LOI d'altitude — qui vaut
+  // 0 au-dessus de `ALT_ESTOMPAGE_DEBUT_M` (40 343 m)** : la planète ENTIÈRE
+  // est dessinée autour du crop, ~150 images d'affilée. D21 ① tenait (le crop
+  // ne meurt pas) ; **c'est le dehors qui revenait, par la porte du repos.**
+  // PORTE ne pouvait pas le voir : son banc partait du fond du crop (460 m –
+  // 18 km), sous `ALT_ESTOMPAGE_FIN_M` (19 364 m), où la loi vaut 1 et masque
+  // la porte.
+  //
+  // ➡️ **LA PORTE DU REPOS N'OBÉIT PLUS AU SEUL MOUVEMENT : IL FAUT EN PLUS
+  // UNE PERMISSION, ET SEULE LA MOLETTE EN DÉZOOM LA DONNE.** `armerSortie`
+  // (le dézoom à la molette, `intentionZoom` de `main.js`) la lève ; elle est
+  // **consommée par le retour au repos** (le geste est fini — le prochain
+  // glissé ne la retrouve pas), par un zoom avant (`desarmerSortie`), et par
+  // toute bascule du crop. Tant qu'elle est basse, un mouvement — glissé,
+  // inclinaison, bouton de caméra, recalage, balayage automatique — laisse le
+  // relais du repos à `true` : le dehors reste éteint et le quadtree ne
+  // parcourt que le crop, quelle que soit l'altitude atteinte.
+  //
+  // ⚠️ **CE N'EST PAS `sortieArmee`, ET LES DEUX NE SE REMPLACENT PAS.**
+  // `sortieArmee` est une INTENTION qui survit au repos (un cran isolé la laisse
+  // armée jusqu'au zoom avant suivant — c'est D21 ①, et un test le garde) ; la
+  // permission, elle, est un fait du GESTE EN COURS : elle meurt avec lui.
+  // Portée par `sortieArmee`, un cran isolé suivi d'un glissé, une minute plus
+  // tard, rallumerait la Terre sur le glissé.
+  let dehorsPermis = false
+  let auReposAvant = true
   let signature = null
   let refus = []
   // ⚠️ **LA PLAQUE EST-ELLE PROVISOIRE ? — SOC.** Posé par chaque appel du
@@ -788,7 +830,18 @@ export function creerVeilleCrop({
     // `if (nom === 'crop') continue` de `reprendre` et le `habillagePose = null`
     // de `retirer`. ⚠️ **L'INVARIANT QUI LE REMPLACE EST ÉCRIT ICI** : hors
     // surface, il n'y a pas de crop, donc rien à relayer.
-    const voulu = !!(pose && auRepos)
+    // ⚡ **VIE — LE RETOUR AU REPOS CONSOMME LA PERMISSION.** Sur le FRONT
+    // montant seulement : une permission donnée pendant que la vue est encore
+    // posée (le cran de molette arrive au DOM avant la première image du
+    // glissement) doit survivre jusqu'au geste qu'elle autorise.
+    if (auRepos && !auReposAvant) dehorsPermis = false
+    auReposAvant = auRepos
+    // ⚡ **VIE — SANS PERMISSION, LE MOUVEMENT NE RALLUME PAS LE DEHORS.** Voir
+    // la déclaration de `dehorsPermis` : c'est la citation d'Adrien, et la mesure.
+    // ⚠️ **ET SANS VEILLE DE REPOS, RIEN N'EST RELAYÉ** — le comportement
+    // d'avant la Tâche N, gardé par `test/veille-repos.test.js` ⑥ : la
+    // permission ne peut pas inventer un repos là où personne ne le mesure.
+    const voulu = !!(pose && (auRepos || (repos && !dehorsPermis)))
     if (voulu !== reposApplique) {
       reposApplique = voulu
       basculesRepos++
@@ -968,6 +1021,7 @@ export function creerVeilleCrop({
     // ⚠️ **L'INTENTION EST CONSOMMÉE.** La laisser armée ferait mourir le crop
     // suivant sur son premier soubresaut d'altitude, sans nouveau geste.
     sortieArmee = false
+    dehorsPermis = false // VIE : la mort du crop consomme aussi la permission
     // ⛔ **IL Y AVAIT ICI UN `habillagePose = null`, ET C'ÉTAIT DU CODE MORT —
     // TROUVÉ PAR LA CAMPAGNE DE MUTATION, PAS PAR LA RELECTURE.** Le
     // raisonnement écrit à côté était plausible (« `retirerCrop` appelle
@@ -1048,7 +1102,7 @@ export function creerVeilleCrop({
         const naissance = !pose
         if (naissance) bascules++
         // on vient d'entrer : aucune intention de sortie ne traîne
-        if (naissance) sortieArmee = false
+        if (naissance) { sortieArmee = false; dehorsPermis = false }
         pose = true
         signature = s
         poserTout(g, ctx)
@@ -1143,13 +1197,23 @@ export function creerVeilleCrop({
      * **dézoom au clic droit maintenu** (`main.js`). ⚠️ N'a aucun effet sur la
      * naissance : D21 dit « la naissance garde son seuil ».
      */
-    armerSortie() { sortieArmee = true; return sortieArmee },
+    armerSortie() {
+      sortieArmee = true
+      // ⚡ **VIE — ET C'EST LA SEULE PORTE PAR LAQUELLE LE DEHORS SE RALLUME.**
+      // Un dézoom à la molette est le geste qu'Adrien autorise : « si je dézoome
+      // en scrollant, alors là tu peux faire réapparaître le reste ».
+      dehorsPermis = true
+      return sortieArmee
+    },
+    /** VIE — le dehors a-t-il la permission de se rallumer sur le mouvement en
+     *  cours ? Vrai entre un dézoom à la molette et le retour au repos. */
+    get dehorsPermis() { return dehorsPermis },
     /**
      * ⚡ **ET LE DÉSARMEMENT, SUR UN ZOOM AVANT.** Le critère de C1 l'exige
      * ligne par ligne : « dans le crop, zoom avant (molette ou clic droit) → le
      * crop vit ». Sans ça, un aller-retour molette laisserait une mine amorcée.
      */
-    desarmerSortie() { sortieArmee = false; return sortieArmee },
+    desarmerSortie() { sortieArmee = false; dehorsPermis = false; return sortieArmee },
     /** Combien de fois le repos relayé a basculé : le compteur de battement. */
     get basculesRepos() { return basculesRepos },
     /** Les maillons qui ont refusé et que la reprise redemande. */

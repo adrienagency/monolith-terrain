@@ -403,7 +403,7 @@ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
   assert.equal(est.etat.repos, null, '`poserRepos` appelée sans crop')
 })
 
-test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () => {
+test('⑥ un DÉZOOM À LA MOLETTE qui bouge RETIRE le crop seul, et le retour au calme le remet', () => {
   const g = globeDePapier()
   const est = veilleEstompageFactice()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
@@ -412,6 +412,11 @@ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () 
   const D = 145.5
   veille.maj(ALT_BLOC, D)
   assert.equal(g.cropSeul, true)
+  // ⚡ **VIE — ET IL FAUT LA MOLETTE EN DÉZOOM** : depuis le 2026-09-05 le
+  // mouvement seul ne rallume plus le dehors (voir le test « ⑥ un mouvement
+  // SANS molette » ci-dessous, et `test/vie-crop.test.js`). Le cran arrive au
+  // DOM avant la première image du glissement : on arme d'abord, on bouge après.
+  veille.armerSortie()
   // un geste : une seule image suffit
   const D2 = D * Math.exp(SEUIL_BOUGE_LOG * 3)
   veille.maj(ALT_BLOC, D2)
@@ -420,6 +425,24 @@ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () 
   for (let i = 0; i < IMAGES_CALME; i++) veille.maj(ALT_BLOC, D2)
   assert.equal(g.cropSeul, true, 'la vue posée ne recroppe pas')
   assert.equal(veille.basculesRepos, 3)
+})
+
+test('⑥ un mouvement SANS molette laisse le crop seul — VIE, Adrien 2026-09-05', () => {
+  // > « on ne puisse plus revoir la terre complète si la caméra remonte via un
+  // > déplacement autre qu'un scroll à la roulette »
+  const g = globeDePapier()
+  const est = veilleEstompageFactice()
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const D = 145.5
+  veille.maj(ALT_BLOC, D)
+  assert.equal(g.cropSeul, true)
+  const poses = g.posesCropSeul
+  // un glissé : la distance bouge franchement, image après image, sans molette
+  for (let i = 1; i <= 40; i++) veille.maj(ALT_BLOC, D * Math.exp(SEUIL_BOUGE_LOG * 3 * i))
+  assert.equal(g.cropSeul, true, 'un glissé sans molette a rallumé les alentours')
+  assert.equal(est.etat.repos, true, '`poserRepos(false)` est parti sans molette')
+  assert.equal(g.posesCropSeul, poses, 'le crop seul a été reposé pour rien')
+  assert.equal(veille.basculesRepos, 1, `${veille.basculesRepos} bascules de repos relayées sur un glissé sans molette`)
 })
 
 test('⑥ le relais ne réécrit RIEN tant que l’état ne change pas', () => {
@@ -977,6 +1000,8 @@ test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la vue', () =>
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
   veille.maj(ALT_BLOC, 145.5)
   assert.equal(g.cropSeul, true)
+  // ⚡ VIE : c'est la molette, donc l'intention est armée au DOM avant l'image
+  veille.armerSortie()
   // une seule image suffit — l'hystérésis est asymétrique À DESSEIN (§3)
   veille.maj(ALT_BLOC, 145.5 * Math.exp(SEUIL_BOUGE_LOG * 3))
   assert.equal(g.cropSeul, false, 'un dézoom n’a pas rendu la main aux alentours')
