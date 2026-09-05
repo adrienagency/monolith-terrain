@@ -11,7 +11,13 @@ AVANT=$(md5)
 resume () { # $1 = nom
   local out; out=$(node --test $TESTS 2>&1)
   local pass fail; pass=$(echo "$out" | grep -E '^(ℹ|#) pass' | awk '{print $3}'); fail=$(echo "$out" | grep -E '^(ℹ|#) fail' | awk '{print $3}')
-  local rouges; rouges=$(echo "$out" | grep -E '^not ok' | sed -E 's/^not ok [0-9]+ - //' | head -12 | tr '\n' '|')
+  # ⚠️ le rapporteur par défaut de `node --test` est `spec`, PAS `tap` : un test
+  # rouge s'y écrit « ✖ nom (durée) », jamais « not ok N - nom ». Le filtre
+  # d'origine (`^not ok`) ne trouvait donc rien et écrivait « — » sur CHAQUE
+  # ligne, y compris pour les mutations qui rougissaient (le compte `fail`, lui,
+  # était juste). Corrigé par GX7 : sans le nom du test, « ça mord » n'est pas
+  # vérifiable — on ne sait pas QUELLE garde a mordu.
+  local rouges; rouges=$(echo "$out" | grep -oE '^✖ .*' | sed -E 's/^✖ //; s/ \([0-9.]+ms\)$//' | cut -c1-64 | head -12 | tr '\n' '|')
   echo "  $1 : pass $pass · fail $fail · rouges : ${rouges:-—}"
 }
 restaure () { git checkout -- $FICHIERS; local APRES; APRES=$(md5); [ "$AVANT" == "$APRES" ] && echo "  restauré à l'octet (md5 identiques)" || { echo "  ⛔ MD5 DIFFÉRENTS"; exit 1; }; }
