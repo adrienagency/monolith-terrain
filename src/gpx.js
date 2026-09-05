@@ -1018,19 +1018,49 @@ export class GpxLayer {
     return out
   }
 
-  // Les morceaux de nuanceur du bord — les MÊMES uniformes de forme que les
-  // tuiles (`uCropCoin`, `uCropCoinN`), la même fonction, le même seuil.
+  // Les morceaux de nuanceur du bord — les MÊMES uniformes que les tuiles
+  // (`uCropCentre`, `uCropDemi`, `uCropCoin`, `uCropCoinN`), **partagés par
+  // référence** avec `globe.uniforms` : le socle bouge pendant un vol, le bord
+  // du ruban le suit dans la même image, sans reconstruction.
+  //
+  // ⛔ **CE BLOC ÉTAIT MORT, ET IL SE DISAIT VIVANT (GX5).** La géométrie pose
+  // l'attribut `aMerc` ; le nuanceur, lui, déclarait `attribute vec2 aCrop` —
+  // un nom qui n'existe dans AUCUNE géométrie. WebGL ne signale pas un attribut
+  // non lié : il rend `(0, 0)`, c'est-à-dire **le centre exact du socle**, donc
+  // `distanceBordCrop < 0`, donc **aucun fragment n'était jamais écarté**. Le
+  // `discard` tournait à chaque image sans rien couper : le banc du noteur
+  // (polygone de l'empreinte du socle) comptait encore 159 à 356 px hors socle
+  // à z13 quand le banc réécrit du tour précédent annonçait 0.
+  // Seconde moitié du même défaut : même correctement lié, un mercator ABSOLU
+  // (~0,52 · ~0,35) passé tel quel à `distanceBordCrop` reste dans [-1, 1],
+  // donc « dedans » partout. Il faut le rapporter au centre COURANT — ici, et
+  // exactement comme `globe.js` le fait au fragment de tuile.
   _glslBordSocle() {
-    const f = this._poseur?.formeCrop || { coin: 0, expo: 2 }
+    const u = this._poseur?.uniformsCrop
+    if (!u) return null
     return {
-      uniforms: { uCropCoin: { value: f.coin }, uCropCoinN: { value: f.expo } },
-      vertexDecl: '\nattribute vec2 aCrop;\nvarying vec2 vCrop;',
-      vertexCorps: '\nvCrop = aCrop;',
-      fragmentDecl: '\nuniform float uCropCoin;\nuniform float uCropCoinN;\nvarying vec2 vCrop;\n' + GLSL_BORD_CROP,
+      // ⚠️ les objets d'uniforme du globe EUX-MÊMES, pas des copies de leur
+      // valeur : c'est ce partage qui fait suivre le bord pendant un recentrage.
+      uniforms: {
+        uCropCentre: u.uCropCentre,
+        uCropDemi: u.uCropDemi,
+        uCropCoin: u.uCropCoin,
+        uCropCoinN: u.uCropCoinN,
+        uCropOn: u.uCropOn,
+      },
+      vertexDecl: '\nattribute vec2 aMerc;\nvarying vec2 vCrop;\nuniform vec2 uCropCentre;\nuniform float uCropDemi;',
+      // le mercator du sommet → coordonnées LOCALES du socle (±1 sur la
+      // frontière) : la transcription exacte de `localCrop` et du fragment de
+      // tuile, repli d'antiméridien compris (le mercator x est de période 1 ;
+      // sans `floor(du + 0.5)`, un socle à cheval sur 180° verrait la moitié de
+      // son ruban à ~1/demi de son centre, donc coupée).
+      vertexCorps: '\n{ float duCrop = aMerc.x - uCropCentre.x;\n  duCrop -= floor(duCrop + 0.5);\n  vCrop = vec2(duCrop, aMerc.y - uCropCentre.y) / uCropDemi; }',
+      fragmentDecl: '\nuniform float uCropCoin;\nuniform float uCropCoinN;\nuniform float uCropOn;\nvarying vec2 vCrop;\n' + GLSL_BORD_CROP,
       // > 0 = hors du socle : rejeté, comme le fragment de tuile (globe.js) et
       // celui de la mer. Pas de fondu : une ligne coupée net au bord se lit
       // comme un bord de carte (c'est déjà la règle des plans de coupe).
-      fragmentCorps: '\nif (distanceBordCrop(vCrop, uCropCoin, uCropCoinN) > 0.0) discard;',
+      // `uCropOn` d'abord, exactement comme la tuile : sans socle, rien à couper.
+      fragmentCorps: '\nif (uCropOn > 0.5 && distanceBordCrop(vCrop, uCropCoin, uCropCoinN) > 0.0) discard;',
     }
   }
 

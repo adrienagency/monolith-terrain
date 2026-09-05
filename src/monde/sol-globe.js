@@ -335,8 +335,13 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
     exagerationGlobe: globe.exaggeration ?? 1,
     repereCrop: globe._crop ? { cx: globe._crop.cx, cy: globe._crop.cy, demi: globe._crop.demi } : null,
     formeCrop: u?.uCropCoin && u?.uCropCoinN ? { coin: u.uCropCoin.value, expo: u.uCropCoinN.value } : null,
-    uniformsCrop: u?.uCropCentre && u?.uCropDemi && u?.uCropCoin && u?.uCropCoinN
-      ? { uCropCentre: u.uCropCentre, uCropDemi: u.uCropDemi, uCropCoin: u.uCropCoin, uCropCoinN: u.uCropCoinN }
+    // ⚠️ `uCropOn` EN FAIT PARTIE (GX5) : `retirerCrop()` l'éteint et rend le
+    // globe entier, mais les autres uniformes gardent la valeur du dernier
+    // socle. Sans lui, un ruban compilé avec le bord resterait coupé sur un
+    // socle qui n'existe plus — c'est la garde que le fragment de tuile porte
+    // depuis toujours (`if (uCropOn > 0.5)`, globe.js), pas une invention.
+    uniformsCrop: u?.uCropCentre && u?.uCropDemi && u?.uCropCoin && u?.uCropCoinN && u?.uCropOn
+      ? { uCropCentre: u.uCropCentre, uCropDemi: u.uCropDemi, uCropCoin: u.uCropCoin, uCropCoinN: u.uCropCoinN, uCropOn: u.uCropOn }
       : null,
     signature: signatureDessineeCrop(globe),
   })

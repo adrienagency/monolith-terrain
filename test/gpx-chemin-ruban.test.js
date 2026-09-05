@@ -121,7 +121,10 @@ function fauxGlobe() {
   const crop = { cx: (origine.x + 1.5) / n, cy: (origine.y + 1.5) / n, demi: 1.5 / n }
   return {
     tiles, exaggeration: EXAG, _crop: crop,
-    uniforms: { uCropCentre: { value: { x: crop.cx, y: crop.cy } }, uCropDemi: { value: crop.demi }, uCropCoin: { value: 0 }, uCropCoinN: { value: 2 } },
+    // ⚠️ `uCropOn` EN FAIT PARTIE, comme sur le vrai globe (`globe.js`) :
+    // `retirerCrop()` l'éteint, et c'est lui qui empêche le ruban de rester
+    // coupé sur un socle qui n'existe plus.
+    uniforms: { uCropCentre: { value: { x: crop.cx, y: crop.cy } }, uCropDemi: { value: crop.demi }, uCropCoin: { value: 0 }, uCropCoinN: { value: 2 }, uCropOn: { value: 1 } },
     tuilesAvecHauteurs() { const out = [...tiles.values()]; out.trieeFinAbord = true; return out },
     tuilesAvecMaillage() { return [...tiles.values()] },
     // ⚠️ la hauteur RÉSERVÉE (le chemin d'avant GX4) répond autre chose que le
@@ -237,6 +240,38 @@ test('② le ruban porte le bord du socle : `aMerc` par sommet, rapporté au cen
   assert.ok(dehors > 100 && dedans > 1000, `le tracé de test doit déborder du socle (dedans ${dedans}, dehors ${dehors})`)
   assert.ok(l.sillage?.geometry.attributes.aMerc, 'le sillage n’a pas de bord de socle')
   assert.equal(l.rubanMat.customProgramCacheKey(), 'ruban-trace-socle', 'le programme du ruban n’est pas la variante qui rejette au bord')
+})
+
+// ⛔ **LA GARDE QUI MANQUAIT, ET QUI A COÛTÉ LE TOUR (GX5).** Le test ci-dessus
+// vérifie l'attribut posé sur la GÉOMÉTRIE ; il ne regardait pas le NOM que le
+// nuanceur déclare. Le produit posait `aMerc` et lisait `aCrop` : WebGL ne
+// signale pas un attribut non lié, il rend `(0, 0)` — le CENTRE du socle —
+// donc `distanceBordCrop < 0`, donc **aucun fragment n'était jamais écarté**.
+// Le `discard` tournait à chaque image sans rien couper, et 154 à 358 px de
+// tracé restaient dessinés hors du socle. On confronte donc ici les deux
+// listes : tout `attribute` déclaré dans le morceau de nuanceur DOIT exister
+// dans la géométrie, et tout `uniform` déclaré doit être fourni — et fourni
+// PAR RÉFÉRENCE depuis `globe.uniforms`, sinon le bord ne suit pas le socle
+// quand il se recentre.
+test('② le nuanceur du bord ne lit QUE des noms qui existent — attributs liés, uniformes partagés avec le globe, discard gaîné par `uCropOn`', () => {
+  const globe = fauxGlobe()
+  const l = calque(globe)
+  const bord = l._glslBordSocle()
+  assert.ok(bord, 'aucun morceau de nuanceur de bord alors que le socle est posé')
+  const source = bord.vertexDecl + bord.vertexCorps + bord.fragmentDecl + bord.fragmentCorps
+  for (const m of source.matchAll(/attribute\s+\w+\s+(\w+)\s*;/g)) {
+    assert.ok(l.ruban.geometry.attributes[m[1]], `le nuanceur déclare \`attribute ${m[1]}\` que la géométrie du ruban ne fournit pas : WebGL rendrait (0,0) et le bord ne couperait rien`)
+    assert.ok(l.sillage.geometry.attributes[m[1]], `le sillage ne fournit pas \`${m[1]}\``)
+  }
+  for (const m of source.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)) {
+    assert.ok(bord.uniforms[m[1]], `le nuanceur déclare \`uniform ${m[1]}\` qui n'est pas fourni`)
+    assert.equal(bord.uniforms[m[1]], globe.uniforms[m[1]], `\`${m[1]}\` est une COPIE de la valeur du globe : le bord se figerait au repère du socle d'avant le recentrage`)
+  }
+  // et le corps du fragment mesure bien le MERCATOR rapporté au centre courant,
+  // pas le mercator absolu (qui vaut ~0,52 · 0,35, donc « dedans » partout)
+  assert.match(bord.vertexCorps, /aMerc\.x\s*-\s*uCropCentre\.x/, 'le sommet n’est pas rapporté au centre courant du socle')
+  assert.match(bord.vertexCorps, /floor\(\s*\w+\s*\+\s*0\.5\s*\)/, 'pas de repli d’antiméridien : un socle à cheval sur 180° couperait la moitié du ruban')
+  assert.match(bord.fragmentCorps, /uCropOn\s*>\s*0\.5\s*&&/, 'le discard n’est pas gaîné par `uCropOn` : le ruban resterait coupé sur un socle retiré')
 })
 
 test('② hors globe (`?terre=deux`), rien de tout ça n’existe : pas d’aMerc, même clé de programme qu’avant', () => {
