@@ -52,31 +52,49 @@ const CPU = Number(opt('--cpu', '1'))
 const LATENCE = Number(opt('--latence', '0'))
 const ETIQ = opt('--etiq', `dezoom${PIXELS ? '' : '-nu'}${CPU > 1 ? `-x${CPU}` : ''}`)
 const SCREENCAST = opt('--screencast', '1') !== '0'
+// CA2 — le levier de D27 : `--attente N` pose `veilleCrop.attenteSocleMax` (en
+// images) avant le geste ; `0` rejoue la pose immédiate d'avant D27 dans la
+// même page (« socle vide » contre « ancien crop », règle D13). Vide : le défaut.
+const ATTENTE = opt('--attente', '')
 const ICI = path.join(RACINE, '.banc', 'CA1')
 fs.mkdirSync(ICI, { recursive: true })
 
 const W = 1280, H = 800, CX = W / 2, CY = H / 2
 const pup = (await import('file:///C:/Dev/wt-f3/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).default
-const nav = await pup.launch({
-  executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  headless: 'new', args: [`--window-size=${W},${H + 120}`, '--use-angle=default'],
-  defaultViewport: { width: W, height: H },
-})
-const page = (await nav.pages())[0]
-const cdp = await page.target().createCDPSession()
+// ⚠️ **CA3 — LE NAVIGATEUR EST RELANÇABLE, ET LE BANC EN DÉPEND.** Vu deux fois
+// à 8 chargements : la page meurt en cours de geste (`window.__ca1` perdu, puis
+// « detached Frame ») et **toutes les passes suivantes échouent sur le même cadre
+// mort** — trois chargements rendus au lieu de huit, et le barème en demande huit.
+// Le lancement est donc une FONCTION, et `nav`/`page`/`cdp` des `let` : une passe
+// interrompue ferme SON navigateur et en relance un neuf.
+// ⛔ **ON NE TUE QUE SON PROPRE CHROME** : `nav.close()` sur l'instance de ce
+// script, jamais un `taskkill` — deux agents ont déjà tué celui d'Adrien.
+let nav = null, page = null, cdp = null
+let requetes = 0 // le réseau, compté au protocole (requêtes de tuiles)
 const dodo = (ms) => new Promise((r) => setTimeout(r, ms))
 const T0 = Date.now()
 const etape = (m) => console.log(`[${((Date.now() - T0) / 1000).toFixed(0)} s] ${m}`)
-if (CPU > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU })
-if (LATENCE > 0) {
-  await cdp.send('Network.enable')
-  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: LATENCE, downloadThroughput: -1, uploadThroughput: -1 })
+async function lancer() {
+  nav = await pup.launch({
+    executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    headless: 'new', args: [`--window-size=${W},${H + 120}`, '--use-angle=default'],
+    defaultViewport: { width: W, height: H },
+  })
+  page = (await nav.pages())[0]
+  cdp = await page.target().createCDPSession()
+  if (CPU > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU })
+  if (LATENCE > 0) {
+    await cdp.send('Network.enable')
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: LATENCE, downloadThroughput: -1, uploadThroughput: -1 })
+  }
+  await cdp.send('Network.enable').catch(() => {})
+  cdp.on('Network.requestWillBeSent', (ev) => { if (/\/(dem|bathy|tiles?|relief)\//i.test(ev.request?.url || '') || /\.(png|webp|bin|pmtiles)(\?|$)/i.test(ev.request?.url || '')) requetes++ })
 }
-
-// le réseau, compté au protocole (requêtes de tuiles)
-let requetes = 0
-await cdp.send('Network.enable').catch(() => {})
-cdp.on('Network.requestWillBeSent', (ev) => { if (/\/(dem|bathy|tiles?|relief)\//i.test(ev.request?.url || '') || /\.(png|webp|bin|pmtiles)(\?|$)/i.test(ev.request?.url || '')) requetes++ })
+async function relancer() {
+  try { await nav?.close() } catch {}
+  await lancer()
+}
+await lancer()
 
 async function voile() {
   for (let k = 0; k < 12; k++) {
@@ -227,6 +245,15 @@ async function installer() {
         cropSeul: !!g?._cropSeul, porteRepos: +(est?.porteRepos ?? -1).toFixed(3), estompagePose: +(est?.valeur ?? -1).toFixed(3),
         uEstompage: u ? +u.uEstompage.value.toFixed(3) : null, uEstompageOn: u?.uEstompageOn?.value ?? null,
         dehorsPermis: !!vc?.dehorsPermis, armee: !!vc?.sortieArmee, auRepos: !!e.veilleRepos?.auRepos, refus: (vc?.refus || []).join('+'),
+        // CA2 — D27 : l'attente du socle (l'ancien crop reste complet à l'écran)
+        attente: !!vc?.attenteSocle, attentes: vc?.attentes ?? null, attentesEchues: vc?.attentesEchues ?? null, sondes: vc?.attente?.sondes ?? null,
+        // CA2 — les DEUX altitudes, pour la loi : `camY` et la largeur du bloc
+        // chargé (unités du bloc, `TERRAIN_SIZE = 56`), et l'altitude de la
+        // caméra du GLOBE au-dessus de la sphère nue — `|camGlobe| − R_GLOBE`,
+        // R_GLOBE = 100 unités pour 6 371 000 m, donc **63 710 m par unité**
+        // (`ORBITAL_M_PER_UNIT`, `geo.js`). Elle ne dépend d'aucun bloc.
+        camY: +e.camera.position.y.toFixed(4), largeurM: e.terrain?.fenetreBornee?.largeurM ?? null,
+        altGlobe: e.camGlobe ? Math.round((e.camGlobe.position.length() - 100) * 63710) : null,
         zServi: g?._zCropServi ?? null, zCible: g?._zCropCible ?? null, zEcran: g?._zCropEcran ?? null,
         dessinees, dessineesHors, zMin: zMin === 99 ? null : zMin, zMax: zMax || null,
         cache: g?.tiles?.size ?? null, file: g?.queue?.length ?? null, vol: g?.inFlight ?? null,
@@ -328,6 +355,10 @@ function bilan(rec) {
   const paroisDecalees = imgs.filter((r) => r.pose && r.parois && r.paroisDemi !== r.cropDemi).length
   const provisoires = imgs.filter((r) => r.pose && r.provisoire).length
   const cropMort = imgs.filter((r) => !r.pose).length
+  // CA2 — D27 : découpe (posée) dont la mer ou le fond refuse encore, images d'attente, requêtes
+  const sansMer = imgs.filter((r) => r.pose && /mer/.test(r.refus)).length
+  const attenteImages = imgs.filter((r) => r.attente).length
+  const zServiMin = Math.min(...imgs.filter((r) => r.pose && r.zServi != null && r.zServi > 0).map((r) => r.zServi))
   // les paliers : chaque image où cropDemi change
   const paliers = []
   for (let i = 1; i < imgs.length; i++) if (imgs[i].cropDemi !== imgs[i - 1].cropDemi) paliers.push({ i, t: imgs[i].t, de: imgs[i - 1].cropDemi, a: imgs[i].cropDemi, demZoom: imgs[i].demZoom })
@@ -335,15 +366,23 @@ function bilan(rec) {
   const premierDessinHors = imgs.find((r) => r.dessineesHors > 0) || null
   const dt = imgs.map((r) => r.dt).filter((x) => x > 0).sort((a, b) => a - b)
   const p = (q) => dt.length ? dt[Math.min(dt.length - 1, Math.floor(q * dt.length))] : null
-  return { images: imgs.length, marques: marques.length, horsPxMax, horsPxImages, dessineesHorsImages, estompeImages, mixte, sansParois, paroisDecalees, provisoires, cropMort, paliers, premierHors: premierHors && { t: premierHors.t, i: imgs.indexOf(premierHors), horsPx: premierHors.horsPx, uEstompage: premierHors.uEstompage, cropDemi: premierHors.cropDemi }, premierDessinHors: premierDessinHors && { t: premierDessinHors.t, i: imgs.indexOf(premierDessinHors), n: premierDessinHors.dessineesHors }, dtP50: p(0.5), dtP99: p(0.99) }
+  return { images: imgs.length, marques: marques.length, horsPxMax, horsPxImages, dessineesHorsImages, estompeImages, mixte, sansParois, paroisDecalees, provisoires, sansMer, attenteImages, zServiMin, cropMort, paliers, premierHors: premierHors && { t: premierHors.t, i: imgs.indexOf(premierHors), horsPx: premierHors.horsPx, uEstompage: premierHors.uEstompage, cropDemi: premierHors.cropDemi }, premierDessinHors: premierDessinHors && { t: premierDessinHors.t, i: imgs.indexOf(premierDessinHors), n: premierDessinHors.dessineesHors }, dtP50: p(0.5), dtP99: p(0.99) }
 }
 
-const R = { etiq: ETIQ, port: PORT, lieu: LIEU, z: Z, zbas: ZBAS, gap: GAP, rafale: RAFALE, espace: ESPACE, pixels: PIXELS, cpu: CPU, latence: LATENCE, quand: new Date().toISOString(), passes: [] }
+const R = { etiq: ETIQ, port: PORT, lieu: LIEU, z: Z, zbas: ZBAS, gap: GAP, rafale: RAFALE, espace: ESPACE, pixels: PIXELS, cpu: CPU, latence: LATENCE, attente: ATTENTE === '' ? null : Number(ATTENTE), quand: new Date().toISOString(), passes: [] }
 
 for (let p = 0; p < REPETE; p++) {
+  // ⚠️ **CA3 — UNE PASSE QUI CASSE NE DOIT PAS EMPORTER LE BANC.** Vu au 4ᵉ
+  // chargement : la page a perdu `window.__ca1` en cours de geste (perte de
+  // contexte WebGL / rechargement), et le `TypeError` a tué le script après
+  // trois passes — le barème demande **8 chargements**, et trois n’en font pas
+  // huit. La passe est enregistrée comme une ERREUR (elle ne compte pas comme
+  // un succès) et le banc continue sur une page neuve.
+  try {
   requetes = 0
   await neuf()
   await installer()
+  if (ATTENTE !== '') await page.evaluate((n) => { window.__exp.veilleCrop.attenteSocleMax = Number(n) }, ATTENTE)
   const depart = await dansLeCropChaud()
   if (!depart?.pose) { R.passes.push({ erreur: 'pas dans le crop', depart }); etape(`⛔ passe ${p + 1} : crop absent (alt ${depart?.alt} m)`); continue }
   // témoin : 20 images au repos, crop seul — horsPx doit valoir 0
@@ -411,8 +450,14 @@ for (let p = 0; p < REPETE; p++) {
     netApresCran.push({ marque: m.marque, t: m.t, netMs: net ? net.t - m.t : null })
   }
   R.passes.push({ depart, busyBloque, temoin: { images: temoin.length, horsPxMax: temoinHors, dessinPxMin: temoinDessin }, origine, tDebut, requetesChauffe, requetes, crans, bas, reposBas, crans2, fin, bilan: b, netApresCran, cast: c && { dossier: c.dossier, images: c.index.length }, poly, courbe: rec })
-  etape(`passe ${p + 1}/${REPETE} : témoin horsPx ${temoinHors} (dessin ≥ ${temoinDessin}) · dézoom ${crans.length} crans z${depart.demZoom}→z${bas.demZoom} (crop ${bas.pose ? 'vit' : 'MORT'}) · re-zoom ${crans2.length} crans →z${fin.demZoom} · images ${b.images} · horsPx max ${b.horsPxMax} sur ${b.horsPxImages} images · dessinéesHors ${b.dessineesHorsImages} img · estompé ${b.estompeImages} img · MIXTE ${b.mixte} img · sans parois ${b.sansParois} · parois décalées ${b.paroisDecalees} · provisoires ${b.provisoires} · paliers ${b.paliers.length} · dt p50 ${b.dtP50} p99 ${b.dtP99} · requêtes ${requetes}${busyBloque.length ? ` · ⛔ BUSY BLOQUÉ ${JSON.stringify(busyBloque)}` : ''}`)
+  etape(`passe ${p + 1}/${REPETE} : témoin horsPx ${temoinHors} (dessin ≥ ${temoinDessin}) · dézoom ${crans.length} crans z${depart.demZoom}→z${bas.demZoom} (crop ${bas.pose ? 'vit' : 'MORT'}) · re-zoom ${crans2.length} crans →z${fin.demZoom} · images ${b.images} · horsPx max ${b.horsPxMax} sur ${b.horsPxImages} images · dessinéesHors ${b.dessineesHorsImages} img · estompé ${b.estompeImages} img · MIXTE ${b.mixte} img · sans parois ${b.sansParois} · parois décalées ${b.paroisDecalees} · provisoires ${b.provisoires} · sans mer ${b.sansMer} · attente ${b.attenteImages} img · zServi min ${b.zServiMin} · paliers ${b.paliers.length} · dt p50 ${b.dtP50} p99 ${b.dtP99} · requêtes ${requetes}${busyBloque.length ? ` · ⛔ BUSY BLOQUÉ ${JSON.stringify(busyBloque)}` : ''}`)
   fs.writeFileSync(path.join(ICI, `${ETIQ}.json`), JSON.stringify(R))
+  } catch (e) {
+    R.passes.push({ erreur: `passe interrompue : ${String(e).slice(0, 200)}` })
+    etape(`⛔ passe ${p + 1}/${REPETE} : interrompue — ${String(e).slice(0, 120)}`)
+    await relancer().catch(() => {})
+    fs.writeFileSync(path.join(ICI, `${ETIQ}.json`), JSON.stringify(R))
+  }
 }
 
 fs.writeFileSync(path.join(ICI, `${ETIQ}.json`), JSON.stringify(R))

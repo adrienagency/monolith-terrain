@@ -403,28 +403,35 @@ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
   assert.equal(est.etat.repos, null, '`poserRepos` appelée sans crop')
 })
 
-test('⑥ un DÉZOOM À LA MOLETTE qui bouge RETIRE le crop seul, et le retour au calme le remet', () => {
+test('⑥ D27 — un DÉZOOM À LA MOLETTE qui bouge ne retire PLUS le crop seul tant que le crop vit ; la veille du repos, elle, se réveille et se rendort', () => {
+  // ⚡ **RÉÉCRIT PAR CA2 (D27).** VIE faisait tomber ici le crop seul sous la
+  // molette (« si je dézoome en scrollant, tu peux faire réapparaître le
+  // reste ») ; c'est l'état mixte qu'Adrien a filmé au dézoom et que CA1 a
+  // mesuré (52 000 px hors emprise, crop vivant). La permission vaut pour la
+  // SORTIE : tant que le crop vit, le relais tient. La veille du repos reste
+  // nourrie et continue de MESURER le geste — c'est elle qui dit à
+  // `arriveeBloc` que la vue est stabilisée.
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const repos = creerVeilleRepos()
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos })
   // ⚠️ **LE GESTE SE JOUE SUR LA DISTANCE DEPUIS LA TÂCHE R1**, pas sur
   // l'altitude : c'est elle que la veille du repos surveille (§1 du module).
   const D = 145.5
   veille.maj(ALT_BLOC, D)
   assert.equal(g.cropSeul, true)
-  // ⚡ **VIE — ET IL FAUT LA MOLETTE EN DÉZOOM** : depuis le 2026-09-05 le
-  // mouvement seul ne rallume plus le dehors (voir le test « ⑥ un mouvement
-  // SANS molette » ci-dessous, et `test/vie-crop.test.js`). Le cran arrive au
-  // DOM avant la première image du glissement : on arme d'abord, on bouge après.
-  veille.armerSortie()
-  // un geste : une seule image suffit
+  veille.armerSortie() // le cran arrive au DOM avant la première image du glissement
   const D2 = D * Math.exp(SEUIL_BOUGE_LOG * 3)
   veille.maj(ALT_BLOC, D2)
-  assert.equal(g.cropSeul, false, 'le geste ne rallume pas les alentours')
-  assert.equal(veille.basculesRepos, 2)
+  assert.equal(repos.auRepos, false, 'la veille du repos n’a pas vu le geste')
+  assert.equal(g.cropSeul, true, 'le geste a rallumé les alentours autour d’un crop vivant — la vidéo d’Adrien')
+  assert.equal(est.etat.repos, true, 'le relais du repos est tombé pendant que le crop vivait')
+  assert.equal(veille.basculesRepos, 1, `${veille.basculesRepos} bascules de repos relayées pour un crop qui n’a pas bougé d’état`)
   for (let i = 0; i < IMAGES_CALME; i++) veille.maj(ALT_BLOC, D2)
-  assert.equal(g.cropSeul, true, 'la vue posée ne recroppe pas')
-  assert.equal(veille.basculesRepos, 3)
+  assert.equal(repos.auRepos, true, 'la veille du repos ne s’est pas rendormie')
+  assert.equal(g.cropSeul, true)
+  assert.equal(veille.basculesRepos, 1)
+  assert.equal(veille.sortieArmee, true, 'l’intention de D21 ① a été consommée par le repos')
 })
 
 test('⑥ un mouvement SANS molette laisse le crop seul — VIE, Adrien 2026-09-05', () => {
@@ -992,21 +999,24 @@ test('⑨ une ALTITUDE qui s’effondre à DISTANCE CONSTANTE ne réveille pas l
   assert.equal(est.etat.repos, true, 'l’estompage a reçu « la vue bouge » sur une orbite')
 })
 
-test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la vue', () => {
-  // C'est la molette : l'échelle change, les alentours doivent revenir DÈS la
-  // première image, sinon la transition commence par un trou.
+test('⑨ une DISTANCE qui change à ALTITUDE CONSTANTE réveille la veille du repos — et, D27, ne rallume pas le dehors', () => {
+  // C'est la molette : l'échelle change, la veille du repos doit le voir DÈS
+  // la première image (l'hystérésis est asymétrique à dessein, §3). ⚡ CA2 :
+  // ce que ce réveil commandait — les alentours — ne revient plus tant que le
+  // crop vit (D27) ; ce qu'il commande encore, c'est `arriveeBloc`.
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const repos = creerVeilleRepos()
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos })
   veille.maj(ALT_BLOC, 145.5)
   assert.equal(g.cropSeul, true)
-  // ⚡ VIE : c'est la molette, donc l'intention est armée au DOM avant l'image
-  veille.armerSortie()
-  // une seule image suffit — l'hystérésis est asymétrique À DESSEIN (§3)
+  veille.armerSortie() // c'est la molette : l'intention est armée au DOM avant l'image
   veille.maj(ALT_BLOC, 145.5 * Math.exp(SEUIL_BOUGE_LOG * 3))
-  assert.equal(g.cropSeul, false, 'un dézoom n’a pas rendu la main aux alentours')
-  assert.equal(veille.basculesRepos, 2)
-  assert.equal(est.etat.repos, false, 'l’estompage n’a pas su que la vue bouge')
+  assert.equal(repos.auRepos, false, 'un dézoom à distance changeante n’a pas réveillé la veille du repos')
+  assert.equal(repos.bascules, 1)
+  assert.equal(g.cropSeul, true, 'le dézoom a rallumé les alentours autour d’un crop vivant (D27)')
+  assert.equal(est.etat.repos, true)
+  assert.equal(veille.basculesRepos, 1)
 })
 
 test('⑨ `SEUIL_BOUGE_LOG` capte encore la molette — le geste qui l’a calibré', () => {

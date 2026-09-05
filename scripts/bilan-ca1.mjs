@@ -49,6 +49,20 @@ for (const [k, P] of R.passes.entries()) {
   const zMinApres11 = p11 ? Math.min(...apres11.slice(0, 200).map((r) => r.zMin ?? 99)) : null
   const zServiMin = p12 ? Math.min(...imgs.filter((r) => r.t >= p12.r.t && r.t <= (net?.t ?? Infinity)).map((r) => r.zServi ?? 99)) : null
   const cropMort = imgs.filter((r) => !r.pose).length
+  // CA2 — D27 : l'attente du socle (l'ancien crop complet à l'écran), la découpe
+  // posée dont la mer refuse encore, et les deux altitudes à la pose : `alt`
+  // (`altitudeCadrageM`, unités du bloc) contre `altGlobe` (caméra du globe,
+  // 63 710 m par unité) — leur rapport dit si la loi a changé d'UNITÉ ou si la
+  // caméra a réellement monté.
+  const attenteImgs = imgs.filter((r) => r.t >= t0 && r.attente).length
+  const attentesEchues = imgs.length ? (imgs[imgs.length - 1].attentesEchues ?? null) : null
+  const attentes = imgs.length ? (imgs[imgs.length - 1].attentes ?? null) : null
+  const sansMerImgs = imgs.filter((r) => r.t >= t0 && r.pose && /mer/.test(r.refus)).length
+  const decoupeSansMer = imgs.filter((r) => r.t >= t0 && r.pose && /mer/.test(r.refus) && r.uEstompage >= 0.999).length
+  const alt12Globe = p12?.r.altGlobe ?? null, alt11Globe = p11?.r.altGlobe ?? null
+  const avant12 = p12 ? imgs[p12.i - 1] : null
+  const rapport12 = p12 && avant12 && avant12.alt > 0 ? +(p12.r.alt / avant12.alt).toFixed(3) : null
+  const rapport12Globe = p12 && avant12 && avant12.altGlobe > 0 ? +(p12.r.altGlobe / avant12.altGlobe).toFixed(3) : null
   // le re-zoom : chaque palier vers le fin
   const rezoom = paliers.filter((p) => p.r.cropDemi < p.avant.cropDemi).map((p) => ({ z: p.r.demZoom, hors: (p.r.horsPx ?? 0), prov: p.r.provisoire, paroisOk: p.r.paroisDemi === p.r.cropDemi, refus: p.r.refus, seul: p.r.cropSeul, est: p.r.uEstompage }))
   const rezoomHors = imgs.filter((r) => rezoom.length && r.t >= (marques.find((m) => m.marque === 'cran-zoom-1')?.t ?? Infinity) && (r.horsPx ?? 0) > 0).length
@@ -64,6 +78,7 @@ for (const [k, P] of R.passes.entries()) {
     premierEst: premierEst && rel(premierEst), premierEstAlt: premierEst?.alt, premierHors: premierHors && rel(premierHors), premierHorsPx: premierHors?.horsPx, premierDessHors: premierDessHors && rel(premierDessHors),
     finProv: finProv && rel(finProv), finRefusMer: finRefusMer && rel(finRefusMer), finRefus: finRefus && rel(finRefus), finHors: finHors && rel(finHors), reposSeul: reposSeul && rel(reposSeul), net: net && rel(net),
     horsMax, horsImgs, dessHorsImgs, mixte, mixteProv, provImgs, zServiMin, cropMort,
+    attenteImgs, attentes, attentesEchues, sansMerImgs, decoupeSansMer, alt12Globe, alt11Globe, rapport12, rapport12Globe,
     rezoom: rezoom.map((z) => `z${z.z}:${z.paroisOk ? (z.prov ? 'PROV' : 'déf.') : 'ANC'}${z.refus ? '/' + z.refus : ''}${z.hors ? '/HORS' + z.hors : ''}${z.seul ? '' : '/seul0'}`).join(' '), rezoomHors,
     dtP50: q(0.5), dtP99: q(0.99), dtGesteP50: qg(0.5), dtGesteP99: qg(0.99), requetes: P.requetes, busyBloque: (P.busyBloque || []).length, images: imgs.length,
     _t0: t0, _origine: P.origine, _p12: p12, _p11: p11, _finProv: finProv, _reposSeul: reposSeul, _premierHors: premierHors, _cast: P.cast,
@@ -77,7 +92,7 @@ const nums = (c) => tableau.map((r) => r[c]).filter((x) => typeof x === 'number'
 const plage = (c) => { const v = nums(c); return v.length ? (Math.min(...v) === Math.max(...v) ? `${Math.min(...v)}` : `${Math.min(...v)} – ${Math.max(...v)}`) : '—' }
 const compte = (c, f) => `${tableau.filter((r) => f(r[c])).length}/${tableau.length}`
 L('\n## synthèse (ms depuis le premier cran du geste qui franchit ; N = ' + tableau.length + ')')
-for (const c of ['temoinHors', 'altDepart', 'permis', 'seul0', 'annonce12', 'pose12', 'alt12', 'annonce11', 'pose11', 'alt11', 'zMinDans11', 'premierEst', 'premierEstAlt', 'premierHors', 'premierHorsPx', 'premierDessHors', 'finProv', 'finRefusMer', 'finRefus', 'finHors', 'reposSeul', 'net', 'horsMax', 'horsImgs', 'dessHorsImgs', 'mixte', 'mixteProv', 'provImgs', 'zServiMin', 'cropMort', 'rezoomHors', 'dtP50', 'dtP99', 'dtGesteP50', 'dtGesteP99', 'requetes', 'busyBloque']) L(`- ${c} : ${plage(c)}`)
+for (const c of ['temoinHors', 'altDepart', 'permis', 'seul0', 'annonce12', 'pose12', 'alt12', 'annonce11', 'pose11', 'alt11', 'zMinDans11', 'premierEst', 'premierEstAlt', 'premierHors', 'premierHorsPx', 'premierDessHors', 'finProv', 'finRefusMer', 'finRefus', 'finHors', 'reposSeul', 'net', 'horsMax', 'horsImgs', 'dessHorsImgs', 'mixte', 'mixteProv', 'provImgs', 'zServiMin', 'cropMort', 'attenteImgs', 'attentes', 'attentesEchues', 'sansMerImgs', 'decoupeSansMer', 'alt12Globe', 'alt11Globe', 'rapport12', 'rapport12Globe', 'rezoomHors', 'dtP50', 'dtP99', 'dtGesteP50', 'dtGesteP99', 'requetes', 'busyBloque']) L(`- ${c} : ${plage(c)}`)
 L(`- parois12 : ${tableau.map((r) => r.parois12).join(' ')} · refus12 : ${tableau.map((r) => r.refus12 || '-').join(' ')}`)
 L(`- parois11 : ${tableau.map((r) => r.parois11).join(' ')} · refus11 : ${tableau.map((r) => r.refus11 || '-').join(' ')}`)
 L(`- re-zoom : ${tableau.map((r) => r.rezoom || '(aucun palier)').join(' | ')}`)
@@ -95,6 +110,7 @@ if (CAST) {
   const cibles = [
     ['00-avant-geste', t0 - 50],
     ['01-pose-z12', row._p12?.r.t + 20],
+    ['01a-attente-avant-z12', row._p12?.r.t - 120],
     ['02-pose-z11-provisoire', row._p11?.r.t + 40],
     ['03-planete-autour-pic', (row._premierHors?.t ?? t0) + 1500],
     ['04-fin-provisoire', row._finProv?.t + 20],

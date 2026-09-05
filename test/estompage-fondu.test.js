@@ -36,7 +36,7 @@ import {
 } from '../src/monde/estompage-terre.js'
 import { IMAGES_CALME } from '../src/monde/veille-repos.js'
 import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
-import { SEUIL_NAISSANCE_M } from '../src/monde/seuil-socle.js'
+import { SEUIL_NAISSANCE_M, SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
 
 const SRC_MAIN = fileURLToPath(new URL('../src/main.js', import.meta.url))
 const SRC_BRANCHE = fileURLToPath(new URL('../src/monde/branchement-crop.js', import.meta.url))
@@ -197,21 +197,29 @@ test('④ `poserCropSeul(true)` n’est POSÉ qu’une fois le fondu achevé', (
   // le crop naît, la vue est au repos : premier relais franc, coupe immédiate
   v.maj(ALT_CROP_NE, 100)
   assert.deepEqual(journal, [true], 'le premier repos doit couper tout de suite')
-  // le geste commence — ⚡ VIE : c'est un DÉZOOM À LA MOLETTE, le seul geste
-  // qui rallume le dehors (Adrien, 2026-09-05) ; le cran arme au DOM avant
-  // la première image
+  // ⚡ **RÉÉCRIT PAR CA2 (D27).** VIE jouait ici un dézoom à la molette qui
+  // faisait tomber la porte sur un crop VIVANT — c'est l'état mixte qu'Adrien a
+  // filmé. Depuis D27, la porte du repos ne tombe qu'à la SORTIE, c'est-à-dire
+  // à la mort du crop : le fondu et son asymétrie se jouent donc sur la mort
+  // et sur la renaissance, et c'est là que ce test les garde.
+  // la sortie : la molette arme, le geste monte au-dessus de la mort — le crop
+  // meurt, le dehors se redessine DÈS cette image (le fondu descend ensuite)
   journal.length = 0
   v.armerSortie()
   repos.auRepos = false
-  v.maj(ALT_CROP_NE, 200)
-  assert.deepEqual(journal, [false], 'le dehors doit se redessiner dès la première image du geste')
-  // le geste dure : le fondu descend jusqu'au bout
-  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_CROP_NE, 200) }
-  assert.deepEqual(journal, [false], 'le parcours a rebasculé pendant le geste')
-  // la vue se stabilise : le fondu part, mais le parcours NE DOIT PAS couper
+  for (let i = 0; i < 5; i++) { est.avancerFondu(); v.maj(ALT_CROP_NE, 200) }
+  assert.deepEqual(journal, [], 'le parcours a rendu le dehors pendant que le crop vivait (D27)')
+  v.maj(SEUIL_MORT_M * 1.01, 200)
+  assert.equal(v.pose, false, 'la sortie armée n’a pas tué le crop')
+  assert.deepEqual(journal, [false], 'le dehors doit se redessiner dès l’image de la mort')
+  for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(SEUIL_MORT_M * 1.01, 200) }
+  assert.deepEqual(journal, [false], 'le parcours a rebasculé pendant le fondu de sortie')
+  // la renaissance : le crop renaît, le relais repart, mais le parcours NE DOIT
+  // PAS couper tant que le fondu court
   journal.length = 0
   repos.auRepos = true
   v.maj(ALT_CROP_NE, 200)
+  assert.equal(v.pose, true)
   assert.deepEqual(journal, [], 'le parcours a coupé pendant que le fondu courait encore')
   // le fondu court
   for (let i = 0; i < IMAGES_FONDU_REPOS; i++) { est.avancerFondu(); v.maj(ALT_CROP_NE, 200) }

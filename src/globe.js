@@ -30,7 +30,7 @@ import { zoneAt } from './bathy-sources.js'
 const NUIT_FROIDE = new THREE.Color('#0e1a2b')
 // LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
 // three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
-import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY } from './monde/crop-sphere.js'
+import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, mercY, latLonDeLocal } from './monde/crop-sphere.js'
 // ⚠️ **`ZOOM_SOCLE` EST PRIS, PAS RECOPIÉ — CULL.** `crop-sphere.js` le tire
 // déjà de `seuil-socle.js` pour le défaut de `zoomCropPrescrit` ; ce fichier en
 // a besoin pour le PLAFOND de `_zoomCropEcran`, et une seconde écriture
@@ -38,7 +38,7 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, merc
 import { ZOOM_SOCLE } from './monde/seuil-socle.js'
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
-import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, jupesEffacees } from './monde/parois-crop.js'
+import { construireSolideCrop, normalesParois, rabattementBorne, localDeAbsolu, jupesEffacees, contourCrop } from './monde/parois-crop.js'
 import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES, largeurCropM, pasGrilleBloc } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
@@ -919,6 +919,14 @@ const _tailleDessin = new THREE.Vector2()
 // donnée vraie** en travers. Monter plus haut ne peindrait que de
 // l'interpolation, pour quatre fois la mémoire.
 const CHAMP_FOND = 384
+
+// D27 — les pas de la sonde `socleCropPret` : l'anneau du contour au quart de
+// `PAS_CONTOUR` (2/256 → 2/64, soit 128 points pour un carré vif), le champ de
+// mer à 24 intervalles (625 nœuds). Voir le pavé de la méthode : un trou de
+// couverture est une TUILE, pas un point, et les deux maillons qu'elle imite ne
+// refusent que sur une tuile absente.
+const PAS_SONDE_SOCLE = 2 / 64
+const N_SONDE_MER = 24
 
 const ROOT_Z = 2
 // ⚠️ EXPORTÉ POUR QUE LE TEST LE CONFRONTE À LA SOURCE, ET NON À UN LITTÉRAL
@@ -5089,6 +5097,100 @@ export class Globe {
     this._melangeCrop(true)
     if (Globe.prototype._effacementLateralActif.call(this) !== effacaitAvant) this._retaillerJupes()
     return rep
+  }
+
+  // ═══════════ LE SOCLE EST-IL PRÊT ? — D27, « LE CROP D'ABORD » ═══════════
+  //
+  // > **Adrien, 2026-09-05 :** *« On ne peut pas lancer le crop avant même
+  // > d'afficher la terre ou la mer ? Ça évite d'afficher des éléments qui sont
+  // > hors crop. »*
+  //
+  // ⚡ **MESURÉ PAR CA1 (`.banc/CA1/dezoom8.json`, 8 chargements) : à chaque
+  // palier du dézoom, `poserCrop` changeait `uCropDemi` dans l'image de la pose
+  // pendant que les parois restaient PROVISOIRES 30 – 60 images et que la mer
+  // refusait 5 – 8,6 s (`refus: fond+mer`).** La découpe neuve s'affichait donc
+  // sans son socle. La règle D27 dit l'ordre : l'emprise ET son socle (parois,
+  // découpe de la mer) d'abord, le dessin ensuite — jamais une découpe sans sa
+  // mer. Ce qui manquait n'était pas un maillon, c'était une QUESTION : « si je
+  // posais ce repère maintenant, les parois et la mer prendraient-elles ? »
+  //
+  // ⚠️ **UNE SONDE, PAS UNE POSE.** Elle ne touche ni `_crop`, ni un uniforme,
+  // ni un maillage : la veille (`branchement-crop.js`) l'interroge pendant
+  // qu'elle laisse l'ANCIEN crop complet à l'écran, et ne pose la chaîne que
+  // lorsqu'elle répond oui — ou lorsque son attente est échue.
+  //
+  // ⚠️ **ELLE POSE EXACTEMENT LES DEUX QUESTIONS QUE LES DEUX MAILLONS
+  // POSERONT, SUR LES MÊMES SOURCES**, sinon elle dirait « prêt » là où la pose
+  // refuserait :
+  //   · les parois définitives échantillonnent `hauteurDessinee` sur l'anneau
+  //     du contour avec `tuilesAvecHauteurs()` et exigent `couverture = 1`
+  //     (`construireParoisCrop`, `couvertureMin = 1`) — ici le même anneau,
+  //     la même source, au pas `PAS_SONDE_SOCLE` (4 fois plus grossier que
+  //     `PAS_CONTOUR` : 128 points au lieu de 512 — une tuile fait des dizaines
+  //     de points, un trou de couverture est une tuile, pas un point) ;
+  //   · la mer remplit le champ de la calotte (`_cuireChampMer`) par `remplir`
+  //     et refuse sous `couvertureMin` ou sans nappe quand `exigerBathy` — ici
+  //     le même `remplir` sur la même calotte, à `N_SONDE_MER = 24` (625 nœuds
+  //     au lieu de 385² = 148 225 : `remplirHauteurs` parcourt les tuiles
+  //     prêtes une fois par tuile, le coût est dans les nœuds).
+  //
+  // ⚠️ **ET ELLE NE TOURNE PAS PAR IMAGE** : la veille la rappelle toutes les
+  // `periodeSonde` images pendant l'attente, jamais au repos.
+
+  /**
+   * Le socle d'un crop CANDIDAT (parois définitives + mer) prendrait-il si on le
+   * posait maintenant ? — D27. Voir le pavé ci-dessus.
+   *
+   * @param {object} arg les mêmes champs que `poserCrop` (`centre`, `zoom`,
+   *   `tuilesParBloc`, `half`, `corner`, `expo`) et le sous-objet `mer` que
+   *   `poserMer` recevra (`remplir`, `portee`, `couvertureMin`, `exigerBathy`,
+   *   `altitudeM`)
+   * @returns {{pret:boolean, parois:number, mer:number, bathy:boolean}}
+   */
+  socleCropPret({ centre, zoom, tuilesParBloc, half = 28, corner = 0, expo = 2, mer = {} } = {}) {
+    const rep = repereCrop({ centre, zoom, tuilesParBloc })
+    // ─── ① les parois définitives : l'anneau couvert par des hauteurs ────────
+    const liste = this.tuilesAvecHauteurs()
+    let vus = 0
+    let total = 0
+    if (liste.length) {
+      const anneau = contourCrop(coinNormalise(corner, half), Math.max(2, expo), PAS_SONDE_SOCLE)
+      total = anneau.length
+      for (const { u, v } of anneau) {
+        const { lat, lon } = latLonDeLocal(u, v, rep)
+        const h = this.hauteurDessinee(lat, lon, liste)
+        if (h != null && Number.isFinite(h)) vus++
+      }
+    }
+    const couvertureParois = total ? vus / total : 0
+    // ─── ② la mer : le champ de la calotte, par la même porte que `poserMer` ─
+    const altitudeM = Number.isFinite(mer.altitudeM) ? mer.altitudeM : 32274
+    const p = Number.isFinite(mer.portee) && mer.portee > 0
+      ? mer.portee
+      : Math.min(PORTEE_DEFAUT, Math.max(1, porteeHorizon(rep, altitudeM, EARTH_RADIUS_M)))
+    const emprise = empriseCalotte(rep, p)
+    const N = N_SONDE_MER
+    const brut = new Float32Array((N + 1) * (N + 1))
+    let couvertureMer = 0
+    let bathy = false
+    if (typeof mer.remplir === 'function') {
+      const r = mer.remplir(emprise, N, brut)
+      couvertureMer = r && Number.isFinite(r.remplis) ? r.remplis / brut.length : 1
+      bathy = r && typeof r.bathy === 'boolean' ? r.bathy : true
+    } else {
+      // le repli de `_cuireChampMer`, au même pas : `hauteurSurface` sur les tuiles
+      let vusMer = 0
+      for (let j = 0; j <= N; j++) {
+        for (let i = 0; i <= N; i++) {
+          const lat = emprise.nord + ((emprise.sud - emprise.nord) * j) / N
+          const lon = emprise.ouest + ((emprise.est - emprise.ouest) * i) / N
+          if (this.hauteurSurface(lat, lon, liste) != null) vusMer++
+        }
+      }
+      couvertureMer = vusMer / brut.length
+    }
+    const merPrete = couvertureMer >= (Number.isFinite(mer.couvertureMin) ? mer.couvertureMin : 0) && (!mer.exigerBathy || bathy)
+    return { pret: couvertureParois >= 1 && merPrete, parois: couvertureParois, mer: couvertureMer, bathy }
   }
 
   // ═══════════ LE CROP SEUL — Tâche N, « ON NE CALCULE PAS LE DEHORS » ══════

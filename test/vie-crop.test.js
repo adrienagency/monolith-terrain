@@ -11,13 +11,25 @@
 // `ALT_ESTOMPAGE_DEBUT_M` la loi d'altitude vaut 0 : la planète ENTIÈRE était
 // redessinée autour d'un crop vivant. C'est le chemin (b) du brief.
 //
-// Ce que ces tests gardent : la permission `dehorsPermis` de
-// `branchement-crop.js` — donnée par `armerSortie` (la molette en dézoom, et
-// elle seule), consommée par le retour au repos, le zoom avant et les bascules.
-// Vérifié par mutation (2026-09-05) : retirer le terme `!dehorsPermis` du relais
-// fait rougir ①, ② et ③ ; consommer la permission à CHAQUE image de repos (au
-// lieu du front montant) fait rougir ④ ; ne pas la consommer au retour au repos
-// fait rougir ② et ⑥ ; un `armerSortie` qui ne la donne plus fait rougir ② et ④.
+// Ce que ces tests gardaient (VIE, 2026-09-05 matin) : une permission
+// `dehorsPermis` donnée par `armerSortie` (la molette en dézoom), qui faisait
+// tomber la porte du repos dès la première image du geste — la planète
+// redessinée autour d'un crop VIVANT.
+//
+// ⚡ **RÉÉCRITS PAR CA2 (D27, 2026-09-05 après-midi) — CE QUI CHANGE, ET
+// POURQUOI.** Adrien a filmé exactement ce que cette permission produisait au
+// dézoom (« bourré de bugs […] ça évite d'afficher des éléments qui sont hors
+// crop ») ; CA1 l'a mesuré : `dehorsPermis` à +40 ms, 52 000 px hors emprise
+// pendant 105 – 206 images, le crop vivant de part et d'autre du palier. La
+// lecture retenue (brief CA2, déduction cohérente avec les deux citations) :
+// **la permission de la molette vaut pour la SORTIE — quand le crop meurt —
+// pas entre deux paliers d'un crop qui vit.** Ce que ① et ③ gardaient tient
+// toujours, et plus fort : AUCUN geste ne rallume le dehors tant que le crop
+// vit — glissé, inclinaison, bouton, ET la molette. Ce qui change : ② et ④ ne
+// disent plus « la molette rallume », ils disent « la molette ARME la sortie,
+// et le dehors ne revient qu'à la mort du crop » ; ⑤ dit que `dehorsPermis` est
+// DÉRIVÉ (vrai exactement quand il n'y a plus de crop), pas un état consommé.
+// `test/crop-avant-tout.test.js` ① mesure le geste filmé lui-même.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -71,21 +83,23 @@ test('① un glissé, une inclinaison, un bouton de caméra — le dehors reste 
   assert.equal(veille.dehorsPermis, false)
 })
 
-test('② la molette en dézoom rallume le dehors ; le retour au repos CONSOMME la permission', () => {
+test('② D27 — la molette en dézoom ARME la sortie et ne rallume RIEN tant que le crop vit ; le dehors revient à la mort du crop', () => {
   const { g, est, veille } = monter()
   veille.armerSortie()
-  assert.equal(veille.dehorsPermis, true, '`armerSortie` ne donne pas la permission')
-  veille.maj(ALT, bouge(1))
-  assert.equal(veille.repos, false, 'sous la molette, le dehors ne se rallume pas')
+  assert.equal(veille.sortieArmee, true, '`armerSortie` n’arme pas l’intention (D21 ①)')
+  assert.equal(veille.dehorsPermis, false, 'le crop vit : le dehors n’a pas la permission')
+  // le geste : la distance bouge franchement, l'altitude monte SOUS la mort
+  for (let i = 1; i <= 60; i++) veille.maj(Math.min(ALT * (1 + i / 60), SEUIL_MORT_M * 0.94), bouge(i))
+  assert.equal(veille.pose, true, 'le crop est mort sous le seuil')
+  assert.equal(veille.repos, true, 'sous la molette, le dehors s’est rallumé — c’est la vidéo d’Adrien')
+  assert.equal(g.cropSeul, true, 'le quadtree est reparti parcourir le dehors')
+  assert.equal(est.etat.appels.filter((v) => v === false).length, 0, '`poserRepos(false)` est parti pendant que le crop vivait')
+  // la sortie est PRONONCÉE : l'intention armée et l'altitude de mort — le crop meurt, le dehors revient
+  veille.maj(SEUIL_MORT_M * 1.01, bouge(61))
+  assert.equal(veille.pose, false, 'la sortie armée n’a pas tué le crop')
+  assert.equal(veille.dehorsPermis, true, 'le crop est mort et le dehors n’a toujours pas la permission')
+  assert.equal(est.etat.repos, false, 'à la mort, le relais du repos n’est pas retombé : la planète resterait effacée')
   assert.equal(g.cropSeul, false)
-  assert.equal(est.etat.repos, false)
-  calme(veille, bouge(1))
-  assert.equal(veille.repos, true, 'la vue posée ne recroppe pas')
-  assert.equal(veille.dehorsPermis, false, 'le retour au repos n’a pas consommé la permission')
-  // et le glissé qui suit, une minute plus tard, ne la retrouve pas
-  for (let i = 2; i <= 40; i++) veille.maj(ALT, bouge(i))
-  assert.equal(veille.repos, true, 'un glissé après un cran isolé a rallumé la Terre')
-  assert.equal(g.cropSeul, true)
 })
 
 test('③ un zoom AVANT retire la permission', () => {
@@ -97,31 +111,36 @@ test('③ un zoom AVANT retire la permission', () => {
   assert.equal(veille.repos, true, 'le zoom avant rallume le dehors')
 })
 
-test('④ une permission donnée AU REPOS survit jusqu’au geste — front montant, pas niveau', () => {
+test('④ D27 — l’intention donnée AU REPOS survit jusqu’au geste (D21 ①), et le geste qui suit ne rallume rien', () => {
   // ⚠️ Le cran de molette arrive au DOM AVANT la première image du glissement :
-  // à cet instant la vue est encore au repos. Consommer la permission à chaque
-  // image de repos la tuerait avant le geste qu'elle autorise, et la molette
-  // ne rallumerait plus jamais le dehors.
-  const { veille } = monter()
+  // à cet instant la vue est encore au repos. L'intention de sortie doit
+  // survivre à ces images posées (c'est elle qui autorisera la mort) — mais
+  // rien ne se dessine hors du crop avant cette mort.
+  const { g, veille } = monter()
   veille.armerSortie()
   for (let i = 0; i < 5; i++) veille.maj(ALT, D) // cinq images posées, cran déjà reçu
-  assert.equal(veille.dehorsPermis, true, 'la permission est consommée avant le geste')
+  assert.equal(veille.sortieArmee, true, 'l’intention est consommée avant le geste')
+  assert.equal(veille.dehorsPermis, false)
   veille.maj(ALT, bouge(1))
-  assert.equal(veille.repos, false, 'la molette ne rallume plus le dehors')
+  assert.equal(veille.repos, true, 'la molette rallume le dehors sur un crop vivant')
+  assert.equal(g.cropSeul, true)
 })
 
-test('⑤ la naissance et la mort du crop consomment la permission', () => {
+test('⑤ D27 — `dehorsPermis` est DÉRIVÉ : vrai exactement quand il n’y a pas de crop, quoi qu’on ait armé', () => {
   const g = globeDePapier()
   const veille = creerVeilleCrop({ globe: () => g, contexte: ctx, estompage: estompageDePapier(), repos: creerVeilleRepos() })
   veille.maj(SEUIL_MORT_M * 2, D) // pas de crop
+  assert.equal(veille.dehorsPermis, true, 'sans crop, la planète est le sujet : le dehors est permis')
   veille.armerSortie()
   veille.maj(ALT, D) // naissance
   assert.equal(veille.pose, true)
-  assert.equal(veille.dehorsPermis, false, 'la naissance n’a pas consommé la permission')
+  assert.equal(veille.dehorsPermis, false, 'le crop est né : le dehors n’est plus permis')
+  assert.equal(veille.sortieArmee, false, 'la naissance n’a pas remis l’intention à zéro (D21 ①)')
   veille.armerSortie()
   veille.maj(SEUIL_MORT_M * 1.01, D) // mort, intention armée
   assert.equal(veille.pose, false)
-  assert.equal(veille.dehorsPermis, false, 'la mort n’a pas consommé la permission')
+  assert.equal(veille.dehorsPermis, true, 'le crop est mort : le dehors est permis')
+  assert.equal(veille.sortieArmee, false, 'la mort n’a pas consommé l’intention')
 })
 
 test('⑥ `sortieArmee` (D21 ①) SURVIT au repos ; la permission, non — ce ne sont pas la même chose', () => {

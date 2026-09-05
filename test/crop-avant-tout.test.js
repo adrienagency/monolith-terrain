@@ -33,6 +33,18 @@
 // crop (le crop meurt, puis la planète). Ici le crop VIT de part et d'autre du
 // palier — c'est le geste filmé — et D27 dit que rien de ce qui est hors crop
 // n'est affiché. Le correcteur devra réconcilier les deux.**
+//
+// ⚡ **CA2 (le correcteur, 2026-09-05) — CE QUI A CHANGÉ ICI, ET POURQUOI.**
+// Les assertions de ①②③④ sont INTACTES. Ce que le correctif a ajouté au
+// globe, le globe de papier le porte aussi, sinon il ne pourrait pas le voir :
+// `socleCropPret(ctx)` (D27), la SONDE que la veille interroge pendant qu'elle
+// laisse l'ancien crop complet à l'écran. Sa latence de papier est la même
+// que celle des maillons — N sondes ou N appels avant que les hauteurs d'un
+// repère soient là — et elle est comptée PAR REPÈRE, parce que c'est ainsi
+// qu'elle se comporte dans l'application : les hauteurs arrivent pour une
+// emprise, pas pour un appel. Un globe SANS la sonde (`sondable: false`) rejoue
+// le dépôt d'avant D27, pose immédiate et socle partiel : c'est le témoin de
+// ⑤, et c'est la morsure de ⑥.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { creerVeilleCrop } from '../src/monde/branchement-crop.js'
@@ -50,25 +62,41 @@ import { SEUIL_MORT_M } from '../src/monde/seuil-socle.js'
  * `merLatence` : nombre d'appels de `poserMer` qui refusent après chaque
  * changement de repère (mesuré : ~5,8 s, soit 5 – 6 reprises de 30 images).
  */
-function globeDePapier({ paroisLatence = 0, merLatence = 0 } = {}) {
+function globeDePapier({ paroisLatence = 0, merLatence = 0, sondable = true } = {}) {
+  // ⚡ **LA LATENCE EST COMPTÉE PAR REPÈRE (CA2)** : le compteur d'un repère
+  // avance à chaque sonde ou appel de maillon pour CE repère, et ne repart
+  // jamais à zéro — les hauteurs arrivées pour une emprise ne repartent pas
+  // parce qu'on l'a reposée. C'est ce qui rend la sonde COHÉRENTE avec la pose :
+  // si elle répond « prêt », les deux maillons prennent dans la même image.
+  // ⚠️ **CA3 — ET CHAQUE MAILLON A LE SIEN.** CA2 n'en tenait qu'UN, PARTAGÉ :
+  // les appels des parois y payaient la latence de la mer, et `merLatence = 5`
+  // ne valait plus « 5 reprises de `poserMer` » mais « 5 avances tous maillons
+  // confondus » — **moins de latence que celle que CA1 a mesurée** (mer refusée
+  // 5 – 8,6 s, 5 à 6 reprises de 30 images). Un correcteur ne relâche pas le
+  // barème du banc : deux compteurs, chacun sa borne, et la sonde les avance
+  // TOUS LES DEUX (une image où les hauteurs peuvent arriver les fait arriver
+  // pour l'un comme pour l'autre — c'est la même tuile qui porte la hauteur du
+  // contour et le nœud du champ de mer).
+  const essais = new Map() // demi → { parois, mer }
+  const compteurs = (demi) => { let c = essais.get(demi); if (!c) { c = { parois: 0, mer: 0 }; essais.set(demi, c) } return c }
+  const avancer = (demi, quoi) => ++compteurs(demi)[quoi]
+  const demiDe = ({ zoom, tuilesParBloc = 3 }) => tuilesParBloc / 2 / 2 ** zoom
   const g = {
     repere: null, // la DÉCOUPE posée (uCropDemi)
     paroisRepere: null, provisoire: false,
     merRepere: null,
     cropSeul: true,
     journal: [],
-    _paroisRefus: 0, _merRefus: 0,
+    sondes: 0,
     poserCrop({ zoom, tuilesParBloc = 3 }) {
-      const rep = { cx: 0.5, cy: 0.5, demi: tuilesParBloc / 2 / 2 ** zoom, zoom }
-      if (!g.repere || g.repere.demi !== rep.demi) { g._paroisRefus = 0; g._merRefus = 0 }
+      const rep = { cx: 0.5, cy: 0.5, demi: demiDe({ zoom, tuilesParBloc }), zoom }
       g.repere = rep
       g.journal.push(['crop', rep.demi])
       return rep
     },
     construireParoisCrop() {
       if (!g.repere) return null
-      if (g._paroisRefus < paroisLatence) {
-        g._paroisRefus++
+      if (avancer(g.repere.demi, 'parois') <= paroisLatence) {
         // SOC : la plaque provisoire suit la découpe dans la même image
         g.paroisRepere = g.repere.demi; g.provisoire = true
         g.journal.push(['parois-prov', g.repere.demi])
@@ -81,13 +109,29 @@ function globeDePapier({ paroisLatence = 0, merLatence = 0 } = {}) {
     poserHabillage() {},
     poserRampe() { return { refus: null } },
     async poserMer() {
-      if (g._merRefus < merLatence) { g._merRefus++; g.journal.push(['mer-refus', g.repere?.demi]); return { refus: 'couverture' } }
+      if (avancer(g.repere?.demi, 'mer') <= merLatence) { g.journal.push(['mer-refus', g.repere?.demi]); return { refus: 'couverture' } }
       g.merRepere = g.repere?.demi ?? null
       g.journal.push(['mer', g.merRepere])
       return { refus: null }
     },
     retirerCrop() { g.repere = null; g.paroisRepere = null; g.merRepere = null },
     poserCropSeul(v) { g.cropSeul = !!v; g.journal.push(['seul', !!v]); return g.cropSeul },
+  }
+  if (sondable) {
+    // D27 — la sonde : « si je posais ce repère maintenant, parois ET mer
+    // prendraient-elles ? » Elle avance les DEUX compteurs du repère comme un
+    // appel (une sonde est une image où les hauteurs peuvent arriver), et ne
+    // pose rien. ⚠️ **ELLE NE MENT PAS DANS LE SENS DANGEREUX** : elle ne peut
+    // répondre « prêt » que si les deux maillons prendraient à l'appel suivant.
+    g.socleCropPret = (ctx) => {
+      g.sondes++
+      const demi = demiDe(ctx)
+      const parois = avancer(demi, 'parois')
+      const mer = avancer(demi, 'mer')
+      const pret = parois >= paroisLatence && mer >= merLatence
+      g.journal.push(['sonde', demi, pret])
+      return { pret, parois: parois >= paroisLatence ? 1 : 0, mer: mer >= merLatence ? 1 : 0 }
+    }
   }
   return g
 }
@@ -104,11 +148,11 @@ const bouge = (i) => D0 * Math.exp(SEUIL_BOUGE_LOG * 3 * i)
  * première image ; la caméra monte ; les paliers tombent aux images données.
  * Rend le relevé par image — ce que les assertions lisent.
  */
-async function jouer({ g, paliers, images = 260, molette = true, zoomDepart = 13, altitude = null }) {
+async function jouer({ g, paliers, images = 260, molette = true, zoomDepart = 13, altitude = null, veilleOpts = {} }) {
   const ctx = { centre: { lat: -21.2482, lon: 55.7664 }, zoom: zoomDepart, tuilesParBloc: 3, habillage: {} }
   const est = creerVeilleEstompage({ appliquer: () => {} })
   const repos = creerVeilleRepos()
-  const veille = creerVeilleCrop({ globe: () => g, contexte: () => ctx, estompage: est, repos, periodeReprise: 30 })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: () => ctx, estompage: est, repos, periodeReprise: 30, ...veilleOpts })
   // la naissance, puis le repos : le crop est CHAUD et SEUL avant le geste —
   // ⚠️ la latence de papier joue aussi à la naissance ; on attend que le socle
   // soit complet (reprises comprises), comme le banc chauffe jusqu'à la netteté
@@ -197,8 +241,45 @@ test('⑤ témoin : sans latence ni molette, aucune assertion ne mord — les te
   assert.equal(relevé.filter(socleIncomplet).length, 0)
   assert.equal(relevé.filter((r) => dehorsDessine(r) && socleIncomplet(r)).length, 0)
   assert.equal(relevé[relevé.length - 1].decoupe, 3 / 2 / 2 ** 11)
-  // et la latence seule fait naître le socle partiel — c'est elle que ② mesure
-  const g2 = globeDePapier({ paroisLatence: 3, merLatence: 5 })
+  // et la latence seule fait naître le socle partiel — c'est elle que ② mesure.
+  // ⚡ CA2 : sur un globe SANS la sonde de D27 (le dépôt d'avant), la pose est
+  // immédiate et la latence se voit — c'est la preuve que le banc n'est pas
+  // aveugle. Avec la sonde, ② exige zéro.
+  const g2 = globeDePapier({ paroisLatence: 3, merLatence: 5, sondable: false })
   const r2 = (await jouer({ g: g2, paliers: PALIERS, molette: false })).relevé
   assert.ok(r2.some(socleIncomplet), 'la latence de papier ne produit aucun socle partiel : le banc est aveugle')
+  assert.equal(r2[r2.length - 1].decoupe, 3 / 2 / 2 ** 11)
+})
+
+// ══════════ ⑥ LA MORSURE — l'attente du socle, et pas autre chose ═══════════
+
+test('⑥ CA2 : c’est l’ATTENTE DU SOCLE qui tient ② — le levier `attenteSocleMax = 0` (la pose immédiate d’avant D27) rend le socle partiel, et l’attente ne dure pas plus que sa borne', async () => {
+  // le levier de banc (règle D13) : pose immédiate, découpe neuve sans socle
+  const g0 = globeDePapier({ paroisLatence: 3, merLatence: 5 })
+  const r0 = (await jouer({ g: g0, paliers: PALIERS, molette: false, veilleOpts: { attenteSocleMax: 0 } })).relevé
+  assert.ok(r0.some(socleIncomplet), 'sans attente, la latence ne se voit plus : le levier est mort')
+  assert.equal(g0.sondes, 0, 'à `attenteSocleMax = 0`, la sonde ne doit jamais être interrogée')
+  // l'attente réelle : l'ancien crop reste COMPLET, la découpe ne change qu'avec son socle
+  const g = globeDePapier({ paroisLatence: 3, merLatence: 5 })
+  const { relevé, veille } = await jouer({ g, paliers: PALIERS, molette: false })
+  assert.equal(relevé.filter(socleIncomplet).length, 0)
+  assert.ok(g.sondes > 0, 'la sonde n’a jamais été interrogée')
+  assert.equal(veille.attentes, 2, `${veille.attentes} attentes ouvertes pour deux paliers`)
+  assert.equal(veille.attentesEchues, 0, 'une attente a été échue alors que la latence tient dans la borne')
+  // la découpe n'a changé qu'avec son socle — et le palier z12, annoncé à i=25,
+  // a été SUPPLANTÉ par z11 (i=45) avant que son socle soit prêt (6 sondes à
+  // 6 images) : une seule découpe neuve, celle de z11, jamais une sans socle
+  const changements = relevé.filter((r, i) => i > 0 && r.decoupe !== relevé[i - 1].decoupe)
+  assert.ok(changements.length >= 1 && changements.length <= 2, `${changements.length} changements de découpe pour deux paliers`)
+  for (const c of changements) {
+    assert.equal(c.parois, c.decoupe); assert.equal(c.provisoire, false); assert.equal(c.mer, c.decoupe)
+  }
+  // et la borne : une latence plus longue que `attenteSocleMax` finit par poser quand même (comme avant D27)
+  const g3 = globeDePapier({ paroisLatence: 3, merLatence: 5 })
+  g3.socleCropPret = () => ({ pret: false }) // un socle qui ne vient jamais (réseau muet)
+  const j3 = await jouer({ g: g3, paliers: { 25: 12 }, molette: false, veilleOpts: { attenteSocleMax: 30 } })
+  assert.equal(j3.veille.attentesEchues, 1, 'une attente plus longue que sa borne n’a pas été échue')
+  assert.equal(j3.relevé[j3.relevé.length - 1].decoupe, 3 / 2 / 2 ** 12, 'la découpe n’a jamais changé : l’attente est sans fin')
+  const premiere = j3.relevé.find((r) => r.decoupe === 3 / 2 / 2 ** 12)
+  assert.ok(premiere.i >= 25 + 30 && premiere.i <= 25 + 31, `la pose échue tombe à i=${premiere.i}, attendu 55`)
 })
