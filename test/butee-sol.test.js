@@ -316,8 +316,17 @@ function redressementCable({ vol }) {
   const drone = { active: vol }
   const params = { gpxFollow: vol }
   const gpxLayer = { isPlaying: () => vol }
-  const f = new Function('terrain', 'controls', 'camera', 'polaireMaxSol', 'drone', 'params', 'gpxLayer',
-    SRC_REDRESSE + '\nreturn redresserSurLeSol')(terrain, controls, camera, polaireMaxSolStub, drone, params, gpxLayer)
+  // ⚠️ `globe` DOIT être injecté même s'il n'est lu qu'en `globe?.…` : l'optionnel
+  // protège d'un `undefined`, PAS d'un identifiant absent de la portée — sans lui
+  // `new Function` lève `ReferenceError` et la garde ne mesure plus rien.
+  // (`redresserSurLeSol` lit `globe.tuilesAvecHauteurs()` depuis la tâche FLU.)
+  const globe = { tuilesAvecHauteurs: () => null }
+  // `solDessine` : la lecture du sol DESSINÉ (tâche OBL). Le stub rend le même
+  // plan que `terrain.sample` ci-dessus — la garde mesure le redressement, pas
+  // le relief.
+  const solDessine = () => 0
+  const f = new Function('terrain', 'controls', 'camera', 'polaireMaxSol', 'drone', 'params', 'gpxLayer', 'globe', 'solDessine',
+    SRC_REDRESSE + '\nreturn redresserSurLeSol')(terrain, controls, camera, polaireMaxSolStub, drone, params, gpxLayer, globe, solDessine)
   f()
   return camera.position
 }
