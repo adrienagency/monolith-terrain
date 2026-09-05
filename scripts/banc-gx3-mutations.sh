@@ -4,7 +4,7 @@
 # rougissent, et combien de tests. Une mutation que rien ne rougit est un trou.
 set -u
 cd "$(dirname "$0")/.."
-TESTS="test/gpx-scene-globe.test.js test/gpx-adoption-scene.test.js test/gpx-pose-globe.test.js test/visibilite-surface.test.js test/gpx-layers.test.js test/gpx.test.js test/sol-globe.test.js"
+TESTS="test/gpx-chemin-ruban.test.js test/gpx-scene-globe.test.js test/gpx-adoption-scene.test.js test/gpx-pose-globe.test.js test/visibilite-surface.test.js test/gpx-layers.test.js test/gpx.test.js test/sol-globe.test.js"
 FICHIERS="src/main.js src/gpx.js src/gpx-layers.js src/monde/sol-globe.js"
 md5 () { for f in $FICHIERS; do md5sum "$f"; done; }
 AVANT=$(md5)

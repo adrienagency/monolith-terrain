@@ -108,7 +108,8 @@ import { visibiliteSurface } from './monde/visibilite-surface.js'
 // ⚠️ **CE N'EST PAS UN SECOND ÉCHANTILLONNEUR DE RELIEF** — `globe.hauteurDessinee`
 // existe depuis la Tâche P11 ; ce module est l'ADAPTATEUR bloc ↔ globe, et il
 // porte les deux seules conversions d'espace de ce branchement.
-import { poseurPourReconstruction } from './monde/sol-globe.js'
+import { poseurPourReconstruction, signatureDessineeCrop } from './monde/sol-globe.js'
+import { quaternionRepere, poserGroupeAncre } from './monde/similitude-groupe.js' // GX4 ⑥ : la pose des bateaux
 // ══════ LE CRÉDIT D'ORTHOPHOTO — Tâche R9, tour de correction ═════════
 //
 // ⛔ **LA GARDE PRÉCÉDENTE DISAIT « sous `terre unique`, l'orthophoto n'est
@@ -8959,6 +8960,57 @@ const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: (
 if (fusionDesPasses) {
   gpxLayer.poserScene(sceneGlobe)
   gpxPoseGlobe.appliquer(gpxLayer)
+  // ══════ ET LES BATEAUX AVEC LUI — LE SEPTIÈME OBJET, GX4 ⑥ ════════════════
+  //
+  // GX2 l'avait vu (« le seul objet encore allumé dans la scène morte »), GX3
+  // l'a prouvé par la chaîne de passes (`RenderPass(scene, enabled: false)`) :
+  // un bateau semé au bord d'une mer, en production, était dessiné dans le
+  // tampon que personne ne regarde. `add` le retire de `scene` au passage —
+  // jamais deux parents. Sa POSE (similitude bloc → globe, ancrée sur le
+  // bateau lui-même) est donnée à chaque image plus bas, `poserBateauxGlobe`,
+  // parce que le nuanceur des bateaux lit `instanceMatrix[3].xz` en BLOC pour
+  // la houle : les instances restent en bloc, c'est le groupe qui voyage.
+  sceneGlobe.add(boats.group)
+}
+
+// ══════ LE RUBAN SUIT LES TUILES QUE LE GPU DESSINE — GX4 ③ ══════════════════
+//
+// > **GX3 ② :** *« après un `flyTo`, le ruban reste drapé sur les hauteurs du
+// > zoom PRÉCÉDENT jusqu'à la reconstruction suivante — le repos du témoin est
+// > atteint, l'image est stable, et le ruban est faux. »*
+//
+// Le drapage lit maintenant le MAILLAGE dessiné (`monde/sol-globe.js`), mais
+// un maillage dessiné, ça change : les tuiles fines arrivent 0,5 à 6 s après
+// la pose du crop (SOC), un cran de zoom en éteint la moitié. Le poseur retient
+// l'EMPREINTE des tuiles allumées dans le socle au moment du drapage
+// (`signature`) ; quand celle de l'image courante en diffère et qu'elle est
+// restée STABLE un instant (les tuiles arrivent par rafales : re-draper à
+// chaque arrivée coûterait 25 500 sommets par tuile), on re-drape UNE fois.
+// Toutes les 6 images : l'empreinte parcourt le cache de tuiles (≤ 1 700), ce
+// n'est pas gratuit par image.
+//
+// ⚠️ **ET LE RAIL DE POURSUITE SUIT** (`drone.retarget`), comme au rebuild du
+// relief : le rail est cuit contre `track.world`, un ruban re-drapé sous un
+// rail d'avant ferait voler la caméra dans un monde qui n'existe plus.
+const REDRAPAGE_STABLE_MS = 350
+let _sigDessinee = null
+let _sigDepuis = 0
+let _imagesDepuisSig = 0
+function redraperSurLeReliefDessine(maintenant) {
+  if (!fusionDesPasses || !gpxLayer.track) return false
+  if (++_imagesDepuisSig < 6) return false
+  _imagesDepuisSig = 0
+  const sig = signatureDessineeCrop(globe)
+  if (sig !== _sigDessinee) { _sigDessinee = sig; _sigDepuis = maintenant; return false }
+  if (maintenant - _sigDepuis < REDRAPAGE_STABLE_MS) return false
+  const poseur = gpxLayer.activeLayer?.gpx?._poseur
+  if (!poseur?.globe || poseur.signature === sig) return false
+  gpxLayer.rebuildAll()
+  if (drone.active) {
+    const w = gpxLayer.track?.world
+    if (w && w.length >= 2) drone.retarget(w)
+  }
+  return true
 }
 
 // ---- Race Studio : état de la course + cartouches espace-écran ------------
@@ -10783,7 +10835,28 @@ function regionFrameScale(parts) {
 // Le rendu ayant été validé, la règle du 1 SUR 10 est rétablie : `force` n'a
 // servi que le temps de juger l'échelle et le mouvement. Croiser un bateau doit
 // rester un événement, pas un décor.
+// LA POSE DES BATEAUX SUR LE GLOBE — GX4 ⑥. Le poseur est celui du tracé et de
+// la carto (`gpxPoseGlobe.fabricant` = `faitPoseurGlobe`), refait à chaque
+// relief (ici) ; la similitude est ancrée SUR LE BATEAU, à la hauteur de la
+// mer du bloc : exacte en son point (voir `monde/similitude-groupe.js`). Sans
+// bateau, le groupe garde sa pose d'avant — il n'y a rien à dessiner.
+let _poseurBateaux = null
+let _qBateaux = null
+function poserBateauxGlobe() {
+  if (!fusionDesPasses || !boats.mesh || !boats.boats.length) return
+  if (!_poseurBateaux) {
+    const fen = terrain.fenetre ?? { x: 0, z: 0 }
+    _poseurBateaux = gpxPoseGlobe.fabricant?.({ dem, terrain, params, sample: (x, z) => terrain.sample?.(x - fen.x, z - fen.z) ?? 0 }) ?? null
+    _qBateaux = _poseurBateaux ? quaternionRepere(_poseurBateaux) : null
+  }
+  const b = boats.boats.find((x) => x && !x.dormant) ?? boats.boats[0]
+  if (!b) return
+  const seaY = Number.isFinite(realWater?.seaY) ? realWater.seaY : 0
+  poserGroupeAncre(boats.group, _poseurBateaux, _qBateaux, { x: b.x, y: seaY, z: b.z })
+}
+
 function syncBoats() {
+  _poseurBateaux = null // le relief a changé : le poseur se refait à la prochaine image
   if (params.source !== 'real' || !dem || !realWater) { boats.boats = []; return }
   const seaMat = realWater.materials?.find((m) => m.uniforms?.uWaveA)
   if (!seaMat) { boats.boats = []; return }
@@ -15399,6 +15472,9 @@ function tick() {
     terrain.tickSurfaceMaterial(dtAmb) // drifting sand (relief material flow)
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
+  // le ruban suit les tuiles dessinées (GX4 ③) — hors du bloc `animations` :
+  // un relief qui arrive n'est pas une décoration
+  redraperSurLeReliefDessine(performance.now())
   // ⚠️ **LA CAMÉRA SUIT LA SCÈNE, comme pour le désencombrement des toponymes**
   // (`mapLayers.setCamera(camGlobe)`) : projeter des points de sphère avec la
   // caméra du bloc calculerait sur un autre monde.
@@ -15449,6 +15525,7 @@ function tick() {
   // dtAmb : la flotte (bateaux, baleine…) est du mouvement ambiant — figée,
   // elle reste À FLOT là où elle est, elle ne disparaît pas (voir stepBoat).
   boats.update(dtAmb, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
+  poserBateauxGlobe()
   realWater?.update(dtAmb, sun) // water simulation: waves, caustics, sun glint — figée par dtAmb, jamais cachée
   // temps des caustiques de fond (terrain + blocs voisins du damier) — dtAmb :
   // décoration ambiante, la nappe de caustiques reste visible, juste immobile

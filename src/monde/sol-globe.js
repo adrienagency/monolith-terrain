@@ -74,6 +74,7 @@
 // puisse dire à quel point la couverture a manqué au lieu de le deviner.
 
 import { R_GLOBE, EARTH_RADIUS_M, latLonToSphere, worldToLatLon } from '../geo.js'
+import { localCrop, distanceCrop, tuileDansCrop } from './crop-sphere.js'
 
 /**
  * Le poseur du BLOC — celui du dépôt, écrit ici pour qu'il n'y ait qu'UNE
@@ -111,6 +112,16 @@ export function poseurPlat(sample) {
  * @param {number} arg.meanM l'altitude moyenne de l'emprise — le ZÉRO du bloc.
  * @param {number} arg.exagerationGlobe `globe.exaggeration`.
  * @param {number} [arg.rayon] le rayon de la sphère, en unités de scène.
+ * @param {{cx:number, cy:number, demi:number}|null} [arg.repereCrop] le repère
+ *   du socle en mercator normalisé (`globe._crop`) — GX4 : c'est la LOI DU BORD,
+ *   celle des tuiles et de la mer ; sans lui `versCrop` rend `null` et rien
+ *   n'est écrêté (hors crop, la planète entière est dessinée).
+ * @param {{coin:number, expo:number}} [arg.formeCrop] l'arrondi du socle, en
+ *   fraction du demi-côté et exposant — `uCropCoin` / `uCropCoinN`.
+ * @param {string} [arg.signature] l'empreinte des tuiles DESSINÉES dans le socle
+ *   au moment de la fabrication (`globe.signatureDessineeCrop()`) : le calque
+ *   la compare à celle de l'image courante pour savoir si le relief qu'il a
+ *   drapé est encore celui que le GPU dessine — GX4 ③.
  */
 export function creerPoseurGlobe({
   sample,
@@ -120,10 +131,13 @@ export function creerPoseurGlobe({
   meanM = 0,
   exagerationGlobe = 1,
   rayon = R_GLOBE,
+  repereCrop = null,
+  formeCrop = null,
+  signature = null,
 }) {
   if (!(echelleBloc > 0)) throw new Error('sol-globe : echelleBloc doit être > 0')
   const echelleGlobe = (rayon / EARTH_RADIUS_M) * exagerationGlobe
-  const etat = { refus: 0, points: 0, globe: true, echelleBloc, echelleGlobe, meanM, rayon }
+  const etat = { refus: 0, points: 0, globe: true, echelleBloc, echelleGlobe, meanM, rayon, signature }
 
   // ② les deux sens de la conversion verticale, écrits une fois.
   const metresDe = (yBloc) => yBloc / echelleBloc + meanM
@@ -131,6 +145,35 @@ export function creerPoseurGlobe({
 
   etat.metresDe = metresDe
   etat.blocDe = blocDe
+  // ⚠️ UNE MARGE EN MÈTRES RÉELS → UNITÉS DE BLOC, SANS ORIGINE : `blocDe`
+  // porte `meanM`, une différence de hauteur ne le porte pas. `echelleBloc`
+  // contient l'exagération, comme `echelleGlobe` : une marge de 2 m de terrain
+  // vaut 2 m réels une fois l'exagération divisée par le banc (GX4 ①).
+  etat.margeBloc = (metres) => metres * echelleBloc
+
+  // ══════ LE BORD DU SOCLE — GX4 ② ══════════════════════════════════════════
+  //
+  // Le tracé était dessiné DANS LE VIDE hors du socle : 358 px sur la planète
+  // nue et le long de la paroi à z13 (GX3 ⑥). La mer et les tuiles, elles, ne
+  // débordent pas d'un pixel : leur fragment mesure `distanceBordCrop(qCrop)` et
+  // rejette au-delà de 0. Le ruban prend la MÊME mesure, calculée ici par
+  // sommet en coordonnées locales du crop (±1 sur la frontière) — c'est
+  // l'`aCrop` de la mer, pas une seconde loi.
+  etat.repereCrop = repereCrop
+  etat.formeCrop = formeCrop
+  etat.versCrop = (x, z) => {
+    if (!repereCrop) return null
+    const p = versLatLon(x, z)
+    if (!p) return null
+    const l = localCrop(p.lat, p.lon, repereCrop)
+    return [l.u, l.v]
+  }
+  // Un point de BLOC est-il dans le socle ? Vrai sans repère (rien à écrêter).
+  etat.dansSocle = (x, z) => {
+    const q = etat.versCrop(x, z)
+    if (!q) return true
+    return distanceCrop(q[0], q[1], formeCrop || undefined) <= 0
+  }
 
   etat.hauteur = (x, z) => {
     etat.points++
@@ -226,14 +269,80 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
   if (!actif || !globe || !dem || !(echelleBloc > 0)) return poseurPlat(sample)
   const liste = globe.tuilesAvecHauteurs?.() ?? null
   if (!liste || !liste.length) return poseurPlat(sample)
+  // ══════ LA HAUTEUR QUE LE GPU DESSINE, PAS CELLE QU'IL A EN RÉSERVE — GX4 ① ══
+  //
+  // ⛔ **`hauteurDessinee` LIT `t.heights`, ET `t.heights` N'EXISTE QUE POUR LES
+  // TUILES RÉSERVÉES — CELLES DU ZOOM DU MNT (z11 au Mont-Blanc).** Le crop, lui,
+  // dessine des tuiles z12/z13 : le ruban était drapé sur un relief deux crans
+  // plus grossier que celui qui le cache. Mesuré par GX3 contre la surface
+  // rendue (rayon sur les maillages, 2 335 sommets) : moyenne +9,5 m, **min
+  // −176 m, max +160 m, 673 sommets enterrés de plus de 5 m** — un tracé
+  // pointillé sur les crêtes, des cols à 150–390 m de leur vraie place.
+  //
+  // ➡️ `hauteurMaillee` LIT LE MAILLAGE (SOC) : la position des sommets que le
+  // GPU rasterise, à 0,05 m près, pour toute tuile qui a un maillage. Et la
+  // liste est celle des tuiles VISIBLES DANS LE SOCLE — celles que `update()`
+  // vient d'allumer — triée du plus fin au plus grossier : la première qui
+  // couvre EST celle qui est dessinée là. Une tuile maillée mais éteinte (un
+  // enfant dont les trois frères ne sont pas prêts, un parent refendu) n'entre
+  // pas : elle n'est pas ce qu'on voit.
+  //
+  // Le repli garde l'ancien chemin (`hauteurDessinee`, hauteurs réservées) puis
+  // le bloc : jamais zéro (voir l'en-tête).
+  const dessinees = tuilesDessineesDansSocle(globe)
+  const hauteurM = dessinees.length
+    ? (lat, lon) => globe.hauteurMaillee(lat, lon, dessinees) ?? globe.hauteurDessinee(lat, lon, liste)
+    : (lat, lon) => globe.hauteurDessinee(lat, lon, liste)
+  const u = globe.uniforms
   return creerPoseurGlobe({
     sample,
-    hauteurM: (lat, lon) => globe.hauteurDessinee(lat, lon, liste),
+    hauteurM,
     versLatLon: (x, z) => worldToLatLon(dem, x, z),
     echelleBloc,
     meanM: dem.meanM ?? 0,
     exagerationGlobe: globe.exaggeration ?? 1,
+    repereCrop: globe._crop ? { cx: globe._crop.cx, cy: globe._crop.cy, demi: globe._crop.demi } : null,
+    formeCrop: u?.uCropCoin && u?.uCropCoinN ? { coin: u.uCropCoin.value, expo: u.uCropCoinN.value } : null,
+    signature: signatureDessineeCrop(globe),
   })
+}
+
+/**
+ * Les tuiles dont le maillage est ALLUMÉ dans l'emprise du socle, du plus fin
+ * au plus grossier — la surface que le GPU dessine à cette image, et rien
+ * d'autre. Étiquetée `trieeFinAbord` pour que `_tuileLaPlusFine` s'arrête à la
+ * première qui couvre (Tâche FLU). Vide sans crop.
+ *
+ * ⚠️ **`mesh.visible`, PAS `state === 'ready'`** : le quadtree n'allume que ses
+ * feuilles (`globe.update`), et c'est la feuille que le rayon du noteur frappe.
+ */
+export function tuilesDessineesDansSocle(globe) {
+  const rep = globe?._crop
+  const out = []
+  if (!rep || !globe.tiles) return out
+  // ⚠️ dilatée d'un cheveu, comme `_paroisProvisoires` : un point sur le bord
+  // est/sud tombe à `tx = 1`, c'est-à-dire dans la voisine.
+  const boite = { cx: rep.cx, cy: rep.cy, demi: rep.demi * (1 + 1e-6) }
+  for (const t of globe.tiles.values()) {
+    if (t.mesh?.visible && t.mesh.geometry?.attributes?.position && tuileDansCrop(t.z, t.x, t.y, boite)) out.push(t)
+  }
+  out.sort((a, b) => b.z - a.z)
+  out.trieeFinAbord = true
+  return out
+}
+
+/**
+ * L'empreinte des tuiles dessinées dans le socle — une chaîne qui change dès
+ * qu'une tuile s'allume ou s'éteint dans l'emprise. C'est ce que le calque GPX
+ * compare pour se re-draper quand les tuiles fines arrivent (GX4 ③) : après un
+ * `flyTo`, le ruban restait drapé sur les hauteurs du zoom PRÉCÉDENT jusqu'à la
+ * reconstruction suivante (GX3 ② : départ z11 à 160 m de sa vérité).
+ */
+export function signatureDessineeCrop(globe) {
+  const liste = tuilesDessineesDansSocle(globe)
+  let s = liste.length + ':'
+  for (const t of liste) s += t.key ?? `${t.z}/${t.x}/${t.y}`, s += ' '
+  return s
 }
 
 /**
