@@ -13,6 +13,13 @@ import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './g
 import { PinchTracker } from './gestes.js'
 import { pasEscalier, paliersRetenus, palierDeClic, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { POLAIRE_MAX_DURE } from './monde/butee-sol.js'
+// LE PIVOT EN OBLIQUE — Tâche OBL. Module PUR : la similitude bloc → globe et
+// sa réciproque, le transport d'une pose d'un repère de bloc à l'autre, le cran
+// autour d'un pivot. `modes.js` ne calcule rien de la similitude : il la lit
+// par le crochet `hooks.similitudeBloc(x, z)` — la MÊME lecture que
+// `majCameraFond()` dans `main.js`, sans quoi la caméra transportée ne serait
+// pas celle qui dessine.
+import { similitudeBloc, empreinteRepere, transporterPose, cranAutourDuPivot } from './monde/pivot-oblique.js'
 // LA LOI D'ALTITUDE vit dans un module PUR (voir son en-tête, et la Tâche 1 du
 // plan « globe continu »). Rien ne change ici : ces quatre fonctions sont
 // exactement les calculs qui étaient écrits en clair ci-dessous, sortis pour
@@ -427,6 +434,7 @@ export class Modes {
     this._levelZoom = 0 // log-distance dépensée dans le niveau ; COMPTEUR sous le drapeau, butée sinon
     this._sortieCourse = null // la poussée de sortie du crop — {restant, t, depart}, voir armerPousseeSortie
     this._empriseVue = null // l'emprise du bloc à l'image précédente — voir _suivreEmprise
+    this._repereVue = null // le repère du bloc à l'image précédente {empreinte, params} — voir _transporterSiRepereChange (OBL)
     this._fonduPose = null // le balayage nadir → oblique — voir _armerFonduPose
     // ⚡ **LA VUE DE TROIS QUARTS ATTEND LE BLOC — D16 ter, étape 5.**
     // Vrai depuis la traversée jusqu'à l'arrivée sur le bloc : pendant tout ce
@@ -544,9 +552,33 @@ export class Modes {
   _suivreEmprise(cibleAvant = null) {
     const emprise = this.hooks.empriseBlocM?.()
     const avant = this._empriseVue
-    if (!(emprise > 0)) { this._empriseVue = null; return }
+    if (!(emprise > 0)) { this._empriseVue = null; this._repereVue = null; return }
     this._empriseVue = emprise
-    if (!this._continu() || this.mode !== 'surface') return
+    if (!this._continu() || this.mode !== 'surface') { this._repereVue = null; return }
+    // ══════ LE TRANSPORT DE LA POSE — Tâche OBL ═══════════════════════════
+    //
+    // ⛔ **CONVERTIR `camera.y` PAR LE RAPPORT DES EMPRISES NE SUFFISAIT PAS, ET
+    // C'EST MESURÉ AU GESTE** (rapport-OBL.md, `scripts/sonde-obl.mjs`) : à 45°
+    // d'inclinaison, le point rendu sous le centre de l'écran restait immobile
+    // à 0,2 px pendant vingt crans de molette DANS un niveau, puis sautait de
+    // **324 / 199 / 180 px** au franchissement (z11 → z14, La Réunion), avec
+    // une excursion de 491 à 753 px pendant le glissé qui suivait. Trois termes
+    // de la similitude bloc → globe changent au franchissement, pas un seul :
+    // l'emprise (÷2), la MOYENNE du bloc (le plan `y = 0`, −727 → +426 m ici)
+    // et le calage sur la grille de tuiles. Et `_zoomPivot`, exprimé dans
+    // l'ancien repère, faisait viser le glissé suivant un point disparu.
+    //
+    // ➡️ **AVEC LE CROCHET `similitudeBloc`, L'INVARIANT EST LA POSE PHYSIQUE** :
+    // caméra, cible et pivot sont réexprimés dans le nouveau repère de sorte
+    // que `camGlobe` — la caméra qui dessine — ne bouge pas (`monde/pivot-
+    // oblique.js`). L'ancienne conversion en `y` en était la projection, juste
+    // seulement quand la moyenne et le calage ne bougeaient pas. La règle
+    // couvre TOUT changement de repère, pas seulement le cran : la moyenne du
+    // bloc est réécrite à chaque remplissage du flux (`appliquerHauteurs`).
+    //
+    // ⚠️ **SANS LE CROCHET, LE CHEMIN D'AVANT AU BIT PRÈS** — bancs de test,
+    // source procédurale, régime hérité.
+    if (typeof this.hooks.similitudeBloc === 'function') { this._transporterSiRepereChange(); return }
     if (!(avant > 0) && !cibleAvant) return
     if (avant === emprise && !cibleAvant) return
     const c = this.controls
@@ -569,6 +601,68 @@ export class Modes {
     if (!pose) return // caméra sur la cible, ou visée rasante : rien à reposer
     this.camera.position.set(pose.x, pose.y, pose.z)
     c.update()
+  }
+
+  // LE TRANSPORT — Tâche OBL. Lit le repère du bloc à chaque image ; le jour où
+  // son EMPREINTE change (emprise, moyenne, exagération, calage), réexprime la
+  // caméra, la cible et le pivot dans le nouveau repère, image invariante.
+  //
+  // ⚠️ **L'ORIGINE DE LA SIMILITUDE EST L'APLOMB DE LA CIBLE, COMME DANS
+  // `majCameraFond`**, et elle est relue APRÈS le transport : la cible vient de
+  // changer de coordonnées, la mémoire doit décrire le repère nouveau avec une
+  // origine qui y vit. L'empreinte, elle, ne porte pas l'origine.
+  //
+  // Rend `true` si un transport a eu lieu.
+  _transporterSiRepereChange() {
+    const c = this.controls
+    const p = this.hooks.similitudeBloc(c.target.x, c.target.z)
+    if (!p) { this._repereVue = null; return false }
+    const empreinte = empreinteRepere(p)
+    const vu = this._repereVue
+    if (!vu || vu.empreinte === empreinte) { this._repereVue = { empreinte, params: p }; return false }
+    const simAvant = similitudeBloc(vu.params)
+    // ⚠️ **LE NOUVEAU REPÈRE EST ANCRÉ AU MÊME POINT PHYSIQUE QUE L'ANCIEN.**
+    // Deux similitudes affines d'un bloc plat ne coïncident exactement qu'à leur
+    // ancre ; `p` est ancré à l'aplomb des ANCIENNES coordonnées de la cible
+    // lues dans le NOUVEAU bloc — un autre lieu, jusqu'à 8 km plus loin. Mesuré
+    // (`sonde-obl.mjs`, z12 → z13) : 1,57 px de saut au transport avec `p`,
+    // sous le pixel avec l'ancre commune. Sans le crochet, `p` fait l'affaire.
+    const pApres = this.hooks.similitudeBlocAuLieu?.(vu.params.lat, vu.params.lon) ?? p
+    const simApres = similitudeBloc(pApres)
+    if (!simAvant || !simApres) { this._repereVue = { empreinte, params: p }; return false }
+    const cam = this.camera.position
+    const piv = this._zoomPivot
+    const t = transporterPose({
+      simAvant,
+      simApres,
+      points: {
+        camera: [cam.x, cam.y, cam.z],
+        cible: [c.target.x, c.target.y, c.target.z],
+        pivot: piv ? [piv.x, piv.y, piv.z] : null,
+      },
+    })
+    if (t.cible) c.target.set(t.cible[0], t.cible[1], t.cible[2])
+    if (t.camera) cam.set(t.camera[0], t.camera[1], t.camera[2])
+    // ⚠️ `_zoomPivot` est un objet nu `{x, y, z}` (celui de `pointUnder`), pas un Vector3
+    if (t.pivot && piv) this._zoomPivot = { x: t.pivot[0], y: t.pivot[1], z: t.pivot[2] }
+    this._repereVue = { empreinte, params: this.hooks.similitudeBloc(c.target.x, c.target.z) ?? p }
+    c.update()
+    return true
+  }
+
+  // LE TRANSPORT, À LA DEMANDE — Tâche OBL. `main.js` l'appelle AVANT les deux
+  // butées de la caméra (`distanceMinSol`, `polaireMaxSol`) : le bloc peut
+  // changer de repère AU MILIEU d'une image (le rechargement est une tâche
+  // découpée, poste ④ de FLU), après le `update()` de cette machine et avant la
+  // lecture du sol. Mesuré (`scripts/sonde-obl.mjs`, espion) : la butée lue
+  // dans le nouveau repère sur une caméra encore dans l'ancien écrêtait
+  // `minDistance` 6 → 6,207 et `φ` 45° → 43,97° — 114 m de recul et 25 à 60 px
+  // de saut, UNE image avant que le transport ne passe. Idempotent : sans
+  // changement d'empreinte, il ne fait rien.
+  suivreRepere() {
+    if (this.mode !== 'surface' || !this._continu() || typeof this.hooks.similitudeBloc !== 'function') return false
+    if (!(this.hooks.empriseBlocM?.() > 0)) return false
+    return this._transporterSiRepereChange()
   }
 
   // Le niveau d'arrivée, DÉDUIT de l'altitude de fond — sans table de paliers.
@@ -732,8 +826,29 @@ export class Modes {
       if (intention > 0 || !!this.hooks.getRefineTarget?.()) dBudget = intention
     }
     this._levelZoom += dBudget
-    _zoomDir.copy(this.camera.position).sub(c.target).normalize()
-    this.camera.position.copy(c.target).addScaledVector(_zoomDir, nouvelle)
+    // ══════ LE CRAN AUSSI VISE LE POINT AU CENTRE DE L'ÉCRAN — D19, Tâche OBL ═
+    //
+    // ⛔ **LE BOUTON RECULAIT LE LONG DE `cible → caméra`, ET LA CIBLE EST
+    // 0,3 UNITÉ SOUS LE PLAN MOYEN DU BLOC** (`Y_CIBLE`) — pas sur le sol qu'on
+    // regarde. En oblique, un cran autour d'un point enterré pousse le sol vers
+    // le haut de l'écran : c'est le « 438 px pendant les crans » de
+    // rapport-VID3 (banc piloté par `cranZoom`). La molette, elle, zoomait déjà
+    // vers le point du cadre (`_applyZoom`, R29 bis + D19) et ne bougeait pas.
+    // Même pivot, même loi (`cranAutourDuPivot` = l'identité de `_applyZoom`),
+    // même prédicat hors du crop : le bouton et la molette font le même geste.
+    this._zoomNdc.set(0, 0)
+    const pv = this.hooks.pointUnder?.(0, 0)
+    if (pv) this._zoomPivot = pv
+    const P = this.hooks.horsDuCrop?.() === true ? null : this._zoomPivot
+    if (P && Math.abs(nouvelle / dist - 1) > 1e-9) {
+      const cam = this.camera.position
+      const h = cranAutourDuPivot({ pivot: [P.x, P.y, P.z], camera: [cam.x, cam.y, cam.z], cible: [c.target.x, c.target.y, c.target.z], facteur: nouvelle / dist })
+      cam.set(h.camera[0], h.camera[1], h.camera[2])
+      c.target.set(h.cible[0], h.cible[1], h.cible[2])
+    } else {
+      _zoomDir.copy(this.camera.position).sub(c.target).normalize()
+      this.camera.position.copy(c.target).addScaledVector(_zoomDir, nouvelle)
+    }
     c.update()
     this._franchirSiBesoin()
   }
@@ -936,6 +1051,7 @@ export class Modes {
       this.camera.lookAt(0, 0, 0)
       this.controls.update()
       this._empriseVue = null // on quitte l'espace du bloc : plus d'unité à suivre
+      this._repereVue = null // ni de repère à transporter (OBL)
       // ⚠️ **L'ATTENTE DE LA VUE DE TROIS QUARTS MEURT AVEC LA SURFACE.** Sans
       // ça, un aller-retour orbite → surface → orbite la laisserait armée, et la
       // bascule tomberait au premier repos du PROCHAIN séjour, sans traversée.
@@ -1245,6 +1361,10 @@ export class Modes {
       // du bloc quitté à celle du bloc d'arrivée et rejouerait un changement
       // d'unités que `_posePlongee` vient déjà d'appliquer.
       this._empriseVue = this.hooks.empriseBlocM?.() ?? null
+      // ⚠️ Même geste pour le repère (OBL) : la plongée vient de POSER la caméra
+      // dans le bloc d'arrivée ; la mémoire repart de ce repère-là, sans
+      // transport depuis celui du bloc quitté.
+      this._repereVue = null
       // `near` DÉRIVÉ, plus restauré : c'est la même loi qu'en orbite
       // (`planProche`), appliquée à la hauteur au-dessus du sol du bloc. Elle
       // sature à NEAR_MAX = 0,5 dès 2,5 unités de dégagement — c'est-à-dire
@@ -1521,7 +1641,14 @@ export class Modes {
     // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
     // direction est celle d'il y a quelques images, pas celle de maintenant.
     const cibleAvant = continu ? this.controls.target.clone() : null
-    this.controls.target.copy(arrival.target)
+    // ⚠️ **SOUS LE CROCHET `similitudeBloc`, LA CIBLE N'EST PAS REPOSÉE À
+    // `Y_CIBLE` — Tâche OBL.** La cible est un point physique (là où le glissé
+    // l'a menée, à la hauteur où il l'a menée) ; c'est `_transporterSiRepere-
+    // Change` (via `_suivreEmprise`) qui la réexprime dans le nouveau repère,
+    // avec la caméra et le pivot. La reposer à −0,3 sous une caméra dont la
+    // DIRECTION est gardée déplaçait la caméra physique : c'est le saut de 324 px
+    // mesuré à 45° (rapport-OBL.md).
+    if (!(continu && typeof this.hooks.similitudeBloc === 'function')) this.controls.target.copy(arrival.target)
     // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
     // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
     // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport

@@ -764,10 +764,20 @@ test('⑩ les trois crochets d’emprise lisent le MÊME couple que la caméra d
   assert.match(SRC_MAIN, /empriseBlocM: \(\) => \(params\.source === 'real' \? largeurBlocM\(\) : 0\)/)
   assert.match(SRC_MAIN, /coteBloc: \(\) => TERRAIN_SIZE/)
   assert.match(SRC_MAIN, /empriseBlocMAuZoom: \(zoom, lat = params\.demLat\) => empriseBlocM\(\{ zoom, lat \}\)/)
+  // ⚠️ **DEPUIS OBL, LE COUPLE EST LU UNE FOIS, DANS `parametresSimilitude`**,
+  // et `majCameraFond()` comme le crochet `similitudeBloc` le prennent là :
+  // c'est ce qui garantit que la caméra TRANSPORTÉE au changement de repère
+  // (`monde/pivot-oblique.js`) est celle qui dessine.
+  const lecture = SRC_MAIN.slice(SRC_MAIN.indexOf('function parametresSimilitude('))
+  const corpsLecture = lecture.slice(0, lecture.indexOf('\n}\n'))
+  assert.match(corpsLecture, /const largeur = largeurBlocM\(\)/)
+  assert.match(corpsLecture, /extentMeters: largeur/)
+  assert.match(corpsLecture, /span: TERRAIN_SIZE/)
   const fond = SRC_MAIN.slice(SRC_MAIN.indexOf('const pose = poseFond({'))
   const corps = fond.slice(0, fond.indexOf('})'))
-  assert.match(corps, /extentMeters: largeur/)
-  assert.match(corps, /span: TERRAIN_SIZE/)
+  assert.match(corps, /extentMeters: sim\.extentMeters/)
+  assert.match(corps, /span: sim\.span/)
+  assert.match(SRC_MAIN, /similitudeBloc: \(x, z\) => \(params\.source === 'real' \? parametresSimilitude\(x, z\) : null\)/)
 })
 
 // ══════════════════════════════════════════════════════════════════════════
