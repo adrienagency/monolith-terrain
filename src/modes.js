@@ -1652,7 +1652,14 @@ export class Modes {
       // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
       // direction est celle d'il y a quelques images, pas celle de maintenant.
       const cibleAvant = continu ? this.controls.target.clone() : null
-      this.controls.target.copy(arrival.target)
+      // ⚠️ **SOUS LE CROCHET `similitudeBloc`, LA CIBLE N'EST PAS REPOSÉE À
+      // `Y_CIBLE` — Tâche OBL.** La cible est un point physique (là où le glissé
+      // l'a menée, à la hauteur où il l'a menée) ; c'est `_transporterSiRepere-
+      // Change` (via `_suivreEmprise`) qui la réexprime dans le nouveau repère,
+      // avec la caméra et le pivot. La reposer à −0,3 sous une caméra dont la
+      // DIRECTION est gardée déplaçait la caméra physique : c'est le saut de 324 px
+      // mesuré à 45° (rapport-OBL.md).
+      if (!(continu && typeof this.hooks.similitudeBloc === 'function')) this.controls.target.copy(arrival.target)
       // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
       // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
       // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport
