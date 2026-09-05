@@ -271,6 +271,25 @@ test('③ le poseur retient l’empreinte des tuiles DESSINÉES, et elle change 
   assert.ok(bouges > 0, 'le re-drapage n’a rien changé alors qu’une tuile dessinée a disparu')
 })
 
+test('③ sans AUCUNE hauteur réservée mais avec des tuiles dessinées, le ruban reste sur la sphère (pas de repli à plat pendant un recentrage)', () => {
+  // ⛔ mesuré : pendant chaque recentrage du socle en vol, `tuilesAvecHauteurs`
+  // est vide ; un ruban reconstruit à cet instant tombait sur `poseurPlat` —
+  // coordonnées de BLOC dans la scène du globe, 0 pixel pendant 3 relevés.
+  const globe = fauxGlobe()
+  globe.tuilesAvecHauteurs = () => { const out = []; out.trieeFinAbord = true; return out }
+  const l = calque(globe)
+  assert.ok(l._poseur?.globe, 'le poseur est retombé à plat alors que le maillage dessiné couvre le tracé')
+  const a = l.ruban.geometry.attributes.position.array
+  let min = Infinity
+  const v = new THREE.Vector3()
+  for (let i = 0; i < a.length; i += 3) {
+    v.set(a[i], a[i + 1], a[i + 2])
+    assert.ok(v.length() > R_GLOBE * 0.9, `sommet ${i / 3} en coordonnées de bloc : le ruban a disparu à 6 371 km`)
+    const e = ecartM(globe, v); if (e != null && e < min) min = e
+  }
+  assert.ok(min >= -0.5, `le ruban passe sous la surface dessinée (${min.toFixed(2)} m)`)
+})
+
 // ─────────────────────────────────────────────── ④ les lignes de main.js, exécutées
 
 const MAIN = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')

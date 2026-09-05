@@ -9002,6 +9002,9 @@ function redraperSurLeReliefDessine(maintenant) {
   _imagesDepuisSig = 0
   const sig = signatureDessineeCrop(globe)
   if (sig !== _sigDessinee) { _sigDessinee = sig; _sigDepuis = maintenant; return false }
+  // ⚠️ aucune tuile allumée dans le socle (il vient d'être reposé, les tuiles
+  // arrivent) : il n'y a rien sur quoi draper, on attend la rafale
+  if (sig.startsWith('0:')) return false
   if (maintenant - _sigDepuis < REDRAPAGE_STABLE_MS) return false
   const poseur = gpxLayer.activeLayer?.gpx?._poseur
   if (!poseur?.globe || poseur.signature === sig) return false

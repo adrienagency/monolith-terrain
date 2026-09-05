@@ -280,8 +280,17 @@ export function kAttendu({ extentMeters, span, rayon = R_GLOBE }) {
  */
 export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, actif }) {
   if (!actif || !globe || !dem || !(echelleBloc > 0)) return poseurPlat(sample)
-  const liste = globe.tuilesAvecHauteurs?.() ?? null
-  if (!liste || !liste.length) return poseurPlat(sample)
+  const liste = globe.tuilesAvecHauteurs?.() ?? []
+  const dessinees = tuilesDessineesDansSocle(globe)
+  // ⛔ **LE REPLI À PLAT NE VAUT QUE SANS AUCUNE SURFACE.** Il tombait dès que
+  // les hauteurs réservées manquaient — et elles manquent pendant chaque
+  // recentrage du socle en vol (`gardeHauteurs` change d'emprise, les
+  // hauteurs sont relâchées, le MNT n'est pas encore arrivé). Un ruban
+  // reconstruit à cet instant l'était en coordonnées de BLOC dans la scène du
+  // globe : 6 371 km du crop, **0 pixel pendant 3 relevés sur 40**, deux fois
+  // par vol de poursuite (mesuré, banc de lecture GX3, phase suivi). Le
+  // maillage dessiné, lui, est là : il suffit à poser le ruban.
+  if (!liste.length && !dessinees.length) return poseurPlat(sample)
   // ══════ LA HAUTEUR QUE LE GPU DESSINE, PAS CELLE QU'IL A EN RÉSERVE — GX4 ① ══
   //
   // ⛔ **`hauteurDessinee` LIT `t.heights`, ET `t.heights` N'EXISTE QUE POUR LES
@@ -302,9 +311,8 @@ export function poseurPourReconstruction({ globe, dem, sample, echelleBloc, acti
   //
   // Le repli garde l'ancien chemin (`hauteurDessinee`, hauteurs réservées) puis
   // le bloc : jamais zéro (voir l'en-tête).
-  const dessinees = tuilesDessineesDansSocle(globe)
   const brute = dessinees.length
-    ? (lat, lon) => globe.hauteurMaillee(lat, lon, dessinees) ?? globe.hauteurDessinee(lat, lon, liste)
+    ? (lat, lon) => globe.hauteurMaillee(lat, lon, dessinees) ?? (liste.length ? globe.hauteurDessinee(lat, lon, liste) : null)
     : (lat, lon) => globe.hauteurDessinee(lat, lon, liste)
   // ⚠️ **LA MER EST UNE SURFACE DESSINÉE AUSSI.** Avec un fond posé
   // (`_fondCrop`), le maillage des tuiles DESCEND sous le niveau de la mer
