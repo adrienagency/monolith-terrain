@@ -1,10 +1,10 @@
 # GX4 — second tour du tracé GPX (branche `gpx-correctif-2`)
 
-> État : **complet.** Écrit en premier à partir des commits, puis complété
-> mesure par mesure, un commit à chaque fois. Cinq
-> sessions précédentes ont été coupées par des limites d'usage AVANT d'écrire
-> ce fichier, alors que six commits de travail existaient. Il est donc écrit
-> d'abord, à partir des commits et des journaux `.banc/GX4/`, puis enrichi.
+> État : **complet.** Cinq sessions ont été coupées par des limites d'usage
+> AVANT d'écrire ce fichier, alors que six commits de travail existaient déjà :
+> tout ce travail était invisible. Il a donc été écrit **en premier**, à partir
+> des commits et des journaux `.banc/GX4/`, commité, puis complété mesure par
+> mesure avec un commit à chaque fois.
 
 Base de la branche : `bf54801` (`git merge-base HEAD regroupement`).
 `regroupement` a beaucoup avancé de son côté (gel du double-clic, transport de
