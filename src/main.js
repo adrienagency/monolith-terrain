@@ -4407,8 +4407,20 @@ function regenerateTerrain({ sansRideau = false } = {}) {
   // dans un onglet caché et la reconstruction resterait en plan. Piège déjà
   // payé trois fois sur ce projet — même à 0 ms, ça reste un setTimeout.
   const delai = Math.max(0, 50 - (performance.now() - loadingVisibleDepuis))
+  // ⛔ **GEL-2 — CE CORPS REND LA MAIN QUOI QU'IL ARRIVE.** Il tourne dans un
+  // `setTimeout`, donc une exception n'y rejette AUCUNE promesse : elle part en
+  // « uncaught », `resolve` n'est jamais appelé, `rebuildPending` reste `true`
+  // (tout `regenerateTerrain` suivant rend une promesse vide) et l'appelant —
+  // `loadSurface`, donc `_rescale`/`_dive` de `modes.js` — attend pour toujours
+  // avec `busy` levé : la carte se dessine encore, mais plus un geste ne passe.
+  // C'est le « freeze au double-clic » d'Adrien, reproduit 6/8 depuis l'orbite
+  // (`sampleHeights(null)` sous `regenerateLabels`, voir `globe._tuileLaPlusFine`).
+  // On ne REJETTE pas : `loadRealTerrain` prendrait un rejet pour un MNT absent
+  // et remplacerait le relief réel par le procédural. Le relief est bâti ; une
+  // étape de parure qui échoue se journalise, et la main revient.
   return new Promise((resolve) =>
     setTimeout(async () => {
+      try {
       terrain.rebuild(params)
       // ══════════ LE GRAIN DES DEUX FINESSES, CUIT SOUS LE VOILE ═════════════
       //
@@ -4514,14 +4526,21 @@ function regenerateTerrain({ sansRideau = false } = {}) {
       // uAnalysisOn — un fondu de peinture, pas de géométrie.
       // ⚠️ `catch` obligatoire : une promesse perdue laisserait `rebuildPending`
       // à true pour toujours et l'application voilée — pire que le gel supprimé.
+      } catch (err) {
+        console.error('[regenerateTerrain] une étape a levé — la main revient quand même :', err)
+        regenerateTerrainErreurs++
+      } finally {
       ;(terrain.fieldsReady || Promise.resolve()).catch(() => null).then(() => {
         rebuildPending = false
         if (!sansRideau) hideLoading()
         resolve()
       })
+      }
     }, delai)
   )
 }
+/** GEL-2, sonde : combien de fois la seconde moitié de `regenerateTerrain` a levé (et rendu la main). */
+let regenerateTerrainErreurs = 0
 
 // ------------------------------------------------------------------ orbital globe + modes
 
@@ -14553,7 +14572,7 @@ const gestesTerre = {
   pointerId: null,
   pointeur: null, // [px, py] du dernier `pointermove`
   precedent: null, // le dernier clic, pour reconnaître le double
-  epingle: null, // {saisi, pointeur, jusquA} : le point tenu sous un pixel pendant un zoom au double-clic
+  epingle: null, // {saisi, pointeur, resteMs} : le point tenu sous un pixel pendant un zoom au double-clic (budget de simulation, GEL-2)
   dInclinaisonDeg: 0, // le pas d'inclinaison en attente, appliqué à l'image
   dCapDeg: 0,
   crans: 0, // les `deltaY` de zoom en attente (le double-clic : un cran franc, avec sa course)
@@ -14565,6 +14584,7 @@ const gestesTerre = {
   retoursNadir: 0, // sonde : redressements automatiques armés (D16 ter, hors du crop)
 }
 window.__exp.gestesTerre = gestesTerre
+Object.defineProperty(window.__exp, 'regenerateTerrainErreurs', { get: () => regenerateTerrainErreurs })
 
 // LE RÉGIME, dans le vocabulaire de `gestes-terre.js`. `null` = régime hérité
 // (pas de frontière de rendu) : on ne touche à rien.
@@ -14723,10 +14743,28 @@ const IMAGES_DOUBLE_CLIC = 15
 // zoom radial garde déjà — l'épingle y est alors une identité, et le prédicat
 // reste le seul endroit où le choix s'écrit.
 const EPINGLE_MS = 2500 // la course du glissé de zoom (τ = 1,2 s) est spente à ~3 τ
+// ⚠️ **GEL — UN BUDGET DE TEMPS DE SIMULATION, PAS UNE ÉCHÉANCE MURALE.**
+// Pendant le rechargement du palier (`busy`), `saisiePossible()` est faux et
+// l'épingle ne peut RIEN faire ; une échéance murale s'écoulait quand même, et
+// sur une machine lente elle tombait avant que l'épingle ait ramené le point —
+// le double-clic cessait de zoomer « vers le point » (D19). Le budget ne
+// s'écoule qu'aux images où l'épingle agit (`dt` plafonné à 50 ms, comme toute
+// la simulation) : la course dure le même NOMBRE d'images sur toute machine,
+// celui de `IMAGES_DOUBLE_CLIC`.
+//
+// ⚡ **LE CHEMIN QUI LE MONTRE EST L'ENCHAÎNÉ, ET LUI SEUL — A/B de 8 contre 8
+// chargements, mêmes paramètres au bit près** (`sonde-gel2 --lieu sulawesi
+// --enchaine 1 --cpu 4 --dpr 2`, le second double-clic 250 ms après le premier,
+// Sulawesi z5) : dérive du point cliqué **195,54 px (7/8) à l'échéance murale,
+// 0,00 px (8/8) au budget** (`.banc/GEL2/f-sul-ench-x4-dpr2` contre
+// `.banc/GEL2/g-sul-ench-x4-dpr2`). ⛔ **Sur le chemin NON enchaîné, le même
+// A/B ne montre RIEN** (135 px des deux côtés, `sul-gauche-x4-dpr2-avantepingle`
+// contre `-apres`) : cette dérive-là est antérieure et n'a pas cette cause.
+// C'est le piège « l'état dépend du CHEMIN », payé une fois de plus.
 function epingler(clientX, clientY) {
   const pointeur = PIVOT_VERS_LE_CURSEUR ? [clientX, clientY] : [innerWidth / 2, innerHeight / 2]
   const saisi = pointSaisi(pointeur[0], pointeur[1])
-  gestesTerre.epingle = saisi ? { saisi, pointeur, jusquA: performance.now() + EPINGLE_MS } : null
+  gestesTerre.epingle = saisi ? { saisi, pointeur, resteMs: EPINGLE_MS } : null
 }
 
 // ⛔ **AUCUN MENU CONTEXTUEL SUR LE GLOBE — et c'est la référence qui le dit**,
@@ -15029,7 +15067,8 @@ function appliquerSaisieTerre(dt) {
     // le même `|Δ ln d| = 0`. C'est « Zoom toward cursor location », obtenu
     // sans écrire une seconde loi de zoom.
     const E = gestesTerre.epingle
-    if (performance.now() > E.jusquA) gestesTerre.epingle = null
+    E.resteMs -= dt * 1000 // GEL-2 : le budget ne s'écoule qu'ici, quand l'épingle peut agir
+    if (E.resteMs <= 0) gestesTerre.epingle = null
     else {
       const d = deplacementDeSaisie({
         saisi: E.saisi, sousCamera: S, hauteur, poseReelle: pose,
