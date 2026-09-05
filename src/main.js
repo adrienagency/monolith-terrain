@@ -64,6 +64,9 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond, facteurEchelle, rayonAncre } from './monde/frontiere-rendu.js'
+// LE PIVOT EN OBLIQUE — Tâche OBL : la réciproque de la similitude, pour lire le
+// pivot de zoom sur la surface DESSINÉE (le globe) et le rendre au bloc.
+import { similitudeBloc } from './monde/pivot-oblique.js'
 import { ancrageCartouche, baseCartoucheEnBloc, poseDepuisParois } from './monde/cartouche-globe.js'
 import { ancrageNuages, positionCameraEnBloc } from './monde/nuages-globe.js'
 import { PLAFOND_NUAGES_M } from './monde/nuages-metres.js'
@@ -5264,6 +5267,26 @@ function latLonDuBloc(x = 0, z = 0) {
 function latLonOrigineBloc() {
   return latLonDuBloc(0, 0)
 }
+// LE SOL DESSINÉ, DANS LES UNITÉS DU BLOC — Tâche OBL. La hauteur que le GPU
+// dessine sous (x, z) (`globe.hauteurDessinee`, la loi de nœud de `_buildMesh`),
+// rendue dans le repère vertical du bloc : `(h − moyenne) × échelle`, mot pour
+// mot `appliquerHauteurs` (`fenetre-bornee.js`). C'est le sol que lisent les
+// deux butées de la caméra (`distanceMinSol`, `polaireMaxSol`) : entre un
+// recadrage de la fenêtre et son remplissage, `terrain.sample` porte encore
+// les sommets de l'ancien niveau, et une butée lue dessus déplace la caméra.
+// ⚠️ **REPLI SUR `terrain.sample`** partout où le globe n'a rien à dire (pas de
+// fenêtre bornée, pas de tuile à hauteurs sous le point, régime hérité) : le
+// dépôt d'avant, au bit près. `_candidatsSol` : la liste des tuiles à hauteurs,
+// bâtie UNE fois par image par l'appelant (même raison que `_candidatsFocus`).
+let _candidatsSol = null
+function solDessine(x, z) {
+  const f = terrain?.fenetreBornee
+  if (!(f?.echelleVerticale > 0) || !Number.isFinite(f.moyenneM) || !globe?.hauteurDessinee) return terrain.sample(x, z)
+  const ll = latLonDuBloc(x, z)
+  if (!ll) return terrain.sample(x, z)
+  const h = globe.hauteurDessinee(ll.lat, ll.lon, _candidatsSol)
+  return h == null ? terrain.sample(x, z) : (h - f.moyenneM) * f.echelleVerticale
+}
 // LA RÉCIPROQUE de `latLonDuBloc` : la position, dans la géométrie du bloc, d'un
 // lat/lon — le même chemin dans l'autre sens (fenêtre bornée d'abord, MNT
 // sinon, décalage de fenêtre continue retranché). ⚠️ Mercator est linéaire
@@ -5282,6 +5305,38 @@ function mondeDuLatLon(lat, lon) {
 // La caméra de fond, remise à jour AVANT chaque dessin. Deux régimes, décrits
 // en tête du bloc ci-dessus.
 const _qBloc = new THREE.Quaternion()
+// LES PARAMÈTRES DE LA SIMILITUDE BLOC → GLOBE, ancrée à l'aplomb de (x, z) —
+// Tâche OBL. Lus par `majCameraFond()` (la caméra qui dessine) ET par le
+// crochet `similitudeBloc` de `modes.js` (le transport de la pose au
+// changement de repère, `monde/pivot-oblique.js`). Une seule lecture, deux
+// consommateurs : la caméra transportée est exactement celle qui dessine.
+//
+// `latOrigine` / `lonOrigine` : l'aplomb de l'ORIGINE du bloc — c'est le calage
+// du bloc sur la grille de tuiles, la part de l'empreinte qui change au
+// franchissement sans que l'emprise en mètres ne le dise.
+// ⚠️ L'exagération est celle du GLOBE (voir `majCameraFond`, R15) ; sans elle
+// l'ancre reste à `R_GLOBE` — le dépôt d'avant R15, pas une valeur devinée.
+function parametresSimilitude(x = 0, z = 0) {
+  const largeur = largeurBlocM()
+  if (!(largeur > 0)) return null
+  const ancre = latLonDuBloc(x, z)
+  if (!ancre) return null
+  const origine = latLonDuBloc(0, 0)
+  return {
+    lat: ancre.lat,
+    lon: ancre.lon,
+    origine: [x, z],
+    altitudeAncreM: altitudeAncreBlocM(),
+    exageration: globe?.exaggeration > 0 ? globe.exaggeration : 0,
+    extentMeters: largeur,
+    // ⚠️ `TERRAIN_SIZE` ET PAS `terrain._span()` : c'est le couple qu'emploie
+    // déjà `altitudeCadrageM()` (`largeurBlocM()` avec `TERRAIN_SIZE`). Deux
+    // conventions d'échelle dans le même fichier divergeraient en silence.
+    span: TERRAIN_SIZE,
+    latOrigine: origine?.lat,
+    lonOrigine: origine?.lon,
+  }
+}
 function majCameraFond() {
   if (!frontiereActive) return
   // le fond suit la palette : même OBJET que la scène principale, relu à chaque
@@ -5369,25 +5424,26 @@ function majCameraFond() {
   // reste à `R_GLOBE` — c'est-à-dire le comportement du dépôt d'avant R15, et
   // pas une valeur devinée qui poserait la planète ailleurs que là où le GPU la
   // dessine.
-  const altitudeAncreM = altitudeAncreBlocM()
-  const exagAncre = globe?.exaggeration > 0 ? globe.exaggeration : 0
+  // ⚠️ **UN SEUL ÉNONCÉ DE LA SIMILITUDE — Tâche OBL.** `parametresSimilitude`
+  // est aussi ce que `modes.js` lit (crochet `similitudeBloc`) pour transporter
+  // la caméra, la cible et le pivot quand le bloc change de repère : si les
+  // deux lectures divergeaient, la caméra transportée ne serait plus celle qui
+  // dessine, et le franchissement sauterait de nouveau.
   const ancreXZ = controls.target
-  const ancre = latLonDuBloc(ancreXZ.x, ancreXZ.z)
-  if (!ancre) return
+  const sim = parametresSimilitude(ancreXZ.x, ancreXZ.z)
+  if (!sim) return
+  const { altitudeAncreM, exageration: exagAncre } = sim
+  const ancre = { lat: sim.lat, lon: sim.lon } // l'aplomb de la cible — relu plus bas par la pose du soleil
   const pose = poseFond({
-    lat: ancre.lat,
-    lon: ancre.lon,
-    origineBloc: [ancreXZ.x, 0, ancreXZ.z],
+    lat: sim.lat,
+    lon: sim.lon,
+    origineBloc: [sim.origine[0], 0, sim.origine[1]],
     altitudeAncreM,
     exageration: exagAncre,
     positionBloc: [camera.position.x, camera.position.y, camera.position.z],
     quaternionBloc: camera.getWorldQuaternion(_qBloc).toArray(),
-    extentMeters: largeur,
-    // ⚠️ `TERRAIN_SIZE` ET PAS `terrain._span()` : c'est le couple qu'emploie
-    // déjà `altitudeCadrageM()` vingt lignes plus haut (`largeurBlocM()` avec
-    // `TERRAIN_SIZE`). Deux conventions d'échelle dans le même fichier
-    // divergeraient en silence — on suit celle qui existe.
-    span: TERRAIN_SIZE,
+    extentMeters: sim.extentMeters,
+    span: sim.span,
   })
   camGlobe.position.set(pose.position[0], pose.position[1], pose.position[2])
   camGlobe.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3])
@@ -5747,6 +5803,30 @@ function rayonAffiche(p) {
 // c'est l'état le plus fréquent. Une tuile qui arrive entre-temps change la
 // hauteur dessinée sans bouger la caméra : l'écart se résorbe au premier geste.
 const _memoVisee = { x: NaN, y: NaN, cam: null, m: new Float64Array(16), d: null }
+// LE POINT DESSINÉ SOUS UNE VISÉE NDC, RENDU AU REPÈRE DU BLOC — Tâche OBL.
+// La marche est celle de `distanceSousLaVisee` (surface dessinée, `camGlobe`) ;
+// le retour au bloc passe par la réciproque de la similitude que `majCameraFond`
+// applique à la caméra — donc un point de l'écran revient exactement là où le
+// bloc le mettrait s'il portait le relief dessiné. `null` hors de ce régime
+// (bloc seul, orbite, ciel) : l'appelant garde sa marche sur `terrain.sample`.
+function pointDessineSousLaVisee(ndc) {
+  if (!frontiereActive || modes?.mode !== 'surface' || cameraDeRendu() !== camGlobe) return null
+  const sim = parametresSimilitude(controls.target.x, controls.target.z)
+  const S = sim ? similitudeBloc(sim) : null
+  if (!S) return null
+  focusRay.setFromCamera(ndc, camGlobe)
+  _candidatsFocus = globe?.tuilesAvecHauteurs?.() ?? null
+  const d = focusRayHitGlobe(focusRay.ray.origin, focusRay.ray.direction, rayonAffiche, {
+    rayon: R_GLOBE,
+    coque: 9000 * unitesParMetreGlobe() * 1.5 + 0.02,
+  })
+  _candidatsFocus = null
+  if (d == null) return null
+  const o = focusRay.ray.origin
+  const v = focusRay.ray.direction
+  const p = S.versBloc([o.x + v.x * d, o.y + v.y * d, o.z + v.z * d])
+  return { x: p[0], y: p[1], z: p[2] }
+}
 function distanceSousLaVisee(ndc) {
   const cam = cameraDeRendu()
   if (cam === camGlobe || modes.mode === 'orbital') {
@@ -7311,6 +7391,22 @@ modes = new Modes({
     // déjà `altitudeCadrageM()` et `majCameraFond()`. Deux conventions d'échelle
     // dans le même fichier divergeraient en silence.
     coteBloc: () => TERRAIN_SIZE,
+    // LA SIMILITUDE BLOC → GLOBE, ancrée à l'aplomb de (x, z) — Tâche OBL. La
+    // MÊME lecture que `majCameraFond()` : c'est elle que `_suivreEmprise` prend
+    // pour transporter caméra, cible et pivot quand le bloc change de repère
+    // (`monde/pivot-oblique.js`). Hors relief réel, `null` : le chemin d'avant.
+    similitudeBloc: (x, z) => (params.source === 'real' ? parametresSimilitude(x, z) : null),
+    // La même similitude, ancrée à l'aplomb d'un LIEU (lat/lon) — Tâche OBL. Au
+    // transport, le nouveau repère est ancré au MÊME point physique que
+    // l'ancien : deux similitudes affines d'un bloc plat ne coïncident qu'à
+    // leur ancre (courbure et Mercator sont du second ordre autour d'elle), et
+    // une ancre à 8 km de la caméra laissait 1 à 1,6 m d'écart — 1,1 à 1,6 px à
+    // z13, mesuré. `null` si le lieu ne se projette pas dans ce bloc.
+    similitudeBlocAuLieu: (lat, lon) => {
+      if (params.source !== 'real') return null
+      const o = mondeDuLatLon(lat, lon)
+      return o ? parametresSimilitude(o.x, o.z) : null
+    },
     // ⚡ **« ARRIVER AU BLOC » — D16 ter, étape 5.** `veilleCrop.repos` vaut
     // `crop posé ET vue au repos` : le LIEU et le MOMENT dans un seul booléen,
     // alimenté par le point unique de `branchement-crop.js`, à la même image que
@@ -7536,6 +7632,20 @@ modes = new Modes({
     // height field like the autofocus ray; null on a sky/off-map miss
     pointUnder: (nx, ny) => {
       _pickNdc.set(nx, ny)
+      // ══════ SOUS « TERRE UNIQUE », LE PIVOT EST LU SUR LA SURFACE DESSINÉE ══
+      //
+      // ⛔ **LE BLOC N'EST PAS CE QU'ON REGARDE, ET IL EST FAUX ENTRE DEUX
+      // REMPLISSAGES — Tâche OBL.** Sous `terreUnique` le relief dessiné est le
+      // globe ; le bloc est invisible, et après un cran ses sommets gardent les
+      // hauteurs de l'ANCIEN niveau jusqu'à ce que le flux les réécrive
+      // (`recadreFenetre` ne touche pas un sommet). Mesuré au geste, 45°, La
+      // Réunion : un pivot lu sur le bloc pendant cette fenêtre déplaçait le
+      // point du cadre de 53 px au premier franchissement. La marche sur la
+      // surface dessinée est celle de la mise au point (`distanceSousLaVisee`,
+      // `rayonAffiche`) ; le point revient au bloc par la réciproque de la
+      // similitude de `majCameraFond` — la même lecture, `parametresSimilitude`.
+      const dessine = pointDessineSousLaVisee(_pickNdc)
+      if (dessine) return dessine
       focusRay.setFromCamera(_pickNdc, camera)
       const d = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
       if (d == null) return null
@@ -14050,12 +14160,35 @@ function updateCameraMotion(dt) {
     // le relief sous la cible change quand la fenêtre glisse. `_poseButees`
     // reste le seul endroit qui pose la VALEUR DE BASE, et c'est elle qu'on
     // passe en `plancher`.
+    // ══════ LE SOL DES BUTÉES EST LE SOL DESSINÉ — Tâche OBL ═══════════════
+    //
+    // ⛔ **`terrain.sample` EST FAUX PENDANT ~700 ms À CHAQUE CRAN, ET LES DEUX
+    // BUTÉES LE LISAIENT.** Sous « terre unique », `recadreFenetre` change
+    // l'emprise du bloc sans toucher un sommet : jusqu'au remplissage du flux,
+    // les `y` du bloc sont ceux de l'ANCIEN niveau lus dans les unités du
+    // nouveau — un relief deux fois trop haut ou trop bas. Mesuré au geste
+    // (`scripts/sonde-obl.mjs`, 45°, La Réunion) : `maxPolarAngle` tombait à
+    // 44,94° pour une image au franchissement et `minDistance` repoussait la
+    // caméra de 12,00 à 12,38 unités — **270 m de recul physique, 25 px de
+    // saut du point du cadre**, d'un chargement à l'autre selon l'instant du
+    // remplissage (1,8 px ou 46 px pour le même geste). Le sol que la caméra
+    // doit dégager est celui que le GPU dessine : `solDessine` le lit sur le
+    // globe (`hauteurDessinee`) et le rend dans les unités du bloc courant.
+    // ⚠️ **ET LA CAMÉRA SUIT LE REPÈRE AVANT QU'ON NE LISE LE SOL.** Le bloc
+    // peut avoir changé de repère depuis `modes.update()` — le rechargement est
+    // une tâche découpée qui peut tomber au milieu de l'image. Lire une butée
+    // dans le nouveau repère sur une caméra encore dans l'ancien l'écrêtait
+    // (mesuré : `minDistance` 6 → 6,207, `φ` 45° → 43,97°, 25 à 60 px de saut,
+    // une image avant le transport). Idempotent, une lecture de crochet.
+    modes.suivreRepere?.()
+    const solButee = solDessine
     if (terrain?.sample) {
+      _candidatsSol = globe?.tuilesAvecHauteurs?.() ?? null
       controls.minDistance = distanceMinSol({
         cibleX: controls.target.x,
         cibleY: controls.target.y,
         cibleZ: controls.target.z,
-        sol: terrain.sample,
+        sol: solButee,
         plancher: DISTANCE_MIN_SURFACE,
         plafond: controls.maxDistance,
         pivotX: PIVOT_BLOC_X,
@@ -14069,9 +14202,10 @@ function updateCameraMotion(dt) {
         cibleY: controls.target.y,
         cibleZ: controls.target.z,
         azimut: controls.getAzimuthalAngle(),
-        sol: terrain.sample,
+        sol: solButee,
       })
       : POLAIRE_MAX_DURE
+    _candidatsSol = null
     // ⚠️ **L'AZIMUT EST LU AVANT `update()`** : c'est lui qui applique la
     // rotation du glissé, et le delta ne se lit qu'en encadrant l'appel.
     const _azAvantUpdate = controls.getAzimuthalAngle()
@@ -14118,14 +14252,16 @@ function redresserSurLeSol() {
   if (!(d > 0)) return
   const phi = controls.getPolarAngle()
   const az = controls.getAzimuthalAngle()
+  _candidatsSol = globe?.tuilesAvecHauteurs?.() ?? null
   const max = polaireMaxSol({
     distance: d,
     cibleX: controls.target.x,
     cibleY: controls.target.y,
     cibleZ: controls.target.z,
     azimut: az,
-    sol: terrain.sample,
+    sol: solDessine, // le sol DESSINÉ, pas le bloc (Tâche OBL, voir la butée par image)
   })
+  _candidatsSol = null
   if (!(phi > max)) return
   const s = Math.sin(max)
   camera.position.set(
