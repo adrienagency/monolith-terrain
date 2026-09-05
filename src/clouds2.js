@@ -28,6 +28,8 @@ import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
 import { bakeCloudVolume } from './cloud-volume.js'
 import { normalizeBgStops, deriveAoColor } from './background.js'
 import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier, CLOUD_HARD_MAX } from './clouds-sim.js'
+import { lireExageration } from './monde/exageration-continue.js'
+import { verticaleDuTerrain, plafondNuagesBloc, colonneNuages, reetagerY, presenceSelonCamera, PLAFOND_NUAGES_M, BANDE_FONDU_BORNE } from './monde/nuages-metres.js'
 
 // plafond dur du buffer ; le peuplement réel est adaptatif. Doit couvrir
 // CLOUD_HARD_MAX : une grappe pèse jusqu'à 7 entités, et les dislocations en
@@ -150,8 +152,25 @@ const FRAG = /* glsl */ `
   // un nuage ne peut pas vivre SOUS l'eau (Adrien). Le plancher de la marche
   // est donc le plus HAUT du relief et de la surface de l'eau.
   uniform float uWaterY;
+  // N2 — BORNE A L'EMPRISE DU SOCLE (unites de bloc). En crop, le dehors est
+  // eteint : un nuage qui deborde flotte sur rien. 0 = pas de borne (hors
+  // crop, comportement du depot au bit pres). Fondu sur uBorneFondu unites
+  // vers l'interieur, jamais de coupe franche (meme exigence que D24, la mer).
+  // Miroir JS : attenuationBorne dans monde/nuages-metres.js.
+  uniform float uBorne;
+  uniform float uBorneFondu;
+  // 1 quand la camera voit la couche de haut ou de bas, 0 quand elle vole
+  // DEDANS (a z14, 30 % de l'ecran etait un seul nuage a 140 m de l'objectif).
+  // Calcule en JS par presenceSelonCamera (monde/nuages-metres.js).
+  uniform float uPresence;
 
   float sat(float v) { return clamp(v, 0.0, 1.0); }
+
+  float borneSocle(vec2 xz) {
+    if (uBorne <= 0.0) return 1.0;
+    float d = max(abs(xz.x), abs(xz.y));
+    return 1.0 - smoothstep(uBorne - uBorneFondu, uBorne, d);
+  }
 
   vec3 hash31(float p) {
     vec3 q = fract(vec3(p) * vec3(0.1031, 0.1030, 0.0973));
@@ -330,7 +349,9 @@ const FRAG = /* glsl */ `
     dens *= mix(0.10, 1.5, smoothstep(0.12, 0.85, thick));
     // jamais de nuage colle a l'objectif
     dens *= smoothstep(1.5, 4.0, distance(wp, uCamBloc));
-    return dens * uDensity * vInfo.y;
+    // N2 : rien ne se dessine hors de l'emprise du socle
+    dens *= borneSocle(wp.xz);
+    return dens * uDensity * vInfo.y * uPresence;
   }
 
   float beer(float d) { return exp(-d); }
@@ -562,8 +583,33 @@ export class Clouds2 {
     // certains vivent au sommet des montagnes, d'autres au fond des vallées ».
     // La tirette Altitude est donc le PLAFOND, et « Étalement en altitude »
     // dit quelle part de la colonne est peuplée (1 = jusqu'au sol).
-    const ceilY = params?.cloudAltitude ?? 4.5
+    //
+    // ══════ LE PLAFOND EST EN MÈTRES — Tâche NUA, N1 (2026-09-05) ═══════════
+    //
+    // ⛔ **13,5 UNITÉS DE BLOC N'ÉTAIENT PAS LA MÊME ALTITUDE D'UN PALIER À
+    // L'AUTRE** — la quatorzième confusion d'espaces de ce dépôt. Le bloc fait
+    // 56 unités de côté à tous les zooms ; l'unité vaut donc `largeurBlocM / 56`
+    // mètres, et le plafond de 13,5 unités faisait **21 346 m à z9, 2 016 m à
+    // z13** (banc NUA, Provence) : sous les crêtes dès z14. Le plafond vient
+    // maintenant de `cloudAltitudeM` (mètres au-dessus de la mer) et se
+    // convertit ICI, par `plafondNuagesBloc` :
+    //
+    //   ceilY = (plafondM − moyenneM) × (56 / largeurBlocM × exagération)
+    //
+    // ⚡ **facteur mètres → unités de bloc, verticale : 56 / 10 496 × 2 =
+    // 0,010 671 à z13 (93,7 m par unité) ; 0,000 667 à z9 (1 499 m par
+    // unité).** Le zéro du bloc est la MOYENNE du relief, pas la mer — d'où
+    // `− moyenneM`. Tout est dans `monde/nuages-metres.js`, avec la dérivation
+    // des 6 000 m. Sur le terrain PROCÉDURAL (pas de mètres) l'ancienne
+    // tirette en unités de bloc reste la loi, au bit près.
+    //
+    // ⚠️ **ET LE PLAFOND EST RELU À CHAQUE IMAGE** (`_majPlafond`, dans
+    // `update`) : la fenêtre bornée change de largeur ~350 ms APRÈS le cran
+    // (rapport VID2), donc un plafond figé à la construction serait celui du
+    // palier précédent — deux fois trop haut ou trop bas — jusqu'au prochain
+    // `build`. La colonne se ré-étage sans reconstruire.
     const spread = Math.max(0, Math.min(1, params?.cloudAltSpread ?? 0.85))
+    const ceilY = this._plafondBloc(params)
     //
     // ══════ LA COLONNE EST RELEVÉE AU-DESSUS DE LA MER — 2026-09-01 ═════════
     //
@@ -594,13 +640,12 @@ export class Clouds2 {
     // remonte EN BLOC, en gardant son épaisseur : un ciel au large est un ciel
     // au-dessus de l'eau, pas un ciel noyé.
     const eau = this.terrain?.mapUniforms?.uSeaY?.value
-    const baseVoulue = ceilY * (1 - spread)
-    const epaisseur = Math.max(ceilY - baseVoulue, 1e-3)
     // ⚠️ LA MARGE N'EST PAS COSMÉTIQUE : posée EXACTEMENT sur `uWaterY`, la
     // base est le cas limite que la simulation et le nuanceur traitent tous
     // deux comme « sous l'eau ». Un demi-unité de bloc suffit à l'en sortir.
-    const baseY = Number.isFinite(eau) ? Math.max(baseVoulue, eau + 0.5) : baseVoulue
-    const topY = baseY + epaisseur
+    // (`colonneNuages` : `Math.max(baseVoulue, eau + 0.5)`, épaisseur conservée.)
+    const { baseY, topY } = colonneNuages({ ceilY, spread, eau })
+    this._colonne = { baseY, topY, ceilY, spread }
     const sky = createSky({
       count: this._targetCount(params),
       seed: (params?.seaSeed ?? 1) | 0 || 1,
@@ -677,6 +722,13 @@ export class Clouds2 {
         uTerrainMin: { value: hf.min },
         uTerrainRange: { value: hf.range },
         uWaterY: { value: -9999 },
+        // N2 : demi-emprise du socle en unités de bloc (0 = pas de borne) et
+        // largeur du fondu au bord — voir `setBorne`.
+        uBorne: { value: this._borne?.demi ?? 0 },
+        uBorneFondu: { value: this._borne?.bande ?? BANDE_FONDU_BORNE },
+        // la présence selon la hauteur de la caméra (dans la couche → 0),
+        // posée à chaque image par `update` — `presenceSelonCamera`
+        uPresence: { value: 1 },
       },
     })
 
@@ -696,6 +748,49 @@ export class Clouds2 {
     // le champ vient d'être recuit : remet `uMapMin` sur la fenêtre courante,
     // sinon une reconstruction pendant un défilement repartirait à zéro
     this.setFenetre(this.terrain?.fenetre?.x ?? 0, this.terrain?.fenetre?.z ?? 0)
+  }
+
+  // LE PLAFOND EN UNITÉS DE BLOC, depuis les mètres — voir le bloc de `build`.
+  // Rend l'ancienne tirette (unités de bloc) quand le terrain n'a pas de mètres.
+  _plafondBloc(params = this._params) {
+    const t = this.terrain
+    const verticale = verticaleDuTerrain({
+      fenetreBornee: t?.fenetreBornee ?? null,
+      dem: t?.dem ?? null,
+      span: typeof t?._span === 'function' ? t._span() : TERRAIN_SIZE,
+      exageration: lireExageration(params),
+    })
+    if (!verticale) return params?.cloudAltitude ?? 4.5
+    const { ceilY, plafondM } = plafondNuagesBloc({ plafondM: params?.cloudAltitudeM ?? PLAFOND_NUAGES_M, verticale })
+    this._plafondM = plafondM
+    this._verticale = verticale
+    return ceilY
+  }
+
+  // Le plafond suit le terrain AFFICHÉ, image par image : quand la fenêtre
+  // bornée change d'échelle (cran, exagération), la colonne se ré-étage et
+  // chaque nuage garde sa position RELATIVE dans la couche. Sans reconstruction.
+  _majPlafond(params) {
+    if (!this.sky || !this._colonne) return
+    const ceilY = this._plafondBloc(params)
+    const c = this._colonne
+    if (Math.abs(ceilY - c.ceilY) < 1e-6) return
+    const eau = this.terrain?.mapUniforms?.uSeaY?.value
+    const apres = colonneNuages({ ceilY, spread: c.spread, eau })
+    const avant = { baseY: c.baseY, topY: c.topY }
+    for (const n of this.sky.clouds) n.y = reetagerY(n.y, avant, apres)
+    this.sky.opts.baseY = apres.baseY
+    this.sky.opts.topY = apres.topY
+    this._colonne = { ...apres, ceilY, spread: c.spread }
+  }
+
+  // N2 — LE VOLUME EST BORNÉ À L'EMPRISE DU SOCLE, en unités de bloc. `demi = 0`
+  // désactive (hors crop : identique au pixel). `main.js` le pose sous la
+  // fusion des passes avec `TERRAIN_SIZE / 2`.
+  setBorne(demi, bande = BANDE_FONDU_BORNE) {
+    this._borne = { demi: demi > 0 ? demi : 0, bande }
+    const u = this.mesh?.material?.uniforms
+    if (u?.uBorne) { u.uBorne.value = this._borne.demi; u.uBorneFondu.value = bande }
   }
 
   // Le décalage de fenêtre du mode continu — DEUX FLOTTANTS par pas, rien de
@@ -843,6 +938,10 @@ export class Clouds2 {
     // seul, à la mort des morceaux (voir stepSky).
     const want = this._targetCount(params)
     if (this.sky.target !== want) resizeSky(this.sky, want)
+    // le plafond en MÈTRES suit le terrain affiché (N1) — voir `build`
+    this._majPlafond(params)
+    // et le ciel s'efface quand la caméra vole DANS la couche (N1, autre chemin)
+    if (cam && this._colonne && u.uPresence) u.uPresence.value = presenceSelonCamera(cam.y, this._colonne.baseY, this._colonne.topY)
 
     this._writeInstances(cam)
     u.uTime.value = this.sky.t
@@ -918,7 +1017,8 @@ export class Clouds2 {
       // décalage de l'ombre le long de la pente du soleil : plus il rase, plus
       // l'ombre s'éloigne du nuage
       const slant = Math.min(2.5, 0.35 / Math.max(0.14, up))
-      const drop = (this._params?.cloudAltitude ?? 4.5) * slant
+      // le plafond en unités de bloc, converti des mètres (N1) — pas la tirette
+      const drop = (this._colonne?.ceilY ?? this._params?.cloudAltitude ?? 4.5) * slant
       const len = Math.hypot(this.sunDir.x, this.sunDir.z) || 1
       mu.uCloudShadowOff.value.set(
         (this.sunDir.x / len) * drop / TERRAIN_SIZE,
