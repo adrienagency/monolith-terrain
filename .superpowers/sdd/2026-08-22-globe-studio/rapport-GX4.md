@@ -1,6 +1,7 @@
 # GX4 — second tour du tracé GPX (branche `gpx-correctif-2`)
 
-> État : **v1, écrite en premier, complétée par commits successifs.** Cinq
+> État : **complet.** Écrit en premier à partir des commits, puis complété
+> mesure par mesure, un commit à chaque fois. Cinq
 > sessions précédentes ont été coupées par des limites d'usage AVANT d'écrire
 > ce fichier, alors que six commits de travail existaient. Il est donc écrit
 > d'abord, à partir des commits et des journaux `.banc/GX4/`, puis enrichi.
@@ -318,8 +319,51 @@ l'arbre pour ne pas emporter le vrai dossier.
   `undefined`, et ma sonde répondait « dans le socle » pour tout point : une
   colonne vide qui avait l'air verte. Exactement la faute de GX5 (`aCrop` contre
   `aMerc`), dans un banc au lieu d'un nuanceur.
+- « **La position horizontale a régressé aux cols** : 3,3 px chez le noteur,
+  74,6 px chez moi à z10 col 1. » **Réfuté par le JSON du banc lui-même** : le
+  `rayonProduit` est identique **au bit** sur les 20 lignes, et `ecartLatLonM`
+  vaut 0 sur les 40. C'est `hDess` — la vérité que le banc se donne — qui a
+  bougé de 300 m. Une colonne de console qui mélange deux grandeurs (l'écart
+  horizontal et l'écart de rayon) n'est pas une mesure : il a fallu ouvrir le
+  JSON.
+- « Le coût a monté de 15,9 à 17,0 ms, c'est le calque. » **Réfuté** : éteindre
+  le calque ne rend rien du tout — 17,0 ms allumé, 17,0 éteint. Le niveau
+  absolu est celui de la machine à cette heure-là, pas celui du tracé. Comparer
+  à un chiffre relevé sur une autre machine à un autre moment n'est pas une
+  mesure de régression.
 
-## Reste à faire (ce tour)
+## Ce qui reste discutable, et je le dis plutôt que de le cacher
 
-- relancer la lecture AU CLIC (40 × 3 × 2) **après** GX6, position, bateaux, coût ;
-- `npm run audit:tests`.
+1. **Le « 0 px hors socle » n'est pas atteignable au sens littéral du banc du
+   noteur**, et je l'ai montré avec son propre `dedans()` : son polygone exclut
+   8,7 % de la surface dessinée du socle à z13, et 100 % à z11. Ce que je
+   revendique est plus fort et plus vérifiable : **0 pixel de tracé sur une
+   tuile hors socle**, aux trois crans, mesuré au rayon. Si le noteur tient au
+   chiffre littéral, c'est son banc qu'il faut corriger, pas le tracé — et la
+   mesure du socle contre lui-même est là pour en décider.
+2. **Le coût absolu est à 17,0 ms** contre 15,9 chez lui. L'écart
+   allumé/éteint est nul, mais un relevé sur machine au repos serait plus propre.
+3. **« Tête au tiers central » à 5/40 à Chamonix en poursuite** : c'est le
+   finale, déjà constaté tel quel par le noteur (5/5 en lecture, 0/35 après).
+   Aucune image sans ruban ne s'y cache, mais la pose de fin de course reste un
+   sujet à elle seule.
+4. **Rien n'est fusionné vers `regroupement`**, qui a beaucoup avancé (gel du
+   double-clic, transport de la pose, crop d'abord). Les lignes touchées sont
+   en tête de ce rapport ; `src/globe.js` n'en fait pas partie.
+
+## Comment rejouer
+
+```bash
+node_modules/.bin/vite --host 127.0.0.1 --port 10471 --strictPort
+node scripts/banc-gx3-drapage.mjs  --port 10471 --etiquette mb --regime B
+node scripts/banc-gx3-lecture.mjs  --port 10471 --etiquette mb --phase suivi   # ×2
+node scripts/banc-gx3-lecture.mjs  --port 10471 --etiquette mb --phase figee
+node scripts/banc-gx3-position.mjs --port 10471 --etiquette mb
+node scripts/banc-gx3-horscrop.mjs --port 10471 --etiquette mb --crans 2       # le banc du noteur
+node scripts/banc-gx8-bord.mjs     --port 10471 --crans 2   # son polygone, contre le socle lui-même
+node scripts/banc-gx8-vide.mjs     --port 10471 --cran 2    # attribution PAR DIFFÉRENCE
+node scripts/banc-gx8-etiquette.mjs --port 10471 --cran 2
+node scripts/banc-gx4-bateaux.mjs  --port 10471
+node scripts/banc-gx3-cout.mjs     --port 10471
+bash scripts/banc-gx3-mutations.sh && npm test && npm run audit:tests
+```
