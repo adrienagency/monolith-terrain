@@ -443,6 +443,25 @@ export class DroneCam {
     // la tête juste avant, donc ce no-op laisse déjà vise == head. Une garde
     // explicite ne ferait que dupliquer ce que la formule donne toute seule.
     amortisVisee(this._viseDisp, head, this.aimHalfLife, dt)
+    // ⛔ **LA TÊTE NE PASSE JAMAIS DERRIÈRE LA CAMÉRA — GX6 ②.** La visée est
+    // amortie (aimHalfLife) alors que la POSITION, elle, saute : la
+    // dé-occlusion rentre la caméra juste devant une crête (minT = 0,35), la
+    // butée au sol la relève. Un amortissement interpole ; il ne rattrape pas
+    // un demi-tour avant plusieurs images, et le banc du noteur a compté
+    // jusqu'à 3 images sur 40 avec la tête projetée derrière la caméra
+    // (−8 288, −10 381) et **zéro pixel de tracé**.
+    // ⚠️ **CE N'EST PAS LA CAUSE MESURÉE DE CES IMAGES-LÀ**, et il faut le dire :
+    // la cause, attribuée pile d'appel à l'appui, est `redresserSurLeSol` dans
+    // `main.js`, qui déplaçait la caméra de 39 unités APRÈS le drone sans la
+    // ré-viser (voir le commentaire là-bas). Ce recalage-ci est l'invariant de
+    // dernier recours, posé là où l'orientation s'écrit : quiconque laisse la
+    // tête passer derrière repart d'une visée sur la tête. Il ne coûte rien —
+    // la condition est fausse tant que la tête est devant, donc la douceur du
+    // vol normal n'est pas touchée d'un cran (le test de centrage de
+    // `drone-cam.test.js` mesure la même moyenne qu'avant).
+    _look.copy(head).sub(this._pos)
+    _fwd.copy(this._viseDisp).sub(this._pos)
+    if (_look.lengthSq() > 1e-12 && _look.dot(_fwd) <= 0) this._viseDisp.copy(head)
     this.controls.target.copy(this._viseDisp)
     this.camera.up.copy(this._up)
     this.camera.lookAt(this._viseDisp)

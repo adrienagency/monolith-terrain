@@ -1,0 +1,6 @@
+semis forcé : ok
+graine centrale : {"seed":24,"x":634,"y":407}
+opacité du bateau : [{"op":0.9999310583456351,"dormant":false,"x":6.3,"z":3.7}]
+état : {"nBateaux":1,"mesh":true,"groupVisible":true,"parentEstSceneGlobe":true,"parentEstSceneBloc":false,"sceneGlobe":"8bbd119f","passes":[{"type":"PasseFond","enabled":true,"scene":"8bbd119f"},{"type":"RenderPass","enabled":false,"scene":"9fae993d"},{"type":"EffectPass","enabled":true,"scene":"76e03944"}],"echelleGroupe":0.00599,"ecran":{"x":566,"y":390,"devant":true,"rayon":100},"mode":"surface","alt":3743}
+
+══ BATEAUX GX4 ══  parent=sceneGlobe:true  pixels posés par le groupe=2725 (témoin A/A 0)  boîte={"x0":494,"x1":639,"y0":340,"y1":409}  écran attendu={"x":566,"y":390,"devant":true,"rayon":100}

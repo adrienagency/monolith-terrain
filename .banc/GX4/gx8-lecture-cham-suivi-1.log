@@ -1,0 +1,12 @@
+  33  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  34  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  35  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  36  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  37  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  38  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+  39  headT=1.000  tracé=  2390 (bis   2390)  bruit=0/0  alt=1003  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(1093,502) hors tiers  cam/sol=46 m
+
+══ VERDICT gx8-cham-v1 · suivi ══
+  images sans tracé : 0/40 (k=)
+  médiane : 2390 px · min 2390 · bruit médian 0 · headT 0.248 → 1.000 (monotone true)
+  tête dans le tiers central : 5/40 · caméra sous le sol dessiné : 0/40

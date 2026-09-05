@@ -1,0 +1,4 @@
+  allumé   image médiane 17 ms · p95 17.8 · max 18.7 · appels 1 · triangles 1 · géométries 175 · textures 182 · requêtes +0
+  éteint   image médiane 17 ms · p95 17.6 · max 17.8 · appels 1 · triangles 1 · géométries 175 · textures 182 · requêtes +0
+  rallumé  image médiane 17.1 ms · p95 17.8 · max 17.9 · appels 1 · triangles 1 · géométries 175 · textures 182 · requêtes +0
+  géométrie du calque : {"objets":20,"Mo":2.33,"sommetsRuban":25500}

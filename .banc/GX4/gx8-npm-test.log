@@ -1,0 +1,12 @@
+✔ a user override in the store wins at any zoom (1.9041ms)
+✔ DETAIL_DEFAULTS zeroes the coarse tiers only (0.2914ms)
+✔ LE PLANCHER DE L ESCALIER a toujours son défaut de détail, et il vaut 0 (0.2152ms)
+✔ tous les niveaux continentaux, du plancher à z6, éteignent le détail (0.2368ms)
+ℹ tests 5105
+ℹ suites 0
+ℹ pass 5105
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30520.5494

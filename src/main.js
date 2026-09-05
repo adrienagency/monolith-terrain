@@ -112,7 +112,8 @@ import { visibiliteSurface } from './monde/visibilite-surface.js'
 // ⚠️ **CE N'EST PAS UN SECOND ÉCHANTILLONNEUR DE RELIEF** — `globe.hauteurDessinee`
 // existe depuis la Tâche P11 ; ce module est l'ADAPTATEUR bloc ↔ globe, et il
 // porte les deux seules conversions d'espace de ce branchement.
-import { poseurPourReconstruction } from './monde/sol-globe.js'
+import { poseurPourReconstruction, signatureDessineeCrop } from './monde/sol-globe.js'
+import { quaternionRepere, poserGroupeAncre } from './monde/similitude-groupe.js' // GX4 ⑥ : la pose des bateaux
 // ══════ LE CRÉDIT D'ORTHOPHOTO — Tâche R9, tour de correction ═════════
 //
 // ⛔ **LA GARDE PRÉCÉDENTE DISAIT « sous `terre unique`, l'orthophoto n'est
@@ -5201,6 +5202,26 @@ class PasseFond extends RenderPass {
 // **Le critère n'est donc pas « y a-t-il deux passes » mais « la seconde
 // dessine-t-elle quelque chose »**, et la réponse ne dépend que de `terre=unique`.
 const fusionDesPasses = frontiereActive && terreUniqueBranchee
+
+// LE RELAIS DE POSE DU CALQUE GPX — Tâche GX2. Un dépôt, pas une logique : la
+// chaîne de passes ci-dessous sait QUELLE caméra dessine et QUELLE fabrique de
+// poseur porte la similitude bloc → globe, mais le calque GPX, lui, n'existe
+// pas encore à cet endroit du fichier (`const gpxLayer`, ~3 400 lignes plus
+// bas — le nommer ici empêche la page de démarrer, mesuré). Il vient donc
+// prendre ce dépôt à sa construction.
+const gpxPoseGlobe = {
+  camera: null,
+  fabricant: null,
+  setCamera(c) { this.camera = c },
+  poserFabricantDePoseur(fn) { this.fabricant = fn },
+  // ⚠️ La SCÈNE ne passe pas par ici : elle est nommée en clair au site
+  // d'adoption, sous la même condition de régime, pour qu'un lecteur du
+  // constructeur voie de ses yeux dans quelle scène le tracé atterrit.
+  appliquer(gestionnaire) {
+    if (this.camera) gestionnaire.setCamera(this.camera)
+    if (this.fabricant) gestionnaire.poserFabricantDePoseur(this.fabricant)
+  },
+}
 // N2 — EN CROP, LE VOLUME DE NUAGES EST BORNÉ À L'EMPRISE DU SOCLE : le dehors
 // est éteint (`_cropSeul`), un nuage qui déborde flotterait sur rien. Le socle
 // fait `TERRAIN_SIZE` unités de bloc de côté (c'est la similitude
@@ -5288,15 +5309,39 @@ if (fusionDesPasses) {
   // PRÈS** (`main.js:3433` l'écrit déjà ainsi) : c'est elle qui convertit les
   // mètres du globe en unités de bloc, et une seconde écriture divergerait en
   // silence le jour où l'exagération bougerait.
-  mapLayers.poserFabricantDePoseur(({ dem, terrain, params, sample }) =>
+  const faitPoseurGlobe = ({ dem, terrain, params, sample }) =>
     poseurPourReconstruction({
       globe,
       dem,
       sample,
       echelleBloc: (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1) / dem.extentMeters) * lireExageration(params),
       actif: true,
-    }),
-  )
+    })
+  mapLayers.poserFabricantDePoseur(faitPoseurGlobe)
+  // ══════ ET LE TRACÉ GPX AVEC EUX — Tâche GX2 ═══════════════════════════════
+  //
+  // > **Adrien :** « Le tracé ne s'affiche plus lorsqu'on lance la lecture d'un
+  // > tracé GPX ; le passage du mode plat au mode sphère a dû rendre le tracé
+  // > inefficient. »
+  //
+  // ⛔ **LE SIXIÈME OBJET DU DÉMÉNAGEMENT AVAIT ÉTÉ OUBLIÉ.** Le disque
+  // solaire, le cartouche, les nuages, les cotes et la cartographie sont
+  // au-dessus ; `gpx.js` faisait toujours `scene.add(this.group)` — la scène
+  // que `passeSurface.enabled = false` a cessé de dessiner. Mesuré au
+  // navigateur le 2026-09-04 (rapport GX1) : **0 pixel posé par le calque**, six
+  // relevés sur six, témoin de bruit à 0, là où la géométrie en prédit 2 019.
+  // Sous `?terre=deux` le même tracé au même cadrage en posait 1 053. Le tracé
+  // n'était pas mal placé : il n'était pas dessiné.
+  //
+  // ⚠️ **ET L'ADOPTION NE PEUT PAS SE FAIRE ICI — MESURÉ, LA PAGE NE DÉMARRE
+  // PLUS.** `gpxLayer` est construit ~3 400 lignes plus bas : le nommer dans ce
+  // bloc le lit dans la zone morte de son `const`, et la première image n'arrive
+  // jamais. On DÉPOSE donc ici ce qui appartient à ce régime — la caméra qui
+  // dessine et la fabrique de poseur, les deux objets que la chaîne de passes
+  // connaît et que le site de construction ne devrait pas réinventer — et le
+  // calque vient les prendre à sa construction (`gpxPoseGlobe.appliquer`).
+  gpxPoseGlobe.setCamera(camGlobe)
+  gpxPoseGlobe.poserFabricantDePoseur(faitPoseurGlobe)
 }
 
 // LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
@@ -5966,9 +6011,27 @@ function poserVisibiliteSocle(v) {
   // maillage plat.
   labels.visible = vue.reperes && params.labels
   hud3.group.visible = vue.socle
-  // GPX sprites draw with depthTest:false — hidden with the surface or
-  // they'd float on top of the planet
-  gpxLayer.setVisible(vue.socle && params.gpxVisible)
+  // ══════ LE TRACÉ GPX — Tâche GX2, et c'est le §5 UNE CINQUIÈME FOIS ══════
+  //
+  // ⛔ **`vue.socle` EST BORNÉ À FAUX SOUS `terre unique`, ET IL ÉTEIGNAIT LE
+  // TRACÉ À TOUTES LES ALTITUDES.** Exactement les nuages de R20, les cotes de
+  // R24, la cartographie de D16-b et les repères de R18 — la cinquième
+  // occurrence du même partage. Mesuré au banc : le tracé était dessiné au
+  // repos, puis **disparaissait dès que quelque chose rappelait cette
+  // fonction** (un changement de vue, le clic Lecture, le vol de poursuite) —
+  // vingt relevés de lecture à **0 pixel avec un témoin de bruit à 0**, c'est-à-
+  // dire un calque éteint, pas un calque mal placé. **C'est la seconde moitié du
+  // défaut d'Adrien, et c'est elle qui explique son « lorsqu'on LANCE LA
+  // LECTURE ».**
+  //
+  // ⚡ **SA QUESTION EST CELLE DES REPÈRES, PAS CELLE DU MAILLAGE.** Depuis la
+  // ligne d'adoption plus haut, le tracé ne dessine plus dans l'espace du bloc
+  // plat : il est posé sur la sphère, dans la scène du globe, par la même
+  // similitude que la carto. « Sommes-nous en vue de surface, devant un bloc ? »
+  // — oui, c'est un crop. Le commentaire d'origine (« les sprites GPX dessinent
+  // en `depthTest:false`, on les cache avec la surface ou ils flotteraient sur
+  // la planète ») reste satisfait : hors vue de surface, `reperes` est faux.
+  gpxLayer.setVisible(vue.reperes && params.gpxVisible)
   // ⚡ **`vue.nuages` ET PLUS `vue.socle` — Tâche R20**, et c'est le §5 de
   // `visibilite-surface.js` une QUATRIÈME fois. `socle` est borné à faux sous
   // le drapeau : accroché à lui, le ciel était éteint à toutes les altitudes et
@@ -9046,6 +9109,72 @@ function cartoucheSuitLeDamier() {
 }
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
+// ══════ LE TRACÉ GPX REJOINT LA SCÈNE QUI EST RENDUE — Tâche GX2 ════════════
+//
+// La condition est celle de la chaîne de passes (`fusionDesPasses`, ~ligne
+// 5 040) et pas une autre : sous `?terre=deux` la passe de surface dessine
+// ENCORE le bloc, et déménager le tracé l'en ferait disparaître — c'est la
+// régression que la fusion des passes avait déjà payée à 17,80 dB de PSNR en
+// s'appliquant au mauvais régime. Le détail de la mesure est en tête du bloc
+// `if (fusionDesPasses)`, avec le dépôt `gpxPoseGlobe` que cette ligne consomme.
+if (fusionDesPasses) {
+  gpxLayer.poserScene(sceneGlobe)
+  gpxPoseGlobe.appliquer(gpxLayer)
+  // ══════ ET LES BATEAUX AVEC LUI — LE SEPTIÈME OBJET, GX4 ⑥ ════════════════
+  //
+  // GX2 l'avait vu (« le seul objet encore allumé dans la scène morte »), GX3
+  // l'a prouvé par la chaîne de passes (`RenderPass(scene, enabled: false)`) :
+  // un bateau semé au bord d'une mer, en production, était dessiné dans le
+  // tampon que personne ne regarde. `add` le retire de `scene` au passage —
+  // jamais deux parents. Sa POSE (similitude bloc → globe, ancrée sur le
+  // bateau lui-même) est donnée à chaque image plus bas, `poserBateauxGlobe`,
+  // parce que le nuanceur des bateaux lit `instanceMatrix[3].xz` en BLOC pour
+  // la houle : les instances restent en bloc, c'est le groupe qui voyage.
+  sceneGlobe.add(boats.group)
+}
+
+// ══════ LE RUBAN SUIT LES TUILES QUE LE GPU DESSINE — GX4 ③ ══════════════════
+//
+// > **GX3 ② :** *« après un `flyTo`, le ruban reste drapé sur les hauteurs du
+// > zoom PRÉCÉDENT jusqu'à la reconstruction suivante — le repos du témoin est
+// > atteint, l'image est stable, et le ruban est faux. »*
+//
+// Le drapage lit maintenant le MAILLAGE dessiné (`monde/sol-globe.js`), mais
+// un maillage dessiné, ça change : les tuiles fines arrivent 0,5 à 6 s après
+// la pose du crop (SOC), un cran de zoom en éteint la moitié. Le poseur retient
+// l'EMPREINTE des tuiles allumées dans le socle au moment du drapage
+// (`signature`) ; quand celle de l'image courante en diffère et qu'elle est
+// restée STABLE un instant (les tuiles arrivent par rafales : re-draper à
+// chaque arrivée coûterait 25 500 sommets par tuile), on re-drape UNE fois.
+// Toutes les 6 images : l'empreinte parcourt le cache de tuiles (≤ 1 700), ce
+// n'est pas gratuit par image.
+//
+// ⚠️ **ET LE RAIL DE POURSUITE SUIT** (`drone.retarget`), comme au rebuild du
+// relief : le rail est cuit contre `track.world`, un ruban re-drapé sous un
+// rail d'avant ferait voler la caméra dans un monde qui n'existe plus.
+const REDRAPAGE_STABLE_MS = 350
+let _sigDessinee = null
+let _sigDepuis = 0
+let _imagesDepuisSig = 0
+function redraperSurLeReliefDessine(maintenant) {
+  if (!fusionDesPasses || !gpxLayer.track) return false
+  if (++_imagesDepuisSig < 6) return false
+  _imagesDepuisSig = 0
+  const sig = signatureDessineeCrop(globe)
+  if (sig !== _sigDessinee) { _sigDessinee = sig; _sigDepuis = maintenant; return false }
+  // ⚠️ aucune tuile allumée dans le socle (il vient d'être reposé, les tuiles
+  // arrivent) : il n'y a rien sur quoi draper, on attend la rafale
+  if (sig.startsWith('0:')) return false
+  if (maintenant - _sigDepuis < REDRAPAGE_STABLE_MS) return false
+  const poseur = gpxLayer.activeLayer?.gpx?._poseur
+  if (!poseur?.globe || poseur.signature === sig) return false
+  gpxLayer.rebuildAll()
+  if (drone.active) {
+    const w = gpxLayer.track?.world
+    if (w && w.length >= 2) drone.retarget(w)
+  }
+  return true
+}
 
 // ---- Race Studio : état de la course + cartouches espace-écran ------------
 // raceState est rempli par le studio (src/ui/studio.js) ; les cartouches se
@@ -10869,7 +10998,28 @@ function regionFrameScale(parts) {
 // Le rendu ayant été validé, la règle du 1 SUR 10 est rétablie : `force` n'a
 // servi que le temps de juger l'échelle et le mouvement. Croiser un bateau doit
 // rester un événement, pas un décor.
+// LA POSE DES BATEAUX SUR LE GLOBE — GX4 ⑥. Le poseur est celui du tracé et de
+// la carto (`gpxPoseGlobe.fabricant` = `faitPoseurGlobe`), refait à chaque
+// relief (ici) ; la similitude est ancrée SUR LE BATEAU, à la hauteur de la
+// mer du bloc : exacte en son point (voir `monde/similitude-groupe.js`). Sans
+// bateau, le groupe garde sa pose d'avant — il n'y a rien à dessiner.
+let _poseurBateaux = null
+let _qBateaux = null
+function poserBateauxGlobe() {
+  if (!fusionDesPasses || !boats.mesh || !boats.boats.length) return
+  if (!_poseurBateaux) {
+    const fen = terrain.fenetre ?? { x: 0, z: 0 }
+    _poseurBateaux = gpxPoseGlobe.fabricant?.({ dem, terrain, params, sample: (x, z) => terrain.sample?.(x - fen.x, z - fen.z) ?? 0 }) ?? null
+    _qBateaux = _poseurBateaux ? quaternionRepere(_poseurBateaux) : null
+  }
+  const b = boats.boats.find((x) => x && !x.dormant) ?? boats.boats[0]
+  if (!b) return
+  const seaY = Number.isFinite(realWater?.seaY) ? realWater.seaY : 0
+  poserGroupeAncre(boats.group, _poseurBateaux, _qBateaux, { x: b.x, y: seaY, z: b.z })
+}
+
 function syncBoats() {
+  _poseurBateaux = null // le relief a changé : le poseur se refait à la prochaine image
   if (params.source !== 'real' || !dem || !realWater) { boats.boats = []; return }
   const seaMat = realWater.materials?.find((m) => m.uniforms?.uWaveA)
   if (!seaMat) { boats.boats = []; return }
@@ -14300,6 +14450,32 @@ function updateCameraMotion(dt) {
 // que celle de la rotation rigide elle-même.
 function redresserSurLeSol() {
   if (!terrain?.sample) return
+  // ⛔ **PAS PENDANT LE VOL DE POURSUITE — GX6 ③.** Ce redressement repose la
+  // caméra sur la sphère autour de `controls.target`, à distance constante,
+  // **sans la ré-viser** : en orbite c'est sans conséquence (`controls.update()`
+  // ré-oriente à l'image suivante), pendant un vol de poursuite c'est le
+  // désastre. Mesuré (`scripts/banc-gx6-qui.mjs`, puis `banc-gx6-pile.mjs` qui
+  // piège les écritures de `camera.position` et garde la pile d'appel) :
+  //   · après `drone.updateAt`, caméra (−23,64 · 6,35 · −16,22), avant·tête
+  //     **0,999** — le drone fait son travail ;
+  //   · au relevé, caméra (0,92 · 2,98 · 9,74) — **39 unités plus loin**, posée
+  //     par cette fonction, orientation inchangée, donc **176,5° de sa propre
+  //     cible** et avant·tête **−0,13** ; la tête sort du cadre à ndc y ≈ +26
+  //     et l'image de lecture n'a **pas un pixel de tracé** (Chamonix, 4 images
+  //     sur 40, k = 0…3).
+  // `followPivot` et `controls.update` ne sont appelés ni l'un ni l'autre de
+  // tout le vol (0 appel contre 330 `updateAt`) : c'est bien cette écriture-ci.
+  //
+  // Le vol a DÉJÀ sa garde au sol, et elle est double : `_desired.y` relevé à
+  // `sol + clearance` AVANT l'amortissement, puis une butée dure sur la pose
+  // réalisée (`drone-cam.js`, `_applyPose`). Le banc du noteur le confirme à
+  // chaque tracé et à chaque phase : **caméra sous le sol dessiné 0/40**. Deux
+  // butées qui se disputent la même caméra, ce n'est pas deux fois plus de
+  // sécurité — c'est celle qui écrit en dernier qui gagne, et celle-ci ne vise
+  // pas. Même arbitrage, mot pour mot, que la correction de pivot juste en
+  // dessous : « pendant un balayage de pose, la machine pose elle-même caméra
+  // ET cible : une correction les combattrait ».
+  if (drone.active && params.gpxFollow && gpxLayer.isPlaying()) return
   const d = controls.getDistance()
   if (!(d > 0)) return
   const phi = controls.getPolarAngle()
@@ -15551,6 +15727,9 @@ function tick() {
     terrain.tickSurfaceMaterial(dtAmb) // drifting sand (relief material flow)
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
+  // le ruban suit les tuiles dessinées (GX4 ③) — hors du bloc `animations` :
+  // un relief qui arrive n'est pas une décoration
+  redraperSurLeReliefDessine(performance.now())
   // ⚠️ **LA CAMÉRA SUIT LA SCÈNE, comme pour le désencombrement des toponymes**
   // (`mapLayers.setCamera(camGlobe)`) : projeter des points de sphère avec la
   // caméra du bloc calculerait sur un autre monde.
@@ -15601,6 +15780,7 @@ function tick() {
   // dtAmb : la flotte (bateaux, baleine…) est du mouvement ambiant — figée,
   // elle reste À FLOT là où elle est, elle ne disparaît pas (voir stepBoat).
   boats.update(dtAmb, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
+  poserBateauxGlobe()
   realWater?.update(dtAmb, sun) // water simulation: waves, caustics, sun glint — figée par dtAmb, jamais cachée
   // temps des caustiques de fond (terrain + blocs voisins du damier) — dtAmb :
   // décoration ambiante, la nappe de caustiques reste visible, juste immobile

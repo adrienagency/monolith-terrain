@@ -1,0 +1,4 @@
+studio fermé : .studio-close
+  cran 0  alt=4094 m  emprise=41 km  tracé=20237 px (bruit 0)  DANS le socle 0 px · HORS 20237 px (100 %)  sommets hors bloc 0/2335  empreinte=[[-248,-327],[2057,-328],[-191880,-97552],[58545,-39233]]
+  cran 1  alt=4118 m  emprise=20 km  tracé=10727 px (bruit 0)  DANS le socle 10271 px · HORS 456 px (4 %)  sommets hors bloc 0/2335  empreinte=[[-168,1],[1557,79],[5266,3487],[-2575,3149]]
+  cran 2  alt=3971 m  emprise=10 km  tracé=5350 px (bruit 0)  DANS le socle 5114 px · HORS 236 px (4 %)  sommets hors bloc 1353/2335  empreinte=[[326,-81],[1401,127],[2128,903],[16,980]]

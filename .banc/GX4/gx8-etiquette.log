@@ -1,0 +1,22 @@
+studio fermé : .studio-close
+  cran 0
+     repère de crop  — poseur (FIGÉ) {"cx":0.519287109375,"cy":0.35571289062499994,"demi":0.000732421875}
+                       globe  (VIF)  {"cx":0.519287109375,"cy":0.35571289062499994,"demi":0.000732421875}
+                       uniforme partagé {"x":0.519287109375,"y":0.35571289062499994} demi=0.000732421875
+                       figé == vif ? true   ·   uniforme == vif ? true
+     forme de crop   — poseur {"coin":0.08,"expo":4.4} · globe {"coin":0.08,"expo":4.4}
+     ponctuels 11 · désaccord produit/socle vivant 0 · VISIBLES HORS DU SOCLE VIVANT 0
+  cran 1
+     repère de crop  — poseur (FIGÉ) {"cx":0.5191650390625,"cy":0.3558349609375,"demi":0.0003662109375}
+                       globe  (VIF)  {"cx":0.5191650390625,"cy":0.3558349609375,"demi":0.0003662109375}
+                       uniforme partagé {"x":0.5191650390625,"y":0.3558349609375} demi=0.0003662109375
+                       figé == vif ? true   ·   uniforme == vif ? true
+     forme de crop   — poseur {"coin":0.08,"expo":4.4} · globe {"coin":0.08,"expo":4.4}
+     ponctuels 11 · désaccord produit/socle vivant 0 · VISIBLES HORS DU SOCLE VIVANT 0
+  cran 2
+     repère de crop  — poseur (FIGÉ) {"cx":0.51922607421875,"cy":0.35577392578125,"demi":0.00018310546875}
+                       globe  (VIF)  {"cx":0.51922607421875,"cy":0.35577392578125,"demi":0.00018310546875}
+                       uniforme partagé {"x":0.51922607421875,"y":0.35577392578125} demi=0.00018310546875
+                       figé == vif ? true   ·   uniforme == vif ? true
+     forme de crop   — poseur {"coin":0.08,"expo":4.4} · globe {"coin":0.08,"expo":4.4}
+     ponctuels 11 · désaccord produit/socle vivant 6 · VISIBLES HORS DU SOCLE VIVANT 0

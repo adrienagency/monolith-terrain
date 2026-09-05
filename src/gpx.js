@@ -15,6 +15,9 @@ import { dansFenetre } from './fenetre-clip.js'
 import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
+import { poseurPlat, poseTableauEnPlace } from './monde/sol-globe.js'
+import { GLSL_BORD_CROP } from './monde/mer-sphere.js' // la loi du bord du socle, une seule écriture
+import { quaternionRepere, poserGroupeAncre } from './monde/similitude-groupe.js'
 import { animationsActives } from './animations.js'
 import { lireExageration } from './monde/exageration-continue.js' // un seul partage, douze lecteurs
 import { survolVientDeLaSouris } from './clic-ruban.js'
@@ -500,6 +503,66 @@ function textSprite(text, color, scale = 1, opacity = 1, renderOrder = 20) {
 // leaves the geometry ON the ground. What remains here is a hair of physical
 // clearance for the head marker and hover cursor to sit against.
 const DRAPE_LIFT = 0.012
+// ══════════ LA MARGE AU-DESSUS DU SOL DESSINÉ, EN MÈTRES — GX4 ① ═════════════
+//
+// Sur le globe, `DRAPE_LIFT` (0,012 unité de BLOC) valait **4,4 m au
+// Mont-Blanc, 1,1 m en Camargue, 0,55 m à Chamonix** : une longueur de bloc
+// change de valeur avec l'emprise (le piège que le commentaire ci-dessus
+// décrit pour l'ancien 0,16). Et le noteur (GX3 ③④) mesure l'écart du sommet de
+// tracé à la surface RENDUE en mètres réels : Chamonix **138 sommets sur 401
+// SOUS la surface** (−4,8 m), Mont-Blanc −176 m — parce que la hauteur lue
+// n'était pas celle dessinée (réparé dans `monde/sol-globe.js`).
+//
+// **DÉRIVATION.** Une fois le sol lu SUR LE MAILLAGE DESSINÉ (`hauteurMaillee`,
+// la même interpolation que le triangle rasterisé), l'écart résiduel du sommet
+// à la surface n'a plus que trois sources, toutes chiffrables :
+//   · la lecture du maillage elle-même : **0,05 m** (SOC, `hauteurMaillee`) ;
+//   · la quantification `Float32` de la position sur la sphère : les sommets
+//     sont à ~100 unités de l'origine, l'ulp y vaut 2⁻¹⁷ ≈ 7,6·10⁻⁶ unité, soit
+//     **0,49 m** à 63 710 m/unité (÷ exagération 2 : 0,24 m réel) ;
+//   · l'interpolation du GPU sur un triangle de tuile (z13 : ~140 m de côté)
+//     contre celle de `interpolerMaille` : la même diagonale, **0 m** par
+//     construction — c'est ce que `test/socle-plaque.test.js` ① confronte.
+// Le pire cas somme à **≈ 0,6 m**. Une marge de **2 m** le couvre trois fois,
+// reste sous le mètre-par-pixel de tout cadrage où le tracé se lit (z13 à
+// 10 km : 6 m/px ; à Chamonix 3 km : 2 m/px — un tiers de pixel), et tient le
+// critère du noteur : moyenne ≤ +3 m, min ≥ −1 m, max ≤ +10 m. Elle ne dépend
+// PAS de l'emprise : c'est ce qui fait qu'elle vaut 2 m aux trois cadrages.
+// Le ruban, lui, survole plus haut (`RUBAN_GARDE`, en unités de bloc, voulu :
+// le survol se lit par rapport à la LARGEUR) ; cette marge-ci est celle des
+// SOMMETS du tracé — tête de course, curseur, profil, étiquettes.
+// Hors globe (`?terre=deux`), `DRAPE_LIFT` reste, au bit près.
+const MARGE_SOL_M = 2
+
+// ══════════ LE TRACÉ PASSE APRÈS LE VOILE NUAGEUX — GX6 ① ═══════════════════
+//
+// ⛔ **DEUX À TROIS IMAGES SUR QUARANTE, EN VOL DE POURSUITE, N'AVAIENT PAS UN
+// PIXEL DE TRACÉ** (banc du noteur, Mont-Blanc, phase `suivi` : k = 14, 15, 16,
+// caméra à ~5 000 m). Attribution mesurée image par image
+// (`scripts/banc-gx6-cause.mjs`, chaque reprise comptée PAR DIFFÉRENCE comme le
+// noteur) :
+//   · nuages RETIRÉS de la scène → **5 664 px de tracé reviennent** ;
+//   · `uCropOn = 0` (l'écrêtage au bord du socle) → 0 px : ce n'est PAS lui ;
+//   · groupe GPX à `renderOrder = 50` → **5 181 px** : c'est l'ORDRE.
+//
+// La couverture volumétrique (`clouds2.js`) est dessinée à `renderOrder = 30`,
+// transparente, **sans test de profondeur** — délibérément : « c'est la marche
+// elle-même qui gère l'occlusion, via `terrainH()` ». Elle marche donc contre
+// le CHAMP DE HAUTEURS DU RELIEF, qui ne connaît que le sol. Un ruban posé 2 m
+// au-dessus de ce sol est, pour elle, derrière lui : elle le peint
+// intégralement, et la lecture s'arrête sur un aplat blanc.
+//
+// Le 30 des nuages dit « au-dessus de tout ce qui est POSÉ SUR LE RELIEF »
+// (mer animée 18, eau OSM drapée 26). Le tracé n'est pas une couche de carte :
+// c'est le SUJET de la lecture. Il passe donc après le voile — comme un
+// cartouche, pas comme un lac. `+34 = 30 + 4` : le voile, plus la place des
+// quatre pièces du tracé (halo 4, ruban 6, ligne 6, sillage 7) dans leur ordre
+// relatif inchangé, et sans empiéter sur les cartouches (`ancrage-cartouche`).
+// ⚠️ Seules les pièces TRANSPARENTES sont concernées : three.js vide toute la
+// file opaque avant la file transparente, quel que soit le `renderOrder` — les
+// étiquettes et les arches (opaques) restent sous le voile, comme le relief
+// qu'elles annotent.
+const ORDRE_VOILE = 34
 // Le ruban (voir ruban-trace.js). Le PAS est ce qui l'empêche de traverser le
 // relief : 0,07 unité, soit plus fin que la maille du terrain la plus dense
 // (~0,11 pour un bloc de 56 unités en 512 segments), donc la corde entre deux
@@ -595,6 +658,28 @@ export class GpxLayer {
     this.group = new THREE.Group()
     this.group.name = 'gpx'
     scene.add(this.group)
+    // ══════════ LA SCÈNE N'EST PLUS FIGÉE ICI — Tâche GX2 ═══════════════════
+    //
+    // ⛔ **CE `scene.add` VISAIT LA SCÈNE DU BLOC PLAT, ET PLUS PERSONNE NE LA
+    // DESSINE.** La Tâche D16-a a éteint la passe de surface sous
+    // `terre unique` (`main.js`, `passeSurface.enabled = false`) et a déménagé
+    // un par un le disque solaire, le cartouche, les nuages, les cotes et la
+    // cartographie dans `sceneGlobe`. **Le calque GPX a été oublié** : mesuré au
+    // navigateur le 2026-09-04, il posait **0 pixel à l'écran** sur six relevés,
+    // témoin de bruit à 0, là où sa géométrie en prédit 2 019. Il n'était pas
+    // mal placé : il était dessiné dans un tampon que plus personne ne regarde.
+    //
+    // Le rattachement reste ici — c'est le cas nominal, et `?terre=deux` s'en
+    // sert encore — mais il n'est plus définitif : `poserScene()` peut le
+    // déplacer après coup, comme `MapLayers.poserScene` le fait déjà.
+    this._poseur = null // le poseur en vigueur, refait à chaque reconstruction
+    this._faitPoseur = null // la fabrique injectée par main.js sous `terre unique`
+    // Le `k` de la similitude bloc → globe et la rotation du repère. `1` et
+    // `null` hors globe : tout ce qui suit redevient alors l'identité, au
+    // caractère près.
+    this._k = 1
+    this._qGlobe = null
+    this._worldScene = null // le jumeau de `track.world` en coordonnées de scène
     // ══════════ LA RÉSOLUTION DES TRAITS LARGES — UNE SEULE VÉRITÉ ══════════
     //
     // `LineMaterial` a besoin de la taille du TAMPON DE DESSIN pour convertir
@@ -817,6 +902,221 @@ export class GpxLayer {
     this.setRaceName(name, { custom: false })
   }
 
+  // ══════════ L'ADOPTION DE SCÈNE ET LA SIMILITUDE — Tâche GX2 ══════════════
+  //
+  // Trois entrées, exactement celles que `MapLayers` reçoit déjà de `main.js`
+  // (`poserScene` + `setCamera` + `poserFabricantDePoseur`) : le calque GPX a
+  // le même besoin et passe donc par le même chemin, pas par un second.
+
+  // ⚠️ **UN SEUL ÉCRIVAIN, ET IL DÉPLACE PLUTÔT QU'IL N'AJOUTE** — mot pour mot
+  // la règle de `MapLayers.poserScene` : deux `add` laisseraient deux parents
+  // et deux dessins du même groupe.
+  poserScene(scene) {
+    if (!scene || scene === this.scene) return
+    this.group.parent?.remove(this.group)
+    scene.add(this.group)
+    this.scene = scene
+  }
+
+  // La caméra sert au dimensionnement du curseur de survol et au lancer de
+  // rayon : sous `terre unique` c'est `camGlobe` qui dessine, et une distance
+  // mesurée avec la caméra du bloc parlerait d'un autre monde.
+  setCamera(camera) { if (camera) this.camera = camera }
+
+  // ⛔ **ADOPTER LA SCÈNE NE SUFFIT PAS, ET ÇA A ÉTÉ MESURÉ : 0 PIXEL QUAND
+  // MÊME.** Le ruban est cuit en coordonnées de BLOC (`latLonToWorld`,
+  // demi-emprise 28 unités autour de l'origine) ; le crop est une découpe de la
+  // sphère `R_GLOBE = 100`, posée à ~100 unités de l'origine. Les deux espaces
+  // n'ont pas la même échelle :
+  //
+  //   | espace | mètres par unité | au cadrage |
+  //   |---|---|---|
+  //   | bloc (le ruban) | **727,6** | Mont-Blanc 90 km |
+  //   | globe (le crop) | **63 710,1** (`ORBITAL_M_PER_UNIT`) | partout |
+  //
+  // ➡️ **facteur 87,56 à ce cadrage — et 335 à Camargue, 700 à Chamonix : IL
+  // DÉPEND DU ZOOM, ce n'est pas une constante.** Reparenter sans poser la
+  // similitude mettrait le tracé à ~100 unités de globe du crop, soit ≈ 6 371 km
+  // — hors de tout. Le `k` n'est donc jamais écrit en dur : il est relu à chaque
+  // reconstruction dans `_majSimilitude()` via `poseur.rapportSimilitude()`.
+  poserFabricantDePoseur(fn) {
+    this._faitPoseur = typeof fn === 'function' ? fn : null
+    if (this.track) this.rebuild()
+  }
+
+  // Le poseur en vigueur, refait UNE fois par reconstruction (jamais par
+  // sommet) — même durée de vie que celui de `map/water-layer.js`, et par la
+  // même fabrique (`poseurPourReconstruction`, `monde/sol-globe.js`).
+  _majPoseur() {
+    const fen = this.terrain?.fenetre ?? ZERO
+    // ⚠️ `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE : il ajoute lui-même
+    // le décalage de fenêtre. C'est la même correction qu'au drapage plus bas.
+    const sample = (x, z) => this.terrain?.sample?.(x - fen.x, z - fen.z) ?? 0
+    this._poseur = this._faitPoseur?.({
+      dem: this.getDem(), terrain: this.terrain, params: this.params, sample,
+    }) ?? poseurPlat(sample)
+    this._majSimilitude()
+  }
+
+  // Le repère local du globe au centre du bloc : la rotation qui emmène les axes
+  // du bloc (X est, Y haut, Z sud) sur ceux de la sphère, et le `k` d'échelle.
+  // ⚠️ Ils ne servent QU'AUX OBJETS PONCTUELS (étiquettes, arches, curseur), qui
+  // portent une pose et non des sommets ; toute géométrie, elle, passe sommet
+  // par sommet par `placer` et n'approxime donc rien.
+  _majSimilitude() {
+    const p = this._poseur
+    if (!p?.globe) { this._k = 1; this._qGlobe = null; return }
+    // k = echelleGlobe / echelleBloc — 1/87,56 au cadrage du Mont-Blanc.
+    this._k = p.rapportSimilitude()
+    // la rotation vit dans `monde/similitude-groupe.js` : les bateaux (GX4 ⑥)
+    // ont la même à poser, et deux écritures d'une base finissent par diverger
+    this._qGlobe = quaternionRepere(p)
+  }
+
+  // Le sol, en unités de BLOC, mais LU SUR LE GLOBE quand c'est lui qu'on
+  // dessine. ⚠️ Sans ça le ruban se draperait sur les hauteurs du bloc alors
+  // que le GPU dessine celles du globe : le tracé s'enterrerait dans un versant
+  // et survolerait le suivant. `poseur.hauteur` retombe tout seul sur le bloc
+  // quand aucune tuile ne couvre le point (`sol-globe.js` : `null` n'est pas 0).
+  _sol(x, z) {
+    return this._poseur ? this._poseur.hauteur(x, z) : (this.terrain?.sample?.(x, z) ?? 0)
+  }
+
+  // La marge des sommets au-dessus du sol, en unités de bloc : `MARGE_SOL_M`
+  // convertie par le poseur sur le globe (voir sa dérivation), `DRAPE_LIFT` tel
+  // quel hors globe. Une seule écriture, lue au drapage ET retranchée par
+  // `_elevations()` — sinon chaque altitude dérivée serait fausse de la marge.
+  _lift() {
+    return this._poseur?.globe ? this._poseur.margeBloc(MARGE_SOL_M) : DRAPE_LIFT
+  }
+
+  // Un point de BLOC est-il dans le socle dessiné ? Toujours vrai hors globe
+  // (le socle plat n'écrête rien : `_dansFenetre` s'en charge en mode continu).
+  _dansSocle(x, z) {
+    return this._poseur?.dansSocle ? this._poseur.dansSocle(x, z) : true
+  }
+
+  // Un point de CHAMP (bloc) → la scène qui est rendue. Identité hors globe.
+  _placer(x, y, z, out = null) {
+    if (!this._poseur) return out ? out.set(x, y, z) : new THREE.Vector3(x, y, z)
+    const v = this._poseur.placer(x, z, y, out)
+    return out ? out.set(v.x, v.y, v.z) : new THREE.Vector3(v.x, v.y, v.z)
+  }
+
+  // Un tableau plat de sommets (x,y,z…) en coordonnées de bloc → la scène, EN
+  // PLACE. C'est le seul geste que subissent le ruban, le sillage et la ligne.
+  // ⚠️ La boucle elle-même vit dans `monde/sol-globe.js` : c'est le geste qui
+  // PORTE LES PIXELS, et une fonction pure se garde en l'EXÉCUTANT (voir
+  // test/gpx-pose-globe.test.js) au lieu de relire du texte.
+  _versScene(positions) {
+    return poseTableauEnPlace(positions, this._poseur)
+  }
+
+  // ══════════ LE BORD DU SOCLE — GX4 ② ═══════════════════════════════════════
+  //
+  // ⛔ **LE TRACÉ ÉTAIT DESSINÉ DANS LE VIDE HORS DU SOCLE** : 358 px à z13 sur
+  // la planète nue et le long de la paroi (GX3 ⑥), 1 353 sommets sur 2 335 hors
+  // bloc. La mer, elle, ne déborde pas d'un pixel : son fragment mesure
+  // `distanceBordCrop(aCrop, uCropCoin, uCropCoinN)` — la superellipse des
+  // tuiles, UNE écriture (`GLSL_BORD_CROP`, `monde/mer-sphere.js`) — et rejette
+  // au-delà de zéro. Le ruban et son sillage font pareil : `aCrop` par sommet
+  // (coordonnées locales du crop, ±1 sur la frontière, calculées par le poseur
+  // en double sur les coordonnées de BLOC), interpolé par le GPU, mesuré au
+  // fragment. Le tracé s'arrête donc EXACTEMENT où les tuiles s'arrêtent, par
+  // construction et non par mesure. Rend `null` hors globe ou sans crop : la
+  // géométrie de `?terre=deux` ne change pas d'un octet.
+  //
+  // ⚡ **LE SOMMET PORTE SON MERCATOR, PAS SA COORDONNÉE DE CROP** (`aMerc`) :
+  // le socle se recentre pendant un vol de poursuite, et un `aCrop` cuit par
+  // rapport au repère d'avant rejetait TOUT le ruban jusqu'au re-drapage — 4 à
+  // 8 images sur 40 sans tracé, par paires (banc de lecture, phase suivi). Le
+  // nuanceur rapporte le mercator au centre COURANT (`uCropCentre`,
+  // `uCropDemi` partagés par référence avec le globe) : le bord suit le socle
+  // dans la même image, sans reconstruction. Précision `Float32` du mercator
+  // normalisé (~0,52 · ~0,35) : 6·10⁻⁸ de la planète, soit **2,4 m** au bord —
+  // sous le mètre-par-pixel de tout cadrage où le bord se voit.
+  _attributBordSocle(positions) {
+    const p = this._poseur
+    if (!p?.globe || !p.versMercator || !p.repereCrop || !p.uniformsCrop) return null
+    const n = positions.length / 3
+    const out = new Float32Array(n * 2)
+    for (let i = 0; i < n; i++) {
+      const q = p.versMercator(positions[i * 3], positions[i * 3 + 2])
+      out[i * 2] = q ? q[0] : 0
+      out[i * 2 + 1] = q ? q[1] : 0
+    }
+    return out
+  }
+
+  // Les morceaux de nuanceur du bord — les MÊMES uniformes que les tuiles
+  // (`uCropCentre`, `uCropDemi`, `uCropCoin`, `uCropCoinN`), **partagés par
+  // référence** avec `globe.uniforms` : le socle bouge pendant un vol, le bord
+  // du ruban le suit dans la même image, sans reconstruction.
+  //
+  // ⛔ **CE BLOC ÉTAIT MORT, ET IL SE DISAIT VIVANT (GX5).** La géométrie pose
+  // l'attribut `aMerc` ; le nuanceur, lui, déclarait `attribute vec2 aCrop` —
+  // un nom qui n'existe dans AUCUNE géométrie. WebGL ne signale pas un attribut
+  // non lié : il rend `(0, 0)`, c'est-à-dire **le centre exact du socle**, donc
+  // `distanceBordCrop < 0`, donc **aucun fragment n'était jamais écarté**. Le
+  // `discard` tournait à chaque image sans rien couper : le banc du noteur
+  // (polygone de l'empreinte du socle) comptait encore 159 à 356 px hors socle
+  // à z13 quand le banc réécrit du tour précédent annonçait 0.
+  // Seconde moitié du même défaut : même correctement lié, un mercator ABSOLU
+  // (~0,52 · ~0,35) passé tel quel à `distanceBordCrop` reste dans [-1, 1],
+  // donc « dedans » partout. Il faut le rapporter au centre COURANT — ici, et
+  // exactement comme `globe.js` le fait au fragment de tuile.
+  _glslBordSocle() {
+    const u = this._poseur?.uniformsCrop
+    if (!u) return null
+    return {
+      // ⚠️ les objets d'uniforme du globe EUX-MÊMES, pas des copies de leur
+      // valeur : c'est ce partage qui fait suivre le bord pendant un recentrage.
+      uniforms: {
+        uCropCentre: u.uCropCentre,
+        uCropDemi: u.uCropDemi,
+        uCropCoin: u.uCropCoin,
+        uCropCoinN: u.uCropCoinN,
+        uCropOn: u.uCropOn,
+      },
+      vertexDecl: '\nattribute vec2 aMerc;\nvarying vec2 vCrop;\nuniform vec2 uCropCentre;\nuniform float uCropDemi;',
+      // le mercator du sommet → coordonnées LOCALES du socle (±1 sur la
+      // frontière) : la transcription exacte de `localCrop` et du fragment de
+      // tuile, repli d'antiméridien compris (le mercator x est de période 1 ;
+      // sans `floor(du + 0.5)`, un socle à cheval sur 180° verrait la moitié de
+      // son ruban à ~1/demi de son centre, donc coupée).
+      vertexCorps: '\n{ float duCrop = aMerc.x - uCropCentre.x;\n  duCrop -= floor(duCrop + 0.5);\n  vCrop = vec2(duCrop, aMerc.y - uCropCentre.y) / uCropDemi; }',
+      fragmentDecl: '\nuniform float uCropCoin;\nuniform float uCropCoinN;\nuniform float uCropOn;\nvarying vec2 vCrop;\n' + GLSL_BORD_CROP,
+      // > 0 = hors du socle : rejeté, comme le fragment de tuile (globe.js) et
+      // celui de la mer. Pas de fondu : une ligne coupée net au bord se lit
+      // comme un bord de carte (c'est déjà la règle des plans de coupe).
+      // `uCropOn` d'abord, exactement comme la tuile : sans socle, rien à couper.
+      fragmentCorps: '\nif (uCropOn > 0.5 && distanceBordCrop(vCrop, uCropCoin, uCropCoinN) > 0.0) discard;',
+    }
+  }
+
+  // Un objet PONCTUEL (sprite, arche, curseur) : sa pose passe par la
+  // similitude — position placée, orientation tournée, taille multipliée par k.
+  // Les sprites ont `sizeAttenuation = false` (taille écran) : leur échelle ne
+  // doit surtout pas être touchée, d'où le drapeau.
+  _poseObjet(obj, x, y, z, { echelle = false } = {}) {
+    this._placer(x, y, z, obj.position)
+    if (!this._poseur?.globe) return obj
+    if (this._qGlobe && !obj.isSprite) obj.quaternion.premultiply(this._qGlobe)
+    if (echelle) obj.scale.multiplyScalar(this._k)
+    return obj
+  }
+
+  // La similitude posée sur un GROUPE dont les enfants gardent leurs
+  // coordonnées de bloc, ancrée en un point choisi : `scène = P + k·R·bloc`,
+  // avec `P` calé pour que l'ancre tombe exactement où `placer` la met. Réservé
+  // à ce qui se peuple après coup (les arches) ; tout le reste passe sommet par
+  // sommet.
+  _poseGroupeAncre(obj, ancre) {
+    if (!this._poseur?.globe || !this._qGlobe) return obj
+    const yb = this._sol(ancre.x, ancre.z)
+    return poserGroupeAncre(obj, this._poseur, this._qGlobe, { x: ancre.x, y: yb, z: ancre.z })
+  }
+
   // (Re)drape the loaded track onto the current terrain patch — called after
   // every terrain rebuild so the line always matches the relief under it.
   rebuild() {
@@ -827,6 +1127,8 @@ export class GpxLayer {
     this._elesCache = null
     const dem = this.getDem()
     if (!this.track || !dem) return
+    // le poseur d'ABORD : tout ce qui suit lit le sol à travers lui.
+    this._majPoseur()
 
     const pts = []
     const world = []
@@ -840,8 +1142,8 @@ export class GpxLayer {
     // lui-même le décalage de fenêtre : lui passer `w.x` (une coordonnée de
     // champ) lui ferait lire le sol DEUX FOIS décalé, donc draper la trace sur
     // le relief d'un autre endroit. Même correction que map/water-layer.js.
-    // Hors mode continu `fen` vaut (0,0) et l'expression est celle d'avant.
-    const fen = this.terrain?.fenetre ?? ZERO
+    // ⚡ Ce retranchement vit maintenant dans `_majPoseur()`, en un seul point :
+    // c'est l'échantillonneur qu'il enveloppe qui le porte.
     for (const p of this.track.points) {
       const w = latLonToWorld(dem, p.lat, p.lon)
       const inside = Math.abs(w.x) < demiChamp && Math.abs(w.z) < demiChamp
@@ -851,16 +1153,35 @@ export class GpxLayer {
       // hors du bloc central : draper sur le bloc VOISIN du damier s'il est
       // chargé (block-grid.js) ; sinon l'ancien fallback à plat
       let y
-      if (inside) y = this.terrain.sample(w.x - fen.x, w.z - fen.z) + DRAPE_LIFT
+      // ⚡ `_sol` PLUTÔT QUE `terrain.sample` : sous `terre unique` c'est la
+      // hauteur DESSINÉE par le globe, sinon celle du bloc — même valeur, même
+      // unité, une seule écriture (voir `_majPoseur`).
+      // ⚡ ET SUR LE GLOBE, HORS DU BLOC AUSSI (GX4 ②) : la planète est dessinée
+      // tout autour du socle, `hauteurMaillee` la lit. Le repli « à plat » posait
+      // les points débordants à l'altitude MOYENNE du bloc — c'était la ligne
+      // orange sur la planète nue. Ils sont maintenant sur le sol dessiné, et le
+      // bord du socle les écrête au fragment (voir `_construitRuban`).
+      const lift = this._lift()
+      if (inside || this._poseur?.globe) y = this._sol(w.x, w.z) + lift
       else {
         const h = grid?.heightAt(w.x, w.z)
-        y = (h != null ? h : 0) + DRAPE_LIFT
+        y = (h != null ? h : 0) + lift
       }
       y += this._depthOffsetY
       world.push(new THREE.Vector3(w.x, y, w.z))
       pts.push(w.x, y, w.z)
     }
     this.track.world = world
+    // ⚠️ LE JUMEAU EN COORDONNÉES DE SCÈNE, pour le survol 3D. Le rayon du
+    // pointeur est en coordonnées de SCÈNE ; `track.world` reste en
+    // coordonnées de CHAMP (tout le reste du calque en dépend : profil, tête de
+    // course, suivi caméra, cartouches). Convertir les 2 400 points à chaque
+    // mouvement de souris coûterait 2 400 trigonométries par image — on les
+    // convertit donc UNE fois, ici. Hors globe c'est le MÊME tableau, pas une
+    // copie : zéro octet et zéro divergence possible.
+    this._worldScene = this._poseur?.globe
+      ? world.map((v) => this._placer(v.x, v.y, v.z))
+      : world
     this._segCount = Math.max(0, world.length - 1)
 
     const lineColor = this.params.gpxColor || this.params.hudAccent
@@ -888,15 +1209,24 @@ export class GpxLayer {
   // Ruban qui survole le relief — la géométrie vient du module pur
   // ruban-trace.js, ici on ne fait que l'habiller et l'accrocher à la scène.
   _construitRuban(world, lineColor, ro) {
-    const fen = this.terrain?.fenetre ?? { x: 0, z: 0 }
-    const demiChamp = TERRAIN_SIZE / 2
+    // ⚠️ `demSpan(dem)/2`, PAS `TERRAIN_SIZE/2` — la MÊME demi-emprise que
+    // `rebuild()` (GX1 ⑧ : les deux divergeaient, sans effet hors mode continu
+    // où l'emprise vaut 1, mais deux écritures d'une même limite finissent
+    // toujours par se contredire). Le repli garde l'ancienne valeur si le DEM
+    // manque.
+    const demiChamp = demSpan(this.getDem()) / 2
     const grid = this.getGrid?.()
     // ⚠️ MÊME SOURCE D'ALTITUDE QUE LE DRAPÉ DES POINTS, sans quoi le ruban
     // flotterait au-dessus du bloc voisin (ou s'y enfoncerait) dès qu'un tracé
     // déborde du bloc central : c'est la règle du damier (voir rebuild()).
     const sol = (x, z) => {
       const dedans = Math.abs(x) < demiChamp && Math.abs(z) < demiChamp
-      if (dedans) return this.terrain.sample(x - fen.x, z - fen.z) + this._depthOffsetY
+      // ⚡ MÊME SOURCE QUE LE DRAPAGE DES POINTS, y compris sous `terre unique`
+      // où c'est la hauteur dessinée par le globe (voir `_sol`) — et sur le
+      // globe, hors du bloc aussi (voir `rebuild()`) : un plancher plat hors
+      // bloc entrerait dans les fenêtres de lissage et tirerait le ruban sous
+      // la surface à l'approche du bord.
+      if (dedans || this._poseur?.globe) return this._sol(x, z) + this._depthOffsetY
       const h = grid?.heightAt(x, z)
       return (h != null ? h : 0) + this._depthOffsetY
     }
@@ -942,7 +1272,15 @@ export class GpxLayer {
     if (!r.indices.length) return
 
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(r.positions), 3))
+    // ⚠️ LE BORD DU SOCLE SE CALCULE SUR LES COORDONNÉES DE BLOC, AVANT que
+    // `_versScene` ne les réécrive en place (GX4 ②).
+    const aCrop = this._attributBordSocle(r.positions)
+    // ⚡ **LE SEUL GESTE QUI MANQUAIT AU TRACÉ** : les sommets sortent de
+    // `construitRuban` en coordonnées de BLOC ; `_versScene` les emmène dans la
+    // scène qui est rendue. Identité hors globe — la géométrie de `?terre=deux`
+    // ne change pas d'un flottant.
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this._versScene(r.positions)), 3))
+    if (aCrop) geo.setAttribute('aMerc', new THREE.BufferAttribute(aCrop, 2))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(r.couleurs), 3))
     // la position le long du tracé, par sommet : c'est elle qui permet un
     // dévoilement CONTINU (voir _applyReveal)
@@ -975,22 +1313,25 @@ export class GpxLayer {
     // il vaut la demi-largeur du ruban, ce qui fait du contour un demi-cercle
     // exact — voir retraitDuNez() dans ruban-trace.js
     const rayonNez = fractionDeTraine(largeur, r.longueur)
+    const bord = aCrop ? this._glslBordSocle() : null
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uProgress = this._rubanProgress
+      if (bord) Object.assign(shader.uniforms, bord.uniforms)
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
-          '#include <common>\nattribute float aDist;\nattribute float aTrav;\nvarying float vDist;\nvarying float vTrav;',
+          '#include <common>\nattribute float aDist;\nattribute float aTrav;\nvarying float vDist;\nvarying float vTrav;' + (bord ? bord.vertexDecl : ''),
         )
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDist = aDist;\nvTrav = aTrav;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDist = aDist;\nvTrav = aTrav;' + (bord ? bord.vertexCorps : ''))
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform float uProgress;\nvarying float vDist;\nvarying float vTrav;',
+          '#include <common>\nuniform float uProgress;\nvarying float vDist;\nvarying float vTrav;' + (bord ? bord.fragmentDecl : ''),
         )
         .replace(
           '#include <dithering_fragment>',
           `#include <dithering_fragment>
+           ${bord ? bord.fragmentCorps : ''}
            // ⚠️ NEZ ARRONDI. La distance le long du tracé est la MÊME sur toute
            // la largeur d'une section : couper dessus donnait un couperet bien
            // droit, que la moindre capture d'écran trahissait. On recule la
@@ -1015,12 +1356,14 @@ export class GpxLayer {
            if (gl_FragColor.a < 0.02) discard;`
         )
     }
-    mat.customProgramCacheKey = () => 'ruban-trace'
+    // ⚠️ une clé PAR VARIANTE : le programme avec le bord du socle n'est pas
+    // celui de `?terre=deux`, et three.js ne recompile que sur la clé.
+    mat.customProgramCacheKey = () => (bord ? 'ruban-trace-socle' : 'ruban-trace')
     this._coupeALaFenetre(mat)
 
     this.rubanMat = mat
     this.ruban = new THREE.Mesh(geo, mat)
-    this.ruban.renderOrder = 6 + ro
+    this.ruban.renderOrder = 6 + ORDRE_VOILE + ro
     this.ruban.frustumCulled = false
     this.group.add(this.ruban)
 
@@ -1055,12 +1398,17 @@ export class GpxLayer {
     if (!s.indices.length) return
 
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.positions), 3))
+    // même bord de socle que le ruban — calculé en bloc, AVANT `_versScene`
+    const aCrop = this._attributBordSocle(s.positions)
+    // même passage bloc → scène que le ruban qu'il enveloppe (voir _construitRuban)
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this._versScene(s.positions)), 3))
     geo.setAttribute('aDist', new THREE.BufferAttribute(new Float32Array(s.distances), 1))
     geo.setAttribute('aTrav', new THREE.BufferAttribute(new Float32Array(s.transverses), 1))
+    if (aCrop) geo.setAttribute('aMerc', new THREE.BufferAttribute(aCrop, 2))
     geo.setIndex(s.indices)
     geo.computeBoundingSphere()
 
+    const bord = aCrop ? this._glslBordSocle() : null
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       // additif : la lumière s'AJOUTE au terrain au lieu de le remplacer
@@ -1092,15 +1440,18 @@ export class GpxLayer {
         uLongueur: { value: s.longueur },
         uBraise: { value: new THREE.Color().setRGB(1, 0.3, 0.05, THREE.SRGBColorSpace) },
         uEtincelle: { value: new THREE.Color().setRGB(1, 0.93, 0.72, THREE.SRGBColorSpace) },
+        ...(bord ? bord.uniforms : {}),
       },
       vertexShader: `
         attribute float aDist;
         attribute float aTrav;
         varying float vDist;
         varying float vTrav;
+        ${bord ? bord.vertexDecl : ''}
         void main() {
           vDist = aDist;
           vTrav = aTrav;
+          ${bord ? bord.vertexCorps : ''}
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }`,
       fragmentShader: `
@@ -1108,7 +1459,9 @@ export class GpxLayer {
         uniform vec3 uBraise, uEtincelle;
         varying float vDist;
         varying float vTrav;
+        ${bord ? bord.fragmentDecl : ''}
         void main() {
+          ${bord ? bord.fragmentCorps : ''}
           // MÊME NEZ ARRONDI QUE LE RUBAN (voir retraitDuNez, ruban-trace.js) :
           // la tête du halo recule sur ses bords, sinon la lueur se terminerait
           // au carré autour d'une pointe ronde.
@@ -1146,7 +1499,7 @@ export class GpxLayer {
     this.sillageMat = mat
     this.sillage = new THREE.Mesh(geo, mat)
     // au-dessus du ruban : additif, il ne masque rien de toute façon
-    this.sillage.renderOrder = 7 + ro
+    this.sillage.renderOrder = 7 + ORDRE_VOILE + ro
     this.sillage.frustumCulled = false
     this.sillage.visible = false
     this.group.add(this.sillage)
@@ -1160,7 +1513,10 @@ export class GpxLayer {
   _rebuildSuite({ pts, world, eles, vertexColors, gradientOn, lineColor, width, ro, utiliseRuban }) {
     if (utiliseRuban) return this._rebuildDecors({ world, eles, ro })
     const geo = new LineGeometry()
-    geo.setPositions(pts)
+    // ⚡ bloc → scène, comme le ruban. `pts` est une COPIE plate des sommets ;
+    // `track.world`, lui, reste en coordonnées de bloc — c'est lui que lisent le
+    // survol, le profil, la tête de course et le suivi caméra.
+    geo.setPositions(this._versScene(pts))
     if (vertexColors) geo.setColors(vertexColors)
     this.lineMat = new LineMaterial({
       // vertex colours are multiplied by the base colour in LineMaterial's
@@ -1182,7 +1538,7 @@ export class GpxLayer {
     this._coupeALaFenetre(this.lineMat)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
-    this.line.renderOrder = 6 + ro
+    this.line.renderOrder = 6 + ORDRE_VOILE + ro
     this.group.add(this.line)
 
     // glow: a second, wider, additive, low-opacity halo behind the main line
@@ -1204,7 +1560,7 @@ export class GpxLayer {
       this._coupeALaFenetre(this.glowMat)
       this.glowLine = new Line2(glowGeo, this.glowMat)
       this.glowLine.computeLineDistances()
-      this.glowLine.renderOrder = 4 + ro
+      this.glowLine.renderOrder = 4 + ORDRE_VOILE + ro
       this.group.add(this.glowLine)
     }
 
@@ -1223,14 +1579,22 @@ export class GpxLayer {
     const names = this.track.pointNames || {}
     const mk = (label, v, scale = 1, opacity = 1) => {
       const s = textSprite(label, this.params.hudAccent, scale, opacity, 20 + ro)
-      s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
+      // le décalage vertical se prend EN UNITÉS DE BLOC, AVANT la pose : c'est
+      // la similitude qui le convertit, pas une seconde constante.
+      const yb = v.y + (scale > 0.8 ? 1.25 : 0.85)
+      // ⚠️ `echelle: false` — ces sprites ont `sizeAttenuation = false`, leur
+      // taille est en fraction d'écran : la multiplier par k les ferait
+      // disparaître (÷ 87,56 au Mont-Blanc).
+      this._poseObjet(s, v.x, yb, v.z)
       this.group.add(s)
       // ⚠️ LES OBJETS PONCTUELS SE CACHENT, ILS NE SE COUPENT PAS. Les plans de
       // coupe conviennent à la trace (une ligne coupée net au bord du socle se
       // lit comme un bord de carte) ; sur une étiquette ils trancheraient le
       // texte en plein milieu d'un mot. On les masque donc entiers — même règle
       // que les noms de lieux (map/places-layer.js:_declutter).
-      this._ponctuels.push({ obj: s, x: s.position.x, z: s.position.z })
+      // ⚠️ Les coordonnées retenues sont celles du CHAMP, pas celles de la
+      // scène : `_ecreteFenetre` compare au socle, qui se mesure en bloc.
+      this._ponctuels.push({ obj: s, x: v.x, z: v.z })
       return s
     }
 
@@ -1391,11 +1755,11 @@ export class GpxLayer {
     const accentColor = new THREE.Color(this.params.hudAccent)
     for (const hit of this._villageHits) {
       // coordonnées de CHAMP → coordonnées de géométrie pour le sampler
-      const fenV = this.terrain?.fenetre ?? ZERO
-      const groundY = this.terrain.sample ? this.terrain.sample(hit.w.x - fenV.x, hit.w.z - fenV.z) : 0
+      // même sol que la trace elle-même (globe sous `terre unique`, bloc sinon)
+      const groundY = this._sol(hit.w.x, hit.w.z)
       const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(hit.w.x, groundY, hit.w.z),
-        new THREE.Vector3(hit.w.x, groundY + VILLAGE_LINE_HEIGHT, hit.w.z),
+        this._placer(hit.w.x, groundY, hit.w.z),
+        this._placer(hit.w.x, groundY + VILLAGE_LINE_HEIGHT, hit.w.z),
       ])
       const line = new THREE.Line(
         lineGeo,
@@ -1411,7 +1775,7 @@ export class GpxLayer {
       )
       label.material.sizeAttenuation = false
       label.scale.set(VILLAGE_LABEL_BASE_H * aspect, VILLAGE_LABEL_BASE_H, 1)
-      label.position.set(hit.w.x, groundY + VILLAGE_LINE_HEIGHT + VILLAGE_LABEL_GAP, hit.w.z)
+      this._poseObjet(label, hit.w.x, groundY + VILLAGE_LINE_HEIGHT + VILLAGE_LABEL_GAP, hit.w.z)
       label.renderOrder = 25 + this._renderOffset
       label.visible = false
       this.group.add(label)
@@ -1429,7 +1793,7 @@ export class GpxLayer {
       const op = villageOpacity(km, m.hit.km, this._villageLeadKm, this._villageFadeKm)
       // Le fondu de lecture ET le test de fenêtre : un village annoncé à
       // l'instant juste ne s'affiche pas s'il est hors du socle (mode continu).
-      const visible = op > 0.002 && this._dansFenetre(m.hit.w.x, m.hit.w.z)
+      const visible = op > 0.002 && this._dansFenetre(m.hit.w.x, m.hit.w.z) && this._dansSocle(m.hit.w.x, m.hit.w.z)
       m.line.visible = visible
       m.label.visible = visible
       m.line.material.opacity = op
@@ -1486,12 +1850,17 @@ export class GpxLayer {
       // ⚠️ `sampleGround` reçoit des coordonnées de CHAMP (spec.pos vient de
       // `world`), et `terrain.sample` répond en coordonnées de géométrie — d'où
       // le décalage retranché, comme au drapage de la trace elle-même.
-      const fen = this.terrain?.fenetre ?? ZERO
       const group = buildArchMesh(spec, {
-        sampleGround: (x, z) => this.terrain.sample?.(x - fen.x, z - fen.z) ?? spec.pos.y,
+        sampleGround: (x, z) => this._sol(x, z),
         ink: archColor,
         renderOrder: 22 + this._renderOffset,
       })
+      // ⚠️ L'ARCHE SE PEUPLE DE FAÇON ASYNCHRONE (le GLB arrive plus tard) et
+      // ses sommets sont posés en coordonnées de BLOC : on ne peut pas les
+      // convertir un par un ici. On donne donc la similitude au GROUPE, ANCRÉE
+      // SUR L'ARCHE elle-même — exacte en son point, et une arche fait dix
+      // mètres, pas dix kilomètres.
+      this._poseGroupeAncre(group, spec.pos)
       this.group.add(group)
       this._archGroups.push(group)
       this._ponctuels.push({ obj: group, x: spec.pos.x, z: spec.pos.z })
@@ -1533,9 +1902,9 @@ export class GpxLayer {
       if (p.ele != null && Number.isFinite(p.ele)) return p.ele
       const w = this.track.world?.[i]
       // subtract the SAME lift rebuild() added, or every derived altitude is
-      // off by it — this is why DRAPE_LIFT is a named constant and not a
+      // off by it — this is why the lift is ONE method (`_lift`) and not a
       // literal repeated in two places that can drift apart
-      return w && dem ? (w.y - DRAPE_LIFT) * mPerUnit + dem.meanM : 0
+      return w && dem ? (w.y - this._lift()) * mPerUnit + dem.meanM : 0
     })
     this._elesTrack = this.track
     this._elesDem = dem
@@ -1859,11 +2228,15 @@ export class GpxLayer {
     ray.origin.x += this._fen.x
     ray.origin.z += this._fen.z
     const camDist = this.camera.position.distanceTo(this.cursor.visible ? this.cursor.position : ray.origin)
-    const tol = Math.max(0.4, camDist * 0.022)
+    // même remarque que pour le plancher du curseur : 0,4 est une longueur de
+    // BLOC, elle passe par `k` (voir setHover)
+    const tol = Math.max(0.4 * this._k, camDist * 0.022)
     let best = -1
     let bestD = tol * tol
-    for (let i = 0; i < this.track.world.length; i++) {
-      const d = ray.distanceSqToPoint(this.track.world[i])
+    // le jumeau de scène (voir rebuild) — identique à `track.world` hors globe
+    const pts = this._worldScene ?? this.track.world
+    for (let i = 0; i < pts.length; i++) {
+      const d = ray.distanceSqToPoint(pts[i])
       if (d < bestD) {
         bestD = d
         best = i
@@ -1906,8 +2279,15 @@ export class GpxLayer {
       this.cursor.visible = false
     } else {
       this.cursor.visible = true
-      this.cursor.position.copy(this.track.world[i])
-      const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
+      // `track.world` est en coordonnées de bloc : le curseur, lui, vit dans la
+      // scène rendue. ⚠️ Son échelle se déduit d'une DISTANCE CAMÉRA, elle
+      // s'ajuste donc toute seule au changement d'espace — pas de `× k` ici.
+      const w = this.track.world[i]
+      this._placer(w.x, w.y, w.z, this.cursor.position)
+      // ⚠️ Le plancher, LUI, est une longueur de BLOC (0,5 unité) : il se
+      // convertit par `k` comme tout le reste, sinon il collerait une bille de
+      // 32 km de rayon sur la sphère (0,5 unité de globe = 31 855 m).
+      const s = Math.max(0.5 * this._k, this.camera.position.distanceTo(this.cursor.position) * 0.02)
       this.cursor.scale.setScalar(s)
     }
 
@@ -2308,6 +2688,12 @@ export class GpxLayer {
   setFenetre(x, z) {
     this._fen.x = x
     this._fen.z = z
+    // ⚠️ **CE DÉCALAGE EST EN UNITÉS DE BLOC ET LE GROUPE PEUT VIVRE DANS LA
+    // SCÈNE DU GLOBE** (Tâche GX2). Les deux ne se rencontrent pas aujourd'hui :
+    // le mode continu 3×3 est éteint sous `terre unique`, et hors de lui `x` et
+    // `z` valent 0. Le jour où les deux s'allumeront ensemble, ce `-x` déplacera
+    // le tracé de dizaines de milliers de kilomètres sur la sphère — il faudra
+    // le passer par `k` (voir `_majSimilitude`), pas le laisser tel quel.
     this.group.position.set(-x, 0, -z)
     this._ecreteFenetre()
   }
@@ -2335,9 +2721,15 @@ export class GpxLayer {
     return dansFenetre(x - this._fen.x, z - this._fen.z, bloc.half, bloc.corner)
   }
 
+  // ⚠️ LES OBJETS PONCTUELS SE CACHENT, ILS NE SE COUPENT PAS (voir `mk`) : hors
+  // du socle du globe comme hors de la fenêtre du mode continu. Une étiquette
+  // « ◆ START » posée sur la planète nue à 20 km du socle est le même défaut
+  // que la ligne orange, en plus lisible.
   _ecreteFenetre() {
-    if (!this.terrain?.empriseFootprint?.()) return
-    for (const p of this._ponctuels) p.obj.visible = this._dansFenetre(p.x, p.z)
+    const fenetre = !!this.terrain?.empriseFootprint?.()
+    const socle = !!this._poseur?.repereCrop
+    if (!fenetre && !socle) return
+    for (const p of this._ponctuels) p.obj.visible = (!fenetre || this._dansFenetre(p.x, p.z)) && (!socle || this._dansSocle(p.x, p.z))
   }
 
   setVisible(v) {

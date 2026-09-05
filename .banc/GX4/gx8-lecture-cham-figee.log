@@ -1,0 +1,8 @@
+  37  headT=0.113  tracé=   724 (bis    724)  bruit=0/0  alt=1017  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(718,452) CENTRE  cam/sol=39 m
+  38  headT=0.170  tracé=   843 (bis    843)  bruit=0/0  alt=1017  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(759,452) CENTRE  cam/sol=39 m
+  39  headT=0.227  tracé=   979 (bis    979)  bruit=0/0  alt=1017  lecture=false follow=false drone=false vis=true mode=surface z14  tête=(800,453) CENTRE  cam/sol=39 m
+
+══ VERDICT gx8-cham · figee ══
+  images sans tracé : 0/40 (k=)
+  médiane : 402 px · min 207 · bruit médian 0 · headT 0.089 → 0.227 (monotone false)
+  tête dans le tiers central : 35/40 · caméra sous le sol dessiné : 0/40

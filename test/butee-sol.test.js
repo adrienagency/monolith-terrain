@@ -284,3 +284,52 @@ test('⑤ le plancher ne passe JAMAIS au-dessus du plafond', () => {
   // une borne sous le plancher physique
   assert.equal(distanceMinSol({ cibleY: -0.3, sol: enorme, plancher: 6, plafond: 2 }), 6)
 })
+
+// ══════════ ④ LE REDRESSEMENT NE COMBAT PAS LE VOL DE POURSUITE — GX6 ③ ═════
+//
+// ⛔ **CE REDRESSEMENT REPOSE LA CAMÉRA SANS LA RÉ-VISER.** En orbite c'est
+// sans conséquence (`controls.update()` ré-oriente à l'image suivante) ; pendant
+// un vol de poursuite GPX, c'est l'image blanche. Mesuré, pile d'appel à
+// l'appui (`scripts/banc-gx6-pile.mjs`) : après `drone.updateAt` la caméra est
+// à (−23,64 · 6,35 · −16,22) et vise la tête (avant·tête 0,999) ; cette
+// fonction la repose 39 unités plus loin, orientation inchangée, soit **176,5°
+// de sa propre cible** — la tête sort du cadre et l'image de lecture n'a pas un
+// pixel de tracé (Chamonix, 4 images sur 40).
+//
+// La garde EXÉCUTE la fonction extraite de `main.js` — une ligne commentée ne
+// s'exécute pas, donc la mutation rougit.
+import { readFileSync } from 'node:fs'
+const MAIN_TXT = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+const SRC_REDRESSE = MAIN_TXT.match(/^function redresserSurLeSol\(\) \{[\s\S]*?^\}$/m)?.[0]
+
+function redressementCable({ vol }) {
+  assert.ok(SRC_REDRESSE, 'la fonction `redresserSurLeSol` n’existe plus dans main.js : relire cette garde')
+  const camera = { position: { x: 0, y: -50, z: 30, set(x, y, z) { this.x = x; this.y = y; this.z = z; this.pose = true } } }
+  const controls = {
+    target: { x: 0, y: 0, z: 0 },
+    getDistance: () => 40,
+    getPolarAngle: () => 1.5, // franchement sous la butée
+    getAzimuthalAngle: () => 0,
+  }
+  const terrain = { sample: () => 0 }
+  const polaireMaxSolStub = () => 0.4 // max ≪ phi : le redressement DOIT tirer
+  const drone = { active: vol }
+  const params = { gpxFollow: vol }
+  const gpxLayer = { isPlaying: () => vol }
+  const f = new Function('terrain', 'controls', 'camera', 'polaireMaxSol', 'drone', 'params', 'gpxLayer',
+    SRC_REDRESSE + '\nreturn redresserSurLeSol')(terrain, controls, camera, polaireMaxSolStub, drone, params, gpxLayer)
+  f()
+  return camera.position
+}
+
+test('④ hors vol, le redressement tire bien la caméra (sinon la garde ne garde rien)', () => {
+  const p = redressementCable({ vol: false })
+  assert.ok(p.pose, 'le redressement n’a pas bougé la caméra : la fixture ne déclenche rien, la garde ne prouve rien')
+})
+
+test('④ pendant le vol de poursuite GPX, le redressement NE touche PAS la caméra (le drone a sa propre butée, et lui vise)', () => {
+  const p = redressementCable({ vol: true })
+  assert.ok(!p.pose,
+    'le redressement a reposé la caméra pendant le vol : 39 unités plus loin, sans ré-viser, la tête sort du cadre et l’image de lecture n’a pas un pixel de tracé')
+  assert.deepEqual({ x: p.x, y: p.y, z: p.z }, { x: 0, y: -50, z: 30 })
+})

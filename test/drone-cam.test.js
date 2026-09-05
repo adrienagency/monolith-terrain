@@ -660,3 +660,47 @@ test('même sans aucun virage, la visée amortie dérive du centre proportionnel
   assert.ok(mid > slow, `l'écart doit croître avec la vitesse (lent ${slow.toFixed(3)} >= moyen ${mid.toFixed(3)})`)
   assert.ok(fast > mid, `l'écart doit croître avec la vitesse (moyen ${mid.toFixed(3)} >= rapide ${fast.toFixed(3)})`)
 })
+
+// ─────────────── LA TÊTE NE PASSE JAMAIS DERRIÈRE LA CAMÉRA (GX6 ②)
+//
+// ⛔ Mesuré au banc de lecture du noteur (Mont-Blanc, clic sur « ▶ Lecture »,
+// 40 relevés) : 2 à 3 images sur 40 avec la tête projetée DERRIÈRE la caméra
+// (par exemple (−8 288, −10 381)) et **zéro pixel de tracé** à l'écran. Le
+// témoin `banc-gx5-vol --sansRedrapage` rend les mêmes images : ce n'est ni le
+// re-drapage ni le `retarget`, c'est la visée AMORTIE (aimHalfLife) contre un
+// saut de POSITION — la dé-occlusion rentre la caméra devant une crête, la
+// butée au sol la relève, et l'interpolation ne rattrape pas un demi-tour.
+//
+// La garde EXÉCUTE le cas : caméra posée au-delà de la tête, visée périmée
+// derrière elle, une image de `updateAt`. Sans le recalage, le produit scalaire
+// (tête − caméra) · (avant de la caméra) reste négatif — la tête est derrière.
+test('DroneCam : la tête ne reste jamais derrière la caméra, même après un saut de pose', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => -1000 })
+  const pts = []
+  for (let i = 0; i <= 40; i++) pts.push({ x: i * 2, y: 0, z: 0 })
+  assert.ok(drone.start(pts, { duration: 30 }), 'start refusé sur un chemin droit')
+
+  const s = 0.5
+  const tete = new THREE.Vector3()
+  drone.curve.getPointAt(s, tete)
+  // LE SAUT : la caméra a été rentrée au-delà de la tête, la visée est restée
+  // 40 unités en arrière — la tête est franchement derrière le plan de visée.
+  drone._pos.set(tete.x - 20, tete.y + 1, tete.z)
+  drone._viseDisp.set(tete.x - 60, tete.y + 1, tete.z)
+  camera.position.copy(drone._pos)
+
+  drone.updateAt(1 / 60, s, tete)
+  camera.updateMatrixWorld(true)
+
+  const avant = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+  const vers = tete.clone().sub(camera.position)
+  assert.ok(vers.dot(avant) > 0,
+    `la tête est DERRIÈRE la caméra (produit scalaire ${vers.dot(avant).toFixed(2)}) : l’image de lecture n’a pas un pixel de tracé`)
+  // et elle est bien dans le champ, pas seulement du bon côté
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+  const q = tete.clone().project(camera)
+  assert.ok(q.z > -1 && q.z < 1, `la tête est hors du tronc de vue (z = ${q.z.toFixed(3)})`)
+  assert.ok(Math.hypot(q.x, q.y) < 0.2, `la tête n’est pas revenue au centre (ndc ${q.x.toFixed(2)}, ${q.y.toFixed(2)})`)
+})

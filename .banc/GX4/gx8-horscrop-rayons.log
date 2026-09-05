@@ -1,0 +1,10 @@
+studio fermé : .studio-close
+  cran 0  alt=3872 m  emprise=41 km  tracé=20712 px (bruit 0)  sommets hors bloc 0/2335
+     polygone GX3 : DANS 0 · HORS 20712
+     RAYONS       : sur le socle 20712 · HORS DU SOCLE 0 · dans le vide 0 (20712 pixels, 145 maillages)  ex=[]
+  cran 1  alt=3682 m  emprise=20 km  tracé=11006 px (bruit 0)  sommets hors bloc 0/2335
+     polygone GX3 : DANS 10804 · HORS 202
+     RAYONS       : sur le socle 11006 · HORS DU SOCLE 0 · dans le vide 0 (11006 pixels, 38 maillages)  ex=[]
+  cran 2  alt=3723 m  emprise=10 km  tracé=5394 px (bruit 0)  sommets hors bloc 1353/2335
+     polygone GX3 : DANS 5256 · HORS 138
+     RAYONS       : sur le socle 5282 · HORS DU SOCLE 0 · dans le vide 112 (5394 pixels, 11 maillages)  ex=[{"x":1184,"y":60,"hit":null},{"x":1185,"y":60,"hit":null},{"x":1186,"y":60,"hit":null},{"x":1187,"y":60,"hit":null},{"x":1194,"y":60,"hit":null},{"x":1195,"y":60,"hit":null}]
