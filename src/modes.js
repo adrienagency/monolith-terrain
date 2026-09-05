@@ -1026,41 +1026,46 @@ export class Modes {
     // would sit above controls.maxDistance and snap every frame
     entryAltM = Math.min(entryAltM, MAX_ALT_M)
     this.busy = true
-    this.announce('FX OFFLINE — ENTERING ORBITAL VIEW')
-    const { lat, lon } = this.hooks.getSurfaceLatLon()
+    try {
+      this.announce('FX OFFLINE — ENTERING ORBITAL VIEW')
+      const { lat, lon } = this.hooks.getSurfaceLatLon()
 
-    await this._whiteout(() => {
-      this.hooks.setSurfaceVisible(false)
-      this.hooks.setEffectsEnabled(false)
-      this.globe.setVisible(true)
+      await this._whiteout(() => {
+        this.hooks.setSurfaceVisible(false)
+        this.hooks.setEffectsEnabled(false)
+        this.globe.setVisible(true)
 
-      this._surfCam.near = this.camera.near
-      this._surfCam.far = this.camera.far
-      this.camera.far = 1400
-      this.camera.updateProjectionMatrix()
+        this._surfCam.near = this.camera.near
+        this._surfCam.far = this.camera.far
+        this.camera.far = 1400
+        this.camera.updateProjectionMatrix()
 
-      this.orbAlt = this.orbAltTarget = entryAltM / ORBITAL_M_PER_UNIT
-      this._diveArmed = false // require an inward zoom before re-diving
-      latLonToSphere(lat, lon, R_GLOBE + this.orbAlt, this.camera.position)
-      this.controls.target.set(0, 0, 0)
-      this._poseButees('orbital') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
-      this.controls.maxPolarAngle = Math.PI
-      this.controls.enableZoom = false // wheel handled by us
-      this.controls.enablePan = false
-      this.camera.up.set(0, 1, 0)
-      this.camera.lookAt(0, 0, 0)
-      this.controls.update()
-      this._empriseVue = null // on quitte l'espace du bloc : plus d'unité à suivre
-      this._repereVue = null // ni de repère à transporter (OBL)
-      // ⚠️ **L'ATTENTE DE LA VUE DE TROIS QUARTS MEURT AVEC LA SURFACE.** Sans
-      // ça, un aller-retour orbite → surface → orbite la laisserait armée, et la
-      // bascule tomberait au premier repos du PROCHAIN séjour, sans traversée.
-      this._attenteTroisQuarts = false
-      this._etaitSurLeBloc = false
-      this._fonduPose = null
-      this.mode = 'orbital'
-    })
-    this.busy = false
+        this.orbAlt = this.orbAltTarget = entryAltM / ORBITAL_M_PER_UNIT
+        this._diveArmed = false // require an inward zoom before re-diving
+        latLonToSphere(lat, lon, R_GLOBE + this.orbAlt, this.camera.position)
+        this.controls.target.set(0, 0, 0)
+        this._poseButees('orbital') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
+        this.controls.maxPolarAngle = Math.PI
+        this.controls.enableZoom = false // wheel handled by us
+        this.controls.enablePan = false
+        this.camera.up.set(0, 1, 0)
+        this.camera.lookAt(0, 0, 0)
+        this.controls.update()
+        this._empriseVue = null // on quitte l'espace du bloc : plus d'unité à suivre
+        this._repereVue = null // ni de repère à transporter (OBL)
+        // ⚠️ **L'ATTENTE DE LA VUE DE TROIS QUARTS MEURT AVEC LA SURFACE.** Sans
+        // ça, un aller-retour orbite → surface → orbite la laisserait armée, et la
+        // bascule tomberait au premier repos du PROCHAIN séjour, sans traversée.
+        this._attenteTroisQuarts = false
+        this._etaitSurLeBloc = false
+        this._fonduPose = null
+        this.mode = 'orbital'
+      })
+      this.busy = false
+    } finally {
+      // GEL-2 : quoi qu'il se passe après `busy = true`, la porte rouvre
+      this.busy = false
+    }
   }
 
   // ---------------------------------------------------------------- orbital → surface
@@ -1317,89 +1322,94 @@ export class Modes {
   async _dive(tier = DIVE_TIERS[0], lieu = null, { zoomImpose = false } = {}) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
-    this._resetZoom()
-    // ⚠️ L'ALTITUDE QUITTÉE SE LIT AVANT TOUT LE RESTE : c'est elle que la pose
-    // d'arrivée doit conserver. En orbite `this.altM` EST l'altitude
-    // géométrique (`orbAlt × ORBITAL_M_PER_UNIT`), donc R1 est déjà satisfaite.
-    const altDepartM = this.altM
-    const { zoom } = this._niveauDePlongee(altDepartM, zoomImpose ? (tier.zoom ?? this.hooks.getFineZoom()) : null)
-    const { lat, lon } = lieu ?? sphereToLatLon(this.camera.position)
-    this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
-    this.controls.enabled = false
     try {
-      await this.hooks.loadSurface(lat, lon, zoom)
-    } catch {
-      this.announce('SURFACE DATA UNAVAILABLE — HOLDING ORBIT')
-      this.orbAltTarget = Math.max(tier.altM * 1.6, 60000) / ORBITAL_M_PER_UNIT
-      // snap back above the dive gate NOW — the damped climb takes several
-      // frames, during which a lingering sub-tier altitude would re-trigger
-      // _dive() every frame and hammer the tile server with doomed requests
-      this.orbAlt = Math.max(this.orbAlt, (tier.altM * 1.1) / ORBITAL_M_PER_UNIT)
-      this._diveArmed = false // a fresh inward zoom is needed to retry
-      this.controls.enabled = true
+      this._resetZoom()
+      // ⚠️ L'ALTITUDE QUITTÉE SE LIT AVANT TOUT LE RESTE : c'est elle que la pose
+      // d'arrivée doit conserver. En orbite `this.altM` EST l'altitude
+      // géométrique (`orbAlt × ORBITAL_M_PER_UNIT`), donc R1 est déjà satisfaite.
+      const altDepartM = this.altM
+      const { zoom } = this._niveauDePlongee(altDepartM, zoomImpose ? (tier.zoom ?? this.hooks.getFineZoom()) : null)
+      const { lat, lon } = lieu ?? sphereToLatLon(this.camera.position)
+      this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
+      this.controls.enabled = false
+      try {
+        await this.hooks.loadSurface(lat, lon, zoom)
+      } catch {
+        this.announce('SURFACE DATA UNAVAILABLE — HOLDING ORBIT')
+        this.orbAltTarget = Math.max(tier.altM * 1.6, 60000) / ORBITAL_M_PER_UNIT
+        // snap back above the dive gate NOW — the damped climb takes several
+        // frames, during which a lingering sub-tier altitude would re-trigger
+        // _dive() every frame and hammer the tile server with doomed requests
+        this.orbAlt = Math.max(this.orbAlt, (tier.altM * 1.1) / ORBITAL_M_PER_UNIT)
+        this._diveArmed = false // a fresh inward zoom is needed to retry
+        this.controls.enabled = true
+        this.busy = false
+        return
+      }
+
+      await this._whiteout(() => {
+        this.globe.setVisible(false)
+        this.hooks.setSurfaceVisible(true)
+        this.hooks.setEffectsEnabled(true)
+
+        this.camera.far = this._surfCam.far
+        // ⚠️ `camera.up` NE BASCULE PAS, ET LE PLAN SE TROMPAIT. Rejoué contre le
+        // dépôt : `enterOrbit` écrit `camera.up.set(0, 1, 0)` lui aussi. Les deux
+        // modes ont toujours eu le MÊME repère vertical — la ligne était un
+        // no-op, elle disparaît. (Le repère de POSITION, lui, change bel et bien ;
+        // c'est l'Étape 2, la frontière globe/terrain, et elle n'est pas faite.)
+        const arrival = this._arrivalPose({ lat, lon })
+        this.controls.target.copy(arrival.target)
+        this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
+        this.camera.position.copy(this._posePlongee(arrival, altDepartM))
+        // ⚠️ **L'EMPRISE D'ARRIVÉE EST MÉMORISÉE ICI, ET SANS ÇA LA PLONGÉE SE
+        // FERAIT CONVERTIR DEUX FOIS** : `_suivreEmprise` verrait passer l'emprise
+        // du bloc quitté à celle du bloc d'arrivée et rejouerait un changement
+        // d'unités que `_posePlongee` vient déjà d'appliquer.
+        this._empriseVue = this.hooks.empriseBlocM?.() ?? null
+        // ⚠️ Même geste pour le repère (OBL) : la plongée vient de POSER la caméra
+        // dans le bloc d'arrivée ; la mémoire repart de ce repère-là, sans
+        // transport depuis celui du bloc quitté.
+        this._repereVue = null
+        // `near` DÉRIVÉ, plus restauré : c'est la même loi qu'en orbite
+        // (`planProche`), appliquée à la hauteur au-dessus du sol du bloc. Elle
+        // sature à NEAR_MAX = 0,5 dès 2,5 unités de dégagement — c'est-à-dire
+        // toujours, à la distance d'arrivée — donc la valeur est celle que
+        // `_surfCam.near` reposait, mais elle est maintenant DÉDUITE.
+        this.camera.near = planProche(this.camera.position.y - this._solSous(arrival.target))
+        this.camera.updateProjectionMatrix()
+        // ⚠️ LE PLAFOND DUR — la vraie butée est posée par image dans `main.js`
+        // (`polaireMaxSol`, Tâche R23) : elle dépend de la distance et du relief.
+        this.controls.maxPolarAngle = POLAIRE_MAX_DURE
+        // ⚠️ `rotateSpeed = 1` DES DEUX CÔTÉS depuis R23 — l'orbite ne le ramène
+        // plus à 0,015 (le commentaire d'avant décrivait ce saut comme un contrat).
+        this.controls.rotateSpeed = 1
+        this.controls.enableZoom = false // surface zoom is our inertial dolly
+        this.controls.enablePan = true
+        this.controls.enabled = true
+        this.controls.update()
+        this.mode = 'surface'
+        // ══════ LA TRAVERSÉE GARDE L'AXE DE L'ORBITE — D16 ter, étape 5 ═══════
+        //
+        // ⛔ **ADRIEN, APRÈS AVOIR VU R4 :** *« Je vois toujours un énorme
+        // déplacement entre orbite et surface mode. **Je veux garder la vue comme
+        // en orbite quand je fais la transition.** »*
+        //
+        // R4 avait ÉTALÉ la bascule de 46,548° sur ~1,9 s au lieu d'une image.
+        // ⚠️ **Étaler n'est pas supprimer**, et c'est ce qu'il refuse. D16 ter
+        // tranche : **nadir de l'orbite jusqu'au bloc, la vue de trois quarts à
+        // l'arrivée sur le bloc, et là seulement.**
+        //
+        // La traversée ne balaie donc plus rien : elle POSE le nadir — l'axe que
+        // l'orbite avait — et met la bascule EN ATTENTE.
+        this._attendreLeBloc(arrival.target)
+      })
+      this.announce('FX ONLINE — SURFACE MODE ENGAGED')
       this.busy = false
-      return
+    } finally {
+      // GEL-2 : quoi qu'il se passe après `busy = true`, la porte rouvre
+      this.busy = false
     }
-
-    await this._whiteout(() => {
-      this.globe.setVisible(false)
-      this.hooks.setSurfaceVisible(true)
-      this.hooks.setEffectsEnabled(true)
-
-      this.camera.far = this._surfCam.far
-      // ⚠️ `camera.up` NE BASCULE PAS, ET LE PLAN SE TROMPAIT. Rejoué contre le
-      // dépôt : `enterOrbit` écrit `camera.up.set(0, 1, 0)` lui aussi. Les deux
-      // modes ont toujours eu le MÊME repère vertical — la ligne était un
-      // no-op, elle disparaît. (Le repère de POSITION, lui, change bel et bien ;
-      // c'est l'Étape 2, la frontière globe/terrain, et elle n'est pas faite.)
-      const arrival = this._arrivalPose({ lat, lon })
-      this.controls.target.copy(arrival.target)
-      this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
-      this.camera.position.copy(this._posePlongee(arrival, altDepartM))
-      // ⚠️ **L'EMPRISE D'ARRIVÉE EST MÉMORISÉE ICI, ET SANS ÇA LA PLONGÉE SE
-      // FERAIT CONVERTIR DEUX FOIS** : `_suivreEmprise` verrait passer l'emprise
-      // du bloc quitté à celle du bloc d'arrivée et rejouerait un changement
-      // d'unités que `_posePlongee` vient déjà d'appliquer.
-      this._empriseVue = this.hooks.empriseBlocM?.() ?? null
-      // ⚠️ Même geste pour le repère (OBL) : la plongée vient de POSER la caméra
-      // dans le bloc d'arrivée ; la mémoire repart de ce repère-là, sans
-      // transport depuis celui du bloc quitté.
-      this._repereVue = null
-      // `near` DÉRIVÉ, plus restauré : c'est la même loi qu'en orbite
-      // (`planProche`), appliquée à la hauteur au-dessus du sol du bloc. Elle
-      // sature à NEAR_MAX = 0,5 dès 2,5 unités de dégagement — c'est-à-dire
-      // toujours, à la distance d'arrivée — donc la valeur est celle que
-      // `_surfCam.near` reposait, mais elle est maintenant DÉDUITE.
-      this.camera.near = planProche(this.camera.position.y - this._solSous(arrival.target))
-      this.camera.updateProjectionMatrix()
-      // ⚠️ LE PLAFOND DUR — la vraie butée est posée par image dans `main.js`
-      // (`polaireMaxSol`, Tâche R23) : elle dépend de la distance et du relief.
-      this.controls.maxPolarAngle = POLAIRE_MAX_DURE
-      // ⚠️ `rotateSpeed = 1` DES DEUX CÔTÉS depuis R23 — l'orbite ne le ramène
-      // plus à 0,015 (le commentaire d'avant décrivait ce saut comme un contrat).
-      this.controls.rotateSpeed = 1
-      this.controls.enableZoom = false // surface zoom is our inertial dolly
-      this.controls.enablePan = true
-      this.controls.enabled = true
-      this.controls.update()
-      this.mode = 'surface'
-      // ══════ LA TRAVERSÉE GARDE L'AXE DE L'ORBITE — D16 ter, étape 5 ═══════
-      //
-      // ⛔ **ADRIEN, APRÈS AVOIR VU R4 :** *« Je vois toujours un énorme
-      // déplacement entre orbite et surface mode. **Je veux garder la vue comme
-      // en orbite quand je fais la transition.** »*
-      //
-      // R4 avait ÉTALÉ la bascule de 46,548° sur ~1,9 s au lieu d'une image.
-      // ⚠️ **Étaler n'est pas supprimer**, et c'est ce qu'il refuse. D16 ter
-      // tranche : **nadir de l'orbite jusqu'au bloc, la vue de trois quarts à
-      // l'arrivée sur le bloc, et là seulement.**
-      //
-      // La traversée ne balaie donc plus rien : elle POSE le nadir — l'axe que
-      // l'orbite avait — et met la bascule EN ATTENTE.
-      this._attendreLeBloc(arrival.target)
-    })
-    this.announce('FX ONLINE — SURFACE MODE ENGAGED')
-    this.busy = false
   }
 
   // ══════════ LE FONDU DE POSE DE LA PLONGÉE — Tâche R4 ═══════════════════
@@ -1609,71 +1619,69 @@ export class Modes {
     const continu = this._continu()
     const silencieux = this._rechargementSilencieux === true
     this.busy = true
-    // ⛔ **`_resetZoom()` TUAIT L'ÉLAN À CHAQUE CRAN, ET C'EST LA MOITIÉ DE LA
-    // SENSATION D'ACCROCHAGE.** Le glissé repartait de zéro de l'autre côté :
-    // l'utilisateur relançait la molette à chaque niveau. Sous le drapeau,
-    // l'élan et le compteur de budget TRAVERSENT — c'est `_franchirSiBesoin` qui
-    // a déjà retranché le niveau franchi du compteur.
-    if (!continu) this._resetZoom() // the new level starts its own scroll budget
-    const prevDir = this.camera.position.clone().sub(this.controls.target)
-    const camYAvant = this.camera.position.y
-    const echelleAvant = this.hooks.echelleVerticaleBloc?.() ?? null
-    // ⚠️ `silencieux` : le recentrage du bloc (R32) n'est pas un événement pour
-    // l'utilisateur — rien ne change à l'écran, rien à annoncer.
-    if (!silencieux) this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
-      await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
-    } catch {
-      if (!silencieux) this.announce(`${verb} FAILED — HOLDING SCALE`)
+      // ⛔ **`_resetZoom()` TUAIT L'ÉLAN À CHAQUE CRAN, ET C'EST LA MOITIÉ DE LA
+      // SENSATION D'ACCROCHAGE.** Le glissé repartait de zéro de l'autre côté :
+      // l'utilisateur relançait la molette à chaque niveau. Sous le drapeau,
+      // l'élan et le compteur de budget TRAVERSENT — c'est `_franchirSiBesoin` qui
+      // a déjà retranché le niveau franchi du compteur.
+      if (!continu) this._resetZoom() // the new level starts its own scroll budget
+      const prevDir = this.camera.position.clone().sub(this.controls.target)
+      const camYAvant = this.camera.position.y
+      const echelleAvant = this.hooks.echelleVerticaleBloc?.() ?? null
+      // ⚠️ `silencieux` : le recentrage du bloc (R32) n'est pas un événement pour
+      // l'utilisateur — rien ne change à l'écran, rien à annoncer.
+      if (!silencieux) this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
+      try {
+        await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
+      } catch {
+        if (!silencieux) this.announce(`${verb} FAILED — HOLDING SCALE`)
+        this.busy = false
+        return
+      }
+      const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
+      const arrival = this._arrivalPose(next)
+      // ⚠️ **L'ANCIENNE CIBLE SE LIT ICI, ET PAS UNE LIGNE PLUS BAS — Tâche R4.**
+      // La ligne suivante la remplace par la visée du NOUVEAU bloc, exprimée dans
+      // le repère du nouveau bloc : la lire après, c'est lire un repère et une
+      // caméra qui ne sont plus dans le même monde. Mesuré : 10,4° de rotation au
+      // cran z3 → z4, et de 1,3° à 8,1° aux six suivants.
+      //
+      // ⛔ **ET `prevDir` NE POUVAIT PAS SERVIR ICI** : il est lu AVANT le
+      // chargement, alors que sous le drapeau le glissé inertiel continue de
+      // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
+      // direction est celle d'il y a quelques images, pas celle de maintenant.
+      const cibleAvant = continu ? this.controls.target.clone() : null
+      this.controls.target.copy(arrival.target)
+      // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
+      // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
+      // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport
+      // des EMPRISES, alors que `poseCranContinu` prend le rapport des échelles
+      // VERTICALES — lequel porte l'exagération, et c'est LUI l'accrochage (jusqu'à
+      // ×2 au cran z4 → z5 avec la table de paliers du dépôt).
+      if (continu) { this._suivreEmprise(cibleAvant); this.busy = false; return }
+      const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+      // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
+      // comparer : on retombe sur la pose d'arrivée, qui est le comportement
+      // d'avant l'escalier continu — jamais sur une distance inventée.
+      const facteur = echelleAvant > 0 && echelleApres > 0 ? echelleApres / echelleAvant : null
+      const dist =
+        facteur && Math.abs(dir.y) > 1e-3
+          ? poseCranContinu({ camY: camYAvant, pente: dir.y, facteurEchelle: facteur, yCible: arrival.target.y })
+              .distanceCible
+          : arrival.pos.distanceTo(arrival.target)
+      const borne = THREE.MathUtils.clamp(dist, this.controls.minDistance, this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE)
+      const pos = this.controls.target.clone().addScaledVector(dir, borne)
+      // même garde de dégagement sol que _arrivalPose
+      const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(arrival.target.x, arrival.target.z) : -Infinity
+      if (pos.y < groundY + 3) pos.y = groundY + 3
+      this.camera.position.copy(pos)
+      this.controls.update()
       this.busy = false
-      return
+    } finally {
+      // GEL-2 : quoi qu'il se passe après `busy = true`, la porte rouvre
+      this.busy = false
     }
-    const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
-    const arrival = this._arrivalPose(next)
-    // ⚠️ **L'ANCIENNE CIBLE SE LIT ICI, ET PAS UNE LIGNE PLUS BAS — Tâche R4.**
-    // La ligne suivante la remplace par la visée du NOUVEAU bloc, exprimée dans
-    // le repère du nouveau bloc : la lire après, c'est lire un repère et une
-    // caméra qui ne sont plus dans le même monde. Mesuré : 10,4° de rotation au
-    // cran z3 → z4, et de 1,3° à 8,1° aux six suivants.
-    //
-    // ⛔ **ET `prevDir` NE POUVAIT PAS SERVIR ICI** : il est lu AVANT le
-    // chargement, alors que sous le drapeau le glissé inertiel continue de
-    // courir pendant tout l'`await` (`_applyZoom` s'exécute même à `busy`). Sa
-    // direction est celle d'il y a quelques images, pas celle de maintenant.
-    const cibleAvant = continu ? this.controls.target.clone() : null
-    // ⚠️ **SOUS LE CROCHET `similitudeBloc`, LA CIBLE N'EST PAS REPOSÉE À
-    // `Y_CIBLE` — Tâche OBL.** La cible est un point physique (là où le glissé
-    // l'a menée, à la hauteur où il l'a menée) ; c'est `_transporterSiRepere-
-    // Change` (via `_suivreEmprise`) qui la réexprime dans le nouveau repère,
-    // avec la caméra et le pivot. La reposer à −0,3 sous une caméra dont la
-    // DIRECTION est gardée déplaçait la caméra physique : c'est le saut de 324 px
-    // mesuré à 45° (rapport-OBL.md).
-    if (!(continu && typeof this.hooks.similitudeBloc === 'function')) this.controls.target.copy(arrival.target)
-    // ⚠️ **SOUS LE DRAPEAU, LA CONVERSION D'UNITÉS EST DÉJÀ FAITE (ou le sera à
-    // cette ligne), ET ELLE NE PASSE PAS PAR `poseCranContinu`.** Voir
-    // `_suivreEmprise` : l'invariant y est l'altitude de FOND, donc le rapport
-    // des EMPRISES, alors que `poseCranContinu` prend le rapport des échelles
-    // VERTICALES — lequel porte l'exagération, et c'est LUI l'accrochage (jusqu'à
-    // ×2 au cran z4 → z5 avec la table de paliers du dépôt).
-    if (continu) { this._suivreEmprise(cibleAvant); this.busy = false; return }
-    const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
-    // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
-    // comparer : on retombe sur la pose d'arrivée, qui est le comportement
-    // d'avant l'escalier continu — jamais sur une distance inventée.
-    const facteur = echelleAvant > 0 && echelleApres > 0 ? echelleApres / echelleAvant : null
-    const dist =
-      facteur && Math.abs(dir.y) > 1e-3
-        ? poseCranContinu({ camY: camYAvant, pente: dir.y, facteurEchelle: facteur, yCible: arrival.target.y })
-            .distanceCible
-        : arrival.pos.distanceTo(arrival.target)
-    const borne = THREE.MathUtils.clamp(dist, this.controls.minDistance, this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE)
-    const pos = this.controls.target.clone().addScaledVector(dir, borne)
-    // même garde de dégagement sol que _arrivalPose
-    const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(arrival.target.x, arrival.target.z) : -Infinity
-    if (pos.y < groundY + 3) pos.y = groundY + 3
-    this.camera.position.copy(pos)
-    this.controls.update()
-    this.busy = false
   }
 
   // ---------------------------------------------------------------- travel
@@ -1880,30 +1888,35 @@ export class Modes {
   async _loadDive(target) {
     if (this.busy || this.mode !== 'surface' || !target) return
     this.busy = true
-    this._resetZoom()
-    const prevDir = this.camera.position.clone().sub(this.controls.target)
-    this.announce(`DIVING — ${target.lat.toFixed(4)}, ${target.lon.toFixed(4)} · Z${target.zoom}`)
     try {
-      await this.hooks.loadSurface(target.lat, target.lon, target.zoom)
-    } catch {
-      this.announce('DIVE FAILED — HOLDING SCALE')
+      this._resetZoom()
+      const prevDir = this.camera.position.clone().sub(this.controls.target)
+      this.announce(`DIVING — ${target.lat.toFixed(4)}, ${target.lon.toFixed(4)} · Z${target.zoom}`)
+      try {
+        await this.hooks.loadSurface(target.lat, target.lon, target.zoom)
+      } catch {
+        this.announce('DIVE FAILED — HOLDING SCALE')
+        this.busy = false
+        return
+      }
+      await this._whiteout(() => {
+        // le point cliqué EST ce que la caméra vise — pas le centre du bloc, qui
+        // en est décalé de tout ce que le calage sur la grille de tuiles a pris
+        const tgt = this._cibleVisee(target)
+        const dist = distancePresentation(this.hooks.surfaceMaxDistance()) // distance de la vue iso 1 (point de présentation)
+        const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+        const pos = tgt.clone().addScaledVector(dir, dist)
+        if (pos.y < this._solSous(tgt) + 3) pos.y = this._solSous(tgt) + 3 // same clearance guard as _arrivalPose
+        this.camera.position.copy(pos)
+        this.controls.target.copy(tgt)
+        this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
+        this.controls.update()
+      })
       this.busy = false
-      return
+    } finally {
+      // GEL-2 : quoi qu'il se passe après `busy = true`, la porte rouvre
+      this.busy = false
     }
-    await this._whiteout(() => {
-      // le point cliqué EST ce que la caméra vise — pas le centre du bloc, qui
-      // en est décalé de tout ce que le calage sur la grille de tuiles a pris
-      const tgt = this._cibleVisee(target)
-      const dist = distancePresentation(this.hooks.surfaceMaxDistance()) // distance de la vue iso 1 (point de présentation)
-      const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
-      const pos = tgt.clone().addScaledVector(dir, dist)
-      if (pos.y < this._solSous(tgt) + 3) pos.y = this._solSous(tgt) + 3 // same clearance guard as _arrivalPose
-      this.camera.position.copy(pos)
-      this.controls.target.copy(tgt)
-      this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
-      this.controls.update()
-    })
-    this.busy = false
   }
 
   // one frame of the inertial surface dolly: scale the distance by the coasting

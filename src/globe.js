@@ -4082,6 +4082,10 @@ export function echantillonnerGrille(heights, G, size = 256) {
   return grille
 }
 
+/** GEL-2 : le filtre des lecteurs de HAUTEURS (`hauteurSurface`, `hauteurDessinee`) — une tuile
+ *  dont `_retenirHauteurs` a relâché les hauteurs après la constitution de la liste n'est pas candidate. */
+const AVEC_HAUTEURS = (t) => !!t.heights
+
 export function sampleHeights(heights, u, v, size = 256) {
   // bilinear sample, u/v in [0,1], row 0 = north. Pixel CENTERS sit at
   // (i + 0.5)/size — the same convention the GPU uses when the fragment shader
@@ -7985,7 +7989,7 @@ export class Globe {
    * @returns {number|null}
    */
   hauteurSurface(lat, lon, candidates = null) {
-    const best = this._tuileLaPlusFine(lat, lon, candidates)
+    const best = this._tuileLaPlusFine(lat, lon, candidates, AVEC_HAUTEURS) // GEL-2
     // ⚠️ **`null`, JAMAIS `0`** : zéro est le NIVEAU DE LA MER, et le confondre
     // avec « je ne sais pas » creuse une encoche dans la paroi (§7 de
     // `parois-crop.js`). C'est l'appelant qui décide, pas cette méthode.
@@ -8024,7 +8028,7 @@ export class Globe {
    * mordant qu'avant.
    */
   hauteurDessinee(lat, lon, candidates = null) {
-    const best = this._tuileLaPlusFine(lat, lon, candidates)
+    const best = this._tuileLaPlusFine(lat, lon, candidates, AVEC_HAUTEURS) // GEL-2
     if (!best) return null
     const t = best.t
     const G = segmentsTuile(t.z)
@@ -8106,7 +8110,7 @@ export class Globe {
    * a coûté un banc entier à la Tâche B ; le recopier dans `hauteurDessinee`
    * aurait fait deux replis à garder d'accord.
    */
-  _tuileLaPlusFine(lat, lon, candidates = null) {
+  _tuileLaPlusFine(lat, lon, candidates = null, exige = null) {
     const liste = candidates || this.tuilesAvecHauteurs()
     // ══════ LE `break` — Tâche FLU, poste ③ (réserve 1 de D16-b) ═════════════
     //
@@ -8123,6 +8127,22 @@ export class Globe {
     const my = mercY(lat)
     let best = null
     for (const t of liste) {
+      // ⛔ **GEL-2 — UNE TUILE PEUT PERDRE SES HAUTEURS APRÈS QUE LA LISTE A ÉTÉ
+      // BÂTIE, ET C'ÉTAIT UN GEL COMPLET.** `poseurPourReconstruction` garde
+      // `tuilesAvecHauteurs()` « pour une reconstruction » ; entre les deux
+      // moitiés de `regenerateTerrain` (un `await` de 0 ms), une tuile atterrit
+      // et `_retenirHauteurs` libère les hauteurs d'une tuile PLUS ANCIENNE de
+      // cette même liste. `sampleHeights(null, …)` levait alors depuis
+      // `regenerateLabels` (pile mesurée, `.banc/GEL2/orb-pile`), la promesse
+      // de `regenerateTerrain` ne se résolvait jamais, `busy` restait levé :
+      // plus un geste ne passait (double-clics depuis l'orbite, 6 chargements
+      // sur 8, `rapport-GEL2.md`). Le filtre est celui du LECTEUR (`exige`) :
+      // `hauteurSurface`/`hauteurDessinee` exigent `t.heights`, alors que
+      // `hauteurMaillee` lit le MAILLAGE de tuiles dont les hauteurs sont
+      // relâchées — un filtre inconditionnel ici cassait la plaque provisoire
+      // (`test/socle-plaque.test.js`, 3 rouges). `null` traverse ensuite,
+      // comme l'en-tête de `hauteurDessinee` le promet.
+      if (exige && !exige(t)) continue
       const n = 2 ** t.z
       // ⚠️ **LE REPLI D'ANTIMÉRIDIEN SE FAIT AU MODULO, PAS AU `round`, ET LA
       // DIFFÉRENCE EST MESURÉE** (`.banc/repli-B.mjs`, huit cas). Le mercator x
