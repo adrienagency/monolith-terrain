@@ -8,6 +8,7 @@
 
 import { gateFor, looksInApp, looksSharedLink, contexteWebGL2 } from './boot-gate.js'
 import { sonderMachine } from './palier-machine.js'
+import { gatePhoneActif } from './flags.js'
 
 const coarse = matchMedia('(pointer: coarse)').matches
 const shortSide = Math.min(screen.width, screen.height)
@@ -19,7 +20,9 @@ const shortSide = Math.min(screen.width, screen.height)
 const gl = contexteWebGL2()
 
 const gate = gateFor({
-  isPhone: coarse && shortSide < 600, // tablets (iPad mini 744+) pass
+  // ⚡ 2026-09-06 : sas sauté le temps du chantier de fluidité mobile — voir
+  // FLAGS.gatePhone dans flags.js. `?gate=1` le remet, `?gate=0` le confirme.
+  isPhone: gatePhoneActif() && coarse && shortSide < 600, // tablets (iPad mini 744+) pass
   hasWebGL2: !!gl,
   inAppBrowser: looksInApp(navigator.userAgent),
   sharedView: looksSharedLink(location.hash), // une shibu reçue se consomme sur téléphone

@@ -345,6 +345,25 @@ export const FLAGS = {
   // reçoit (`solide.retraitJupe`). `?biseau=1` le rallume sans toucher au code,
   // `?biseau=0` le coupe si le défaut remontait un jour.
   biseauSocle: false,
+
+  // ════════════════════════════════════════════════════════════════════════
+  // ⚡ 2026-09-06 — LE SAS TÉLÉPHONE, SAUTÉ POUR LE CHANTIER DE FLUIDITÉ MOBILE
+  // ════════════════════════════════════════════════════════════════════════
+  //
+  // > **Adrien** : « Sur mobile, il y a une fonction de blocage pour renvoyer
+  // > les gens vers le site web, tu peux la faire sauter pour l'instant. »
+  //
+  // Le sas vit dans `boot.js` / `boot-gate.js` (`GATE_PHONE`) : sur un écran
+  // tactile de moins de 600 px de petit côté, l'application ne démarre jamais
+  // et affiche une carte de refus au lieu du globe. Ce chantier de fluidité
+  // mobile a besoin de voir tourner l'application SUR téléphone, pas sa carte
+  // de refus — d'où le drapeau, le temps du chantier.
+  //
+  // Un seul lecteur, `gatePhoneActif()` : `boot.js` ne l'appelle qu'une fois,
+  // dans le calcul d'`isPhone` transmis à `gateFor()`. `?gate=1` remet le sas
+  // en place sans toucher au code, `?gate=0` le saute si le défaut redevenait
+  // le comportement d'usine.
+  gatePhone: false,
 }
 
 // LA PLANÈTE ÉCLAIRÉE — règle D15, Tâche R6. ⚠️ **ELLE EXIGE `terre unique`**,
@@ -556,6 +575,15 @@ export function biseauSocleActif(recherche) {
   if (v === '0' || v === 'vif' || v === 'off') return false
   if (v === '1' || v === 'on') return true
   return FLAGS.biseauSocle
+}
+
+// LE SAS TÉLÉPHONE — voir le drapeau. Même patron d'échappatoire que les
+// autres ; `recherche` est la couture de test de `paramAdresse`.
+export function gatePhoneActif(recherche) {
+  const v = paramAdresse('gate', recherche)
+  if (v === '0' || v === 'off') return false
+  if (v === '1' || v === 'on') return true
+  return FLAGS.gatePhone
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse. Isolé dans une fonction
